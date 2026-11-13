@@ -1,0 +1,863 @@
+{
+  "group": {
+    "id": "g127",
+    "domain": "supervisor-stop-delete",
+    "purpose": "supervisor-stop-delete: crates/farhelm-supervisor/src/service/sweep.rs, crates/farhelm-supervisor/src/service/teardown.rs; phases -    async fn a_stop_waits_for_live_sinks_and_refuses_new_ones() {",
+    "interfaces": [
+      "g001",
+      "g003",
+      "g007",
+      "g008",
+      "g009",
+      "g095",
+      "g096",
+      "g102",
+      "g103",
+      "g104",
+      "g105",
+      "g106",
+      "g107",
+      "g108",
+      "g109",
+      "g110",
+      "g111",
+      "g112",
+      "g113",
+      "g114",
+      "g115",
+      "g116",
+      "g128",
+      "g159",
+      "g160",
+      "g161",
+      "g162",
+      "g163",
+      "g164",
+      "g165",
+      "g166",
+      "g167",
+      "g168",
+      "g169",
+      "g170",
+      "g171",
+      "g172",
+      "g173"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00300-000.patch",
+        "ranges": [
+          [
+            1,
+            46
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/sweep.rs",
+        "commit": "04d85f0c98a9b635709d00b056719a0baa7fd3fc",
+        "notes": "patch header; patch character offsets [0,2143)",
+        "lines": 46,
+        "bytes": 2143,
+        "start": 0,
+        "end": 2143,
+        "original": "[private-run]/prep/originals/00300.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00301-000.patch",
+        "ranges": [
+          [
+            1,
+            23
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/teardown.rs",
+        "commit": "04d85f0c98a9b635709d00b056719a0baa7fd3fc",
+        "notes": "patch header; patch character offsets [0,1199)",
+        "lines": 23,
+        "bytes": 1199,
+        "start": 0,
+        "end": 1199,
+        "original": "[private-run]/prep/originals/00301.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00685-000.patch",
+        "ranges": [
+          [
+            1,
+            503
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/teardown.rs",
+        "commit": "47f33bbdbd5ff4a6e437e97a800f9083be43096e",
+        "notes": "patch header; patch character offsets [0,23569)",
+        "lines": 503,
+        "bytes": 23573,
+        "start": 0,
+        "end": 23569,
+        "original": "[private-run]/prep/originals/00685.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00747-000.patch",
+        "ranges": [
+          [
+            1,
+            22
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/teardown.rs",
+        "commit": "70bc66a9f285cc2a9984924f389834d118b7cfdc",
+        "notes": "patch header; patch character offsets [0,1080)",
+        "lines": 22,
+        "bytes": 1080,
+        "start": 0,
+        "end": 1080,
+        "original": "[private-run]/prep/originals/00747.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00942-000.patch",
+        "ranges": [
+          [
+            1,
+            275
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/sweep.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,13457)",
+        "lines": 275,
+        "bytes": 13469,
+        "start": 0,
+        "end": 13457,
+        "original": "[private-run]/prep/originals/00942.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00943-001.patch",
+        "ranges": [
+          [
+            1,
+            99
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/teardown.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "-    async fn a_stop_waits_for_live_sinks_and_refuses_new_ones() {; patch character offsets [59027,63382)",
+        "lines": 99,
+        "bytes": 4355,
+        "start": 59027,
+        "end": 63382,
+        "original": "[private-run]/prep/originals/00943.patch"
+      }
+    ],
+    "lines": 968,
+    "bytes": 45819
+  },
+  "records": [
+    {
+      "key": "g127/c1",
+      "owner": "g127",
+      "id": "c1",
+      "domain": "supervisor-stop-delete",
+      "purpose": "supervisor-stop-delete: crates/farhelm-supervisor/src/service/sweep.rs, crates/farhelm-supervisor/src/service/teardown.rs; phases -    async fn a_stop_waits_for_live_sinks_and_refuses_new_ones() {",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Retried archive moves still enter the discard journal",
+            "location": "crates/farhelm-supervisor/src/service/teardown.rs:1066",
+            "detail": "Reviewed commit: 47f33bbdbd5ff4a6e437e97a800f9083be43096e. TLDR: considered whether retrying an environment session Delete after an interrupted archive could leave its checkout as an ordinary archive rather than remove it. Source refutation: archive_last_reference at teardown.rs:1401-1436 treats both ReconcileOutcome::Moved and MetadataComplete as moved=true; only SourceMissing produces false. The Discard branch at 1066-1074 therefore puts recovered moved checkouts into discard just like a fresh move, and 1125-1128 passes those IDs into the deleting transaction. Contract: SPEC_impl.md, Environment Delete and the seal, 6607-6618 requires non-final environment Delete to discard the last checkout reference. Suggested bucket: other (hypothesized incomplete cleanup); confidence: confirmed source refutation; proposed_drop: true, refuted by the source above; possible_cover: none. Could-be-highest: no established security or loss-of-work consequence; this hypothesis concerned retained files. No execution or reproduction performed."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Retried archive moves and committed discards retain removal recovery",
+            "location": "crates/farhelm-supervisor/src/service/teardown.rs:1066",
+            "detail": "Reviewed commit: 47f33bbdbd5ff4a6e437e97a800f9083be43096e. TLDR: considered whether retrying a non-final environment session Delete after an interrupted archive, or restarting after its deleting transaction, could leave the checkout as an ordinary archive instead of removing it. Initial source refutation remains: teardown.rs:1401-1436 treats ReconcileOutcome::Moved and MetadataComplete as moved=true, so Discard collects those IDs at 1066-1074 and passes them into the deleting transaction at 1125-1128. Synthesis checks/results: store.rs:3838-3877 removes this membership, checks zero remaining members, retires ArchivePending, and calls journal_removal in the same transaction; checkout_trash.rs:56-71 writes the .rm: destination using repoint_retired. Both post-commit finish at teardown.rs:1152-1187 and startup use resume_retirement: checkout_trash.rs:899-963 scans retired .rm: rows, checks zero members and retained session paths, accepts the already-hidden directory or finishes the original-to-hidden rename, and queues only verified content. A definite missing original and hidden directory forgets the record; failures retain the journal. service/trash_remover.rs:356-373 obtains authoritative retained session paths and keeps supervisor ownership through the blocking recovery. core.rs:8734-8749 awaits this recovery, enqueues it and starts the remover before the accept loop. Readily checkable recovery premises are settled by source, with no missing premise for this hypothesis. Contract: SPEC_impl.md Environment Delete and the seal at 6607-6618 requires non-final environment Delete to discard the last checkout reference; SPEC.md Managed checkouts requires accepted cleanup to resume after restart and protect retained session paths. Suggested bucket: other (original hypothetical incomplete cleanup); confidence: confirmed source refutation; proposed_drop: true for that hypothesis, no parent drop accepted; possible_cover: none. Could-be-highest: no established security or loss-of-work consequence in the retained-files hypothesis. Caveat: this establishes the recovery wiring and ownership checks, not an execution observation or a promise that filesystem failures cannot retain cleanup for retry. No execution or reproduction performed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 9,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Retried archive moves and committed discards retain removal recovery",
+          "location": "crates/farhelm-supervisor/src/service/teardown.rs:1066",
+          "detail": "Reviewed commit: 47f33bbdbd5ff4a6e437e97a800f9083be43096e. TLDR: considered whether retrying a non-final environment session Delete after an interrupted archive, or restarting after its deleting transaction, could leave the checkout as an ordinary archive instead of removing it. Initial source refutation remains: teardown.rs:1401-1436 treats ReconcileOutcome::Moved and MetadataComplete as moved=true, so Discard collects those IDs at 1066-1074 and passes them into the deleting transaction at 1125-1128. Synthesis checks/results: store.rs:3838-3877 removes this membership, checks zero remaining members, retires ArchivePending, and calls journal_removal in the same transaction; checkout_trash.rs:56-71 writes the .rm: destination using repoint_retired. Both post-commit finish at teardown.rs:1152-1187 and startup use resume_retirement: checkout_trash.rs:899-963 scans retired .rm: rows, checks zero members and retained session paths, accepts the already-hidden directory or finishes the original-to-hidden rename, and queues only verified content. A definite missing original and hidden directory forgets the record; failures retain the journal. service/trash_remover.rs:356-373 obtains authoritative retained session paths and keeps supervisor ownership through the blocking recovery. core.rs:8734-8749 awaits this recovery, enqueues it and starts the remover before the accept loop. Readily checkable recovery premises are settled by source, with no missing premise for this hypothesis. Contract: SPEC_impl.md Environment Delete and the seal at 6607-6618 requires non-final environment Delete to discard the last checkout reference; SPEC.md Managed checkouts requires accepted cleanup to resume after restart and protect retained session paths. Suggested bucket: other (original hypothetical incomplete cleanup); confidence: confirmed source refutation; proposed_drop: true for that hypothesis, no parent drop accepted; possible_cover: none. Could-be-highest: no established security or loss-of-work consequence in the retained-files hypothesis. Caveat: this establishes the recovery wiring and ownership checks, not an execution observation or a promise that filesystem failures cannot retain cleanup for retry. No execution or reproduction performed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g127/findings.jsonl",
+        "id": "c1",
+        "line": 9,
+        "disposition": "under-investigation",
+        "group": "g127-c1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-081",
+          "key": "g127/c1",
+          "latest_line": 9,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "environment-discard-reconciled-archive-removal-journal",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Both an archive recovered on retry and a discard committed before a crash retain removal intent. The original retained-files hypothesis is source-refuted. This is not a claim that filesystem failures cannot defer removal.",
+          "checks": [
+            "47f33bbdbd5ff4a6e437e97a800f9083be43096e teardown.rs:1401-1436 returns moved=true for Moved and MetadataComplete; only SourceMissing is false. Lines 1066-1074 collect recovered moved IDs for Discard, and 1125-1128 pass them to the deleting transaction.",
+            "Same revision store.rs:3838-3877 removes membership, verifies zero members, retires ArchivePending and journals discard in the same transaction. checkout_trash.rs:56-71 repoints the retired destination to .rm:.",
+            "Same revision teardown.rs:1152-1187 resumes the committed journal; checkout_trash.rs:899-963 recovers hidden or not-yet-hidden content with membership and retained-path checks. trash_remover.rs:356-373 retains supervisor ownership and reads authoritative session paths; core.rs:8734-8749 awaits recovery before accepting requests.",
+            "Source inspection only; no runtime observation or reproduction."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md Managed checkouts and SPEC_impl.md Environment Delete and the seal: non-final environment Delete discards rather than archives; this states the intended contract, not acceptance of retained ordinary archives.",
+            "TODO.md Planned is empty (25-26). BUGS.md has only the unrelated local-SSH-output hang. Searches of plans/queue, INDEX.md and active TRIAGE_OUTCOMES.md for discard/archive retry/journaling found no exact unresolved item or decision for this hypothesis. No archive read.",
+            "FILTER.md does not supply the refutation; no filter applied."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "An interrupted archive or post-commit restart could leave a non-final environment Delete's checkout as an ordinary archive instead of removing it. No work-loss consequence was claimed.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Narrow source refutation of lost removal recovery. Because this dismissal concerns persisted intent to remove a user checkout, carry it to the independent drop register conservatively; this consultation authorizes no drop."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "environment-discard-reconciled-archive-removal-journal",
+        "destination": null
+      }
+    },
+    {
+      "key": "g127/c2",
+      "owner": "g127",
+      "id": "c2",
+      "domain": "supervisor-stop-delete",
+      "purpose": "supervisor-stop-delete: crates/farhelm-supervisor/src/service/sweep.rs, crates/farhelm-supervisor/src/service/teardown.rs; phases -    async fn a_stop_waits_for_live_sinks_and_refuses_new_ones() {",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Removed sink-reaper tests target a retired output transport",
+            "location": "crates/farhelm-supervisor/src/service/teardown.rs:1237",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether removing tests for live output-sink leases and their reapers concealed shutdown returning while a session output client still needed orderly teardown. Source and contract refutation: the assigned 00943-001 patch removes tests of SessionSinkHandle/SessionSinkLease, while teardown.rs:1222-1253 now establishes attachments_closed under the attachments lock, drains attachments, signals every forwarder and joins them within one timeout. SPEC_impl.md:1963-1976, Terminal host, states 'every terminal the supervisor serves is a host' and that old tmux terminals are ended at startup; SPEC_impl.md:2880-2889 says the running supervisor runs no tmux and its old-terminal driver is gone. The removed shared tmux-output-sink lifecycle has no replacement sink lease requiring these tests. Suggested bucket: other; confidence: confirmed source/contract analysis; proposed_drop: true, retired implementation contract and replacement shutdown inspected; possible_cover: none. Could-be-highest: no established user-work-loss route; this candidate concerned a retired output-client shutdown fence. Caveat: this is a source review of the assigned deletion, not a runtime verification of all host shutdown behavior. No execution or reproduction performed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 2,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Removed sink-reaper tests target a retired output transport",
+          "location": "crates/farhelm-supervisor/src/service/teardown.rs:1237",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether removing tests for live output-sink leases and their reapers concealed shutdown returning while a session output client still needed orderly teardown. Source and contract refutation: the assigned 00943-001 patch removes tests of SessionSinkHandle/SessionSinkLease, while teardown.rs:1222-1253 now establishes attachments_closed under the attachments lock, drains attachments, signals every forwarder and joins them within one timeout. SPEC_impl.md:1963-1976, Terminal host, states 'every terminal the supervisor serves is a host' and that old tmux terminals are ended at startup; SPEC_impl.md:2880-2889 says the running supervisor runs no tmux and its old-terminal driver is gone. The removed shared tmux-output-sink lifecycle has no replacement sink lease requiring these tests. Suggested bucket: other; confidence: confirmed source/contract analysis; proposed_drop: true, retired implementation contract and replacement shutdown inspected; possible_cover: none. Could-be-highest: no established user-work-loss route; this candidate concerned a retired output-client shutdown fence. Caveat: this is a source review of the assigned deletion, not a runtime verification of all host shutdown behavior. No execution or reproduction performed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g127/findings.jsonl",
+        "id": "c2",
+        "line": 2,
+        "disposition": "excluded",
+        "group": "removed-tmux-output-sink-lease-shutdown-tests",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-081 after inspecting it. The deleted tests exercise the removed tmux output-client lease/reaper resource. The replacement host output task has no external client resource requiring that lease contract. This refutes the named retired-resource concern, not every possible host shutdown or test-coverage defect. Retired implementation contract plus inspected replacement shutdown, limited to the named sink resource. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333 teardown diff deletes SessionSinkHandle/SessionSinkLease fixtures and the live-lease/reaper tests.\",\"Same revision teardown.rs:1222-1253 closes attachment admission under the map lock, drains attachments, signals all output tasks and joins them within one overall timeout.\",\"Same revision grid_stream.rs:917-925 documents the output task's lack of external processes; 937-963 races the entire stream against shutdown and reports without awaiting attachment-map work. terminals.rs:478-482 joins the task.\",\"Current SPEC_impl.md Terminal host and Ending the old private tmux server describe the host-only running supervisor and retirement of old terminals. Source checks, not runtime validation.\"] Current coverage/results: [\"Both specifications searched for output shutdown, terminal hosts and old-terminal retirement; no replacement sink-lease requirement found.\",\"TODO.md Planned empty; BUGS.md unrelated. plans/queue tmux-end-old-terminals describes this intentional replacement rather than an unlanded correction. INDEX.md and active TRIAGE_OUTCOMES.md searches yielded no exact sink-reaper-test item. No archive read.\",\"FILTER.md not used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Shutdown might return while an output client still needed orderly teardown. No established user-work-loss route; the original concern was the removed tmux output-client fence.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g127/c2",
+        "line": 2,
+        "disposition": "excluded",
+        "group": "removed-tmux-output-sink-lease-shutdown-tests",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-081 after inspecting it. The deleted tests exercise the removed tmux output-client lease/reaper resource. The replacement host output task has no external client resource requiring that lease contract. This refutes the named retired-resource concern, not every possible host shutdown or test-coverage defect. Retired implementation contract plus inspected replacement shutdown, limited to the named sink resource. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333 teardown diff deletes SessionSinkHandle/SessionSinkLease fixtures and the live-lease/reaper tests.\",\"Same revision teardown.rs:1222-1253 closes attachment admission under the map lock, drains attachments, signals all output tasks and joins them within one overall timeout.\",\"Same revision grid_stream.rs:917-925 documents the output task's lack of external processes; 937-963 races the entire stream against shutdown and reports without awaiting attachment-map work. terminals.rs:478-482 joins the task.\",\"Current SPEC_impl.md Terminal host and Ending the old private tmux server describe the host-only running supervisor and retirement of old terminals. Source checks, not runtime validation.\"] Current coverage/results: [\"Both specifications searched for output shutdown, terminal hosts and old-terminal retirement; no replacement sink-lease requirement found.\",\"TODO.md Planned empty; BUGS.md unrelated. plans/queue tmux-end-old-terminals describes this intentional replacement rather than an unlanded correction. INDEX.md and active TRIAGE_OUTCOMES.md searches yielded no exact sink-reaper-test item. No archive read.\",\"FILTER.md not used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Shutdown might return while an output client still needed orderly teardown. No established user-work-loss route; the original concern was the removed tmux output-client fence.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-081",
+          "key": "g127/c2",
+          "latest_line": 2,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "removed-tmux-output-sink-lease-shutdown-tests",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The deleted tests exercise the removed tmux output-client lease/reaper resource. The replacement host output task has no external client resource requiring that lease contract. This refutes the named retired-resource concern, not every possible host shutdown or test-coverage defect.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333 teardown diff deletes SessionSinkHandle/SessionSinkLease fixtures and the live-lease/reaper tests.",
+            "Same revision teardown.rs:1222-1253 closes attachment admission under the map lock, drains attachments, signals all output tasks and joins them within one overall timeout.",
+            "Same revision grid_stream.rs:917-925 documents the output task's lack of external processes; 937-963 races the entire stream against shutdown and reports without awaiting attachment-map work. terminals.rs:478-482 joins the task.",
+            "Current SPEC_impl.md Terminal host and Ending the old private tmux server describe the host-only running supervisor and retirement of old terminals. Source checks, not runtime validation."
+          ],
+          "coverage_checked": [
+            "Both specifications searched for output shutdown, terminal hosts and old-terminal retirement; no replacement sink-lease requirement found.",
+            "TODO.md Planned empty; BUGS.md unrelated. plans/queue tmux-end-old-terminals describes this intentional replacement rather than an unlanded correction. INDEX.md and active TRIAGE_OUTCOMES.md searches yielded no exact sink-reaper-test item. No archive read.",
+            "FILTER.md not used."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Shutdown might return while an output client still needed orderly teardown. No established user-work-loss route; the original concern was the removed tmux output-client fence.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retired implementation contract plus inspected replacement shutdown, limited to the named sink resource."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "removed-tmux-output-sink-lease-shutdown-tests",
+        "destination": null
+      }
+    },
+    {
+      "key": "g127/c3",
+      "owner": "g127",
+      "id": "c3",
+      "domain": "supervisor-stop-delete",
+      "purpose": "supervisor-stop-delete: crates/farhelm-supervisor/src/service/sweep.rs, crates/farhelm-supervisor/src/service/teardown.rs; phases -    async fn a_stop_waits_for_live_sinks_and_refuses_new_ones() {",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Host roots retain the removed unreadable-process refusal",
+            "location": "crates/farhelm-supervisor/src/service/sweep.rs:1553",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether making capture_process_identity test-only and deleting its identity_from_read checks allowed Stop or Restart to skip an unreadable live agent or bind its cleanup to a recycled PID. Source refutation: handlers.rs:898-907 and core.rs:12392-12397 obtain roots through HostTerminal::sweep_root and propagate errors before intent/signals. hosts/terminal.rs:2571-2583 uses live_root and verifies the probe's PID against the adoption-pinned root; live_root at 737-751 refuses unavailable hosts and process-read errors, and pinned_child at 791-799 returns roots only for the same running PID/start identity. Contract: SPEC.md Lifecycle operations at 2110-2118 says unexamined is unconfirmed, never gone; SPEC_impl.md Terminal host at 2122-2129 describes the adoption-pinned identity and reread. Suggested bucket if the hypothesis were true: highest (wrong-process cleanup could end other user-owned work); confidence: confirmed source refutation; proposed_drop: true, replacement root validation preserves the invariant; possible_cover: none. Could-be-highest: yes, hypothetical recycled-PID signals, but that route is refuted by the pinned-identity comparison. No execution or reproduction performed."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Host roots retain the removed unreadable-process refusal",
+            "location": "crates/farhelm-supervisor/src/service/sweep.rs:1553",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether making capture_process_identity test-only and deleting its identity_from_read checks allowed Stop or Restart to skip an unreadable live agent or bind its cleanup to a recycled PID. Source refutation: handlers.rs:898-907 and core.rs:12392-12397 obtain roots through HostTerminal::sweep_root and propagate errors before intent/signals. hosts/terminal.rs:2571-2583 uses live_root and verifies the probe's PID against the adoption-pinned root; live_root at 737-751 refuses unavailable hosts and process-read errors, and pinned_child at 791-799 returns roots only for the same running PID/start identity. Contract: SPEC.md Lifecycle operations at 2102-2110 says unexamined is unconfirmed, never gone; SPEC_impl.md Terminal host at 2123-2128 describes the adoption-pinned identity and reread. These correct the preceding event's specification line offsets; the conclusion and original possible consequence are unchanged. Suggested bucket if the hypothesis were true: highest (wrong-process cleanup could end other user-owned work); confidence: confirmed source refutation; proposed_drop: true, replacement root validation preserves the invariant; possible_cover: none. Could-be-highest: yes, hypothetical recycled-PID signals, but that route is refuted by the pinned-identity comparison. No execution or reproduction performed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 7,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Host roots retain the removed unreadable-process refusal",
+          "location": "crates/farhelm-supervisor/src/service/sweep.rs:1553",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether making capture_process_identity test-only and deleting its identity_from_read checks allowed Stop or Restart to skip an unreadable live agent or bind its cleanup to a recycled PID. Source refutation: handlers.rs:898-907 and core.rs:12392-12397 obtain roots through HostTerminal::sweep_root and propagate errors before intent/signals. hosts/terminal.rs:2571-2583 uses live_root and verifies the probe's PID against the adoption-pinned root; live_root at 737-751 refuses unavailable hosts and process-read errors, and pinned_child at 791-799 returns roots only for the same running PID/start identity. Contract: SPEC.md Lifecycle operations at 2102-2110 says unexamined is unconfirmed, never gone; SPEC_impl.md Terminal host at 2123-2128 describes the adoption-pinned identity and reread. These correct the preceding event's specification line offsets; the conclusion and original possible consequence are unchanged. Suggested bucket if the hypothesis were true: highest (wrong-process cleanup could end other user-owned work); confidence: confirmed source refutation; proposed_drop: true, replacement root validation preserves the invariant; possible_cover: none. Could-be-highest: yes, hypothetical recycled-PID signals, but that route is refuted by the pinned-identity comparison. No execution or reproduction performed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g127/findings.jsonl",
+        "id": "c3",
+        "line": 7,
+        "disposition": "under-investigation",
+        "group": "g127-c3",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-081",
+          "key": "g127/c3",
+          "latest_line": 7,
+          "recommendation": "refuted",
+          "bucket": "highest",
+          "underlying_key": "stop-restart-host-root-pinned-identity-refusal",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Stop and Restart still obtain their root from adoption-pinned identity, reread the process table and refuse unreadable evidence before recording intent or signalling. Preserve the original wrong-process consequence for independent drop judgment.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333 handlers.rs:898-907 and core.rs:12392-12397 call terminal.sweep_root and propagate errors before continuing.",
+            "Same revision hosts/terminal.rs:2571-2583 uses live_root and checks the probe PID. Lines 737-751 refuse unavailable/read-error states; 791-799 accepts only the same running PID/start identity. This refutes removal of the old helper as an identity-check omission.",
+            "Historical references in line 7 correct line 3's specification offsets; the alleged consequence and proposed drop did not change. Current SPEC.md Lifecycle operations requires unexamined cleanup to remain unconfirmed. No runtime reproduction."
+          ],
+          "coverage_checked": [
+            "SPEC.md Lifecycle operations and SPEC_impl.md Terminal host/process ownership require pinned roots and failure on unreadable evidence, not acceptance of recycled-PID signalling.",
+            "TODO.md Planned empty; BUGS.md unrelated. Searches of plans/queue, INDEX.md and active TRIAGE_OUTCOMES.md for pinned identity, unreadable root and recycled PID found no exact coverage. hosts-directory-replacement-stop-uncertainty is a different socket/directory-replacement premise, not this removed-helper claim. No archive read.",
+            "FILTER.md's terminal-host verification-to-numeric-signal handoff filter is a different host-process handoff; it does not cover omission of root verification, and was not applied."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Skipping an unreadable live root or binding cleanup to a recycled PID could signal unrelated processes and lose other user-owned work. The reviewer source-refuted that route; no occurrence was observed.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Narrow source refutation: replacement pinned-root validation preserves the removed helper's relevant safety invariant. Keep highest for the proposed-drop register; no lower or drop authorized here."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "stop-restart-host-root-pinned-identity-refusal",
+        "destination": null
+      }
+    },
+    {
+      "key": "g127/c4",
+      "owner": "g127",
+      "id": "c4",
+      "domain": "supervisor-stop-delete",
+      "purpose": "supervisor-stop-delete: crates/farhelm-supervisor/src/service/sweep.rs, crates/farhelm-supervisor/src/service/teardown.rs; phases -    async fn a_stop_waits_for_live_sinks_and_refuses_new_ones() {",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Retired container Stop is explicitly refused",
+            "location": "crates/farhelm-supervisor/src/service/sweep.rs:2043",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: considered whether removing container revocation and stop from stop_live_agent left a successful Stop with its old container still running. The replacement calls require_active_launch before StopRequested; core.rs:3729-3738 refuses launches container::is_retired identifies. SPEC.md:4816-4823, Retired containerized sessions, explicitly says 'Existing sessions support Delete only' and 'Opening terminals or tabs, exec, Stop, Restart, Clone, Replace and Replace with are refused.' The same section requires legacy container-removal and absence confirmation for Delete, and teardown.rs:564 onward retains the acquire/revoke/remove path; container.rs:102-149 uses the original permanent lock inode. Suggested bucket if unsupported: high (Stop refusal rather than available lifecycle action); confidence: confirmed source and exact specification acceptance; proposed_drop: true, the cited contract requires refusing Stop instead of stopping these retired containers; possible_cover: none. Could-be-highest: no established security or loss-of-work consequence; the considered consequence was a container remaining running after a refused Stop. No execution or reproduction performed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 4,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c4",
+          "state": "open",
+          "summary": "Retired container Stop is explicitly refused",
+          "location": "crates/farhelm-supervisor/src/service/sweep.rs:2043",
+          "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: considered whether removing container revocation and stop from stop_live_agent left a successful Stop with its old container still running. The replacement calls require_active_launch before StopRequested; core.rs:3729-3738 refuses launches container::is_retired identifies. SPEC.md:4816-4823, Retired containerized sessions, explicitly says 'Existing sessions support Delete only' and 'Opening terminals or tabs, exec, Stop, Restart, Clone, Replace and Replace with are refused.' The same section requires legacy container-removal and absence confirmation for Delete, and teardown.rs:564 onward retains the acquire/revoke/remove path; container.rs:102-149 uses the original permanent lock inode. Suggested bucket if unsupported: high (Stop refusal rather than available lifecycle action); confidence: confirmed source and exact specification acceptance; proposed_drop: true, the cited contract requires refusing Stop instead of stopping these retired containers; possible_cover: none. Could-be-highest: no established security or loss-of-work consequence; the considered consequence was a container remaining running after a refused Stop. No execution or reproduction performed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g127/findings.jsonl",
+        "id": "c4",
+        "line": 4,
+        "disposition": "excluded",
+        "group": "retired-container-stop-refusal-contract",
+        "reason": "Parent explicitly accepted named covered proposal from claims-081 after inspecting it. Stop is explicitly unsupported for retired outside-supervisor container sessions. The named concern cannot treat that refused Stop as a successful lifecycle cleanup; Delete remains their supported cleanup action. Exact Delete-only specification acceptance, not a claim that a successful supported Stop may omit cleanup. Checked source/results: [\"04d85f0c98a9b635709d00b056719a0baa7fd3fc core.rs:3729-3738 require_active_launch refuses container::is_retired before current operations can mutate the legacy launch.\",\"Current SPEC.md:4892-4899 Retired containerized sessions explicitly requires Delete-only support, refusal of Stop and legacy removal/absence confirmation for Delete. plans/queue/podman-environments.md:284-296 contains the same retirement design, already implemented in the reviewed commit.\",\"No runtime observation; original hypothesis concerned a container left running after a purportedly successful Stop.\"] Current coverage/results: [\"Exact specification acceptance in SPEC.md Retired containerized sessions; SPEC_impl.md's environment and retirement descriptions agree.\",\"TODO.md Planned empty; BUGS.md unrelated. plans/queue/podman-environments.md's matching retirement section was read. INDEX.md and active TRIAGE_OUTCOMES.md have no exact additional retired-Stop finding. Existing container store-routing cleanup items concern the older supported operation and are different triggers. No archive read.\",\"FILTER.md unnecessary; no rarity basis used.\"] Exact cited cover: [{\"source\":\"SPEC.md:4894-4896, Retired containerized sessions\",\"quote\":\"Existing sessions support Delete only. Opening terminals or tabs, exec, Stop, Restart, Clone, Replace and Replace with are refused.\"}] Original stronger consequence and missing premise remain preserved: \"An old container could remain running after Stop's removal path was deleted; reviewer suggested high if Stop were still supported. The product intentionally refuses this operation instead of reporting success.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g127/c4",
+        "line": 4,
+        "disposition": "excluded",
+        "group": "retired-container-stop-refusal-contract",
+        "bucket": "other",
+        "recording": "covered",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named covered proposal from claims-081 after inspecting it. Stop is explicitly unsupported for retired outside-supervisor container sessions. The named concern cannot treat that refused Stop as a successful lifecycle cleanup; Delete remains their supported cleanup action. Exact Delete-only specification acceptance, not a claim that a successful supported Stop may omit cleanup. Checked source/results: [\"04d85f0c98a9b635709d00b056719a0baa7fd3fc core.rs:3729-3738 require_active_launch refuses container::is_retired before current operations can mutate the legacy launch.\",\"Current SPEC.md:4892-4899 Retired containerized sessions explicitly requires Delete-only support, refusal of Stop and legacy removal/absence confirmation for Delete. plans/queue/podman-environments.md:284-296 contains the same retirement design, already implemented in the reviewed commit.\",\"No runtime observation; original hypothesis concerned a container left running after a purportedly successful Stop.\"] Current coverage/results: [\"Exact specification acceptance in SPEC.md Retired containerized sessions; SPEC_impl.md's environment and retirement descriptions agree.\",\"TODO.md Planned empty; BUGS.md unrelated. plans/queue/podman-environments.md's matching retirement section was read. INDEX.md and active TRIAGE_OUTCOMES.md have no exact additional retired-Stop finding. Existing container store-routing cleanup items concern the older supported operation and are different triggers. No archive read.\",\"FILTER.md unnecessary; no rarity basis used.\"] Exact cited cover: [{\"source\":\"SPEC.md:4894-4896, Retired containerized sessions\",\"quote\":\"Existing sessions support Delete only. Opening terminals or tabs, exec, Stop, Restart, Clone, Replace and Replace with are refused.\"}] Original stronger consequence and missing premise remain preserved: \"An old container could remain running after Stop's removal path was deleted; reviewer suggested high if Stop were still supported. The product intentionally refuses this operation instead of reporting success.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-081",
+          "key": "g127/c4",
+          "latest_line": 4,
+          "recommendation": "covered",
+          "bucket": "other",
+          "underlying_key": "retired-container-stop-refusal-contract",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Stop is explicitly unsupported for retired outside-supervisor container sessions. The named concern cannot treat that refused Stop as a successful lifecycle cleanup; Delete remains their supported cleanup action.",
+          "checks": [
+            "04d85f0c98a9b635709d00b056719a0baa7fd3fc core.rs:3729-3738 require_active_launch refuses container::is_retired before current operations can mutate the legacy launch.",
+            "Current SPEC.md:4892-4899 Retired containerized sessions explicitly requires Delete-only support, refusal of Stop and legacy removal/absence confirmation for Delete. plans/queue/podman-environments.md:284-296 contains the same retirement design, already implemented in the reviewed commit.",
+            "No runtime observation; original hypothesis concerned a container left running after a purportedly successful Stop."
+          ],
+          "coverage_checked": [
+            "Exact specification acceptance in SPEC.md Retired containerized sessions; SPEC_impl.md's environment and retirement descriptions agree.",
+            "TODO.md Planned empty; BUGS.md unrelated. plans/queue/podman-environments.md's matching retirement section was read. INDEX.md and active TRIAGE_OUTCOMES.md have no exact additional retired-Stop finding. Existing container store-routing cleanup items concern the older supported operation and are different triggers. No archive read.",
+            "FILTER.md unnecessary; no rarity basis used."
+          ],
+          "exact_cover_quotes": [
+            {
+              "source": "SPEC.md:4894-4896, Retired containerized sessions",
+              "quote": "Existing sessions support Delete only. Opening terminals or tabs, exec, Stop, Restart, Clone, Replace and Replace with are refused."
+            }
+          ],
+          "missing_premise": null,
+          "original_stronger_consequence": "An old container could remain running after Stop's removal path was deleted; reviewer suggested high if Stop were still supported. The product intentionally refuses this operation instead of reporting success.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Exact Delete-only specification acceptance, not a claim that a successful supported Stop may omit cleanup."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retired-container-stop-refusal-contract",
+        "destination": null
+      }
+    },
+    {
+      "key": "g127/c5",
+      "owner": "g127",
+      "id": "c5",
+      "domain": "supervisor-stop-delete",
+      "purpose": "supervisor-stop-delete: crates/farhelm-supervisor/src/service/sweep.rs, crates/farhelm-supervisor/src/service/teardown.rs; phases -    async fn a_stop_waits_for_live_sinks_and_refuses_new_ones() {",
+      "history": [
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c5",
+            "state": "open",
+            "summary": "Boolean host scope metadata does not erase uncertain containment",
+            "location": "crates/farhelm-supervisor/src/service/sweep.rs:1295",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether replacing the tab's Scoped/Unscoped/Unknown selection with a boolean could omit cleanup of detached tab programs. Source refutation: hosts/tag.rs:29-42 and 75-85 show that version 1 has always carried a required scoped boolean for host tabs. The only production ScopeUnits::tab caller is core.rs:14150-14179, taking that host tab selection; true maps to recorded provenance and false to derived provenance with needs_sweep=true (sweep.rs:1263-1299). Delete's separate add_tab_scopes in session_hosts.rs:554-579 requires a sweep for Gone/Unreadable records and preserves false host-tab selections. SPEC_impl.md Terminal substrate: private tmux server says the old-terminal driver is gone and old terminals end at startup (2880-2889); unknown old tmux-window metadata is no longer an input to this function. Contract: SPEC_impl.md:5023-5033 requires unscoped or unavailable selection and incomplete discovery to retain the sweep. Suggested bucket: high if cleanup were omitted; confidence: confirmed source refutation; proposed_drop: true, all remaining callers use mandatory host-tag selection and unknown discovery still requires fallback; possible_cover: none. Could-be-highest: no demonstrated extra destruction or loss of work; the suspected consequence was leftover tab programs after cleanup. No execution or reproduction performed."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c5",
+            "state": "open",
+            "summary": "Boolean host scope metadata does not erase uncertain containment",
+            "location": "crates/farhelm-supervisor/src/service/sweep.rs:1295",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether replacing Scoped/Unscoped/Unknown with a boolean omitted cleanup of detached tab programs. Source refutation remains limited to that omission: hosts/tag.rs:29-42,75-85 requires a scoped boolean from version 1; core.rs:14150-14179 is the sole production ScopeUnits::tab caller and passes host selection; sweep.rs:1263-1299 treats false as derived with needs_sweep=true; session_hosts.rs:554-579 preserves false selections and requires the sweep for Gone/Unreadable records. Contract: SPEC_impl.md:5023-5033 keeps fallback for uncertain containment and incomplete discovery. Synthesis caveat from the caller: g128/c2 independently confirms terminal-less and later-generation rows force the portable sweep. That retained cleanup does not refute g128/l1's separate consent concern: a NothingAlive Delete could later sweep an old agent that survived startup cleanup. Its source route is claimed separately and any migration-policy cover is interpretive; this record takes no position that cleanup reachability establishes consent. Original suspected consequence here remains leftover tab programs, not unauthorized termination. Suggested bucket: high if cleanup were omitted; confidence: confirmed source refutation for the metadata hypothesis only; proposed_drop: true only for that narrow hypothesis, no parent drop accepted; possible_cover: none. Could-be-highest: no for the omitted-cleanup hypothesis; the separate g128/l1 route could lose user-owned processes and must retain its own judgment. No execution or reproduction performed. Next check this turn: trace discard startup recovery and verify incomplete-inventory fallback at the pinned source."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c5",
+            "state": "open",
+            "summary": "Mandatory host scope flags and incomplete inventory preserve fallback",
+            "location": "crates/farhelm-supervisor/src/service/sweep.rs:1295",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether replacing Scoped/Unscoped/Unknown with a boolean omitted cleanup of detached tab programs. Source refutation remains limited to that omission. Synthesis checks/results: hosts/tag.rs:188-208 decodes each v1 tab's scope byte strictly as 0 or 1 and refuses missing/other values, so there is no legacy host tag silently defaulting unknown to scoped. core.rs:14150-14179 passes this host selection to the sole production ScopeUnits::tab caller; sweep.rs:1263-1299 maps true to recorded provenance and false to derived with needs_sweep=true. core.rs:13400-13427 explicitly makes inventory complete only when entry.terminal.is_some() && entry.generation == 0; teardown.rs:402-419 calls require_sweep for incomplete inventory or no terminal and merges host selections. session_hosts.rs:554-579 additionally requires the sweep for Gone/Unreadable records. These direct checks agree with caller-supplied g128/c2. The fallback bit survives adding discovered units and normalization: sweep.rs:1312-1314 ORs incomplete containment and 1324-1340 only adds/deduplicates names; 1516-1527 skips the sweep only when !needs_sweep. Contract: SPEC_impl.md:5023-5033 keeps fallback for uncertain containment and incomplete discovery. All readily checkable metadata and inventory premises are settled by source. The retained fallback is not a consent guard and does not refute g128/l1: a later NothingAlive Delete may sweep an old agent that survived startup cleanup. That separate claimed route could end user-owned processes; migration-policy cover remains the other group's interpretive question. This record neither drops nor lowers it. Original suspected consequence here remains leftover tab programs. Suggested bucket: high if cleanup were omitted; confidence: confirmed source refutation of the omission hypothesis; proposed_drop: true only for that hypothesis, no parent drop accepted; possible_cover: none. Could-be-highest: no established additional destruction in the omission hypothesis; separate g128/l1 remains independent. No execution or reproduction performed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c5",
+          "state": "open",
+          "summary": "Mandatory host scope flags and incomplete inventory preserve fallback",
+          "location": "crates/farhelm-supervisor/src/service/sweep.rs:1295",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether replacing Scoped/Unscoped/Unknown with a boolean omitted cleanup of detached tab programs. Source refutation remains limited to that omission. Synthesis checks/results: hosts/tag.rs:188-208 decodes each v1 tab's scope byte strictly as 0 or 1 and refuses missing/other values, so there is no legacy host tag silently defaulting unknown to scoped. core.rs:14150-14179 passes this host selection to the sole production ScopeUnits::tab caller; sweep.rs:1263-1299 maps true to recorded provenance and false to derived with needs_sweep=true. core.rs:13400-13427 explicitly makes inventory complete only when entry.terminal.is_some() && entry.generation == 0; teardown.rs:402-419 calls require_sweep for incomplete inventory or no terminal and merges host selections. session_hosts.rs:554-579 additionally requires the sweep for Gone/Unreadable records. These direct checks agree with caller-supplied g128/c2. The fallback bit survives adding discovered units and normalization: sweep.rs:1312-1314 ORs incomplete containment and 1324-1340 only adds/deduplicates names; 1516-1527 skips the sweep only when !needs_sweep. Contract: SPEC_impl.md:5023-5033 keeps fallback for uncertain containment and incomplete discovery. All readily checkable metadata and inventory premises are settled by source. The retained fallback is not a consent guard and does not refute g128/l1: a later NothingAlive Delete may sweep an old agent that survived startup cleanup. That separate claimed route could end user-owned processes; migration-policy cover remains the other group's interpretive question. This record neither drops nor lowers it. Original suspected consequence here remains leftover tab programs. Suggested bucket: high if cleanup were omitted; confidence: confirmed source refutation of the omission hypothesis; proposed_drop: true only for that hypothesis, no parent drop accepted; possible_cover: none. Could-be-highest: no established additional destruction in the omission hypothesis; separate g128/l1 remains independent. No execution or reproduction performed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g127/findings.jsonl",
+        "id": "c5",
+        "line": 10,
+        "disposition": "excluded",
+        "group": "host-tab-scoped-boolean-retains-portable-fallback",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-081 after inspecting it. The boolean is mandatory in every supported host-tab tag, and false/unavailable/incomplete inventory retains the portable sweep. This settles only the suspected cleanup omission. It does not settle the separate consent consequence of successful cleanup. Narrow metadata/containment source refutation. g128/c2 corroborates the inventory fallback but has a different named omission premise; do not erase either history or conflate retained cleanup with authorization. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333 hosts/tag.rs:29-42,75-85 specifies the required v1 scoped byte; 188-208 refuses missing or invalid values rather than defaulting to scoped.\",\"Same revision core.rs:14150-14179 passes the host selection into ScopeUnits::tab; sweep.rs:1291-1299 maps false to derived, preserving needs_sweep=true. Lines 1312-1314 OR uncertainty; 1324-1340 add/deduplicate names without clearing it.\",\"Same revision core.rs:13418-13427 declares completeness only with a host and generation zero. teardown.rs:402-419 requires fallback for incomplete or absent inventory; session_hosts.rs:554-579 retains false selections and Gone/Unreadable records.\",\"No runtime tests; line 8 and 10 explicitly preserve g128/l1's separate unwarned-termination concern.\"] Current coverage/results: [\"Current SPEC.md Lifecycle operations and SPEC_impl.md:4866-4899 explicitly require the observed fallback behavior; they do not accept omission of detached jobs because of missing metadata.\",\"TODO.md Planned empty; BUGS.md unrelated. plans/queue/tmux-end-old-terminals and user-tmux-jobs-outlive-cleanup concern intentional retirement and intentional user-tmux escape, respectively; neither adds exact unresolved coverage of this metadata hypothesis. INDEX.md/active TRIAGE_OUTCOMES.md searches found no exact record. No archive read.\",\"FILTER.md not used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Detached tab programs could survive cleanup after Scoped/Unscoped/Unknown became a boolean; reviewer suggested high if omission were established. No extra destruction or loss-of-work route was claimed by this ID.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g127/c5",
+        "line": 10,
+        "disposition": "excluded",
+        "group": "host-tab-scoped-boolean-retains-portable-fallback",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-081 after inspecting it. The boolean is mandatory in every supported host-tab tag, and false/unavailable/incomplete inventory retains the portable sweep. This settles only the suspected cleanup omission. It does not settle the separate consent consequence of successful cleanup. Narrow metadata/containment source refutation. g128/c2 corroborates the inventory fallback but has a different named omission premise; do not erase either history or conflate retained cleanup with authorization. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333 hosts/tag.rs:29-42,75-85 specifies the required v1 scoped byte; 188-208 refuses missing or invalid values rather than defaulting to scoped.\",\"Same revision core.rs:14150-14179 passes the host selection into ScopeUnits::tab; sweep.rs:1291-1299 maps false to derived, preserving needs_sweep=true. Lines 1312-1314 OR uncertainty; 1324-1340 add/deduplicate names without clearing it.\",\"Same revision core.rs:13418-13427 declares completeness only with a host and generation zero. teardown.rs:402-419 requires fallback for incomplete or absent inventory; session_hosts.rs:554-579 retains false selections and Gone/Unreadable records.\",\"No runtime tests; line 8 and 10 explicitly preserve g128/l1's separate unwarned-termination concern.\"] Current coverage/results: [\"Current SPEC.md Lifecycle operations and SPEC_impl.md:4866-4899 explicitly require the observed fallback behavior; they do not accept omission of detached jobs because of missing metadata.\",\"TODO.md Planned empty; BUGS.md unrelated. plans/queue/tmux-end-old-terminals and user-tmux-jobs-outlive-cleanup concern intentional retirement and intentional user-tmux escape, respectively; neither adds exact unresolved coverage of this metadata hypothesis. INDEX.md/active TRIAGE_OUTCOMES.md searches found no exact record. No archive read.\",\"FILTER.md not used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Detached tab programs could survive cleanup after Scoped/Unscoped/Unknown became a boolean; reviewer suggested high if omission were established. No extra destruction or loss-of-work route was claimed by this ID.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-081",
+          "key": "g127/c5",
+          "latest_line": 10,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "host-tab-scoped-boolean-retains-portable-fallback",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The boolean is mandatory in every supported host-tab tag, and false/unavailable/incomplete inventory retains the portable sweep. This settles only the suspected cleanup omission. It does not settle the separate consent consequence of successful cleanup.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333 hosts/tag.rs:29-42,75-85 specifies the required v1 scoped byte; 188-208 refuses missing or invalid values rather than defaulting to scoped.",
+            "Same revision core.rs:14150-14179 passes the host selection into ScopeUnits::tab; sweep.rs:1291-1299 maps false to derived, preserving needs_sweep=true. Lines 1312-1314 OR uncertainty; 1324-1340 add/deduplicate names without clearing it.",
+            "Same revision core.rs:13418-13427 declares completeness only with a host and generation zero. teardown.rs:402-419 requires fallback for incomplete or absent inventory; session_hosts.rs:554-579 retains false selections and Gone/Unreadable records.",
+            "No runtime tests; line 8 and 10 explicitly preserve g128/l1's separate unwarned-termination concern."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md Lifecycle operations and SPEC_impl.md:4866-4899 explicitly require the observed fallback behavior; they do not accept omission of detached jobs because of missing metadata.",
+            "TODO.md Planned empty; BUGS.md unrelated. plans/queue/tmux-end-old-terminals and user-tmux-jobs-outlive-cleanup concern intentional retirement and intentional user-tmux escape, respectively; neither adds exact unresolved coverage of this metadata hypothesis. INDEX.md/active TRIAGE_OUTCOMES.md searches found no exact record. No archive read.",
+            "FILTER.md not used."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Detached tab programs could survive cleanup after Scoped/Unscoped/Unknown became a boolean; reviewer suggested high if omission were established. No extra destruction or loss-of-work route was claimed by this ID.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Narrow metadata/containment source refutation. g128/c2 corroborates the inventory fallback but has a different named omission premise; do not erase either history or conflate retained cleanup with authorization."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "host-tab-scoped-boolean-retains-portable-fallback",
+        "destination": null
+      }
+    },
+    {
+      "key": "g127/c6",
+      "owner": "g127",
+      "id": "c6",
+      "domain": "supervisor-stop-delete",
+      "purpose": "supervisor-stop-delete: crates/farhelm-supervisor/src/service/sweep.rs, crates/farhelm-supervisor/src/service/teardown.rs; phases -    async fn a_stop_waits_for_live_sinks_and_refuses_new_ones() {",
+      "history": [
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c6",
+            "state": "open",
+            "summary": "Stop's direct host exit-code read preserves the previous behavior",
+            "location": "crates/farhelm-supervisor/src/service/sweep.rs:2038",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether replacing dead_pane_exit_code with an immediate host exit-code read lost a wait needed to capture the agent's exit result. Source refutation: at the parent revision, status.rs:635-642 immediately returned host.exit_code() for Terminal::Host; only the removed tmux branch performed I/O. The replacement sweep.rs:2035-2038 is the same host operation, and hosts/terminal.rs:853-860 returns a code only after the runtime processes the exit record, retaining None for signal deaths or an outstanding record. Contract: the prior status.rs:627-634 explicitly allowed an exit record not yet arrived and monotonic later enrichment. Suggested bucket: other (hypothetical missing exit diagnostic); confidence: confirmed source equivalence; proposed_drop: true, no wait or host functionality was removed; possible_cover: none. Could-be-highest: no, the hypothesized effect was an omitted numeric exit code. No execution or reproduction performed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 6,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c6",
+          "state": "open",
+          "summary": "Stop's direct host exit-code read preserves the previous behavior",
+          "location": "crates/farhelm-supervisor/src/service/sweep.rs:2038",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether replacing dead_pane_exit_code with an immediate host exit-code read lost a wait needed to capture the agent's exit result. Source refutation: at the parent revision, status.rs:635-642 immediately returned host.exit_code() for Terminal::Host; only the removed tmux branch performed I/O. The replacement sweep.rs:2035-2038 is the same host operation, and hosts/terminal.rs:853-860 returns a code only after the runtime processes the exit record, retaining None for signal deaths or an outstanding record. Contract: the prior status.rs:627-634 explicitly allowed an exit record not yet arrived and monotonic later enrichment. Suggested bucket: other (hypothetical missing exit diagnostic); confidence: confirmed source equivalence; proposed_drop: true, no wait or host functionality was removed; possible_cover: none. Could-be-highest: no, the hypothesized effect was an omitted numeric exit code. No execution or reproduction performed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g127/findings.jsonl",
+        "id": "c6",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "stop-host-exit-code-immediate-read-equivalence",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-081 after inspecting it. The old host branch already read the runtime exit code immediately. Removing the tmux query wrapper removed no wait from the host path. Historical before/after host-path equivalence, limited to the alleged removed wait. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333^ service/status.rs:627-642 explicitly returns host.exit_code() directly and allows an exit record not yet processed.\",\"1ed482dde220452e424973faf38a5e1318986333 sweep.rs:2035-2038 performs that same immediate host read; hosts/terminal.rs:853-860 yields a numeric code only for processed Exited evidence and otherwise None.\",\"No runtime reproduction; this establishes host-path source equivalence, not observed timing of exit delivery.\"] Current coverage/results: [\"Both specifications searched for exit status and Stop recording; no contract requires a new host-path wait here.\",\"TODO.md Planned empty; BUGS.md unrelated. plans/queue, INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact missing-wait concern. successor-exit-processing-witness and stop-annotation-exit-witness are test-observation defects, not this product-path change. No archive read.\",\"FILTER.md unnecessary because the alleged behavioral regression is source-refuted.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Stop might lose a numeric exit diagnostic by omitting a wait. No security or user-owned-work consequence was claimed.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g127/c6",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "stop-host-exit-code-immediate-read-equivalence",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-081 after inspecting it. The old host branch already read the runtime exit code immediately. Removing the tmux query wrapper removed no wait from the host path. Historical before/after host-path equivalence, limited to the alleged removed wait. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333^ service/status.rs:627-642 explicitly returns host.exit_code() directly and allows an exit record not yet processed.\",\"1ed482dde220452e424973faf38a5e1318986333 sweep.rs:2035-2038 performs that same immediate host read; hosts/terminal.rs:853-860 yields a numeric code only for processed Exited evidence and otherwise None.\",\"No runtime reproduction; this establishes host-path source equivalence, not observed timing of exit delivery.\"] Current coverage/results: [\"Both specifications searched for exit status and Stop recording; no contract requires a new host-path wait here.\",\"TODO.md Planned empty; BUGS.md unrelated. plans/queue, INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact missing-wait concern. successor-exit-processing-witness and stop-annotation-exit-witness are test-observation defects, not this product-path change. No archive read.\",\"FILTER.md unnecessary because the alleged behavioral regression is source-refuted.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Stop might lose a numeric exit diagnostic by omitting a wait. No security or user-owned-work consequence was claimed.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-081",
+          "key": "g127/c6",
+          "latest_line": 6,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "stop-host-exit-code-immediate-read-equivalence",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The old host branch already read the runtime exit code immediately. Removing the tmux query wrapper removed no wait from the host path.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333^ service/status.rs:627-642 explicitly returns host.exit_code() directly and allows an exit record not yet processed.",
+            "1ed482dde220452e424973faf38a5e1318986333 sweep.rs:2035-2038 performs that same immediate host read; hosts/terminal.rs:853-860 yields a numeric code only for processed Exited evidence and otherwise None.",
+            "No runtime reproduction; this establishes host-path source equivalence, not observed timing of exit delivery."
+          ],
+          "coverage_checked": [
+            "Both specifications searched for exit status and Stop recording; no contract requires a new host-path wait here.",
+            "TODO.md Planned empty; BUGS.md unrelated. plans/queue, INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact missing-wait concern. successor-exit-processing-witness and stop-annotation-exit-witness are test-observation defects, not this product-path change. No archive read.",
+            "FILTER.md unnecessary because the alleged behavioral regression is source-refuted."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Stop might lose a numeric exit diagnostic by omitting a wait. No security or user-owned-work consequence was claimed.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Historical before/after host-path equivalence, limited to the alleged removed wait."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "stop-host-exit-code-immediate-read-equivalence",
+        "destination": null
+      }
+    },
+    {
+      "key": "g127/l1",
+      "owner": "g127",
+      "id": "l1",
+      "domain": "supervisor-stop-delete",
+      "purpose": "supervisor-stop-delete: crates/farhelm-supervisor/src/service/sweep.rs, crates/farhelm-supervisor/src/service/teardown.rs; phases -    async fn a_stop_waits_for_live_sinks_and_refuses_new_ones() {",
+      "history": [
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Check final environment Delete notice for an unresolved checkout plan",
+            "location": "crates/farhelm-supervisor/src/service/teardown.rs:993",
+            "detail": "Reviewed commit: 47f33bbdbd5ff4a6e437e97a800f9083be43096e. TLDR: a final environment Delete may report that an unresolved checkout folder was left untouched for inspection even though the environment is destroyed. Source basis: CheckoutDisposition::Abandon documents quiet release and the Allocated/ArchivePending branch handles it at 1056-1064, but Planned at 993-1026 independently appends a preserved-path notice. handlers.rs:1547-1576 forwards successful finish_teardown.notice with Sealed. Potential consequence is misleading cleanup guidance, not unauthorized destruction: the environment Delete already warns about destroying all files. Suggested bucket pending checks: other. Confidence: concrete source lead, not yet a confirmed user-visible route. Missing readily checkable premise: whether the helm actually returns that successful final-teardown notice after destroying the environment, or replaces/suppresses it with a truthful final result. Need also check the exact final-Delete notice contract. proposed_drop: false pending source checks; possible_cover: none in interface findings. Could-be-highest: no established security or loss-of-work route; original concern is false preserved-folder guidance. No execution, tests or reproduction."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Final environment Delete suppresses unresolved-plan inspection notices",
+            "location": "crates/farhelm-supervisor/src/service/teardown.rs:993",
+            "detail": "Reviewed assigned commit: 47f33bbdbd5ff4a6e437e97a800f9083be43096e; caller checked through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: considered whether a final environment Delete falsely tells the user that an unresolved checkout folder remains available for inspection after destroying its environment. Original suspected misleading-guidance consequence preserved. Source basis: teardown.rs:993-1026 appends the Planned notice independently of CheckoutDisposition::Abandon, whose quiet branch only handles Allocated/ArchivePending at 1056-1064; handlers.rs:1547-1576 can send that notice with Sealed. Readily checkable caller premise is now refuted: tip sessions/sandbox.rs:257-261 explicitly matches Sealed with _notice, awaits finish_seal_locked, then returns the default empty SessionDeleteOutcome. Its comment states the notice concerns cleanup inside the environment destroyed with everything in it. This branch originated in in-range commit 222bf6253bcd168db04bcbb1df20180c88306998, found by path-scoped git log -S; the earlier assigned 47f33bbd had no helm delete_session_or_seal caller, and its old whole-environment path at sessions/sandbox.rs:122-152 also returns the default outcome after removal. Non-final Deleted at tip:249-255 retains notices appropriately because the environment remains. Thus the supervisor's intermediate internal notice does not produce the alleged final user guidance. Contract: SPEC.md:1514-1543 at 47f33bbd warns final Delete destroys all environment files and whole-environment deletion produces no archive/not-archived notice. Suggested bucket: other for the original hypothetical misleading guidance. Confidence: confirmed source refutation, not execution. proposed_drop: true, explicit final-result suppression at the shipped caller; no parent drop accepted. possible_cover: none. Could-be-highest: no established security or loss-of-work route; authorized environment destruction is not disputed. No remaining source premise or open lead for this ID. No runtime tests, builds or reproductions performed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 12,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l1",
+          "state": "open",
+          "summary": "Final environment Delete suppresses unresolved-plan inspection notices",
+          "location": "crates/farhelm-supervisor/src/service/teardown.rs:993",
+          "detail": "Reviewed assigned commit: 47f33bbdbd5ff4a6e437e97a800f9083be43096e; caller checked through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: considered whether a final environment Delete falsely tells the user that an unresolved checkout folder remains available for inspection after destroying its environment. Original suspected misleading-guidance consequence preserved. Source basis: teardown.rs:993-1026 appends the Planned notice independently of CheckoutDisposition::Abandon, whose quiet branch only handles Allocated/ArchivePending at 1056-1064; handlers.rs:1547-1576 can send that notice with Sealed. Readily checkable caller premise is now refuted: tip sessions/sandbox.rs:257-261 explicitly matches Sealed with _notice, awaits finish_seal_locked, then returns the default empty SessionDeleteOutcome. Its comment states the notice concerns cleanup inside the environment destroyed with everything in it. This branch originated in in-range commit 222bf6253bcd168db04bcbb1df20180c88306998, found by path-scoped git log -S; the earlier assigned 47f33bbd had no helm delete_session_or_seal caller, and its old whole-environment path at sessions/sandbox.rs:122-152 also returns the default outcome after removal. Non-final Deleted at tip:249-255 retains notices appropriately because the environment remains. Thus the supervisor's intermediate internal notice does not produce the alleged final user guidance. Contract: SPEC.md:1514-1543 at 47f33bbd warns final Delete destroys all environment files and whole-environment deletion produces no archive/not-archived notice. Suggested bucket: other for the original hypothetical misleading guidance. Confidence: confirmed source refutation, not execution. proposed_drop: true, explicit final-result suppression at the shipped caller; no parent drop accepted. possible_cover: none. Could-be-highest: no established security or loss-of-work route; authorized environment destruction is not disputed. No remaining source premise or open lead for this ID. No runtime tests, builds or reproductions performed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g127/findings.jsonl",
+        "id": "l1",
+        "line": 12,
+        "disposition": "excluded",
+        "group": "final-environment-delete-suppresses-internal-plan-notice",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-081 after inspecting it. The supervisor can construct an internal preserved-path notice, but the final environment Delete's shipped helm caller discards it after destruction. The original misleading-guidance consequence is not user-visible through that caller. Explicit suppression at the final user-facing caller; retain the fact that the supervisor's intermediate notice exists. Checked source/results: [\"47f33bbdbd5ff4a6e437e97a800f9083be43096e teardown.rs:993-1026 constructs a Planned-path notice independently of the Abandon quiet branch at 1056-1064; the original internal observation is real.\",\"00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db crates/farhelm-helm/src/sessions/sandbox.rs:257-261 matches Sealed with _notice, awaits finish_seal_locked and returns default empty outcome. Lines 249-255 retain notices for non-final Deleted, where the environment remains.\",\"Latest history records this suppression's introduction in 222bf6253bcd168db04bcbb1df20180c88306998 and an older whole-environment caller returning an empty outcome; this consultation directly checked the shipped tip suppression, not that full provenance search.\",\"Source checks only; no authorized environment destruction is disputed and no runtime observation was made.\"] Current coverage/results: [\"Current SPEC_impl.md:6106-6149 Environment Delete and the seal describes final teardown notice as internal and Sealed as environment destruction. SPEC.md environment deletion and Managed checkouts govern final destruction versus retained environment notices.\",\"TODO.md Planned empty; BUGS.md unrelated. Searches of plans/queue, INDEX.md and active TRIAGE_OUTCOMES.md for unresolved checkout, preserved-path notice and seal found no exact unresolved item. No archive read.\",\"FILTER.md not applied; the caller refutes the user-visible premise.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"After knowingly destroying an environment, final Delete might falsely tell the user an unresolved checkout folder remains for inspection. This was a diagnostic-guidance claim, not unauthorized destruction or loss of work.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g127/l1",
+        "line": 12,
+        "disposition": "excluded",
+        "group": "final-environment-delete-suppresses-internal-plan-notice",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-081 after inspecting it. The supervisor can construct an internal preserved-path notice, but the final environment Delete's shipped helm caller discards it after destruction. The original misleading-guidance consequence is not user-visible through that caller. Explicit suppression at the final user-facing caller; retain the fact that the supervisor's intermediate notice exists. Checked source/results: [\"47f33bbdbd5ff4a6e437e97a800f9083be43096e teardown.rs:993-1026 constructs a Planned-path notice independently of the Abandon quiet branch at 1056-1064; the original internal observation is real.\",\"00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db crates/farhelm-helm/src/sessions/sandbox.rs:257-261 matches Sealed with _notice, awaits finish_seal_locked and returns default empty outcome. Lines 249-255 retain notices for non-final Deleted, where the environment remains.\",\"Latest history records this suppression's introduction in 222bf6253bcd168db04bcbb1df20180c88306998 and an older whole-environment caller returning an empty outcome; this consultation directly checked the shipped tip suppression, not that full provenance search.\",\"Source checks only; no authorized environment destruction is disputed and no runtime observation was made.\"] Current coverage/results: [\"Current SPEC_impl.md:6106-6149 Environment Delete and the seal describes final teardown notice as internal and Sealed as environment destruction. SPEC.md environment deletion and Managed checkouts govern final destruction versus retained environment notices.\",\"TODO.md Planned empty; BUGS.md unrelated. Searches of plans/queue, INDEX.md and active TRIAGE_OUTCOMES.md for unresolved checkout, preserved-path notice and seal found no exact unresolved item. No archive read.\",\"FILTER.md not applied; the caller refutes the user-visible premise.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"After knowingly destroying an environment, final Delete might falsely tell the user an unresolved checkout folder remains for inspection. This was a diagnostic-guidance claim, not unauthorized destruction or loss of work.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-081",
+          "key": "g127/l1",
+          "latest_line": 12,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "final-environment-delete-suppresses-internal-plan-notice",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The supervisor can construct an internal preserved-path notice, but the final environment Delete's shipped helm caller discards it after destruction. The original misleading-guidance consequence is not user-visible through that caller.",
+          "checks": [
+            "47f33bbdbd5ff4a6e437e97a800f9083be43096e teardown.rs:993-1026 constructs a Planned-path notice independently of the Abandon quiet branch at 1056-1064; the original internal observation is real.",
+            "00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db crates/farhelm-helm/src/sessions/sandbox.rs:257-261 matches Sealed with _notice, awaits finish_seal_locked and returns default empty outcome. Lines 249-255 retain notices for non-final Deleted, where the environment remains.",
+            "Latest history records this suppression's introduction in 222bf6253bcd168db04bcbb1df20180c88306998 and an older whole-environment caller returning an empty outcome; this consultation directly checked the shipped tip suppression, not that full provenance search.",
+            "Source checks only; no authorized environment destruction is disputed and no runtime observation was made."
+          ],
+          "coverage_checked": [
+            "Current SPEC_impl.md:6106-6149 Environment Delete and the seal describes final teardown notice as internal and Sealed as environment destruction. SPEC.md environment deletion and Managed checkouts govern final destruction versus retained environment notices.",
+            "TODO.md Planned empty; BUGS.md unrelated. Searches of plans/queue, INDEX.md and active TRIAGE_OUTCOMES.md for unresolved checkout, preserved-path notice and seal found no exact unresolved item. No archive read.",
+            "FILTER.md not applied; the caller refutes the user-visible premise."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "After knowingly destroying an environment, final Delete might falsely tell the user an unresolved checkout folder remains for inspection. This was a diagnostic-guidance claim, not unauthorized destruction or loss of work.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Explicit suppression at the final user-facing caller; retain the fact that the supervisor's intermediate notice exists."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "final-environment-delete-suppresses-internal-plan-notice",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete: all 968 assigned patch lines reviewed.\n\nNo substantiated findings or open leads. Candidates c1–c6 are recorded; c3 needs the caller’s independent drop check. Findings log and progress notes are updated. No tests or reproductions ran."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised c1 with startup discard-recovery evidence and c5 with strict scope-tag decoding and incomplete-inventory fallback evidence.\n\nNo new findings or open local leads. g128/l1’s separate consent concern remains unresolved and is not refuted by these checks."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 found no new reportable issue.\n\nChecked teardown failure boundaries, changed test oracles, and final environment Delete notice handling. New lead l1 was source-refuted and recorded as a candidate.\n\nNew verified IDs: none. New unverified IDs: none. Open local leads: none. No runtime execution."
+    }
+  ],
+  "progress": "Group: g127 (supervisor-stop-delete)\nTurn type/count: initial review / 1. Discovery-pass count: 0. This turn does not perform later synthesis or discovery passes.\nState: initial assigned pass complete. No substantiated findings. Six source-refuted or contract-accepted candidates recorded immediately as c1-c6; c3 revised once to correct specification line offsets. No open leads.\n\nMandatory patch coverage: all 968 assigned lines delivered through evidence read, each invocation separately.\n- 00300-000.patch: 1-46 (04d85f0c98a9b635709d00b056719a0baa7fd3fc, sweep.rs).\n- 00301-000.patch: 1-23 (04d85f0c98a9b635709d00b056719a0baa7fd3fc, teardown.rs).\n- 00685-000.patch: 1-170, 171-340, 341-503 (47f33bbdbd5ff4a6e437e97a800f9083be43096e, teardown.rs).\n- 00747-000.patch: 1-22 (70bc66a9f285cc2a9984924f389834d118b7cfdc, teardown.rs).\n- 00942-000.patch: 1-150, 151-275 (1ed482dde220452e424973faf38a5e1318986333, sweep.rs).\n- 00943-001.patch: 1-99 (1ed482dde220452e424973faf38a5e1318986333, teardown.rs).\nThe complete inventory commits field was read; excluded metadata and forbidden coverage sources were not read.\n\nGoverning contracts checked: SPEC.md Lifecycle operations (04d85f0c:1839-1965; 47f33bbd:2010-2133; 1ed482dd:2070-2126); Sandbox sessions and Managed checkouts (47f33bbd:1441-1882); Retired containerized sessions (04d85f0c:4816-4823); SPEC_impl.md Environment ownership and refusal / Environment Delete and the seal (47f33bbd:6585-6656), Terminal host runtime and switch points / Tabs in hosts (1ed482dd:1963-2128, 2192-2236, 2309-2338), Terminal substrate removal contract (1ed482dd:2880-2925), process ownership and scope contracts (1ed482dd:4930-5115), and Rootless Podman sessions (04d85f0c:8643-8656). Relevant specification differences were inspected between 04d85f0c and 47f33bbd, 47f33bbd and 70bc66a9, and 70bc66a9 and 1ed482dd to establish unchanged text and changed terminal semantics. Answers bind to what was drawn was read at 1ed482dd:1071-1104; no GUI handler is assigned here.\n\nSource/caller checks: 47f33bbd teardown.rs:300-825,980-1538 and handlers.rs:1400-1595; store.rs:3760-3975 confirms discarded archive retirement and removal journaling commit with session deletion. 1ed482dd sweep.rs:1230-1550,1950-2095, teardown.rs:1210-1315, hosts/terminal.rs:700-810,840-900,2520-2615, hosts/tag.rs:1-180, session_hosts.rs:475-595, handlers.rs:870-920 and core.rs:12370-12420,14105-14193 establish pinned process roots and tab scope provenance. Parent revision status.rs:615-675 confirms the replaced host exit-code read is equivalent. 04d85f0c core.rs:3720-3745 and container.rs:1-250 establish retired launch refusal and persistent creator fence. 70bc66a9 teardown.rs:4670-4868 and core.rs:20535-20620 cover the changed checkout admission race test and real host test seam.\n\nInterface assumptions: handlers retain agent fence, admission, directory admission and lifecycle claim across prepare/count-or-seal/finish. PreparedTeardown carries roots and deletion-notice ownership across that split. Only the last checkout reference is eligible for discard; archive safety checks remain shared. The final deleting transaction journals discard; resumption happens before directory admission is released. Host roots use adoption-pinned PID/start identities and read errors refuse lifecycle cleanup. Host-tag scope selection is mandatory; unavailable discovery preserves the portable sweep. Parent owns other groups and queue-coverage matching.\n\nNew verified finding IDs: none. New unverified finding IDs: none. Candidate IDs: c1-c6. Could-be-highest proposed drop: c3 (source refutes wrong-process cleanup); parent must include it in the independent drop register. Open lead IDs: none.\nUnread assigned scope: none. Context inspection is bounded to the assigned behavior and callers, not an independent review of entire adjacent modules.\nExecution: no tests, builds or reproductions; source-only review as requested. No checkout files changed. Findings artifacts retained for the parent.\nTool note: the first c1 record invocation rejected state=closed; corrected to state=open and successfully recorded before further source reads. No bulk transcript inspection or alternate coverage mechanism was used.\nNext action: return to caller for its separately prompted synthesis turn.\n\nTurn 2 started: later-turn synthesis; discovery passes still 0. Caller verified delivery and all seven initial events. Revisiting discard journal recovery and scope/inventory interactions. c5 revised immediately to separate cleanup coverage from g128/l1's unauthorized-termination concern. No parent drop accepted. Adjacent pinned-root checks independently confirmed by g098/g101/g118; g128/c2 independently confirms incomplete inventory fallback. No open local leads at entry.\n\nTurn 2 complete: later-turn synthesis, total turns 2; discovery-pass count 0. No new substantive finding, candidate ID or local lead. Revisions: c5 twice (first separated consent from reachability; second added direct strict decoder and inventory evidence); c1 once (traced post-commit and startup discard recovery). No parent drop is accepted or claimed here.\n\nNew source checks this turn, all at recorded revisions:\n- 47f33bbdbd5ff4a6e437e97a800f9083be43096e: checkout_trash.rs:1-135,810-1030; service/trash_remover.rs:1-160,345-385; service/core.rs:8708-8765; store.rs:3836-3882. The zero-member archive's .rm: removal journal commits with session deletion. Post-commit and startup recovery share resume_retirement, which rechecks membership, retained paths and directory identity. Startup awaits it before accepting requests and enqueues verified removals. Missing names settle absence; failure retains the journal. This closes the readily checkable startup-recovery premise for c1 without executing anything.\n- 1ed482dde220452e424973faf38a5e1318986333: teardown.rs:300-470; core.rs:13390-13478; hosts/tag.rs:185-267. Decoder requires each v1 tab's 0/1 scope byte; no missing selection is defaulted true. Inventory completeness requires an existing host and generation zero. No terminal or a later generation retains needs_sweep, independently of units subsequently discovered. c5 therefore addresses omitted cleanup only.\n\nCross-batch boundaries: directory admission and the lifecycle claim carry the read-only preparation into count-or-seal and destructive finish; the checkout discard transaction removes only the last membership before granting removal authority. Host-tag provenance determines individual tab scope policy; inventory completeness independently determines whether a machine-wide sweep can be omitted. Neither pinned process identity nor complete cleanup establishes that a user authorized terminating a process. g128/l1's source-claimed later NothingAlive Delete of an old startup survivor is separate: retained incomplete-inventory fallback supports its cleanup reachability rather than refuting its consent concern. No attempt made to interpret migration-policy cover on that other group's behalf. g098/g101/g118's root-mapping confirmation is consistent with c3, whose could-be-highest proposed drop remains for the parent's independent check.\n\nNew verified finding IDs this pass: none. New unverified finding IDs: none. Revised IDs: c1,c5. Open local lead IDs: none. External unresolved issue: g128/l1, owned by its group/caller; no local duplicate created. Unread assigned material: none. No runtime execution, tests, builds or reproductions; all conclusions are source/contract analysis. No checkout files changed.\nNext action: return only this turn's delta and unresolved lead IDs; await a separately prompted discovery pass if requested.\n\nTurn 3 started: separate discovery pass 1. Read all discovery-neighbours.json lines 1-575 in bounded chunks before new source search. Synthesis prerequisite: g128/l1:8 now supplies a source-confirmed later NothingAlive route for an ordinary legacy row without host records; its retained WholeSession sweep supports reachability. The explicit leftover-for-Restart-or-Delete text and destructive-consent rule conflict requires independent acceptance judgment. c5 already separates this from its omitted-cleanup hypothesis; neither c5 nor pinned-root validation refutes that distinct consent issue. No parent drop/lowering accepted. Known neighbour findings are novelty context only; no new local duplicate is being opened. Fresh search will stay within the assigned stop/delete patches, focusing on error/transaction boundaries and changed test oracles beyond c1-c6.\n\nTurn 3 complete: separate discovery pass 1, total turns 3. Result: no new verified finding and no new unverified-after-investigation finding. New local lead l1 was recorded immediately, investigated, then revised under the same ID to a source-refuted candidate. Open local lead IDs: none. No new reportable issue found. No prior proposed drop or lowering is treated as accepted.\n\nFresh checks beyond the known c1-c6 conclusions:\n- At 47f33bbdbd5ff4a6e437e97a800f9083be43096e, read teardown.rs:825-980 and3219-3410 for failures before ownership settlement, new disposition fixtures and their crash-boundary assertions. The test checks the moved-directory premise, directly requires the retained row to carry removal intent, and checks exact recovery IDs; the shared-checkout fixture tests presence before last-reference deletion and its absence/queued removal afterward. No distinct test-oracle defect established.\n- New l1 checked Planned notice handling versus Abandon: assigned teardown.rs:95-120,987-1066 and SPEC.md:1503-1550. Traced only the relevant caller at 47f33bbd sessions.rs:3560-3656 and sessions/sandbox.rs:1-280, then the later shipped path at tip sessions/sandbox.rs:205-278. A scope-specific git log -S located the Sealed result handler in in-range commit 222bf6253bcd168db04bcbb1df20180c88306998, and its source:235-265 confirms the same suppression. The original assigned revision has no helm delete_session_or_seal caller; the actual caller from its introduction suppresses internal teardown notices after final destruction. l1's suspected final user guidance is refuted, preserving its original consequence in the log.\n- At 1ed482dde220452e424973faf38a5e1318986333, read sweep.rs:2780-2860 to check changed scope fallback test oracles independently of production correctness. The explicit fallback callback diagnostic distinguishes sweep invocation from successful optional scope handling; removed Unknown cases correspond to the removed tmux metadata mechanism.\n- At 70bc66a9f285cc2a9984924f389834d118b7cfdc, read teardown.rs:4788-4880 to inspect both admission orders after host_seams conversion. Both require actual pending contention, then assert durable membership/session state and sentinel location. No distinct loss of the named admission-race oracle established.\n\nInterface synthesis remains limited: the incoming g128/l1:8 route is separate from this group's cleanup-completeness conclusions, and its acceptance question is not resolved or dismissed here. Neighbour records were used for novelty, not mandatory source credit. No omitted assigned scope. All checks are source/contract analysis; no tests, builds, reproductions or live-install actions. Only private artifacts changed.\nNext action: return checks, new verified/unverified IDs, open local leads and explicit empty discovery result. A new prompt controls any further pass.\n"
+}

@@ -1,0 +1,34 @@
+[
+  {
+    "key": "g076/l2",
+    "latest_line": 11,
+    "recommendation": "out-of-range",
+    "bucket": "other",
+    "underlying_key": "helm-wedged-browser-test-pause-does-not-directly-witness-blocked-send",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The latest attribution claim is established: the exclusive base already contains the surviving grid test's pause oracle, parked-send claim, flood helper and teardown expectations. The in-range rewrite removes the byte-stream case and preserves that grid case. This does not establish that the inherited oracle is sound, or that it can actually false-pass.",
+    "checks": [
+      "6e423e30068b62c6cfa276c6d720ee35bb70387a:crates/farhelm-helm/src/terminal.rs:1668-1682 already describes PauseOutput as observing a parked send for the grid case; :1749-1758 already uses flood_until_heard(..., 32 * 1024, 0) and asserts its first control is PauseOutput.",
+      "The exclusive base's terminal.rs:2455-2508 already implements the bounded flood with an independent watcher and yield_now after every frame. It does not expose a socket-send readiness or blocked-send witness. Base :1771-1818 already waits for the same two Detach messages before reading the browser again.",
+      "f560058da19e02716e6f943883a9508b447aff4e:terminal.rs:1454-1579 retains that grid setup, pause assertion, injected stalled Detached, two-Detach expectation and final close. Its focused diff changes 'For a grid stream it is observed' to 'Both are observed' after deleting the byte-stream branch; 'Both' refers to the two premises, not newly introduced stream coverage. The only intervening readiness removal is the obsolete stream-kind notice.",
+      "f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-helm/src/client.rs:837-898 counts queue events/bytes and steers pause from their marks. It does not inspect WebSocket send state. terminal.rs:1972-2016 retains the same helper behavior.",
+      "Scoped git log -G checks over 6e423e3..00de0b6 for flood_until_heard, the parked-send explanation, the test name, SMALL_RECEIVE_BUFFER and MOST_FRAMES identify only f560058d in terminal.rs. The inclusive tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:terminal.rs:1467-1521 retains the same explanation and assertion. No in-range worsening of this named oracle was found.",
+      "Source inspection only. No runtime, scheduler, mutation or reproduction experiment was performed. The record's Tokio scheduling citation was not needed to decide full-range attribution and was not independently rechecked."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:3013-3031 requires slow/wedged viewers to pause and eventually detach; it does not accept a weak regression oracle. Searches for PauseOutput, blocked-send, stall-detach, backpressure and test-oracle wording found no exact acceptance of this claim.",
+      "Current SPEC_impl.md, Grid streams (:2937-3038), defines backlog-based PauseOutput and the 60-second stall timeout. Testing (:8163-8232) does not exempt this test's premise. These product and testing requirements are context, not coverage of the suspected oracle defect.",
+      "TODO.md's Planned bucket (:25-26) is empty. plans/queue/INDEX.md has no unlanded plan entries. Targeted searches of plans/queue found no work fixing this oracle; the archived-in-place tmux-end-old-terminals text concerns removal of old terminals, not proving a blocked-send premise.",
+      "BUGS.md was read in full; its only accepted bug concerns a provisioning ssh helper holding output open, not terminal WebSocket test pressure.",
+      "review_feedback_queue/INDEX.md and matching queue text were searched for the named test/helper and pause, stall, blocked-send and oracle terms. host-flood-stall-window-claim.md was read in full: it concerns terminal_tabs.rs, an eight-second test claiming to cross a sixty-second timeout, and an input-echo flood witness. It has a different test, trigger and cause; it is neither an alias nor exact coverage of this terminal.rs queue-pause oracle.",
+      "Active TRIAGE_OUTCOMES.md was searched; the matching removed-deflake-items-leave-exclusions.md section (:47-70) was read in full and concerns stale test exclusions. It does not decide this oracle. The archive was not read.",
+      "FILTER.md was read in full. No filter fully matches a possible false-pass regression oracle. A rare scheduling trigger alone does not make this a self-correcting display, safe retry or diagnostic-only defect. No filter is proposed."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A feasible scheduler/socket sequence in which PauseOutput is received while the browser send has not blocked, and the teardown test consequently passes without exercising the intended detach race, remains unestablished. The absence of a direct blocked-send witness alone is not an observed false pass.",
+    "original_stronger_consequence": "If a temporary queue backlog can produce PauseOutput before ws_tx.send is blocked, the stalled-browser teardown regression can pass without exercising the detach race it claims to cover, allowing a later missing detach-race protection to escape. The original lead never established a current shipped resource leak, security consequence or loss of user-owned work. Latest line 11 withdraws in-range attribution, not the inherited concern itself.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Do not record this as a defect introduced or worsened in the pinned review range: the exclusive base contains the same questionable grid oracle and documentation. Preserve the withdrawal and unresolved false-pass premise. The established consequence is confined to maintainer test coverage, so the suggested bucket is other; no stronger user-visible route was claimed or established. This is a proposed range disposition for the parent, not a finding that the oracle is correct."
+  }
+]

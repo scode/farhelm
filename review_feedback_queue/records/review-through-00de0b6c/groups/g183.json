@@ -1,0 +1,587 @@
+{
+  "group": {
+    "id": "g183",
+    "domain": "agent-screen-inspection",
+    "purpose": "agent-screen-inspection: crates/farhelm-supervisor/src/agent_kind/screen_fixtures.rs, scripts/capture-agent-screens.py, scripts/agent-tui.py, scripts/agent_screen_host.py; phases complete small per-commit changes",
+    "interfaces": [
+      "g001",
+      "g006",
+      "g007",
+      "g008",
+      "g009"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00902-000.patch",
+        "ranges": [
+          [
+            1,
+            15
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/agent_kind/screen_fixtures.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,1050)",
+        "lines": 15,
+        "bytes": 1050,
+        "start": 0,
+        "end": 1050,
+        "original": "[private-run]/prep/originals/00902.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01415-000.patch",
+        "ranges": [
+          [
+            1,
+            33
+          ]
+        ],
+        "original_path": "scripts/capture-agent-screens.py",
+        "commit": "d751ff1633bb479c7bf53920f2e4ea4ba932a1c2",
+        "notes": "patch header; patch character offsets [0,2259)",
+        "lines": 33,
+        "bytes": 2259,
+        "start": 0,
+        "end": 2259,
+        "original": "[private-run]/prep/originals/01415.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01530-000.patch",
+        "ranges": [
+          [
+            1,
+            66
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/agent_kind/screen_fixtures.rs",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,4251)",
+        "lines": 66,
+        "bytes": 4253,
+        "start": 0,
+        "end": 4251,
+        "original": "[private-run]/prep/originals/01530.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01618-000.patch",
+        "ranges": [
+          [
+            1,
+            25
+          ]
+        ],
+        "original_path": "scripts/agent-tui.py",
+        "commit": "4b489b4f2eeade14f119b186ecb16eeaaf027021",
+        "notes": "patch header; patch character offsets [0,1986)",
+        "lines": 25,
+        "bytes": 1986,
+        "start": 0,
+        "end": 1986,
+        "original": "[private-run]/prep/originals/01618.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01619-000.patch",
+        "ranges": [
+          [
+            1,
+            28
+          ]
+        ],
+        "original_path": "scripts/agent_screen_host.py",
+        "commit": "4b489b4f2eeade14f119b186ecb16eeaaf027021",
+        "notes": "patch header; patch character offsets [0,2134)",
+        "lines": 28,
+        "bytes": 2134,
+        "start": 0,
+        "end": 2134,
+        "original": "[private-run]/prep/originals/01619.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01620-000.patch",
+        "ranges": [
+          [
+            1,
+            21
+          ]
+        ],
+        "original_path": "scripts/capture-agent-screens.py",
+        "commit": "4b489b4f2eeade14f119b186ecb16eeaaf027021",
+        "notes": "patch header; patch character offsets [0,1773)",
+        "lines": 21,
+        "bytes": 1773,
+        "start": 0,
+        "end": 1773,
+        "original": "[private-run]/prep/originals/01620.patch"
+      }
+    ],
+    "lines": 188,
+    "bytes": 13455
+  },
+  "records": [
+    {
+      "key": "g183/c1",
+      "owner": "g183",
+      "id": "c1",
+      "domain": "agent-screen-inspection",
+      "purpose": "agent-screen-inspection: crates/farhelm-supervisor/src/agent_kind/screen_fixtures.rs, scripts/capture-agent-screens.py, scripts/agent-tui.py, scripts/agent_screen_host.py; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removing retired recorder option preserves fixture-test invocation",
+            "location": "scripts/capture-agent-screens.py:754",
+            "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. TLDR: considered whether removing --tmux none loses required fixture-test evidence or prevents validation; source establishes that the option is retired and would instead make the recorder refuse the command. Details: run_fixture_tests at scripts/capture-agent-screens.py:744-758 still selects the nextest runner, development kind, explicit selection and concurrency, and the same supervisor fixture filter. scripts/record-test-run.py:223-275 at this commit defines the accepted arguments without --tmux and documents: 'An unknown option is a refusal before any evidence directory exists' and 'a retired option in an old command ... fails loudly instead of being ignored.' parse_args passes option_argv to argparse.parse_args. Suggested bucket: other (maintainer validation tooling). Confidence: confirmed by source; no execution. proposed_drop: removing an unsupported argument fixes the call and does not remove a current recorder contract. possible_cover: none; no coverage sources searched. Could-be-highest: no; no established security or loss-of-work route, and this change only removes an obsolete recorder argument. No finding proposed."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removing retired recorder option preserves fixture-test invocation",
+            "location": "scripts/capture-agent-screens.py:754",
+            "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. TLDR: considered whether removing --tmux none loses required fixture-test evidence or prevents validation; source establishes that the option is retired and would instead make the recorder refuse the command. Details: run_fixture_tests at scripts/capture-agent-screens.py:744-758 still selects the nextest runner, development kind, explicit selection and concurrency, and the same supervisor fixture filter. scripts/record-test-run.py:223-275 at this commit defines the accepted arguments without --tmux and documents: 'An unknown option is a refusal before any evidence directory exists' and 'a retired option in an old command ... fails loudly instead of being ignored.' parse_args passes option_argv to argparse.parse_args. Suggested bucket: other (maintainer validation tooling). Confidence: confirmed by source; no execution. proposed_drop: removing an unsupported argument fixes the call and does not remove a current recorder contract. possible_cover: none; no coverage sources searched. Could-be-highest: no; no established security or loss-of-work route, and this change only removes an obsolete recorder argument. No finding proposed. Synthesis turn 2 checked the full caller return path: capture-agent-screens.py:744-824 returns the recorder exit code from run_fixture_tests and folds it into main status unless --no-test is explicit. The same revision of scripts/test_run_nextest.py:27-29,34-77 allows both -p and -E used here, requires cargo nextest run, and sets THREADS=4; prepare at :119-181 inserts four threads and zero retries and retains the selected fixture filter. Thus the remaining invocation satisfies both recorder and nextest-adapter contracts and its failure is propagated. A guessed context path scripts/record_test_nextest.py did not exist; the actual adapter was located from RUNNER_MODULES/imports and read as scripts/test_run_nextest.py. These are source checks, not executed tests; disposition and considered consequence are unchanged."
+          }
+        }
+      ],
+      "latest": {
+        "line": 7,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Removing retired recorder option preserves fixture-test invocation",
+          "location": "scripts/capture-agent-screens.py:754",
+          "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. TLDR: considered whether removing --tmux none loses required fixture-test evidence or prevents validation; source establishes that the option is retired and would instead make the recorder refuse the command. Details: run_fixture_tests at scripts/capture-agent-screens.py:744-758 still selects the nextest runner, development kind, explicit selection and concurrency, and the same supervisor fixture filter. scripts/record-test-run.py:223-275 at this commit defines the accepted arguments without --tmux and documents: 'An unknown option is a refusal before any evidence directory exists' and 'a retired option in an old command ... fails loudly instead of being ignored.' parse_args passes option_argv to argparse.parse_args. Suggested bucket: other (maintainer validation tooling). Confidence: confirmed by source; no execution. proposed_drop: removing an unsupported argument fixes the call and does not remove a current recorder contract. possible_cover: none; no coverage sources searched. Could-be-highest: no; no established security or loss-of-work route, and this change only removes an obsolete recorder argument. No finding proposed. Synthesis turn 2 checked the full caller return path: capture-agent-screens.py:744-824 returns the recorder exit code from run_fixture_tests and folds it into main status unless --no-test is explicit. The same revision of scripts/test_run_nextest.py:27-29,34-77 allows both -p and -E used here, requires cargo nextest run, and sets THREADS=4; prepare at :119-181 inserts four threads and zero retries and retains the selected fixture filter. Thus the remaining invocation satisfies both recorder and nextest-adapter contracts and its failure is propagated. A guessed context path scripts/record_test_nextest.py did not exist; the actual adapter was located from RUNNER_MODULES/imports and read as scripts/test_run_nextest.py. These are source checks, not executed tests; disposition and considered consequence are unchanged."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g183/findings.jsonl",
+        "id": "c1",
+        "line": 7,
+        "disposition": "excluded",
+        "group": "capture-fixture-tests-retired-tmux-option",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-114 after inspecting it. The removed argument is unsupported at the reviewed revision. Removing it preserves the fixture selection and recorder evidence path. No lost validation requirement or suppressed caller failure is established. Source-refuted validation-regression hypothesis: the retired option would itself cause argument refusal, while selection, evidence recording and failure propagation remain. Checked source/results: [\"d751ff1633bb479c7bf53920f2e4ea4ba932a1c2 patch, scripts/capture-agent-screens.py:751-756: removes only --tmux none from the fixture-test argv; -p farhelm-supervisor and -E test(screen_fixtures) remain.\",\"d751ff1633bb479c7bf53920f2e4ea4ba932a1c2:scripts/record-test-run.py:223-275: argparse accepts the remaining recorder options, has no --tmux option, parses the pre-boundary argv strictly, and checks the nextest selection.\",\"Same revision scripts/test_run_nextest.py:27-77,119-181: -p and -E are permitted; prepare retains the selection and inserts four threads and zero retries.\",\"Same revision scripts/capture-agent-screens.py:744-824: subprocess return code is returned and folded into main's status unless --no-test was explicitly selected. Source checks only; no tests executed.\"] Current coverage/results: [\"Current SPEC.md and SPEC_impl.md searched for capture, fixture, recorder, retired/unknown options and width names. No acceptance rule requiring the removed recorder option; SPEC_impl.md:2703-2705 and 4202-4207 describe fixture coverage, which the caller still selects.\",\"TODO.md:23-26: Planned is empty. plans/queue searched for the actual recorder-option/capture trigger; tmux-drop-from-tooling.md:46-55 explicitly removes the recorder mode, but plans/REPORTS.md:31 records that plan already landed, so it supplies context rather than unlanded coverage.\",\"BUGS.md searched and read: only the provisioning SSH-output hang is recorded; no match.\",\"INDEX.md and matching recorder files read: runtime-recorder-guidance-conflict.md, timing-history-can-retain-failed-recorder-success.md and outer-recorder-deletes-nested-failure-evidence.md concern different command-guidance/publication/nesting triggers. No exact alias or useful extension.\",\"Active TRIAGE_OUTCOMES.md searched for recorder, tmux, fixture and capture terms: no decision covering loss of fixture evidence from this option removal. FILTER.md has no applicable boundary; no filter used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Considered whether removing --tmux none loses required fixture-test evidence or prevents validation. Both history entries reject that consequence from the recorder/caller contracts; neither alleges security or user-work loss.\"; \"None for the narrow refutation. This does not establish a successful executed capture or test run.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g183/c1",
+        "line": 7,
+        "disposition": "excluded",
+        "group": "capture-fixture-tests-retired-tmux-option",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-114 after inspecting it. The removed argument is unsupported at the reviewed revision. Removing it preserves the fixture selection and recorder evidence path. No lost validation requirement or suppressed caller failure is established. Source-refuted validation-regression hypothesis: the retired option would itself cause argument refusal, while selection, evidence recording and failure propagation remain. Checked source/results: [\"d751ff1633bb479c7bf53920f2e4ea4ba932a1c2 patch, scripts/capture-agent-screens.py:751-756: removes only --tmux none from the fixture-test argv; -p farhelm-supervisor and -E test(screen_fixtures) remain.\",\"d751ff1633bb479c7bf53920f2e4ea4ba932a1c2:scripts/record-test-run.py:223-275: argparse accepts the remaining recorder options, has no --tmux option, parses the pre-boundary argv strictly, and checks the nextest selection.\",\"Same revision scripts/test_run_nextest.py:27-77,119-181: -p and -E are permitted; prepare retains the selection and inserts four threads and zero retries.\",\"Same revision scripts/capture-agent-screens.py:744-824: subprocess return code is returned and folded into main's status unless --no-test was explicitly selected. Source checks only; no tests executed.\"] Current coverage/results: [\"Current SPEC.md and SPEC_impl.md searched for capture, fixture, recorder, retired/unknown options and width names. No acceptance rule requiring the removed recorder option; SPEC_impl.md:2703-2705 and 4202-4207 describe fixture coverage, which the caller still selects.\",\"TODO.md:23-26: Planned is empty. plans/queue searched for the actual recorder-option/capture trigger; tmux-drop-from-tooling.md:46-55 explicitly removes the recorder mode, but plans/REPORTS.md:31 records that plan already landed, so it supplies context rather than unlanded coverage.\",\"BUGS.md searched and read: only the provisioning SSH-output hang is recorded; no match.\",\"INDEX.md and matching recorder files read: runtime-recorder-guidance-conflict.md, timing-history-can-retain-failed-recorder-success.md and outer-recorder-deletes-nested-failure-evidence.md concern different command-guidance/publication/nesting triggers. No exact alias or useful extension.\",\"Active TRIAGE_OUTCOMES.md searched for recorder, tmux, fixture and capture terms: no decision covering loss of fixture evidence from this option removal. FILTER.md has no applicable boundary; no filter used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Considered whether removing --tmux none loses required fixture-test evidence or prevents validation. Both history entries reject that consequence from the recorder/caller contracts; neither alleges security or user-work loss.\"; \"None for the narrow refutation. This does not establish a successful executed capture or test run.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-114",
+          "key": "g183/c1",
+          "latest_line": 7,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "capture-fixture-tests-retired-tmux-option",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The removed argument is unsupported at the reviewed revision. Removing it preserves the fixture selection and recorder evidence path. No lost validation requirement or suppressed caller failure is established.",
+          "checks": [
+            "d751ff1633bb479c7bf53920f2e4ea4ba932a1c2 patch, scripts/capture-agent-screens.py:751-756: removes only --tmux none from the fixture-test argv; -p farhelm-supervisor and -E test(screen_fixtures) remain.",
+            "d751ff1633bb479c7bf53920f2e4ea4ba932a1c2:scripts/record-test-run.py:223-275: argparse accepts the remaining recorder options, has no --tmux option, parses the pre-boundary argv strictly, and checks the nextest selection.",
+            "Same revision scripts/test_run_nextest.py:27-77,119-181: -p and -E are permitted; prepare retains the selection and inserts four threads and zero retries.",
+            "Same revision scripts/capture-agent-screens.py:744-824: subprocess return code is returned and folded into main's status unless --no-test was explicitly selected. Source checks only; no tests executed."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md and SPEC_impl.md searched for capture, fixture, recorder, retired/unknown options and width names. No acceptance rule requiring the removed recorder option; SPEC_impl.md:2703-2705 and 4202-4207 describe fixture coverage, which the caller still selects.",
+            "TODO.md:23-26: Planned is empty. plans/queue searched for the actual recorder-option/capture trigger; tmux-drop-from-tooling.md:46-55 explicitly removes the recorder mode, but plans/REPORTS.md:31 records that plan already landed, so it supplies context rather than unlanded coverage.",
+            "BUGS.md searched and read: only the provisioning SSH-output hang is recorded; no match.",
+            "INDEX.md and matching recorder files read: runtime-recorder-guidance-conflict.md, timing-history-can-retain-failed-recorder-success.md and outer-recorder-deletes-nested-failure-evidence.md concern different command-guidance/publication/nesting triggers. No exact alias or useful extension.",
+            "Active TRIAGE_OUTCOMES.md searched for recorder, tmux, fixture and capture terms: no decision covering loss of fixture evidence from this option removal. FILTER.md has no applicable boundary; no filter used."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "None for the narrow refutation. This does not establish a successful executed capture or test run.",
+          "original_stronger_consequence": "Considered whether removing --tmux none loses required fixture-test evidence or prevents validation. Both history entries reject that consequence from the recorder/caller contracts; neither alleges security or user-work loss.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source-refuted validation-regression hypothesis: the retired option would itself cause argument refusal, while selection, evidence recording and failure propagation remain."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "capture-fixture-tests-retired-tmux-option",
+        "destination": null
+      }
+    },
+    {
+      "key": "g183/c2",
+      "owner": "g183",
+      "id": "c2",
+      "domain": "agent-screen-inspection",
+      "purpose": "agent-screen-inspection: crates/farhelm-supervisor/src/agent_kind/screen_fixtures.rs, scripts/capture-agent-screens.py, scripts/agent-tui.py, scripts/agent_screen_host.py; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Retaining tmux-era screen fixtures remains justified for surviving host agents",
+            "location": "crates/farhelm-supervisor/src/agent_kind/screen_fixtures.rs:10-19",
+            "detail": "Reviewed commits: 1ed482dde220452e424973faf38a5e1318986333 and 08399d092d20815ced6619c26df2391944ae2b4a. TLDR: considered whether the revised reason for keeping old screen captures incorrectly preserves obsolete terminal behavior. The edits only clarify documentation; they neither change fixture data nor require a current terminal to pretend it is tmux. Details: the complete assigned patches modify module prose and repaint-test prose, leaving executable assertions unchanged. At 08399d092d20815ced6619c26df2391944ae2b4a, SPEC_impl.md:2187-2200 says the child now receives Farhelm terminal variables, and explicitly states: 'until 2026-11 the child got `TERM_PROGRAM=tmux`, the private server’s version and a placeholder `TMUX` that held such an autostart back, and a host started then keeps that environment until its agent is restarted.' Its status contract at SPEC_impl.md:4202-4207 explicitly retains pre-November captures for agents in terminal hosts started before 0.36.0. The repaint test at screen_fixtures.rs:488-606 independently checks that captured text survives the current emulator and its status reader; it does not replay live programs or change terminal environments. docs/agent-screen-fixtures.md:33-37 at 4b489b4f2eeade14f119b186ecb16eeaaf027021 gives the same retained-host rationale. Suggested bucket: other (explanatory test documentation). Confidence: confirmed by patch and source contract; no execution and no claim of newly observing installed vendor behavior. proposed_drop: no changed runtime or assertion behavior, and retained old-agent coverage agrees with the explicit compatibility contract. possible_cover: none; no coverage sources searched. Could-be-highest: no; the comments neither remove coverage nor introduce a security or user-work mutation path. Historical release-version attribution was not independently audited; no contrary source premise was found."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Retaining tmux-era screen fixtures remains justified for surviving host agents",
+            "location": "crates/farhelm-supervisor/src/agent_kind/screen_fixtures.rs:10-19",
+            "detail": "Reviewed commits: 1ed482dde220452e424973faf38a5e1318986333 and 08399d092d20815ced6619c26df2391944ae2b4a. TLDR: considered whether the revised reason for keeping old screen captures incorrectly preserves obsolete terminal behavior. The edits only clarify documentation; they neither change fixture data nor require a current terminal to pretend it is tmux. Details: the complete assigned patches modify module prose and repaint-test prose, leaving executable assertions unchanged. At 08399d092d20815ced6619c26df2391944ae2b4a, SPEC_impl.md:2187-2200 specifies current Farhelm terminal variables. Exact acceptance text at :2197-2199: \"until 2026-11 the child got `TERM_PROGRAM=tmux`, the private server's version and a placeholder `TMUX` that held such an autostart back, and a host started then keeps that environment until its agent is restarted.\" At :4202-4207 its status contract explicitly retains pre-November captures for agents in terminal hosts started before 0.36.0. The earlier 1ed482dde220452e424973faf38a5e1318986333 contract at SPEC_impl.md:2254-2278 already specifies the same retained child environment, even though its status bullet still describes the old terminals. The repaint test at screen_fixtures.rs:488-606 at 08399d092d20815ced6619c26df2391944ae2b4a independently checks that captured text survives the current emulator and its status reader; it does not replay live programs or change terminal environments. docs/agent-screen-fixtures.md:33-37 at 4b489b4f2eeade14f119b186ecb16eeaaf027021 gives the same retained-host rationale. Suggested bucket: other (explanatory test documentation). Confidence: confirmed by patch and source contract; no execution and no claim of newly observing installed vendor behavior. proposed_drop: no changed runtime or assertion behavior, and retained old-agent coverage agrees with the explicit compatibility contract quoted above. possible_cover: none; no coverage sources searched. Could-be-highest: no; the comments neither remove coverage nor introduce a security or user-work mutation path. Historical release-version attribution was not independently audited; no contrary source premise was found. Revision corrects the quotation's apostrophe to the source spelling and adds the initial revision's contract check; the considered consequence and disposition are unchanged."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Retaining tmux-era screen fixtures remains justified for surviving host agents",
+            "location": "crates/farhelm-supervisor/src/agent_kind/screen_fixtures.rs:10-19",
+            "detail": "Reviewed commits: 1ed482dde220452e424973faf38a5e1318986333 and 08399d092d20815ced6619c26df2391944ae2b4a. TLDR: considered whether the revised reason for keeping old screen captures incorrectly preserves obsolete terminal behavior. The edits only clarify documentation; they neither change fixture data nor require a current terminal to pretend it is tmux. Details: the complete assigned patches modify module prose and repaint-test prose, leaving executable assertions unchanged. At 08399d092d20815ced6619c26df2391944ae2b4a, SPEC_impl.md:2187-2200 specifies current Farhelm terminal variables. Exact acceptance text at :2197-2199: \"until 2026-11 the child got `TERM_PROGRAM=tmux`, the private server's version and a placeholder `TMUX` that held such an autostart back, and a host started then keeps that environment until its agent is restarted.\" At :4202-4207 its status contract explicitly retains pre-November captures for agents in terminal hosts started before 0.36.0. The earlier 1ed482dde220452e424973faf38a5e1318986333 contract at SPEC_impl.md:2254-2278 already specifies the same retained child environment, even though its status bullet still describes the old terminals. The repaint test at screen_fixtures.rs:488-606 at 08399d092d20815ced6619c26df2391944ae2b4a independently checks that captured text survives the current emulator and its status reader; it does not replay live programs or change terminal environments. docs/agent-screen-fixtures.md:33-37 at 4b489b4f2eeade14f119b186ecb16eeaaf027021 gives the same retained-host rationale. Synthesis turn 2 resolves the prior historical-version caveat: v0.34.0 points to 0d2c98c858b7282becaecbb40e0f557f8003f6c0 and v0.35.0 to ee6957b5f0aa10bd4d36834f633b122cf2ec4695. Both revisions' crates/farhelm-supervisor/src/service/core/host_launch.rs:93-170 define PANE_TERM_PROGRAM as tmux and host_child_env explicitly sets TERM_PROGRAM to it, optionally sets TERM_PROGRAM_VERSION from the private server, and sets the startup TMUX placeholder. The newly documented v0.34/v0.35 attribution is therefore supported by historical implementation, not merely current spec prose. Suggested bucket: other (explanatory test documentation). Confidence: confirmed by patch and source contract; no execution and no claim of newly observing installed vendor behavior. proposed_drop: no changed runtime or assertion behavior, and retained old-agent coverage agrees with both the explicit compatibility contract quoted above and the historical launch implementation. possible_cover: none; no coverage sources searched. Could-be-highest: no; the comments neither remove coverage nor introduce a security or user-work mutation path. The considered consequence and disposition are unchanged; the historical-version uncertainty is resolved."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Retaining tmux-era screen fixtures remains justified for surviving host agents",
+            "location": "crates/farhelm-supervisor/src/agent_kind/screen_fixtures.rs:10-19",
+            "detail": "Reviewed commits: 1ed482dde220452e424973faf38a5e1318986333 and 08399d092d20815ced6619c26df2391944ae2b4a. TLDR: considered whether the revised reason for keeping old screen captures incorrectly preserves obsolete terminal behavior. The edits only clarify documentation; they neither change fixture data nor require a current terminal to pretend it is tmux. Details: the complete assigned patches modify module prose and repaint-test prose, leaving executable assertions unchanged. At 08399d092d20815ced6619c26df2391944ae2b4a, SPEC_impl.md:2187-2200 specifies current Farhelm terminal variables. Exact acceptance text at :2197-2199: \"until 2026-11 the child got `TERM_PROGRAM=tmux`, the private server's version and a placeholder `TMUX` that held such an autostart back, and a host started then keeps that environment until its agent is restarted.\" At :4202-4207 its status contract explicitly retains pre-November captures for agents in terminal hosts started before 0.36.0. The earlier 1ed482dde220452e424973faf38a5e1318986333 contract at SPEC_impl.md:2254-2278 already specifies the same retained child environment, even though its status bullet still describes the old terminals. The repaint test at screen_fixtures.rs:488-606 at 08399d092d20815ced6619c26df2391944ae2b4a independently checks that captured text survives the current emulator and its status reader; it does not replay live programs or change terminal environments. docs/agent-screen-fixtures.md:33-37 at 4b489b4f2eeade14f119b186ecb16eeaaf027021 gives the same retained-host rationale. Synthesis turn 2 resolves the prior historical-version caveat: v0.34.0 points to 0d2c98c858b7282becaecbb40e0f557f8003f6c0 and v0.35.0 to ee6957b5f0aa10bd4d36834f633b122cf2ec4695. Both revisions' crates/farhelm-supervisor/src/service/core/host_launch.rs:93-170 define PANE_TERM_PROGRAM as tmux and host_child_env explicitly sets TERM_PROGRAM to it, optionally sets TERM_PROGRAM_VERSION from the private server, and sets the startup TMUX placeholder. The newly documented v0.34/v0.35 attribution is therefore supported by historical implementation, not merely current spec prose. Suggested bucket: other (explanatory test documentation). Confidence: confirmed by patch and source contract; no execution and no claim of newly observing installed vendor behavior. proposed_drop: no changed runtime or assertion behavior, and retained old-agent coverage agrees with both the explicit compatibility contract quoted above and the historical launch implementation. possible_cover: none; no coverage sources searched. Could-be-highest: no; the comments neither remove coverage nor introduce a security or user-work mutation path. The considered consequence and disposition are unchanged; the historical-version uncertainty is resolved. Synthesis also checked host adoption at 08399d092d20815ced6619c26df2391944ae2b4a: crates/farhelm-supervisor/src/hosts/terminal.rs:1740-1947 connects to the existing socket, pins its existing child, starts reading its journal, restores emulator/runtime state and spawns only the runtime task. It supplies no ChildSpec or replacement process environment. This confirms the retained-environment premise through the adoption caller, rather than relying only on the specification."
+          }
+        }
+      ],
+      "latest": {
+        "line": 6,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Retaining tmux-era screen fixtures remains justified for surviving host agents",
+          "location": "crates/farhelm-supervisor/src/agent_kind/screen_fixtures.rs:10-19",
+          "detail": "Reviewed commits: 1ed482dde220452e424973faf38a5e1318986333 and 08399d092d20815ced6619c26df2391944ae2b4a. TLDR: considered whether the revised reason for keeping old screen captures incorrectly preserves obsolete terminal behavior. The edits only clarify documentation; they neither change fixture data nor require a current terminal to pretend it is tmux. Details: the complete assigned patches modify module prose and repaint-test prose, leaving executable assertions unchanged. At 08399d092d20815ced6619c26df2391944ae2b4a, SPEC_impl.md:2187-2200 specifies current Farhelm terminal variables. Exact acceptance text at :2197-2199: \"until 2026-11 the child got `TERM_PROGRAM=tmux`, the private server's version and a placeholder `TMUX` that held such an autostart back, and a host started then keeps that environment until its agent is restarted.\" At :4202-4207 its status contract explicitly retains pre-November captures for agents in terminal hosts started before 0.36.0. The earlier 1ed482dde220452e424973faf38a5e1318986333 contract at SPEC_impl.md:2254-2278 already specifies the same retained child environment, even though its status bullet still describes the old terminals. The repaint test at screen_fixtures.rs:488-606 at 08399d092d20815ced6619c26df2391944ae2b4a independently checks that captured text survives the current emulator and its status reader; it does not replay live programs or change terminal environments. docs/agent-screen-fixtures.md:33-37 at 4b489b4f2eeade14f119b186ecb16eeaaf027021 gives the same retained-host rationale. Synthesis turn 2 resolves the prior historical-version caveat: v0.34.0 points to 0d2c98c858b7282becaecbb40e0f557f8003f6c0 and v0.35.0 to ee6957b5f0aa10bd4d36834f633b122cf2ec4695. Both revisions' crates/farhelm-supervisor/src/service/core/host_launch.rs:93-170 define PANE_TERM_PROGRAM as tmux and host_child_env explicitly sets TERM_PROGRAM to it, optionally sets TERM_PROGRAM_VERSION from the private server, and sets the startup TMUX placeholder. The newly documented v0.34/v0.35 attribution is therefore supported by historical implementation, not merely current spec prose. Suggested bucket: other (explanatory test documentation). Confidence: confirmed by patch and source contract; no execution and no claim of newly observing installed vendor behavior. proposed_drop: no changed runtime or assertion behavior, and retained old-agent coverage agrees with both the explicit compatibility contract quoted above and the historical launch implementation. possible_cover: none; no coverage sources searched. Could-be-highest: no; the comments neither remove coverage nor introduce a security or user-work mutation path. The considered consequence and disposition are unchanged; the historical-version uncertainty is resolved. Synthesis also checked host adoption at 08399d092d20815ced6619c26df2391944ae2b4a: crates/farhelm-supervisor/src/hosts/terminal.rs:1740-1947 connects to the existing socket, pins its existing child, starts reading its journal, restores emulator/runtime state and spawns only the runtime task. It supplies no ChildSpec or replacement process environment. This confirms the retained-environment premise through the adoption caller, rather than relying only on the specification."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g183/findings.jsonl",
+        "id": "c2",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "retained-host-launch-environment-screen-fixtures",
+        "reason": "Parent explicitly accepted named covered proposal from claims-114 after inspecting it. The current implementation specification explicitly keeps these captures for agents surviving from older terminal-host launches. The changed comments describe that same compatibility case; they change neither fixtures nor executable assertions. Exact specification acceptance of old captures for surviving old-environment terminal-host agents, corroborated by historical launch and current adoption source; no executable/assertion regression in the named patches. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333 and 08399d092d20815ced6619c26df2391944ae2b4a patches for screen_fixtures.rs are prose-only. The later module prose names v0.34/v0.35 terminal-host launches, not surviving old tmux terminals.\",\"08399d092d20815ced6619c26df2391944ae2b4a:SPEC_impl.md:2187-2200 and 4202-4207 explicitly retain the old child environment and old captures; 1ed482dde220452e424973faf38a5e1318986333:SPEC_impl.md:2254-2278 already states the retained-environment contract.\",\"git rev-parse resolves v0.34.0 to 0d2c98c858b7282becaecbb40e0f557f8003f6c0 and v0.35.0 to ee6957b5f0aa10bd4d36834f633b122cf2ec4695. Both revisions' service/core/host_launch.rs:93-170 define TERM_PROGRAM=tmux and a startup TMUX placeholder in host_child_env. The earlier historical-version caveat is resolved by source.\",\"08399d092d20815ced6619c26df2391944ae2b4a:hosts/terminal.rs:1740-1947 connects to the existing host, pins its child and starts a runtime; it provides no replacement ChildSpec/environment. screen_fixtures.rs:486-606 repaints stored text and compares text and reader results, without replaying a vendor program. No runtime/vendor observations.\"] Current coverage/results: [\"Current SPEC.md:2735-2754 requires readers held to real captures and SPEC.md:2899-2908 describes the terminal environment/survival. Current SPEC_impl.md:2197-2199 and 4202-4207 explicitly settle the retained-old-agent/capture case.\",\"TODO.md Planned is empty. plans/queue actual capture/environment matches include tmux-drop-from-docs.md:64-65 and tmux-drop-from-tooling.md:65; plans/REPORTS.md:29-32 marks all four tmux-removal plans landed. No unlanded cause-removing plan found.\",\"BUGS.md has no matching fixture/environment entry.\",\"INDEX.md and version-agreement-lifetime-doc.md read: that item concerns an old launch version versus a new live XTVERSION reply after adoption, not whether old screen captures should remain. It is neither an alias nor refuted by this compatibility rationale; no extension needed.\",\"Active TRIAGE_OUTCOMES.md searched for tmux, screen, capture and fixture terms: no exact retained-capture decision. FILTER.md reviewed; no filter used.\"] Exact cited cover: [{\"source\":\"SPEC_impl.md:2198-2199\",\"quote\":\"a host started then keeps that environment until its agent is restarted.\"},{\"source\":\"SPEC_impl.md:4205-4207\",\"quote\":\"versions captured before November 2026 come from a tmux pane and stay, because agents in terminal hosts started before 0.36.0 still have the environment that draws them\"}] Original stronger consequence and missing premise remain preserved: \"Considered whether revised fixture-retention prose incorrectly preserves obsolete terminal behavior. The initial historical-release attribution was unverified; later entries verified v0.34/v0.35 launch source and adoption. No removed coverage, security or user-work mutation was alleged.\"; \"None for the documented compatibility case. No new claim about the behavior of an installed vendor agent was tested.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g183/c2",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "retained-host-launch-environment-screen-fixtures",
+        "bucket": "other",
+        "recording": "covered",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named covered proposal from claims-114 after inspecting it. The current implementation specification explicitly keeps these captures for agents surviving from older terminal-host launches. The changed comments describe that same compatibility case; they change neither fixtures nor executable assertions. Exact specification acceptance of old captures for surviving old-environment terminal-host agents, corroborated by historical launch and current adoption source; no executable/assertion regression in the named patches. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333 and 08399d092d20815ced6619c26df2391944ae2b4a patches for screen_fixtures.rs are prose-only. The later module prose names v0.34/v0.35 terminal-host launches, not surviving old tmux terminals.\",\"08399d092d20815ced6619c26df2391944ae2b4a:SPEC_impl.md:2187-2200 and 4202-4207 explicitly retain the old child environment and old captures; 1ed482dde220452e424973faf38a5e1318986333:SPEC_impl.md:2254-2278 already states the retained-environment contract.\",\"git rev-parse resolves v0.34.0 to 0d2c98c858b7282becaecbb40e0f557f8003f6c0 and v0.35.0 to ee6957b5f0aa10bd4d36834f633b122cf2ec4695. Both revisions' service/core/host_launch.rs:93-170 define TERM_PROGRAM=tmux and a startup TMUX placeholder in host_child_env. The earlier historical-version caveat is resolved by source.\",\"08399d092d20815ced6619c26df2391944ae2b4a:hosts/terminal.rs:1740-1947 connects to the existing host, pins its child and starts a runtime; it provides no replacement ChildSpec/environment. screen_fixtures.rs:486-606 repaints stored text and compares text and reader results, without replaying a vendor program. No runtime/vendor observations.\"] Current coverage/results: [\"Current SPEC.md:2735-2754 requires readers held to real captures and SPEC.md:2899-2908 describes the terminal environment/survival. Current SPEC_impl.md:2197-2199 and 4202-4207 explicitly settle the retained-old-agent/capture case.\",\"TODO.md Planned is empty. plans/queue actual capture/environment matches include tmux-drop-from-docs.md:64-65 and tmux-drop-from-tooling.md:65; plans/REPORTS.md:29-32 marks all four tmux-removal plans landed. No unlanded cause-removing plan found.\",\"BUGS.md has no matching fixture/environment entry.\",\"INDEX.md and version-agreement-lifetime-doc.md read: that item concerns an old launch version versus a new live XTVERSION reply after adoption, not whether old screen captures should remain. It is neither an alias nor refuted by this compatibility rationale; no extension needed.\",\"Active TRIAGE_OUTCOMES.md searched for tmux, screen, capture and fixture terms: no exact retained-capture decision. FILTER.md reviewed; no filter used.\"] Exact cited cover: [{\"source\":\"SPEC_impl.md:2198-2199\",\"quote\":\"a host started then keeps that environment until its agent is restarted.\"},{\"source\":\"SPEC_impl.md:4205-4207\",\"quote\":\"versions captured before November 2026 come from a tmux pane and stay, because agents in terminal hosts started before 0.36.0 still have the environment that draws them\"}] Original stronger consequence and missing premise remain preserved: \"Considered whether revised fixture-retention prose incorrectly preserves obsolete terminal behavior. The initial historical-release attribution was unverified; later entries verified v0.34/v0.35 launch source and adoption. No removed coverage, security or user-work mutation was alleged.\"; \"None for the documented compatibility case. No new claim about the behavior of an installed vendor agent was tested.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-114",
+          "key": "g183/c2",
+          "latest_line": 6,
+          "recommendation": "covered",
+          "bucket": "other",
+          "underlying_key": "retained-host-launch-environment-screen-fixtures",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The current implementation specification explicitly keeps these captures for agents surviving from older terminal-host launches. The changed comments describe that same compatibility case; they change neither fixtures nor executable assertions.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333 and 08399d092d20815ced6619c26df2391944ae2b4a patches for screen_fixtures.rs are prose-only. The later module prose names v0.34/v0.35 terminal-host launches, not surviving old tmux terminals.",
+            "08399d092d20815ced6619c26df2391944ae2b4a:SPEC_impl.md:2187-2200 and 4202-4207 explicitly retain the old child environment and old captures; 1ed482dde220452e424973faf38a5e1318986333:SPEC_impl.md:2254-2278 already states the retained-environment contract.",
+            "git rev-parse resolves v0.34.0 to 0d2c98c858b7282becaecbb40e0f557f8003f6c0 and v0.35.0 to ee6957b5f0aa10bd4d36834f633b122cf2ec4695. Both revisions' service/core/host_launch.rs:93-170 define TERM_PROGRAM=tmux and a startup TMUX placeholder in host_child_env. The earlier historical-version caveat is resolved by source.",
+            "08399d092d20815ced6619c26df2391944ae2b4a:hosts/terminal.rs:1740-1947 connects to the existing host, pins its child and starts a runtime; it provides no replacement ChildSpec/environment. screen_fixtures.rs:486-606 repaints stored text and compares text and reader results, without replaying a vendor program. No runtime/vendor observations."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:2735-2754 requires readers held to real captures and SPEC.md:2899-2908 describes the terminal environment/survival. Current SPEC_impl.md:2197-2199 and 4202-4207 explicitly settle the retained-old-agent/capture case.",
+            "TODO.md Planned is empty. plans/queue actual capture/environment matches include tmux-drop-from-docs.md:64-65 and tmux-drop-from-tooling.md:65; plans/REPORTS.md:29-32 marks all four tmux-removal plans landed. No unlanded cause-removing plan found.",
+            "BUGS.md has no matching fixture/environment entry.",
+            "INDEX.md and version-agreement-lifetime-doc.md read: that item concerns an old launch version versus a new live XTVERSION reply after adoption, not whether old screen captures should remain. It is neither an alias nor refuted by this compatibility rationale; no extension needed.",
+            "Active TRIAGE_OUTCOMES.md searched for tmux, screen, capture and fixture terms: no exact retained-capture decision. FILTER.md reviewed; no filter used."
+          ],
+          "exact_cover_quotes": [
+            {
+              "source": "SPEC_impl.md:2198-2199",
+              "quote": "a host started then keeps that environment until its agent is restarted."
+            },
+            {
+              "source": "SPEC_impl.md:4205-4207",
+              "quote": "versions captured before November 2026 come from a tmux pane and stay, because agents in terminal hosts started before 0.36.0 still have the environment that draws them"
+            }
+          ],
+          "missing_premise": "None for the documented compatibility case. No new claim about the behavior of an installed vendor agent was tested.",
+          "original_stronger_consequence": "Considered whether revised fixture-retention prose incorrectly preserves obsolete terminal behavior. The initial historical-release attribution was unverified; later entries verified v0.34/v0.35 launch source and adoption. No removed coverage, security or user-work mutation was alleged.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Exact specification acceptance of old captures for surviving old-environment terminal-host agents, corroborated by historical launch and current adoption source; no executable/assertion regression in the named patches."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retained-host-launch-environment-screen-fixtures",
+        "destination": null
+      }
+    },
+    {
+      "key": "g183/c3",
+      "owner": "g183",
+      "id": "c3",
+      "domain": "agent-screen-inspection",
+      "purpose": "agent-screen-inspection: crates/farhelm-supervisor/src/agent_kind/screen_fixtures.rs, scripts/capture-agent-screens.py, scripts/agent-tui.py, scripts/agent_screen_host.py; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Inspection-helper wording still describes its private terminal-host path",
+            "location": "scripts/agent_screen_host.py:1-15",
+            "detail": "Reviewed commit: 4b489b4f2eeade14f119b186ecb16eeaaf027021 (scripts/agent_screen_host.py:1-15, scripts/agent-tui.py:4-12, scripts/capture-agent-screens.py:6-13); also d751ff1633bb479c7bf53920f2e4ea4ba932a1c2 (scripts/capture-agent-screens.py:521-522). TLDR: considered whether removing the distinction between new and old terminals falsely promises isolation or a production-like terminal environment, and whether generalizing the timeout comment weakens a lifecycle guarantee. The changed text agrees with the existing implementation; no executable behavior changes in these hunks. Details: at 4b489b4f2eeade14f119b186ecb16eeaaf027021, agent_screen_host.py:66-74 strips ambient FARHELM_ variables, TMUX/TMUX_PANE and named outer-agent markers; HostRun.start at :98-139 creates a random /tmp/fh-tui- directory and launches the explicitly selected farhelm internal agent-screen with that environment. crates/farhelm-supervisor/src/agent_screen.rs:154-200 passes its private run_dir to spawn_host and builds the program environment with the same crate::service::host_child_env used for production hosts; it adopts the host as Fresh with the normal HostTerminal runtime. Its module contract at :9-25 names the shared emulator query path and private state directory. SPEC.md:2899-2906 and SPEC_impl.md:2187-2200 specify Farhelm terminal variables for all new launches, with older hosts retaining their launch environment. At d751ff1633bb479c7bf53920f2e4ea4ba932a1c2, reach_prompt at capture-agent-screens.py:507-549 checks both child exit and deadline before answering trust and taking continue; the generalized comment preserves the actual guard and does not assert an unverified new vendor behavior. Suggested bucket: other (development-tool explanatory text). Confidence: confirmed by source; no runtime or real-agent observations. proposed_drop: wording-only changes preserve the inspected isolation, environment, and timeout contracts. possible_cover: none; no coverage sources searched. Could-be-highest: no; no changed cleanup, credential handling or process-targeting route exists in these patches. This does not audit unrelated pre-existing helper behavior."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Inspection-helper wording still describes its private terminal-host path",
+            "location": "scripts/agent_screen_host.py:1-15",
+            "detail": "Reviewed commit: 4b489b4f2eeade14f119b186ecb16eeaaf027021 (scripts/agent_screen_host.py:1-15, scripts/agent-tui.py:4-12, scripts/capture-agent-screens.py:6-13); also d751ff1633bb479c7bf53920f2e4ea4ba932a1c2 (scripts/capture-agent-screens.py:521-522). TLDR: considered whether removing the distinction between new and old terminals falsely promises isolation or a production-like terminal environment, and whether generalizing the timeout comment weakens a lifecycle guarantee. The changed text agrees with the existing implementation; no executable behavior changes in these hunks. Details: at 4b489b4f2eeade14f119b186ecb16eeaaf027021, agent_screen_host.py:66-74 strips ambient FARHELM_ variables, TMUX/TMUX_PANE and named outer-agent markers; HostRun.start at :98-139 creates a random /tmp/fh-tui- directory and launches the explicitly selected farhelm internal agent-screen with that environment. crates/farhelm-supervisor/src/agent_screen.rs:154-200 passes its private run_dir to spawn_host and builds the program environment with the same crate::service::host_child_env used for production hosts; it adopts the host as Fresh with the normal HostTerminal runtime. Its module contract at :9-25 names the shared emulator query path and private state directory. SPEC.md:2899-2906 and SPEC_impl.md:2187-2200 specify Farhelm terminal variables for all new launches, with older hosts retaining their launch environment. At d751ff1633bb479c7bf53920f2e4ea4ba932a1c2, reach_prompt at capture-agent-screens.py:507-549 checks both child exit and deadline before answering trust and taking continue; the generalized comment preserves the actual guard and does not assert an unverified new vendor behavior. Suggested bucket: other (development-tool explanatory text). Confidence: confirmed by source; no runtime or real-agent observations. proposed_drop: wording-only changes preserve the inspected isolation, environment, and timeout contracts. possible_cover: none; no coverage sources searched. Could-be-highest: no; no changed cleanup, credential handling or process-targeting route exists in these patches. This does not audit unrelated pre-existing helper behavior. Synthesis turn 2 checked the interaction between both frontend descriptions and the actual capture wrapper at 4b489b4f2eeade14f119b186ecb16eeaaf027021: scripts/capture-agent-screens.py:171-216 starts HostRun with TERMINAL_COLUMNS/TERMINAL_ROWS and forwards state() directly, while agent-tui.py:53-71 uses that same HostRun and prints its returned screen. The Rust screen reply at crates/farhelm-supervisor/src/agent_screen.rs:237-252 reads emulator.screen_text(), terminal.title() and host liveness, matching the revised descriptions. The earlier d751ff trust-loop comment and later frontend wording therefore describe the same private-host observation path. No GUI confirmation handler or changed live-target selection exists in the assigned patches. No new exception to isolation or timeout contracts was found. Disposition and considered consequence are unchanged; no runtime behavior was observed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 8,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Inspection-helper wording still describes its private terminal-host path",
+          "location": "scripts/agent_screen_host.py:1-15",
+          "detail": "Reviewed commit: 4b489b4f2eeade14f119b186ecb16eeaaf027021 (scripts/agent_screen_host.py:1-15, scripts/agent-tui.py:4-12, scripts/capture-agent-screens.py:6-13); also d751ff1633bb479c7bf53920f2e4ea4ba932a1c2 (scripts/capture-agent-screens.py:521-522). TLDR: considered whether removing the distinction between new and old terminals falsely promises isolation or a production-like terminal environment, and whether generalizing the timeout comment weakens a lifecycle guarantee. The changed text agrees with the existing implementation; no executable behavior changes in these hunks. Details: at 4b489b4f2eeade14f119b186ecb16eeaaf027021, agent_screen_host.py:66-74 strips ambient FARHELM_ variables, TMUX/TMUX_PANE and named outer-agent markers; HostRun.start at :98-139 creates a random /tmp/fh-tui- directory and launches the explicitly selected farhelm internal agent-screen with that environment. crates/farhelm-supervisor/src/agent_screen.rs:154-200 passes its private run_dir to spawn_host and builds the program environment with the same crate::service::host_child_env used for production hosts; it adopts the host as Fresh with the normal HostTerminal runtime. Its module contract at :9-25 names the shared emulator query path and private state directory. SPEC.md:2899-2906 and SPEC_impl.md:2187-2200 specify Farhelm terminal variables for all new launches, with older hosts retaining their launch environment. At d751ff1633bb479c7bf53920f2e4ea4ba932a1c2, reach_prompt at capture-agent-screens.py:507-549 checks both child exit and deadline before answering trust and taking continue; the generalized comment preserves the actual guard and does not assert an unverified new vendor behavior. Suggested bucket: other (development-tool explanatory text). Confidence: confirmed by source; no runtime or real-agent observations. proposed_drop: wording-only changes preserve the inspected isolation, environment, and timeout contracts. possible_cover: none; no coverage sources searched. Could-be-highest: no; no changed cleanup, credential handling or process-targeting route exists in these patches. This does not audit unrelated pre-existing helper behavior. Synthesis turn 2 checked the interaction between both frontend descriptions and the actual capture wrapper at 4b489b4f2eeade14f119b186ecb16eeaaf027021: scripts/capture-agent-screens.py:171-216 starts HostRun with TERMINAL_COLUMNS/TERMINAL_ROWS and forwards state() directly, while agent-tui.py:53-71 uses that same HostRun and prints its returned screen. The Rust screen reply at crates/farhelm-supervisor/src/agent_screen.rs:237-252 reads emulator.screen_text(), terminal.title() and host liveness, matching the revised descriptions. The earlier d751ff trust-loop comment and later frontend wording therefore describe the same private-host observation path. No GUI confirmation handler or changed live-target selection exists in the assigned patches. No new exception to isolation or timeout contracts was found. Disposition and considered consequence are unchanged; no runtime behavior was observed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g183/findings.jsonl",
+        "id": "c3",
+        "line": 8,
+        "disposition": "under-investigation",
+        "group": "g183-c3",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-114",
+          "key": "g183/c3",
+          "latest_line": 8,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "inspection-helper-wording-private-host-environment-timeout",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The named wording edits preserve the private-host observation path and the timeout ordering they describe. This narrow conclusion does not certify unrelated pre-existing helper cleanup, executable-selection or credential behavior.",
+          "checks": [
+            "4b489b4f2eeade14f119b186ecb16eeaaf027021 patches for agent_screen_host.py, agent-tui.py and capture-agent-screens.py only remove obsolete new-terminal distinctions/reword the caller's tmux context. d751ff1633bb479c7bf53920f2e4ea4ba932a1c2:518-522 generalizes the timeout example without changing its guard.",
+            "4b489b4f2eeade14f119b186ecb16eeaaf027021:agent_screen_host.py:66-74 removes outer FARHELM_, TMUX/TMUX_PANE and named session markers; :98-139 creates a random fh-tui directory and passes it as --run-dir to the selected internal agent-screen command. This proves the inspected path, not a blanket audit of all tool behavior.",
+            "Same revision crates/farhelm-supervisor/src/agent_screen.rs:154-200 creates ChildSpec with production host_child_env, passes the private run_dir to spawn_host and adopts Fresh. :237-252 returns emulator.screen_text, terminal.title and liveness.",
+            "Same revision capture-agent-screens.py:171-216 and agent-tui.py:53-72 use HostRun and return its screen; d751ff1633bb479c7bf53920f2e4ea4ba932a1c2:capture-agent-screens.py:507-549 checks dead/deadline before trust-dialog continue. These are source conclusions; no execution or real-agent observations."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:2899-2908 and SPEC_impl.md:2187-2200,4202-4207 describe new-launch Farhelm terminal variables and the production emulator/capture path. They support the environment wording, without accepting a hypothetical isolation failure. SPEC_impl.md:8216-8229's single-user/tooling assumptions are not used to dismiss such a failure.",
+            "TODO.md Planned is empty. plans/queue searched for agent-screen, agent-tui, capture, tmux environment and timeout triggers; matching removal plans are already landed per plans/REPORTS.md:29-32. No unlanded exact coverage found.",
+            "BUGS.md searched/read: no capture-helper isolation, environment or prompt-deadline match.",
+            "INDEX.md and capture-failed-stop-erases-recovery.md, capture-startup-metadata-cleanup.md, capture-local-program-path.md and agent-screen-refusal-missing-path.md read. They retain different pre-existing cleanup/ownership/build-selection/diagnostic defects. None is an alias of these wording edits, and none is dismissed or narrowed here.",
+            "Active TRIAGE_OUTCOMES.md searched for capture, screen, fixture, inspect, timeout and tmux: no exact acceptance or decision for the suspected wording regression. FILTER.md has no fully matching boundary; no filter used."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No source route from these wording edits to a changed isolation target, environment, timeout or confirmation handler is established. Broader guarantees about every pre-existing helper failure path remain outside this named check.",
+          "original_stronger_consequence": "Considered whether removing the new/old-terminal distinction falsely promises isolation or production-like terminal environment, and whether generalizing the timeout comment weakens a lifecycle guarantee. Isolation could concern live sessions or credentials, so carry this dismissal to an independent drop check even though no such route was established and maintainer-tool prose is other priority.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Narrow source refutation: the named comment-only edits accurately describe the inspected private-host launch/screen path and unchanged deadline ordering. Do not read this as a clean verdict on the helper or a dismissal of its existing queued defects."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "inspection-helper-wording-private-host-environment-timeout",
+        "destination": null
+      }
+    },
+    {
+      "key": "g183/l1",
+      "owner": "g183",
+      "id": "l1",
+      "domain": "agent-screen-inspection",
+      "purpose": "agent-screen-inspection: crates/farhelm-supervisor/src/agent_kind/screen_fixtures.rs, scripts/capture-agent-screens.py, scripts/agent-tui.py, scripts/agent_screen_host.py; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Check capture-width documentation pointer and whole-range attribution",
+            "location": "crates/farhelm-supervisor/src/agent_kind/screen_fixtures.rs:502",
+            "detail": "Reviewed commit: 08399d092d20815ced6619c26df2391944ae2b4a. TLDR: a reader following the repaint test's width documentation may be sent to a capture-tool constant that is no longer named that way. Source basis already read: screen_fixtures.rs documents CAPTURE_COLUMNS as the capture tool's PANE_COLUMNS; the capture script at the reviewed later helper revision uses TERMINAL_COLUMNS=133. The assigned change rewrites surrounding repaint documentation. Missing premise: whether this mismatch exists at the exact reviewed revision and was introduced by changes in the whole pinned range rather than predating it, and whether any alias makes the pointer valid. Next checks: exact pinned source grep, baseline source, and narrow path history for the constant name. Suggested bucket: other if established (test documentation pointer), confidence: lead under investigation, proposed_drop: not decided, possible_cover: none; no coverage sources searched. Could-be-highest: no; no suspected runtime or user-work effect from a stale constant name. This is distinct from c2's preserved-fixture/environment rationale and does not question correct production behavior as a refutation of a documentation defect. No runtime observations."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Capture-width pointer mismatch predates the whole pinned range",
+            "location": "crates/farhelm-supervisor/src/agent_kind/screen_fixtures.rs:502",
+            "detail": "Reviewed commit: 08399d092d20815ced6619c26df2391944ae2b4a. TLDR: the repaint test documentation does point to a nonexistent capture-tool constant, which can confuse a reader looking for the shared width; this documentation defect was already present before the entire reviewed range and is unchanged by the assigned patches. Details: git grep at both exclusive baseline 6e423e30068b62c6cfa276c6d720ee35bb70387a and the reviewed commit finds screen_fixtures.rs:502 naming PANE_COLUMNS and :503 defining CAPTURE_COLUMNS=133, while scripts/capture-agent-screens.py:61 defines TERMINAL_COLUMNS=133 and :185 passes it to HostRun.start. The baseline context at screen_fixtures.rs:501-503 is identical. git log -G PANE_COLUMNS|TERMINAL_COLUMNS across the complete exclusive-baseline/inclusive-tip range for the two assigned paths returned no changes. No PANE_COLUMNS alias occurs in the capture script at either revision. The original potential consequence is retained as a real stale documentation pointer; correct runtime geometry does not refute it. Suggested bucket: other (developer-facing test documentation). Confidence: confirmed by source and whole-range attribution; no execution. proposed_drop: solely outside the review range and unaffected by any selected patch, established against the actual exclusive baseline rather than merely an assigned commit's parent. possible_cover: none; no coverage sources searched. Could-be-highest: no; neither suspected nor established security or loss-of-work impact. This closes l1's exact-revision/alias/attribution checks; it is no longer an unresolved lead and is not a new in-range finding."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l1",
+          "state": "open",
+          "summary": "Capture-width pointer mismatch predates the whole pinned range",
+          "location": "crates/farhelm-supervisor/src/agent_kind/screen_fixtures.rs:502",
+          "detail": "Reviewed commit: 08399d092d20815ced6619c26df2391944ae2b4a. TLDR: the repaint test documentation does point to a nonexistent capture-tool constant, which can confuse a reader looking for the shared width; this documentation defect was already present before the entire reviewed range and is unchanged by the assigned patches. Details: git grep at both exclusive baseline 6e423e30068b62c6cfa276c6d720ee35bb70387a and the reviewed commit finds screen_fixtures.rs:502 naming PANE_COLUMNS and :503 defining CAPTURE_COLUMNS=133, while scripts/capture-agent-screens.py:61 defines TERMINAL_COLUMNS=133 and :185 passes it to HostRun.start. The baseline context at screen_fixtures.rs:501-503 is identical. git log -G PANE_COLUMNS|TERMINAL_COLUMNS across the complete exclusive-baseline/inclusive-tip range for the two assigned paths returned no changes. No PANE_COLUMNS alias occurs in the capture script at either revision. The original potential consequence is retained as a real stale documentation pointer; correct runtime geometry does not refute it. Suggested bucket: other (developer-facing test documentation). Confidence: confirmed by source and whole-range attribution; no execution. proposed_drop: solely outside the review range and unaffected by any selected patch, established against the actual exclusive baseline rather than merely an assigned commit's parent. possible_cover: none; no coverage sources searched. Could-be-highest: no; neither suspected nor established security or loss-of-work impact. This closes l1's exact-revision/alias/attribution checks; it is no longer an unresolved lead and is not a new in-range finding."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g183/findings.jsonl",
+        "id": "l1",
+        "line": 10,
+        "disposition": "excluded",
+        "group": "screen-fixture-capture-width-stale-pane-columns-pointer",
+        "reason": "Parent explicitly accepted named out-of-range proposal from claims-114 after inspecting it. The stale constant-name pointer is real, but it already exists at the exclusive baseline and is unchanged throughout the complete reviewed range. Correct runtime geometry does not refute this documentation defect. Outside the entire pinned range, established against the exclusive baseline and complete narrow path history; not dismissed because production geometry happens to be correct. Checked source/results: [\"git grep at exclusive baseline 6e423e30068b62c6cfa276c6d720ee35bb70387a and reviewed 08399d092d20815ced6619c26df2391944ae2b4a: screen_fixtures.rs:502 names PANE_COLUMNS; capture-agent-screens.py:61 defines TERMINAL_COLUMNS=133 and :185 passes it to HostRun.start. No PANE_COLUMNS alias appears in that script at either revision.\",\"Explicit baseline and inclusive-tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db source at screen_fixtures.rs:501-503 both retain the identical PANE_COLUMNS pointer and CAPTURE_COLUMNS=133 declaration.\",\"git log -G 'PANE_COLUMNS|TERMINAL_COLUMNS' over 6e423e30068b62c6cfa276c6d720ee35bb70387a..00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db for both paths returns no changes. This checks the whole range, not only the assigned patch's parent. Source/history checks only.\"] Current coverage/results: [\"SPEC.md and SPEC_impl.md searched for PANE_COLUMNS, TERMINAL_COLUMNS, CAPTURE_COLUMNS, capture width, repaint and screen fixtures. SPEC_impl.md:2703-2705 describes repainting but does not accept a nonexistent documentation pointer.\",\"TODO.md Planned is empty. plans/queue searched for these width names/trigger: no exact unlanded fix. The broad tmux-drop-from-docs cleanup plan is already landed per plans/REPORTS.md:32 and supplies no current unlanded coverage.\",\"BUGS.md and active TRIAGE_OUTCOMES.md searched: no exact stale width-pointer acceptance or decision.\",\"INDEX.md read and searched for width/capture/fixture terms: no same-root item. transition-accessor-comment.md's index entry concerns a different nonexistent accessor; shared documentation-staleness symptoms are not an alias. No existing item extension proposed.\",\"FILTER.md reviewed: permanent stale test documentation is not a rare self-correcting display/diagnostic trigger, and no other filter boundary matches. No filter used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A reader can follow the repaint test's width documentation to a capture-tool constant that no longer exists, confusing maintenance of the shared width. The lead initially left attribution open; the later candidate closes it as pre-existing. That real documentation consequence is preserved.\"; \"The original exact-revision, alias and whole-range-attribution questions are resolved: the defect exists but predates this range. No runtime or user-work consequence is established.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g183/l1",
+        "line": 10,
+        "disposition": "excluded",
+        "group": "screen-fixture-capture-width-stale-pane-columns-pointer",
+        "bucket": "other",
+        "recording": "out-of-range",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named out-of-range proposal from claims-114 after inspecting it. The stale constant-name pointer is real, but it already exists at the exclusive baseline and is unchanged throughout the complete reviewed range. Correct runtime geometry does not refute this documentation defect. Outside the entire pinned range, established against the exclusive baseline and complete narrow path history; not dismissed because production geometry happens to be correct. Checked source/results: [\"git grep at exclusive baseline 6e423e30068b62c6cfa276c6d720ee35bb70387a and reviewed 08399d092d20815ced6619c26df2391944ae2b4a: screen_fixtures.rs:502 names PANE_COLUMNS; capture-agent-screens.py:61 defines TERMINAL_COLUMNS=133 and :185 passes it to HostRun.start. No PANE_COLUMNS alias appears in that script at either revision.\",\"Explicit baseline and inclusive-tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db source at screen_fixtures.rs:501-503 both retain the identical PANE_COLUMNS pointer and CAPTURE_COLUMNS=133 declaration.\",\"git log -G 'PANE_COLUMNS|TERMINAL_COLUMNS' over 6e423e30068b62c6cfa276c6d720ee35bb70387a..00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db for both paths returns no changes. This checks the whole range, not only the assigned patch's parent. Source/history checks only.\"] Current coverage/results: [\"SPEC.md and SPEC_impl.md searched for PANE_COLUMNS, TERMINAL_COLUMNS, CAPTURE_COLUMNS, capture width, repaint and screen fixtures. SPEC_impl.md:2703-2705 describes repainting but does not accept a nonexistent documentation pointer.\",\"TODO.md Planned is empty. plans/queue searched for these width names/trigger: no exact unlanded fix. The broad tmux-drop-from-docs cleanup plan is already landed per plans/REPORTS.md:32 and supplies no current unlanded coverage.\",\"BUGS.md and active TRIAGE_OUTCOMES.md searched: no exact stale width-pointer acceptance or decision.\",\"INDEX.md read and searched for width/capture/fixture terms: no same-root item. transition-accessor-comment.md's index entry concerns a different nonexistent accessor; shared documentation-staleness symptoms are not an alias. No existing item extension proposed.\",\"FILTER.md reviewed: permanent stale test documentation is not a rare self-correcting display/diagnostic trigger, and no other filter boundary matches. No filter used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A reader can follow the repaint test's width documentation to a capture-tool constant that no longer exists, confusing maintenance of the shared width. The lead initially left attribution open; the later candidate closes it as pre-existing. That real documentation consequence is preserved.\"; \"The original exact-revision, alias and whole-range-attribution questions are resolved: the defect exists but predates this range. No runtime or user-work consequence is established.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-114",
+          "key": "g183/l1",
+          "latest_line": 10,
+          "recommendation": "out-of-range",
+          "bucket": "other",
+          "underlying_key": "screen-fixture-capture-width-stale-pane-columns-pointer",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The stale constant-name pointer is real, but it already exists at the exclusive baseline and is unchanged throughout the complete reviewed range. Correct runtime geometry does not refute this documentation defect.",
+          "checks": [
+            "git grep at exclusive baseline 6e423e30068b62c6cfa276c6d720ee35bb70387a and reviewed 08399d092d20815ced6619c26df2391944ae2b4a: screen_fixtures.rs:502 names PANE_COLUMNS; capture-agent-screens.py:61 defines TERMINAL_COLUMNS=133 and :185 passes it to HostRun.start. No PANE_COLUMNS alias appears in that script at either revision.",
+            "Explicit baseline and inclusive-tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db source at screen_fixtures.rs:501-503 both retain the identical PANE_COLUMNS pointer and CAPTURE_COLUMNS=133 declaration.",
+            "git log -G 'PANE_COLUMNS|TERMINAL_COLUMNS' over 6e423e30068b62c6cfa276c6d720ee35bb70387a..00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db for both paths returns no changes. This checks the whole range, not only the assigned patch's parent. Source/history checks only."
+          ],
+          "coverage_checked": [
+            "SPEC.md and SPEC_impl.md searched for PANE_COLUMNS, TERMINAL_COLUMNS, CAPTURE_COLUMNS, capture width, repaint and screen fixtures. SPEC_impl.md:2703-2705 describes repainting but does not accept a nonexistent documentation pointer.",
+            "TODO.md Planned is empty. plans/queue searched for these width names/trigger: no exact unlanded fix. The broad tmux-drop-from-docs cleanup plan is already landed per plans/REPORTS.md:32 and supplies no current unlanded coverage.",
+            "BUGS.md and active TRIAGE_OUTCOMES.md searched: no exact stale width-pointer acceptance or decision.",
+            "INDEX.md read and searched for width/capture/fixture terms: no same-root item. transition-accessor-comment.md's index entry concerns a different nonexistent accessor; shared documentation-staleness symptoms are not an alias. No existing item extension proposed.",
+            "FILTER.md reviewed: permanent stale test documentation is not a rare self-correcting display/diagnostic trigger, and no other filter boundary matches. No filter used."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "The original exact-revision, alias and whole-range-attribution questions are resolved: the defect exists but predates this range. No runtime or user-work consequence is established.",
+          "original_stronger_consequence": "A reader can follow the repaint test's width documentation to a capture-tool constant that no longer exists, confusing maintenance of the shared width. The lead initially left attribution open; the later candidate closes it as pre-existing. That real documentation consequence is preserved.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Outside the entire pinned range, established against the exclusive baseline and complete narrow path history; not dismissed because production geometry happens to be correct."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "screen-fixture-capture-width-stale-pane-columns-pointer",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete: all six assigned patches reviewed at their recorded revisions. No reportable findings or open leads.\n\nRecorded source-based dispositions as c1–c3 in `g183/findings.jsonl`; updated `progress.md`. No tests, reproductions, or checkout changes."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised c1–c3 with caller and contract evidence. Resolved c2’s historical-version caveat against v0.34.0/v0.35.0 source.\n\nNo new findings. Unresolved lead IDs: none."
+    },
+    {
+      "turn": 3,
+      "reply": "- Checked full-range diffs, geometry references, fixture writing, and repaint assertions.\n- No new in-range issue found. Logged l1 as an out-of-range documentation candidate.\n- New verified finding IDs: none.\n- New unverified finding IDs: none.\n- Open lead IDs: none.\n\nDiscovery count and result updated in `progress.md`."
+    }
+  ],
+  "progress": "# g183 initial review\n\nTurn type/count: initial / 1. Discovery-pass count: 0. Initial assigned pass complete; no later synthesis or discovery pass performed.\n\nCoverage: read the brief fully, the complete inventory commits field only, and all six assigned evidence packets (188 patch lines) through the prescribed evidence reader. Reviewed each patch at its recorded revision: 1ed482dde220452e424973faf38a5e1318986333, d751ff1633bb479c7bf53920f2e4ea4ba932a1c2, 08399d092d20815ced6619c26df2391944ae2b4a and 4b489b4f2eeade14f119b186ecb16eeaaf027021. All assigned hunks are covered; no assigned material remains unread.\n\nSource checks: recorder accepted arguments and fixture command at d751ff; screen fixture loader and full repaint assertion at 08399d; module context at 1ed; capture-tool startup/deadline checks at d751ff; Python inspection frontend and shared host backend at 4b489; Rust agent-screen startup, private host adoption and screen response; production host_child_env implementation. Governing contracts read include pinned emulator and status-reader sections, production child-environment contracts, SPEC.md Status and Terminal experience, SPEC_impl.md Answers bind to what was drawn and Testing, and the complete agent-screen fixture guide. Earlier-revision emulator/status sections were read separately. A broad supplemental cross-revision SPEC diff was clipped and is not counted as a complete read; relevant contracts were obtained from bounded pinned source reads instead.\n\nInterface conclusions: both Python tools use HostRun; it strips outer session markers and starts the explicitly selected binary in its own random directory. The Rust inspection command calls the production terminal-environment helper and adopts a fresh terminal host with the ordinary emulator. The recorder no longer accepts --tmux. Fixture repaint continues to compare captured and emulated text and reader results; all its changed lines are comments. Existing host agents keep the environment from their launch across updates.\n\nDurable records: c1 (retired recorder argument), c2 (retained old-agent fixtures, revised to correct exact quotation and add initial-revision contract), c3 (inspection-helper and timeout wording). All are candidates with proposed drops supported by source, not reportable findings. No could-be-highest candidate. New verified findings: none. New unverified findings: none. Open leads: none.\n\nValidation: source-only review as requested. No tests, builds, reproductions, real-agent runs, live-install actions or checkout mutations. No coverage metadata or queue findings read.\n\nNext action: return this initial-pass result to the caller; await its later-turn instructions. findings.jsonl is the complete record.\n\n# Synthesis turn 2 in progress\n\nTurn type/count: synthesis / 2. Discovery-pass count: 0. Revisiting interactions and readily checkable premises under c1-c3. findings.jsonl remains present and append-only. No open leads. Next action: inspect v0.34.0 and v0.35.0 launch environments and host adoption, then reconcile evidence under the original IDs. No new findings so far.\n\n# Synthesis turn 2 complete\n\nTurn type/count: synthesis / 2. Discovery-pass count: 0. Completed the requested later-turn synthesis without starting a discovery pass.\n\nChanges this turn: revised c2 under its original ID with historical implementation evidence from v0.34.0 and v0.35.0, resolving its historical-version caveat. Added adoption-source evidence that the recovered runtime keeps the existing child rather than replacing its process environment. Revised c1 with the capture caller status path and actual nextest-adapter option allowlist, thread/retry policy and filter propagation. Revised c3 with both frontend callers, capture wrapper forwarding and the Rust screen reply, checking the interaction between the earlier timeout comment and later descriptions.\n\nChecks/results: historical tagged host_launch implementations both set TERM_PROGRAM=tmux, optional private tmux version and the startup TMUX placeholder. Adoption connects to the existing child and restores only its runtime. The recorder accepts the retained -p/-E selection and the caller propagates its nonzero status. Both inspection frontends use HostRun; the Rust reply supplies emulator text, title and liveness. A guessed adapter filename was absent; imports identified scripts/test_run_nextest.py, which was read. No runtime tests or reproductions performed.\n\nInterface assumptions: all prior assumptions now have explicit caller or implementation evidence relevant to the assigned changes. No changed confirmation handlers or process-target selection. No reportable cross-patch interaction found.\n\nNew verified findings: none. New unverified findings: none. IDs revised: c1, c2, c3. Open leads: none. No assigned material remains unread. No checkout or live-install changes.\n\nNext action: return this turn's delta and await the caller's next instruction. The append-only findings.jsonl remains the complete finding/candidate record.\n\n# Discovery turn 3 in progress\n\nTurn type/count: discovery / 3. Discovery-pass count: 1. Read discovery-neighbours.json completely before source search. No named pending questions. Interface findings concern migration behavior and authoritative specification pointers; none duplicates an assigned helper/fixture issue. Existing c1-c3 remain the starting record, with no open leads.\n\nSearch focus: independently examine the revised helper and fixture documentation as contracts, including names and geometry/oracle claims, against the whole pinned range and recorded source. No runtime tests or reproductions. Next action: check the capture-width documentation pointer and its attribution before following unrelated code.\n\n# Discovery turn 3 complete\n\nTurn type/count: discovery / 3. Discovery-pass count: 1. Completed a separate discovery search beyond c1-c3 after reading all supplied latest neighbour records. No named pending questions required additional synthesis, and no interface finding changed the assigned helper/fixture contracts.\n\nChecks/results: compared all four assigned paths over the full exclusive baseline 6e423e30068b62c6cfa276c6d720ee35bb70387a through inclusive tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. Revisited the changed documentation as documentation, separately from production correctness: capture geometry and its named source constant, capture/title pair writing and scrubbing in Recorder.save, the SCRUBBED_HOST title omission, and the repaint test's independent text comparison before its reader comparison. The aggregate changes contain no additional executable/test-assertion change beyond the previously inspected recorder option removal; all intermediate assigned patches were already read in full in turn 1.\n\nNew concrete lead l1 was recorded immediately, then settled by exact-revision and whole-range evidence. The repaint width doc names nonexistent PANE_COLUMNS while the capture script uses TERMINAL_COLUMNS. This is a real stale documentation pointer, but the identical mismatch is present at the exclusive baseline; narrow name-change history across the entire range returns no change. Revised l1 to candidate with attribution-only proposed drop, preserving its original reader-confusion consequence. This did not rely on correct runtime geometry to refute the documentation defect.\n\nNew verified in-range finding IDs: none. New unverified-after-investigation finding IDs: none. New candidate IDs: l1 (closed lead, outside-range disposition). Remaining lead IDs: none. Anything new found: no new in-range issue. All assigned scope remains read; no omitted assigned material.\n\nSource-only evidence throughout. No tests, builds, reproductions, real-agent runs, live-install actions or checkout changes; no prohibited coverage sources searched. Next action: return discovery result to the caller. findings.jsonl remains the complete record.\n"
+}

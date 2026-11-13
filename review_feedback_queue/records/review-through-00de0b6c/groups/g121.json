@@ -1,0 +1,325 @@
+{
+  "group": {
+    "id": "g121",
+    "domain": "supervisor-terminal-streaming",
+    "purpose": "supervisor-terminal-streaming: crates/farhelm-supervisor/src/service/terminals.rs; phases -    fn tabs_are_rediscovered_in_window_creation_order_and_nothing_else_qualifies() {",
+    "interfaces": [
+      "g001",
+      "g007",
+      "g008",
+      "g009",
+      "g074",
+      "g075",
+      "g076",
+      "g079",
+      "g080",
+      "g081",
+      "g082",
+      "g083",
+      "g084",
+      "g102",
+      "g103",
+      "g104",
+      "g105",
+      "g106",
+      "g107",
+      "g108",
+      "g109",
+      "g110",
+      "g111",
+      "g112",
+      "g113",
+      "g114",
+      "g115",
+      "g116",
+      "g117",
+      "g118",
+      "g119",
+      "g120",
+      "g159",
+      "g160",
+      "g161",
+      "g162",
+      "g163",
+      "g164",
+      "g165",
+      "g166",
+      "g167",
+      "g168",
+      "g169",
+      "g170",
+      "g171",
+      "g172",
+      "g173"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00944-003.patch",
+        "ranges": [
+          [
+            1,
+            995
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/terminals.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "-    fn tabs_are_rediscovered_in_window_creation_order_and_nothing_else_qualifies() {; patch character offsets [175503,219620)",
+        "lines": 995,
+        "bytes": 44135,
+        "start": 175503,
+        "end": 219620,
+        "original": "[private-run]/prep/originals/00944.patch"
+      }
+    ],
+    "lines": 995,
+    "bytes": 44135
+  },
+  "records": [
+    {
+      "key": "g121/c1",
+      "owner": "g121",
+      "id": "c1",
+      "domain": "supervisor-terminal-streaming",
+      "purpose": "supervisor-terminal-streaming: crates/farhelm-supervisor/src/service/terminals.rs; phases -    fn tabs_are_rediscovered_in_window_creation_order_and_nothing_else_qualifies() {",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removed tmux tab-discovery tests do not remove host tab identity protections",
+            "location": "crates/farhelm-supervisor/src/service/terminals.rs (deleted tab-discovery tests; assigned patch lines 1–139)",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether removing tab ordering, deduplication and agent-window exclusion tests allows a shell tab to point at the agent or another session, potentially ending user work when closed. Suggested bucket: highest if that destructive route existed; could-be-highest: yes, explicitly considered. Confidence: confirmed source refutation of this deletion concern, not runtime observation. proposed_drop: source refutation; these tests exercised tabs_from_pane_states, which has no surviving reference in the supervisor source at this revision (git grep also finds no SessionSink or sink registry). Replacement terminals.rs:223–247 resolves tabs only from the session's own host-tab cell. core/host_tabs.rs:258–277 sorts tabs by creation stamp and tab id; :337–355 assigns a monotonic creation stamp. :1279–1471 restores one entry per session/tab launch record, avoids held ids, and at :1404–1406 requires names_tab before adoption. :1476–1478 requires the exact session id, tab id and HostRole::Tab. :915–928 checks the selected runtime still belongs to that tab and refuses the agent runtime before close. SPEC_impl.md, Terminal host / Tabs in hosts: 'Closing a tab: the session’s cell holds only hosts whose tag names one of its tabs (the open wrote it, a reload checked it), and the agent’s own runtime is refused' (apostrophes normalized here; source lines 2330–2334 carry the same contract). The tmux marker and numeric pane/window ordering tests no longer exercise any shipped path; one host owns one terminal, so tmux split-pane deduplication has no replacement requirement. possible_cover: none known; coverage sources were not searched. Caveats: this validates the removal's identity/order consequences, not every host implementation path or external hostile state mutation. No tests or reproductions executed."
+          }
+        },
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removed tmux tab-discovery tests do not remove host tab identity protections",
+            "location": "crates/farhelm-supervisor/src/service/terminals.rs:3828 (parent revision; deleted at reviewed commit)",
+            "detail": "# Removed tmux tab-discovery tests\n\nReviewed commit: 1ed482dde220452e424973faf38a5e1318986333\n\n## TLDR\n\nConsidered whether removing tab ordering, deduplication and agent-window exclusion tests lets a shell tab point at the agent or another session, potentially ending user work when closed. The replacement path retains the relevant identity and ordering protections.\n\n## Details\n\nSuggested bucket: highest if that destructive route existed. Could-be-highest: yes. Confidence: confirmed source refutation of this deletion concern; no runtime observation. proposed_drop: source refutation, not specification acceptance alone. possible_cover: none known; coverage sources not searched.\n\nThe assigned deletion is parent terminals.rs:3828–3966 (patch packet lines 1–139). git grep at the reviewed revision finds no tabs_from_pane_states in the supervisor source. Replacement terminals.rs:223–247 resolves tabs only from the session's host-tab cell. core/host_tabs.rs:258–277 sorts tabs by creation stamp and tab id; :337–355 assigns a monotonic stamp. :1279–1471 restores tab entries from launch records, skips held session/tab ids, and requires names_tab before adoption. :1476–1478 requires the exact session id, tab id and HostRole::Tab. :400–446 constructs fresh tabs using a new UUID and HostRole::Tab. :915–928 confirms the selected runtime still belongs to that tab and refuses the agent runtime before close. The current host ordering test remains at host_tabs.rs:1735–1800, with a separate creation-stamp test at :1817–1826.\n\nContract: SPEC_impl.md:2332–2333, Terminal host / Tabs in hosts, says exactly: \"Closing a tab: the session's cell holds only hosts whose tag names one of its tabs (the open wrote it, a reload checked it), and the agent's own runtime is refused\". The deleted numeric pane/window ordering and split-pane deduplication tests no longer exercise any shipped path: a terminal host owns one terminal.\n\nCaveats: this validates the removal's identity/order consequences, not all host implementation paths or arbitrary hostile state mutation. No independent retired-code defects were investigated. No tests or reproductions executed. This revision supplies original line references and the exact contract quotation; it preserves the originally considered loss-of-work consequence."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removed tmux tab-discovery tests do not remove host tab identity protections",
+            "location": "crates/farhelm-supervisor/src/service/terminals.rs:3828 (parent revision; deleted at reviewed commit)",
+            "detail": "# Removed tmux tab-discovery tests\n\nReviewed commit: 1ed482dde220452e424973faf38a5e1318986333\n\n## TLDR\n\nConsidered whether removing discovery and agent-exclusion tests permits closing a shell tab to end the agent or another session's user work. That potentially highest consequence remains the reason for independent review of this proposed drop; no such route has been established.\n\n## Details\n\nSuggested bucket: highest if the wrong-tab-close route existed. Could-be-highest: yes. Confidence: confirmed source refutation of the removal concern, not runtime observation. proposed_drop: source refutation, pending the parent's independent check; no parent acceptance is claimed. possible_cover: none known; prohibited coverage sources not searched.\n\nThe deleted cases are parent terminals.rs:3828–3966, assigned patch lines 1–139. Their numeric window/pane ordering, split-pane deduplication and mutable tmux-marker exclusion mechanics are retired. Necessary behaviors remain tab creation order and keeping the agent/other sessions outside a tab-close target. terminals.rs:223–247 resolves through the session's host-tab cell. core/host_tabs.rs:258–277 orders by creation stamp/tab id, :337–355 generates a stamp after every known stamp, and :400–446 creates an explicit HostRole::Tab. Existing tests at :1744–1799 assert exact listing order and filtering; :1818–1824 asserts a future existing stamp cannot reorder the next open. These are actual current service-cell oracles, rather than merely equivalent comments.\n\nSynthesis checked all replacement adoption entrances: initial scan at host_tabs.rs:1404–1406, retry scan at :1137–1142, and settling an interrupted start at :1553–1569 each require names_tab (:1476–1478: exact session id, tab id and HostRole::Tab). A nonmatching readable tag becomes an unavailable placeholder, not an adopted runtime (:1423–1434, :1145–1151, :1571–1578). Retry installation at :1176–1206 requires the same session cell, old handle and tab id, and aborts an uninstalled replacement. Close at :915–928 revalidates the tab's runtime and refuses the agent runtime. The tag role is an enum (hosts/tag.rs:60–86), so an agent/tag cannot simultaneously carry the old tmux tests' two independent markers.\n\nAdditional test-source check: hosts/registry/tests.rs:531–579 supplies an agent plus four tab hosts, asserts exact stamp order excluding the agent and flags a duplicate tab id. The registry helper at hosts/registry.rs:622–656 implements that test, but production adopt_tab_hosts uses per-record by_name/names_tab, not registry.tabs; therefore this is not claimed as a direct oracle for the production per-record rejection branch. No direct test of every names_tab refusal was established by the targeted search. The removed tmux tests never exercised those host branches, so their removal is not evidence that a previously tested host behavior lost its oracle. This distinction narrows the conclusion rather than certifying the complete host test suite.\n\nContract remains SPEC_impl.md:2332–2333, Terminal host / Tabs in hosts: \"Closing a tab: the session's cell holds only hosts whose tag names one of its tabs (the open wrote it, a reload checked it), and the agent's own runtime is refused\". All readily checkable identity/order premises above were checked against pinned source. No tests or reproductions executed. No independent retired-code defects investigated."
+          }
+        }
+      ],
+      "latest": {
+        "line": 5,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Removed tmux tab-discovery tests do not remove host tab identity protections",
+          "location": "crates/farhelm-supervisor/src/service/terminals.rs:3828 (parent revision; deleted at reviewed commit)",
+          "detail": "# Removed tmux tab-discovery tests\n\nReviewed commit: 1ed482dde220452e424973faf38a5e1318986333\n\n## TLDR\n\nConsidered whether removing discovery and agent-exclusion tests permits closing a shell tab to end the agent or another session's user work. That potentially highest consequence remains the reason for independent review of this proposed drop; no such route has been established.\n\n## Details\n\nSuggested bucket: highest if the wrong-tab-close route existed. Could-be-highest: yes. Confidence: confirmed source refutation of the removal concern, not runtime observation. proposed_drop: source refutation, pending the parent's independent check; no parent acceptance is claimed. possible_cover: none known; prohibited coverage sources not searched.\n\nThe deleted cases are parent terminals.rs:3828–3966, assigned patch lines 1–139. Their numeric window/pane ordering, split-pane deduplication and mutable tmux-marker exclusion mechanics are retired. Necessary behaviors remain tab creation order and keeping the agent/other sessions outside a tab-close target. terminals.rs:223–247 resolves through the session's host-tab cell. core/host_tabs.rs:258–277 orders by creation stamp/tab id, :337–355 generates a stamp after every known stamp, and :400–446 creates an explicit HostRole::Tab. Existing tests at :1744–1799 assert exact listing order and filtering; :1818–1824 asserts a future existing stamp cannot reorder the next open. These are actual current service-cell oracles, rather than merely equivalent comments.\n\nSynthesis checked all replacement adoption entrances: initial scan at host_tabs.rs:1404–1406, retry scan at :1137–1142, and settling an interrupted start at :1553–1569 each require names_tab (:1476–1478: exact session id, tab id and HostRole::Tab). A nonmatching readable tag becomes an unavailable placeholder, not an adopted runtime (:1423–1434, :1145–1151, :1571–1578). Retry installation at :1176–1206 requires the same session cell, old handle and tab id, and aborts an uninstalled replacement. Close at :915–928 revalidates the tab's runtime and refuses the agent runtime. The tag role is an enum (hosts/tag.rs:60–86), so an agent/tag cannot simultaneously carry the old tmux tests' two independent markers.\n\nAdditional test-source check: hosts/registry/tests.rs:531–579 supplies an agent plus four tab hosts, asserts exact stamp order excluding the agent and flags a duplicate tab id. The registry helper at hosts/registry.rs:622–656 implements that test, but production adopt_tab_hosts uses per-record by_name/names_tab, not registry.tabs; therefore this is not claimed as a direct oracle for the production per-record rejection branch. No direct test of every names_tab refusal was established by the targeted search. The removed tmux tests never exercised those host branches, so their removal is not evidence that a previously tested host behavior lost its oracle. This distinction narrows the conclusion rather than certifying the complete host test suite.\n\nContract remains SPEC_impl.md:2332–2333, Terminal host / Tabs in hosts: \"Closing a tab: the session's cell holds only hosts whose tag names one of its tabs (the open wrote it, a reload checked it), and the agent's own runtime is refused\". All readily checkable identity/order premises above were checked against pinned source. No tests or reproductions executed. No independent retired-code defects investigated."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g121/findings.jsonl",
+        "id": "c1",
+        "line": 5,
+        "disposition": "under-investigation",
+        "group": "g121-c1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-077",
+          "key": "g121/c1",
+          "latest_line": 5,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "removed-tmux-tab-discovery-wrong-close-target",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The deleted tests exercised tmux window ordering, split-pane deduplication and independent mutable agent/tab markers. The host path resolves the session's own tab cell, requires matching session/tab/role at adoption, and refuses closing its agent runtime. No wrong-target destruction route from deleting those tests is established. The original possible loss of user work still requires the independent drop check.",
+          "checks": [
+            "At 1ed482dde220452e424973faf38a5e1318986333, terminals.rs:223-247 resolves tab ids only through entry.session.host_tabs. core/host_tabs.rs:258-277 sorts by creation stamp/id and filters finished tabs; :337-355 stamps a new tab after existing known stamps; :400-446 creates a fresh UUID with HostRole::Tab.",
+            "core/host_tabs.rs:1404-1434 initial adoption, :1137-1151 retry scan and :1553-1578 interrupted-start settlement each require names_tab; :1476-1478 demands exact session id, exact tab id and the Tab role. Nonmatching readable tags become unavailable placeholders. :1176-1207 fences retry installation by session cell, tab id, old handle and orderly-stop state.",
+            "core/host_tabs.rs:915-928 rechecks that the selected tab still holds the exact runtime and explicitly rejects the session's agent runtime. hosts/tag.rs:77-85 uses exclusive Agent/Tab enum variants; it does not retain the deleted test's independently mutable dual marker shape.",
+            "core/host_tabs.rs:1744-1795 asserts exact listing/filtering/reap order after witnessing processed exit; :1818-1824 asserts monotonic stamps with a future existing stamp. These are actual current cell oracles. hosts/registry/tests.rs:531-569 checks helper sorting, agent exclusion and duplicate ids, but production adoption uses by_name/names_tab, so that helper test is not a direct oracle for every adoption-refusal branch.",
+            "Parent terminals.rs:3828 onward constructs PaneState/window fixtures, and :3941-3956 applies recorded-pane exclusion to forged markers. git grep finds no tabs_from_pane_states under supervisor src at the reviewed revision. No direct test of every names_tab refusal is claimed; deleting a tmux-only test did not itself remove such a host-branch oracle."
+          ],
+          "coverage_checked": [
+            "Searched SPEC.md and SPEC_impl.md for tab discovery, ordering, tab identity, close target and agent exclusion. Current SPEC_impl.md:2235-2270 explicitly binds tabs to session/tab tags and refuses the agent runtime; historical :2331-2338 carries that contract. SPEC.md Session view tab lifecycle (:2155-2164) describes ending that tab's work. These require safety; they do not accept a wrong-target close.",
+            "TODO.md Planned is empty. BUGS.md's install/update SSH-helper hang is unrelated.",
+            "Searched plans/queue for tab identity/discovery, wrong-tab close and agent/tab confusion. tmux-end-old-terminals.md acceptance 2 and 5 removes obsolete tmux tests while retaining surviving subjects; no pending exact wrong-close-target fix found. Later tmux docs/tooling work does not establish acceptance of unsafe tab identity.",
+            "Searched INDEX.md and active TRIAGE_OUTCOMES.md for wrong-target tabs, agent exclusion, tab identity and discovery. Read container-tab-close-overpromises-process-termination.md: inaccurate wording about intentionally detached container work surviving is a different cause/consequence, not identity coverage or an alias. The tab-reap timeout item is also distinct. No exact queued item or active decision found; archive not read.",
+            "FILTER.md read in full. None matches this alleged wrong-target close. The random socket collision and verified-signal handoff filters cover only their exact separate routes."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "The original highest consequence requires a tab-close path selecting the agent or another session's work despite the checked identity boundaries; none was established. Missing direct tests for every host refusal branch are not equivalent to evidence that this tmux-test deletion removed those tests. Source-only checks do not certify all hostile state mutation or all host cleanup paths.",
+          "original_stronger_consequence": "Closing a shell tab could end the agent or another session's user-owned work if tab discovery lost identity protection. All history preserves that conditional highest consequence; no withdrawal or downgrade of an established loss route is asserted.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Narrow source refutation of the test-removal concern, preserving the conditional highest consequence for the parent's independent drop consultation. Bucket other describes the absence of an established defect, not permission to lower an established destructive route."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "removed-tmux-tab-discovery-wrong-close-target",
+        "destination": null
+      }
+    },
+    {
+      "key": "g121/c2",
+      "owner": "g121",
+      "id": "c2",
+      "domain": "supervisor-terminal-streaming",
+      "purpose": "supervisor-terminal-streaming: crates/farhelm-supervisor/src/service/terminals.rs; phases -    fn tabs_are_rediscovered_in_window_creation_order_and_nothing_else_qualifies() {",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Removed sink lifecycle tests no longer govern an attachment-owned process",
+            "location": "crates/farhelm-supervisor/src/service/terminals.rs (deleted sink tests; assigned patch lines 141–991)",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether deleting indefinite sink retry, child-reaping, cancellation-safe handoff, failure poisoning and healthy-backoff-reset tests permits stuck output, leaked clients or cross-attachment overlap on reconnect. Suggested bucket: high for materially stuck terminal output if established; could-be-highest: no established security or loss-of-work route from this test removal. Confidence: confirmed source refutation of this deletion concern, not observed execution. proposed_drop: source refutation; the removed tests target SessionSink, run_session_sink, SinkRegistry and sink_retry_delay, none of which survives anywhere under the supervisor src tree at the reviewed revision (git grep). HostTerminal is an Arc handle, hosts/terminal.rs:1226–1280; adoption creates the runtime once at :1772–1938, spawning runtime.run(conn) at :1926. Runtime::run at :3031–3053 drives the connection independently of viewer attachments and reconnects on connection errors. handlers.rs:1688–1717 resolves an existing HostTerminal and requires grid support before takeover; :1935–1974 only starts the in-process HostAttach pump and GridSender against that same handle, not a tmux child. Detach at :1985–2006 checks channel ownership, requests sender shutdown and joins it; terminals.rs:414–461 contains no sink lease or external attachment-owned process. grid_stream.rs:937–963 selects shutdown against the stream; :1022–1055 creates a pump from host.input_sequence, without spawning a process or adopting another host connection. Thus a viewer detach/reattach does not replace the host reader, and none of the removed client-reap/respawn barriers has a surviving operation to protect. Governing contract SPEC_impl.md, Terminal host / Grid streams: 'an attach to a host terminal from a client that can show grids is answered with stream kind `grid` and gets a sender task of its own in the forwarder’s place' (source contract also says 'the terminal takes in everything the program writes whatever its viewers do' in SPEC.md, Terminal experience). possible_cover: none known; coverage sources not searched. Caveats: does not establish every runtime reconnect or re-adoption path is defect-free; no independent retired sink defects were investigated. No runtime tests or reproductions executed."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Removed sink lifecycle tests no longer govern an attachment-owned process",
+            "location": "crates/farhelm-supervisor/src/service/terminals.rs:3969 (parent revision; deleted at reviewed commit)",
+            "detail": "# Removed tmux sink lifecycle tests\n\nReviewed commit: 1ed482dde220452e424973faf38a5e1318986333\n\n## TLDR\n\nConsidered whether deleting indefinite sink retry, child-reaping, cancellation-safe handoff, failure poisoning and healthy-backoff-reset tests permits stuck output, leaked clients or overlap during terminal reconnect. A viewer reconnect now uses the existing host reader rather than replacing an external sink client.\n\n## Details\n\nSuggested bucket: high for materially stuck output if established. Could-be-highest: no established security or loss-of-work route from this test removal. Confidence: confirmed source refutation of this deletion concern, not observed execution. proposed_drop: source refutation. possible_cover: none known; coverage sources not searched.\n\nAssigned patch lines 141–991 remove sink tests and helpers (parent terminals.rs:3969 through the final sink test before :4820). git grep finds no SessionSink, run_session_sink, SinkRegistry or sink_retry_delay anywhere under the reviewed supervisor src tree. HostTerminal is an Arc handle at hosts/terminal.rs:1226–1280. Adoption creates the runtime at :1772–1938 and spawns runtime.run(conn) at :1926; Runtime::run at :3031–3053 drives the host connection independently of viewer attachments and reconnects on connection errors. handlers.rs:1688–1717 resolves an existing terminal and requires grid support before takeover. :1935–1974 starts only an in-process HostAttach pump and GridSender against that existing handle. Detach at :1985–2006 checks channel ownership, requests sender shutdown and joins it. terminals.rs:414–461 contains no sink lease or external attachment-owned process. grid_stream.rs:937–963 selects shutdown against the stream; :1022–1055 creates the pump from host.input_sequence without spawning a process or adopting another host connection. Thus none of the removed external-client reap/respawn barriers has a surviving viewer operation to protect.\n\nContract: SPEC_impl.md:2628–2630, Terminal host / Grid streams, says exactly: \"an attach to a host terminal from a client that can show grids is answered with stream kind `grid` and gets a sender task of its own in the forwarder's place\". The SPEC.md Terminal experience section separately requires that a new terminal's intake be independent of viewers.\n\nCaveats: this does not establish every runtime reconnect or re-adoption path is defect-free. No independent retired sink defects were investigated. No tests or reproductions executed. This revision supplies the original line reference, the requested feedback headings and an exact contract quotation; the originally considered stuck-output/client-overlap consequence is unchanged."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Removed sink lifecycle tests no longer govern an attachment-owned process",
+            "location": "crates/farhelm-supervisor/src/service/terminals.rs:3969 (parent revision; deleted at reviewed commit)",
+            "detail": "# Removed tmux sink lifecycle tests\n\nReviewed commit: 1ed482dde220452e424973faf38a5e1318986333\n\n## TLDR\n\nConsidered whether removing sink retry/reap/handoff tests causes stuck output, leaked clients or overlap during viewer reconnect. Viewer reconnect no longer creates or replaces an external reader. This rejects that specific removal concern; it does not certify every host reconnection or recovery test.\n\n## Details\n\nSuggested bucket: high if materially stuck output were established. Could-be-highest: no established security or loss-of-work route from this removal. Confidence: confirmed source refutation of the attachment-owned-reader premise, not execution evidence. proposed_drop: source refutation, pending the parent's independent check; no parent acceptance claimed. possible_cover: none known; prohibited coverage sources not searched.\n\nThe assigned deletion is patch lines 141–991, parent terminals.rs:3969 through the sink test ending before :4820. There are no surviving supervisor-source references to SessionSink, run_session_sink, SinkRegistry or sink_retry_delay. HostTerminal shares an Arc at hosts/terminal.rs:1226–1280. Its runtime starts at adoption (:1926), and Runtime::run (:3031–3053) owns the connection, independently of viewer tasks. SessionEntry retains its terminal (service/core.rs:4144–4152), and tabs retain theirs in the session's host-tab cell (core/host_tabs.rs:130–145, :249–280). Last-viewer detach therefore is not last-terminal-owner drop.\n\nhandlers.rs:1688–1717 resolves the existing terminal and requires grid support; :1935–1974 creates HostAttach and GridSender without adopting a host or spawning a process. Detach :1985–2006 joins the sender after checking channel ownership. terminals.rs:414–461 holds no sink lease. grid_stream.rs:937–963 selects sender shutdown; :1022–1055 creates an input pump from host.input_sequence; :1169–1175 cancels that pump on drop; :1201–1243 stops its in-process work and discards queued input not handed to the runtime. None reaps or replaces an external reader. The caller reports g118/g120 corroboration of this same narrow ownership conclusion; the cited source is the independent basis here.\n\nNecessary behavior versus obsolete mechanics: the deleted process-reap, stale-reaper poisoning and same-session external-client handoff oracles target operations that no longer exist on viewer attach/detach. Recovery still matters, but it now belongs to the host runtime/re-adoption layer rather than an attachment sink. Synthesis checked core/host_handover.rs:1373–1377 (capped delay), :1390–1417 (supervisor-owned retry loop), :1433–1540 (agent/tab scheduling with saturating counts, no attempt-limit exit, retained backoff across success). Existing test source core/tests/host_terminals.rs:2359–2415 checks successful adoption retains attempt history and every unstable episode waits the reconnect window; :2710–2761 checks tab identity/order/scope and retry count survive adoption and the agent restart window. Unlike the removed sink's healthy-run-reset rule, the host retry policy deliberately keeps history (SPEC_impl.md, Terminal host / Across supervisor restarts: \"The attempt count is kept for that session and launch (or session and tab id) even after success\"). A missing sink-reset test is therefore not proof of a missing current-policy oracle. These checks establish actual replacement oracles for those particular behaviors, not full retry coverage.\n\nContract: SPEC_impl.md:2628–2630, Terminal host / Grid streams: \"an attach to a host terminal from a client that can show grids is answered with stream kind `grid` and gets a sender task of its own in the forwarder's place\". Scope caveat: no complete proof of all runtime reconnect, scheduling, cancellation or test paths is claimed; only the removed attachment sink roles and readily checkable related assumptions were resolved. Original suspected stuck-output/client-overlap consequence preserved. No runtime tests or reproductions executed; no independent retired-code defects investigated."
+          }
+        }
+      ],
+      "latest": {
+        "line": 6,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Removed sink lifecycle tests no longer govern an attachment-owned process",
+          "location": "crates/farhelm-supervisor/src/service/terminals.rs:3969 (parent revision; deleted at reviewed commit)",
+          "detail": "# Removed tmux sink lifecycle tests\n\nReviewed commit: 1ed482dde220452e424973faf38a5e1318986333\n\n## TLDR\n\nConsidered whether removing sink retry/reap/handoff tests causes stuck output, leaked clients or overlap during viewer reconnect. Viewer reconnect no longer creates or replaces an external reader. This rejects that specific removal concern; it does not certify every host reconnection or recovery test.\n\n## Details\n\nSuggested bucket: high if materially stuck output were established. Could-be-highest: no established security or loss-of-work route from this removal. Confidence: confirmed source refutation of the attachment-owned-reader premise, not execution evidence. proposed_drop: source refutation, pending the parent's independent check; no parent acceptance claimed. possible_cover: none known; prohibited coverage sources not searched.\n\nThe assigned deletion is patch lines 141–991, parent terminals.rs:3969 through the sink test ending before :4820. There are no surviving supervisor-source references to SessionSink, run_session_sink, SinkRegistry or sink_retry_delay. HostTerminal shares an Arc at hosts/terminal.rs:1226–1280. Its runtime starts at adoption (:1926), and Runtime::run (:3031–3053) owns the connection, independently of viewer tasks. SessionEntry retains its terminal (service/core.rs:4144–4152), and tabs retain theirs in the session's host-tab cell (core/host_tabs.rs:130–145, :249–280). Last-viewer detach therefore is not last-terminal-owner drop.\n\nhandlers.rs:1688–1717 resolves the existing terminal and requires grid support; :1935–1974 creates HostAttach and GridSender without adopting a host or spawning a process. Detach :1985–2006 joins the sender after checking channel ownership. terminals.rs:414–461 holds no sink lease. grid_stream.rs:937–963 selects sender shutdown; :1022–1055 creates an input pump from host.input_sequence; :1169–1175 cancels that pump on drop; :1201–1243 stops its in-process work and discards queued input not handed to the runtime. None reaps or replaces an external reader. The caller reports g118/g120 corroboration of this same narrow ownership conclusion; the cited source is the independent basis here.\n\nNecessary behavior versus obsolete mechanics: the deleted process-reap, stale-reaper poisoning and same-session external-client handoff oracles target operations that no longer exist on viewer attach/detach. Recovery still matters, but it now belongs to the host runtime/re-adoption layer rather than an attachment sink. Synthesis checked core/host_handover.rs:1373–1377 (capped delay), :1390–1417 (supervisor-owned retry loop), :1433–1540 (agent/tab scheduling with saturating counts, no attempt-limit exit, retained backoff across success). Existing test source core/tests/host_terminals.rs:2359–2415 checks successful adoption retains attempt history and every unstable episode waits the reconnect window; :2710–2761 checks tab identity/order/scope and retry count survive adoption and the agent restart window. Unlike the removed sink's healthy-run-reset rule, the host retry policy deliberately keeps history (SPEC_impl.md, Terminal host / Across supervisor restarts: \"The attempt count is kept for that session and launch (or session and tab id) even after success\"). A missing sink-reset test is therefore not proof of a missing current-policy oracle. These checks establish actual replacement oracles for those particular behaviors, not full retry coverage.\n\nContract: SPEC_impl.md:2628–2630, Terminal host / Grid streams: \"an attach to a host terminal from a client that can show grids is answered with stream kind `grid` and gets a sender task of its own in the forwarder's place\". Scope caveat: no complete proof of all runtime reconnect, scheduling, cancellation or test paths is claimed; only the removed attachment sink roles and readily checkable related assumptions were resolved. Original suspected stuck-output/client-overlap consequence preserved. No runtime tests or reproductions executed; no independent retired-code defects investigated."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g121/findings.jsonl",
+        "id": "c2",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "removed-tmux-sink-external-reader-overlap",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-077 after inspecting it. The removed sink retry/reap/handoff tests target an attachment-owned external client that the host viewer path no longer creates. Terminal ownership and recovery remain above the viewer lifetime. The surviving retry policy deliberately preserves attempt history rather than resetting after health. This refutes the specific removed-sink test concern, with no claim of complete recovery/cancellation coverage. Source refutation of obsolete attachment-owned external-client test stimuli. Shares the narrow external-reader root with g120/c1, while the removed-test oracle and changed retry policy were checked separately. No existing queue item is extended and no surviving test defect is dismissed by production correctness alone. Checked source/results: [\"At 1ed482dde220452e424973faf38a5e1318986333, hosts/terminal.rs:1226-1280 shares the handle via Arc; :1926 spawns runtime.run at adoption; :3031-3053 drives/reconnects the connection independently of viewer tasks. core.rs:4144-4152 retains the agent terminal; core/host_tabs.rs:249-280 retains tab handles in the session cell. Last-viewer detach is not last-terminal-owner drop.\",\"handlers.rs:1688-1717 resolves an existing terminal; :1935-1974 starts HostAttach and GridSender without host adoption or an external process. :1985-2006 checks owner and joins the sender. terminals.rs:414-461 has no sink lease; grid_stream.rs:1022-1049 creates an input sequence/pump, :1169-1175 signals cancellation on drop and :1201-1242 discards work not handed to the runtime after cancellation. These local pump semantics do not prove every caller drops it before unlocking.\",\"git grep at the reviewed revision finds no SessionSink, run_session_sink, SinkRegistry or sink_retry_delay in supervisor src. Parent terminals.rs:3969-3985 tests retired sink backoff; :1665-1698 describes retrying a replacement external client indefinitely while attachment ownership holds it.\",\"core/host_handover.rs:1373-1377 caps retry delay, :1390-1417 runs the supervisor-owned retry task, and :1433-1540 retains attempt history, schedules before attempts and uses saturating counts without an attempt-limit exit. core/tests/host_terminals.rs:2359-2407 asserts retained history and a fresh reconnect-window wait after each unstable episode; :2710-2756 asserts tab metadata/count survive recovery and an off-map agent Restart. These verify specific replacement-policy oracles, not full retry coverage.\"] Current coverage/results: [\"Both specifications searched for sink/reconnect/reader/pump lifecycle. SPEC.md:3011-3040 requires viewer-independent terminal intake/recovery; current SPEC_impl.md:2549-2591 assigns per-viewer sender/pump roles. Current :2477-2501 explicitly retains retry attempt counts after success. Thus retired healthy-sink reset mechanics are not the current required policy.\",\"TODO.md Planned is empty; BUGS.md concerns a separate provisioning SSH-helper hang.\",\"plans/queue searches found tmux-end-old-terminals.md acceptance 2/5 specifying obsolete sink removal and preserving surviving test subjects, plus later install/tooling/docs work. No exact pending coverage of a demonstrated surviving sink-reader/retry defect was found.\",\"INDEX.md and active TRIAGE_OUTCOMES.md searched for sink retry/reap, external reader overlap, cancellation/pump and terminal recovery. Read oversized-paste-test-cancels-before-pump-can-run.md; it is a different surviving overflow-test oracle and remains unaffected by this disposition. No exact queued/ledger cover found; archive not read.\",\"FILTER.md supplies no basis for this result. No rare-trigger filter is applied to a supposed persistent stuck-output or leaked-client consequence.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Materially stuck terminal output, leaked clients or cross-attachment overlap during reconnect if the removed sink lifecycle guarantees were still necessary. That would be high for established materially stuck output; this candidate never established a security or user-work-loss route. g120/c1's separate natural-detach input-lifetime caveat remains outside this shared external-reader refutation.\"; \"A surviving viewer operation that owns/replaces the external client these tests protected has not been shown; the cited viewer path creates none. Recovery is still required at the runtime/re-adoption layer, and no complete proof of its scheduling/cancellation/tests is claimed. No runtime tests or reproduction were performed.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g121/c2",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "removed-tmux-sink-external-reader-overlap",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-077 after inspecting it. The removed sink retry/reap/handoff tests target an attachment-owned external client that the host viewer path no longer creates. Terminal ownership and recovery remain above the viewer lifetime. The surviving retry policy deliberately preserves attempt history rather than resetting after health. This refutes the specific removed-sink test concern, with no claim of complete recovery/cancellation coverage. Source refutation of obsolete attachment-owned external-client test stimuli. Shares the narrow external-reader root with g120/c1, while the removed-test oracle and changed retry policy were checked separately. No existing queue item is extended and no surviving test defect is dismissed by production correctness alone. Checked source/results: [\"At 1ed482dde220452e424973faf38a5e1318986333, hosts/terminal.rs:1226-1280 shares the handle via Arc; :1926 spawns runtime.run at adoption; :3031-3053 drives/reconnects the connection independently of viewer tasks. core.rs:4144-4152 retains the agent terminal; core/host_tabs.rs:249-280 retains tab handles in the session cell. Last-viewer detach is not last-terminal-owner drop.\",\"handlers.rs:1688-1717 resolves an existing terminal; :1935-1974 starts HostAttach and GridSender without host adoption or an external process. :1985-2006 checks owner and joins the sender. terminals.rs:414-461 has no sink lease; grid_stream.rs:1022-1049 creates an input sequence/pump, :1169-1175 signals cancellation on drop and :1201-1242 discards work not handed to the runtime after cancellation. These local pump semantics do not prove every caller drops it before unlocking.\",\"git grep at the reviewed revision finds no SessionSink, run_session_sink, SinkRegistry or sink_retry_delay in supervisor src. Parent terminals.rs:3969-3985 tests retired sink backoff; :1665-1698 describes retrying a replacement external client indefinitely while attachment ownership holds it.\",\"core/host_handover.rs:1373-1377 caps retry delay, :1390-1417 runs the supervisor-owned retry task, and :1433-1540 retains attempt history, schedules before attempts and uses saturating counts without an attempt-limit exit. core/tests/host_terminals.rs:2359-2407 asserts retained history and a fresh reconnect-window wait after each unstable episode; :2710-2756 asserts tab metadata/count survive recovery and an off-map agent Restart. These verify specific replacement-policy oracles, not full retry coverage.\"] Current coverage/results: [\"Both specifications searched for sink/reconnect/reader/pump lifecycle. SPEC.md:3011-3040 requires viewer-independent terminal intake/recovery; current SPEC_impl.md:2549-2591 assigns per-viewer sender/pump roles. Current :2477-2501 explicitly retains retry attempt counts after success. Thus retired healthy-sink reset mechanics are not the current required policy.\",\"TODO.md Planned is empty; BUGS.md concerns a separate provisioning SSH-helper hang.\",\"plans/queue searches found tmux-end-old-terminals.md acceptance 2/5 specifying obsolete sink removal and preserving surviving test subjects, plus later install/tooling/docs work. No exact pending coverage of a demonstrated surviving sink-reader/retry defect was found.\",\"INDEX.md and active TRIAGE_OUTCOMES.md searched for sink retry/reap, external reader overlap, cancellation/pump and terminal recovery. Read oversized-paste-test-cancels-before-pump-can-run.md; it is a different surviving overflow-test oracle and remains unaffected by this disposition. No exact queued/ledger cover found; archive not read.\",\"FILTER.md supplies no basis for this result. No rare-trigger filter is applied to a supposed persistent stuck-output or leaked-client consequence.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Materially stuck terminal output, leaked clients or cross-attachment overlap during reconnect if the removed sink lifecycle guarantees were still necessary. That would be high for established materially stuck output; this candidate never established a security or user-work-loss route. g120/c1's separate natural-detach input-lifetime caveat remains outside this shared external-reader refutation.\"; \"A surviving viewer operation that owns/replaces the external client these tests protected has not been shown; the cited viewer path creates none. Recovery is still required at the runtime/re-adoption layer, and no complete proof of its scheduling/cancellation/tests is claimed. No runtime tests or reproduction were performed.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-077",
+          "key": "g121/c2",
+          "latest_line": 6,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "removed-tmux-sink-external-reader-overlap",
+          "aliases": [
+            "g120/c1"
+          ],
+          "target_queue_file": null,
+          "why": "The removed sink retry/reap/handoff tests target an attachment-owned external client that the host viewer path no longer creates. Terminal ownership and recovery remain above the viewer lifetime. The surviving retry policy deliberately preserves attempt history rather than resetting after health. This refutes the specific removed-sink test concern, with no claim of complete recovery/cancellation coverage.",
+          "checks": [
+            "At 1ed482dde220452e424973faf38a5e1318986333, hosts/terminal.rs:1226-1280 shares the handle via Arc; :1926 spawns runtime.run at adoption; :3031-3053 drives/reconnects the connection independently of viewer tasks. core.rs:4144-4152 retains the agent terminal; core/host_tabs.rs:249-280 retains tab handles in the session cell. Last-viewer detach is not last-terminal-owner drop.",
+            "handlers.rs:1688-1717 resolves an existing terminal; :1935-1974 starts HostAttach and GridSender without host adoption or an external process. :1985-2006 checks owner and joins the sender. terminals.rs:414-461 has no sink lease; grid_stream.rs:1022-1049 creates an input sequence/pump, :1169-1175 signals cancellation on drop and :1201-1242 discards work not handed to the runtime after cancellation. These local pump semantics do not prove every caller drops it before unlocking.",
+            "git grep at the reviewed revision finds no SessionSink, run_session_sink, SinkRegistry or sink_retry_delay in supervisor src. Parent terminals.rs:3969-3985 tests retired sink backoff; :1665-1698 describes retrying a replacement external client indefinitely while attachment ownership holds it.",
+            "core/host_handover.rs:1373-1377 caps retry delay, :1390-1417 runs the supervisor-owned retry task, and :1433-1540 retains attempt history, schedules before attempts and uses saturating counts without an attempt-limit exit. core/tests/host_terminals.rs:2359-2407 asserts retained history and a fresh reconnect-window wait after each unstable episode; :2710-2756 asserts tab metadata/count survive recovery and an off-map agent Restart. These verify specific replacement-policy oracles, not full retry coverage."
+          ],
+          "coverage_checked": [
+            "Both specifications searched for sink/reconnect/reader/pump lifecycle. SPEC.md:3011-3040 requires viewer-independent terminal intake/recovery; current SPEC_impl.md:2549-2591 assigns per-viewer sender/pump roles. Current :2477-2501 explicitly retains retry attempt counts after success. Thus retired healthy-sink reset mechanics are not the current required policy.",
+            "TODO.md Planned is empty; BUGS.md concerns a separate provisioning SSH-helper hang.",
+            "plans/queue searches found tmux-end-old-terminals.md acceptance 2/5 specifying obsolete sink removal and preserving surviving test subjects, plus later install/tooling/docs work. No exact pending coverage of a demonstrated surviving sink-reader/retry defect was found.",
+            "INDEX.md and active TRIAGE_OUTCOMES.md searched for sink retry/reap, external reader overlap, cancellation/pump and terminal recovery. Read oversized-paste-test-cancels-before-pump-can-run.md; it is a different surviving overflow-test oracle and remains unaffected by this disposition. No exact queued/ledger cover found; archive not read.",
+            "FILTER.md supplies no basis for this result. No rare-trigger filter is applied to a supposed persistent stuck-output or leaked-client consequence."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "A surviving viewer operation that owns/replaces the external client these tests protected has not been shown; the cited viewer path creates none. Recovery is still required at the runtime/re-adoption layer, and no complete proof of its scheduling/cancellation/tests is claimed. No runtime tests or reproduction were performed.",
+          "original_stronger_consequence": "Materially stuck terminal output, leaked clients or cross-attachment overlap during reconnect if the removed sink lifecycle guarantees were still necessary. That would be high for established materially stuck output; this candidate never established a security or user-work-loss route. g120/c1's separate natural-detach input-lifetime caveat remains outside this shared external-reader refutation.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation of obsolete attachment-owned external-client test stimuli. Shares the narrow external-reader root with g120/c1, while the removed-test oracle and changed retry policy were checked separately. No existing queue item is extended and no surviving test defect is dismissed by production correctness alone."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "removed-tmux-sink-external-reader-overlap",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete: all 995 assigned lines reviewed at the pinned revision.\n\nNo actionable findings or unresolved leads. Candidates `c1` and `c2`, with source-based drop rationales, are recorded in `g121/findings.jsonl`. Progress is updated. No tests or reproductions were run."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised `c1` with checks of all three tab-adoption paths and precise limits on replacement test coverage; preserved the potentially highest wrong-tab-close consequence.\n\nRevised `c2` with independent runtime ownership and current retry-policy oracles, without claiming complete reconnect coverage.\n\nNo new findings. Unresolved lead IDs: none. Progress updated."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 found nothing new.\n\nChecked interface records, deleted-symbol references, retained lease-test boundaries, and pinned-range file history. No new verified or unverified-after-investigation IDs. Open leads: none.\n\nProgress updated; existing records unchanged. No runtime execution."
+    }
+  ],
+  "progress": "# g121 progress\n\nInitial review complete, turn 1. Discovery passes: 0. No actionable findings; no unresolved leads. Durable records: c1 and c2, both candidate proposals to drop with source refutations; each has a later revision supplying original source locations and the feedback headings. New verified findings: none. New unverified findings: none.\n\nCoverage: read the complete commits field of inventory.json, without displaying or using excluded coverage metadata. Delivered all assigned patch lines 1–995 through five evidence packets (1–200, 201–400, 401–600, 601–800, 801–995), each within the packet limits. No unread assigned material. Root instructions include the End sentinel. Read the required priority-bucket and feedback-format sections, the complete pinned SPEC.md Terminal experience section (2855–3187), complete SPEC_impl.md Terminal host section (1963–2700), complete private-tmux substrate section (2880–2991), and the Answers bind to what was drawn rule (1071 onward). The assigned patch contains deleted tests, not GUI handlers.\n\nInterface conclusions at 1ed482dde220452e424973faf38a5e1318986333: terminal resolution uses per-session host-tab cells; creation and reload verify tab roles and ids, and close refuses the agent runtime. Tab ordering uses creation stamps rather than tmux pane/window ids. A viewer attaches to an existing HostTerminal runtime; detach stops in-process sender/input tasks without replacing the external host reader. No supervisor source references survive to the removed tmux sink or discovery helpers. The removed tests were assessed for removal/replacement consequences, not independent defects in retired code. Read replacement ordering tests as source evidence, without running them.\n\nNo tests, builds or reproductions were run; the brief requests source-only review. No checkout files were changed. Private artifacts remain under the assigned group directory. Next action: await the caller's later synthesis/discovery prompt; do not perform additional passes inside this initial turn. Parent owns independent drop decisions and coverage.\n\n## Turn 2: later-turn synthesis complete\n\nTurn count: 2 (initial review 1, synthesis 1). Discovery-pass count: 0. New verified/unverified findings this turn: none. Revised c1 and c2 under their original IDs; no open leads. No unread assigned patch scope. No tests, builds, reproductions or checkout edits.\n\nc1 synthesis: checked the production per-record adoption entry points for initial scan, retry and interrupted-start settlement. Every readable adoption requires exact session/tab/role matching; retry installation preserves cell/handle identity. Read actual ordering and future-stamp assertions, plus the registry test that excludes an agent and flags duplicate ids. Recorded that registry.tabs is not the production per-record adoption caller, so its test is not a direct oracle for every names_tab rejection. Removed split-pane and independent-marker mechanics are obsolete, while ordering and agent exclusion remain necessary. No previously tested host behavior was shown to lose an oracle through this deletion. The potential highest wrong-tab-close loss-of-work consequence remains explicit for the independent check; no parent drop acceptance claimed.\n\nc2 synthesis: confirmed SessionEntry and the tab cells hold the runtime independently of attachments, and input-pump teardown is in-process work with no external-reader reap role. Reviewed actual host retry schedule and tests: attempts are retained across success, and tab metadata/count survives recovery and the agent restart window. The removed sink healthy-reset expectation is not the current host recovery policy. Caller supplied g118/g120 corroboration; the checked pinned source remains the basis. This is narrower than certifying every reconnect, recovery or cancellation case.\n\nInterface assumptions resolved: viewer reconnect uses the existing per-host reader; tab adoption enforces role/session/id at all checked entry points. Candidate proposals remain pending independent parent handling. Next action: await the caller's next synthesis/discovery or delivery instruction; this turn performs no additional discovery pass.\n\n## Turn 3: separate discovery pass complete\n\nTurn count: 3 (initial 1, synthesis 1, discovery 1). Discovery-pass count: 1. Result: empty; nothing new found. New verified IDs: none. New unverified-after-investigation IDs: none. Open lead IDs: none. No finding/candidate revisions this turn; c1/c2 and their original consequences/proposed-drop bases remain unchanged, with no accepted parent drops.\n\nRead discovery-neighbours.json completely in bounded line ranges 1–150, 151–220, 221–290, 291–360, 361–430, 431–500, 501–570 and 571–639 before the new source search. Interface synthesis found no pending question or novel source premise in the assigned slice. In particular, the supplied retirement, guarded-Delete, test-fixture and other groups' test-oracle records were context for novelty, not adopted as new local findings or treated as permission to expand this assignment.\n\nNew search beyond the established tab identity/sink ownership checks: re-enumerated every deleted test/helper contract in the assigned packet; checked the deletion's retained lease-test boundary against parent and reviewed source, confirming both lease truth-table and per-session displacement tests remain annotated with their assertions; searched reviewed crates/docs/.agents/.github/Cargo.toml for the removed test names, fake-sink helpers and sink registry types, with no matches; separately checked the retained terminals module for advance_until, DropFlag, sink/fake helpers and their old atomic/oneshot/mutex scaffolding, with no matches. These checks supplied no surviving stale reference, broken retained helper dependency or lost retained-test annotation caused by this slice. They are not a certification of unrelated comments or every repository test oracle.\n\nPinned-range check: terminals.rs path history contains four selected commits (04d85f0c98a9b635709d00b056719a0baa7fd3fc, 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513, dbfc69751215dbf15e1d31d5bed73c3754c4ebc4, 1ed482dde220452e424973faf38a5e1318986333); the assigned reviewed-commit file has an empty diff to pinned tip. No new attribution concern was retained; the charter's full-range requirement is not replaced by an immediate-parent-only inference.\n\nNo unread assigned scope. All new results are source checks, not observed runtime behavior. No runtime tests, builds, reproductions, live-install actions or checkout changes. Next action: await caller's next instruction.\n"
+}

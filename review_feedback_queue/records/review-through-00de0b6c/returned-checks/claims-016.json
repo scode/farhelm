@@ -1,0 +1,193 @@
+[
+  {
+    "key": "g028/l3",
+    "latest_line": 11,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "seal-finisher-stale-pending-snapshot-admission",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The automatic finisher can consume an old Pending snapshot after the direct attempt records Failed. Mutual exclusion does not revalidate eligibility. This establishes an unsolicited retry and replacement or loss of its failure display, conditionally by source; no runtime occurrence was observed. Destruction of this permanently sealed environment was already authorized, so no additional user-work loss is established.",
+    "checks": [
+      "222bf6253bcd168db04bcbb1df20180c88306998:crates/farhelm-helm/src/sessions/sandbox.rs:257-260,281-304,344-359: direct Delete writes Pending before awaited cleanup and Failed afterward; the finisher snapshots Pending IDs then awaits each sequentially; finish_seal acquires a provisioning lock but does not inspect current seal state.",
+      "Same revision:crates/farhelm-helm/src/manager.rs:2610-2619,2628-2651,2669-2679,2711-2718: note_sealed preserves Failed, but sealed_attempt overwrites it with Pending; sealed_pending filters only while constructing its Vec; Failed supplies the displayed reason.",
+      "Same revision:crates/farhelm-helm/src/hosts.rs:1450-1471,1506-1545: the provider-error branch returns while retaining the host and releasing its hold. The provisioning guard is passed by value into cleanup, so outcome settlement outside that call also needs ordering with subsequent admission.",
+      "A two-host snapshot [A,B] supplies the schedule: automatic cleanup waits for A while a direct B attempt changes Pending to Failed; B's freed lock then permits the old snapshot to attempt B again. No overlapping provider attempts are required. A normal sequential single-host failure remains excluded from new snapshots.",
+      "git log 222bf625..00de0b6 for sandbox.rs, manager.rs and hosts.rs returns only f560058da19e02716e6f943883a9508b447aff4e, whose relevant change removes unrelated test-fixture fields. No repair in the reviewed interval was identified.",
+      "The supplied adjacent g027/l4 describes missing failure settlement in ordinary Hosts removal. hosts.rs:1393-1401,1422-1437 directly await forget_host_locked, unlike sandbox.rs's wrapper. That is a different cause; correct settlement alone does not fix stale automatic admission. No exact alias is proposed."
+    ],
+    "coverage_checked": [
+      "SPEC.md:1509-1548 and SPEC_impl.md:6106-6158 (current recording main): destruction after observing a seal is intended, but the failure and Retry must remain visible. The general automatic-finishing language does not explicitly accept retrying a correctly settled Failed record from an older Vec. At reviewed 222bf625, SPEC_impl.md:6639-6649 states the same failure-retention contract.",
+      "TODO.md:24-27: Planned is empty. Searches of plans/queue for finisher, sealed, failed destruction and retry-delete found the environment-agent-operations design; plans/REPORTS.md:28 marks that plan landed. No unlanded repair of stale admission was found.",
+      "BUGS.md has only the SSH-transfer helper hang, unrelated to seal eligibility. Searches of review_feedback_queue/INDEX.md and matching queue text found no seal-finisher item. Active TRIAGE_OUTCOMES.md has no matching seal failure/retry decision; the archive was not read.",
+      "FILTER.md: the rare-glitch filter does not clearly cover the whole consequence, because the stale entry performs another provider destruction rather than only losing a diagnostic. Other filters' required triggers do not match. Retain rather than extend a filter by analogy."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No missing premise for the conditional control-flow claim. Actual provider failure and the stated scheduling interleaving were not reproduced; frequency and additional material harm remain unmeasured.",
+    "original_stronger_consequence": "The histories consistently alleged unexpected automatic retry and a disappearing or changed failure/Retry display. They explicitly denied newly unauthorized destruction or additional work loss; no highest consequence was withdrawn or lowered.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Record the narrow retry-policy and diagnostic defect, with the two-host or equivalent scheduling condition and already-authorized-destruction limitation. Fix automatic admission under the provisioning lock and order eligibility with result publication."
+  },
+  {
+    "key": "g028/c4",
+    "latest_line": 10,
+    "recommendation": "refuted",
+    "bucket": "highest",
+    "underlying_key": "environment-delete-rendered-scope-binding-hypothesis",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The checked scope helper and immediate row/header consumers bind dispatch to the answered question's lane. A later host connection refresh cannot change Session consent into Whole consent on these paths. This is a narrow source refutation, not acceptance of broader destruction and not a judgment about other lifecycle questions.",
+    "checks": [
+      "2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa:crates/farhelm-ui/src/sandbox_sessions.rs:169-182: for_host computes scope and with_scope replaces it explicitly. list/row.rs:1171-1176 and session_view.rs:1973-1977 construct the value during rendering.",
+      "Same revision:list/shared.rs:64-82,134-148: environment Delete always asks; question() picks the opened lane and answered() derives the actual scope from that lane, overriding refreshed environment scope.",
+      "Same revision:list/view.rs:3287-3300: the row callback consumes the exact supplied Delete token and uses token.key().answered(environment). session_view.rs:2071-2087,2790-2800: header wording and dispatch both use the drawn shown_delete key, consuming that exact token before dispatch.",
+      "This refutes only the proposed refresh-driven widening through EnvironmentDelete/DeleteScope. The separate old-question, Stop/control-ownership and other reviewer-owned paths named in the history were not disposed of. No runtime test was run."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md:1069-1097, Answers bind to what was drawn, requires this render/token binding. SPEC.md:1531-1547 separately requires a warned whole-environment confirmation. These are requirements supporting the source refutation, not acceptance of an unconfirmed wider Delete.",
+      "TODO.md Planned is empty. Plans/queue searches for environment Delete scope, retained snapshots and rendered answers found the landed environment-agent-operations design; plans/REPORTS.md:28 confirms landed status. No pending repair changes this narrow source conclusion.",
+      "BUGS.md does not cover confirmation scope. INDEX.md and queue searches yielded lifecycle/opening-token items about other questions, not this helper's source-refuted refresh hypothesis. Active TRIAGE_OUTCOMES.md searches found no exact decision. No archive was read.",
+      "No FILTER.md rule is used: the hypothesized broader destruction of user-owned sessions/files would exceed the rare-glitch filters."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "The alleged widening would require a shipped answer path that ignores or replaces the displayed question lane; the checked row and header callbacks do the opposite.",
+    "original_stronger_consequence": "A refreshed disconnected-host state could turn a session-only Delete answer into permission to destroy every session and file in the environment. Both history entries retain this hypothetical highest consequence while narrowly refuting its stated mechanism.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Propose a narrowly stated source refutation for the independent drop register. A fresh checker must agree before the parent dismisses the user-work-loss hypothesis; this consultation supplies no authorization to drop it."
+  },
+  {
+    "key": "g028/l5",
+    "latest_line": 13,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "delete-freshness-test-docstring-connected-versus-suspended",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The test docstring says the retained snapshot shows a connected host, but the fixture is Suspended and remains so after the failed read. The distinction explains why the assertion detects unsafe use of retained state. Production behavior and assertions are correct; the defect is the explanatory test contract.",
+    "checks": [
+      "2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa:crates/farhelm-ui/src/sandbox_sessions.rs:593-619: the new docstring says connected, creates HostPhase::Suspended, first expects Whole, records Err, then expects Session.",
+      "Same revision:crates/farhelm-ui/src/hosts.rs:1563-1569,1612-1625: record(Err) keeps the successful snapshot and lookup returns Failed before consulting it. sandbox_sessions.rs:190-203 maps known nonconnected state to Whole, but Failed or connected state to Session. A connected retained fixture would fail to distinguish these mechanisms.",
+      "git diff 2ef10815..00de0b6 for sandbox_sessions.rs is empty. The error was introduced by the reviewed patch and remains at the inclusive tip. No runtime observation is needed to establish the prose/fixture contradiction."
+    ],
+    "coverage_checked": [
+      "SPEC.md:1531-1547 requires Delete not to guess when it cannot ask and requires separate whole-environment warning; SPEC_impl.md:1069-1097 requires drawn-consent binding. Neither accepts a false test-fixture explanation. Root AGENTS.md's Docstrings on tests supplies the relevant explanatory-documentation requirement.",
+      "TODO.md Planned is empty. Searches of plans/queue for retained snapshot, Delete scope/freshness and the exact file found no unlanded correction of this docstring; the related environment-agent-operations plan is landed per plans/REPORTS.md:28.",
+      "BUGS.md, INDEX.md/matching queue text and active TRIAGE_OUTCOMES.md have no exact connected-versus-suspended test-documentation item. The production-scope refutation g028/c4 is a different claim and does not cover this one. No archive read.",
+      "FILTER.md does not match: this is a stable misleading explanation in committed test source, not a rare triggering event with a self-correcting display or diagnostic. No other filter has the required trigger."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "None for the docstring mismatch. No product deletion failure or ineffective existing assertion is alleged.",
+    "original_stronger_consequence": "The initial lead and final finding both concern misleading test documentation. They expressly preserve correct production behavior and assertions, and allege no destructive route or user-work loss.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Record as a narrow test-documentation correction: name the retained suspended/nonconnected state and explain why trusting it after a failed refresh would widen the proposed scope."
+  },
+  {
+    "key": "g028/c6",
+    "latest_line": 14,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "environment-delete-hidden-shorter-rpc-timeout-hypothesis",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The supervisor client does not impose the suspected nested timeout. Its request waits for the correlated answer or connection loss, leaving the enclosing four-minute bound operative. This says nothing about every provider cleanup's total duration.",
+    "checks": [
+      "222bf6253bcd168db04bcbb1df20180c88306998:crates/farhelm-helm/src/client.rs:3032-3061 documents no request timeout; 3062-3111 reserves writer capacity and awaits the response without a timer. delete_session_or_seal:3961-3989 calls that request directly and explicitly assigns bounding to its caller.",
+      "Same revision:crates/farhelm-helm/src/sessions/sandbox.rs:135-146,221-225 supplies the 240-second reply timeout. Supervisor service/core.rs:471-482 supplies the distinct 30-second pre-decision admission bound.",
+      "2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa:crates/farhelm-ui/src/api/sandbox_sessions.rs:131-139,214-226 chooses the page's 540-second environment-session budget or 180-second whole-environment budget explicitly. These do not reveal a shorter client RPC timer. No execution was performed."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md:6137-6146 describes the helm deadline and unasked follow-up, and SPEC.md:1531-1547 requires the separate wider warning. The candidate is refuted by the actual client path, not by an accepted spurious timeout.",
+      "TODO.md Planned is empty. Plans/queue searches for deadlines and environment Delete found the landed environment-agent-operations rule, not a pending nested-timeout repair; plans/REPORTS.md:28 confirms landed status.",
+      "BUGS.md's SSH-transfer output hang is a different operation. INDEX.md/matching queue text and active TRIAGE_OUTCOMES.md searches found no exact shorter supervisor-Delete RPC timer claim. Archive not read. No FILTER.md dismissal is proposed."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "The proposed shorter timeout does not exist in the checked client call chain. No broader timing claim about provider destruction is settled.",
+    "original_stronger_consequence": "A hidden shorter RPC timer might incorrectly report a slow connected Delete as unanswered and unnecessarily offer whole-environment deletion. The history states that this wider action remains separately confirmed and establishes no unauthorized loss.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Narrow source refutation of the nested-timeout mechanism. Conservatively include it in the independent drop register because the original follow-up concerns destructive environment scope, even though the record's established hypothetical impact was only spurious failure/follow-up."
+  },
+  {
+    "key": "g029/f1",
+    "latest_line": 3,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "bulk-delete-notice-false-pass-before-second-reply-hypothesis",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The row-disappearance implication is unsound, but the separate persistent-notice assertion prevents the alleged early false pass. The first count is published before the second Delete starts; this fixture keeps its host present and connected, so only the later Delete result retires that count in this sequence. Keep the withdrawal and distinguish the true comment defect g029/f2.",
+    "checks": [
+      "2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa:e2e/tests/tensorlake-sandbox-sessions.spec.ts:704-725 does real cleanup before mock fulfillment; :929-964 sends both Deletes and finally asserts no .delete-notice. Row disappearance alone therefore is not a reply-completion witness.",
+      "Same revision:crates/farhelm-ui/src/list/lifecycle.rs:123-150 polls each host's work sequentially. list/view.rs:3004-3014 publishes the first remaining count inside that completion before the next same-host work is polled; its later result publishes the absent count.",
+      "Same revision:list/view.rs:492-506,605-612 only retires the host-tagged count on an absent or being-deleted host. The test's ownedHost(page,request,true,false) implementation (:26-85) retains the real connected SSH host while presenting ownership/kind, and the bulk test never calls present or remove. fleet.ts:663-699 replaces the real event feed. Ordinary cleanupSession(:576-589) deletes the session, not that host.",
+      "The sound final notice assertion does not repair the misleading comment at :959-962. That is a separate retained claim, not an alias or revival of the false-pass hypothesis. No reproduction or timing observation was made."
+    ],
+    "coverage_checked": [
+      "SPEC.md:1524-1529,1543-1548 describes remaining-session reporting and per-session bulk Delete. SPEC_impl.md's Environment Delete and the seal and Testing sections contain no accepted false-pass policy. The disposition rests on source ordering, not coverage.",
+      "TODO.md Planned is empty. Searches of plans/queue for bulk Delete, stays/count and reply handling found the landed environment-agent-operations work and nonblocking-session-actions selection/pacing work, not acceptance of an early notice false pass.",
+      "BUGS.md and INDEX.md/matching queue text have no exact notice-retirement oracle item. Active TRIAGE_OUTCOMES.md searches found no exact bulk-notice decision. Related cleanup or sort-save items have different triggers/consequences. No archive read; no filter applied."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "An early false pass would require clearing the first count independently before the second result. The checked fixture supplies no absent/deleting-host transition and no count-dismissal action.",
+    "original_stronger_consequence": "The original lead suspected that absent notice could be accepted before both mocked Delete replies were processed, leaving notice retirement untested. Lines 2 and 3 withdraw that suspected test false pass after source ordering checks, while preserving the false comment as a separate issue. No security or user-work consequence was alleged.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Preserve the source-refuted candidate and its withdrawal in the parent's record history. Do not queue a test false-pass defect, and do not use this refutation to discard g029/f2."
+  },
+  {
+    "key": "g029/f2",
+    "latest_line": 5,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "bulk-delete-test-row-disappearance-comment-false-oracle",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The new comment promises that each row leaves only after its own reply is handled. A refresh caused by the first success can observe the second real cleanup before the second mock browser reply is handled. The final notice assertion remains meaningful; this is a false explanation of its row waits.",
+    "checks": [
+      "2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa:e2e/tests/tensorlake-sandbox-sessions.spec.ts:959-962 adds the 'only when its own reply has been handled' explanation. environmentDeletes:719-725 awaits real cleanupSession before route.fulfill.",
+      "Same revision:e2e/tests/helpers/fleet.ts:576-589 stops/deletes via the real API. crates/farhelm-helm/src/sessions.rs:3603-3607 states successful deletion forgets the helm row before answering. list/view.rs:3068-3133 removes the first row and requests an explicit refresh; list/lifecycle.rs:123-150 then allows the second Delete while that independent refresh is outstanding.",
+      "Same revision:list/view.rs:2236-2249 preserves held operation state during absence reconciliation but does not restore missing listing rows; :2310 replaces the listing with the fetched result. A current accepted read after second real deletion can therefore remove its row before mock-reply handling. No pending-Delete row-retention gate appears in this commit path.",
+      "git diff 2ef10815..00de0b6 for this spec is empty. The comment defect is in range and persists. g029/f1's first-count publication and final persistent-notice witness remain valid; no existing-test false pass or product Delete error is asserted."
+    ],
+    "coverage_checked": [
+      "SPEC.md:1524-1529,1543-1548 and SPEC_impl.md's Environment Delete and Testing sections do not accept the false row/reply equivalence. Root AGENTS.md requires comments to teach actual constraints; this comment instead overstates one.",
+      "TODO.md Planned is empty. Plans/queue searches for bulk Delete, reply handling and the exact test found the landed environment-agent-operations design and other selection/pacing rules, not an unlanded correction of this oracle comment.",
+      "BUGS.md has no test-comment acceptance. INDEX.md/matching queue text and active TRIAGE_OUTCOMES.md searches found no exact row-disappearance comment item. Existing bulk sort-save or reply-witness issues are different causes. g029/f1 is a withdrawn false-pass hypothesis, not duplicate coverage. Archive not read.",
+      "FILTER.md does not cover a stable source comment that teaches a false invariant. Actual adverse response ordering being unmeasured does not make the incorrect categorical 'only' promise a rare self-correcting diagnostic."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "None for the source/ordering contradiction. Actual incidence was not measured. No assertion ineffectiveness or product failure is inferred.",
+    "original_stronger_consequence": "The named f2 history consistently confines the claim to misleading maintainer documentation. f1's earlier suspected false pass is explicitly preserved as refuted and is not silently adopted here.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Record the narrow comment correction. Explain the persistent notice as the completion witness, or add explicit response-completion gates if the row waits themselves are meant to establish that fact."
+  },
+  {
+    "key": "g029/f3",
+    "latest_line": 8,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "browser-cleanup-drains-real-api-route-before-request-client-lifetime",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "If the real API cleanup awaited by the mock Delete stays pending through the test deadline, sequential route draining delays independent session and preference cleanup until their request fixture is disposed. A rejected step is caught, but a still-pending step is not bounded. This is a verified conditional test-isolation path; no timeout, leak or frequency was observed.",
+    "checks": [
+      "2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa:e2e/tests/tensorlake-sandbox-sessions.spec.ts:719-725 records sent then awaits real cleanup before fulfillment; :759-767 creates independent kept/gone sessions and changes a shared preference. :785-786 can reach the sent witness while the notice is still waiting. finally:790-795 drains all routes before session cleanup and preference restoration. :835-839 and :965-969 have the same ordering.",
+      "Same revision:e2e/tests/helpers/drained-route.ts:39-43 waits for every entered rewrite before unroute; helpers/cleanup.ts:6-13 awaits cleanup steps sequentially. allSettled catches rejection but cannot settle an unanswered rewrite. fleet.ts:576-589 and :1108-1131 use the same request fixture for session deletion and restoration.",
+      "Same revision:e2e/package-lock.json pins Playwright 1.64.0. playwright.config.ts:119-148 keeps a shared stack and 60-second test deadline, with no actionTimeout. evidence.ts extends observation fixtures without overriding the test request fixture; the test file has no timeout/request override.",
+      "Official Playwright v1.64.0 source was retrieved, without execution: packages/playwright/src/index.ts request fixture creates/disposes its API context and _setupContextOptions sets _defaultContextTimeout=actionTimeout||0; packages/playwright-core/src/client/fetch.ts:newContext installs that default and fetch forwards TimeoutSettings.timeout. timeoutSettings.ts:_timeout preserves explicit zero. The repo's real cleanup calls therefore have no shorter independent deadline.",
+      "Official v1.64.0 packages/playwright/src/worker/timeoutManager.ts:withRunnable uses Promise.race; worker/workerMain.ts runs test-scoped fixture teardown after the test wrapper finishes. index.ts's request fixture disposes its context then. server/fetch.ts:_disposeImpl marks it disposed and emits Dispose; outstanding requests reject/destroy on that event, and _sendRequest rejects later requests on the disposed context. Disposal may release the blocked route, but independent cleanup using that same client is then too late.",
+      "Primary URLs checked: https://raw.githubusercontent.com/microsoft/playwright/v1.64.0/packages/playwright/src/index.ts ; https://raw.githubusercontent.com/microsoft/playwright/v1.64.0/packages/playwright/src/worker/timeoutManager.ts ; https://raw.githubusercontent.com/microsoft/playwright/v1.64.0/packages/playwright/src/worker/workerMain.ts ; https://raw.githubusercontent.com/microsoft/playwright/v1.64.0/packages/playwright-core/src/client/fetch.ts ; https://raw.githubusercontent.com/microsoft/playwright/v1.64.0/packages/playwright-core/src/client/timeoutSettings.ts ; https://raw.githubusercontent.com/microsoft/playwright/v1.64.0/packages/playwright-core/src/server/fetch.ts . Prefer symbol references because rendered web-source and raw-source line numbering differed.",
+      "The new test/helper use is introduced by 2ef10815 and git diff to 00de0b6 for the affected spec is empty. This does not assert an indefinite runner hang, persistence past outer stack reclamation, or live-install/user-work loss. The record's supplied g069/l2 is an external same-pattern reconciliation hint, not an independently checked alias in this batch."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md Testing describes real shared test stacks and fake agents; neither it nor SPEC.md accepts failure to restore independent shared fixture state after an unanswered cleanup request. No exact accepted limitation found.",
+      "TODO.md Planned is empty. Plans/queue searches for cleanupOwnedSteps, environmentDeletes, drainedRoute, route timeout, disposal and client lifetime found no unlanded repair of this dependency. Environment-agent-operations, which added these Deletes, is landed per plans/REPORTS.md:28.",
+      "BUGS.md's SSH-transfer helper hang is unrelated. INDEX.md and matching files were checked: route-retirement-failure-skips-owned-session-cleanup.md addresses rejecting prerequisites before cleanup and explicitly disclaims recovery with a closed request context; the new call sites already use its suggested independent-step helper, yet an unsettled step still loses client lifetime. held-preference-reply-blocks-fixture-restoration.md concerns a separate never-settled post-fulfillment gate in popover-template-movement, not real API cleanup and disposal. replace-cleanup-snapshots-owned-ids-before-drain.md concerns enumerating IDs too early. manual-unroute-leaves-listing-callback-running.md concerns missing drain. None exactly covers this trigger/cause/scope.",
+      "TRIAGE_OUTCOMES.md:1184-1196 chooses observed-flake/trivial-fix treatment for the held-preference gate in four named tests. The same consequence family is insufficient to extend that decision to this request-client lifetime defect. No archive read. post-clone-test-save-overtakes-restoration concerns a late write overtaking restoration, also distinct.",
+      "FILTER.md rare-glitch rules do not cover shared sessions/preferences left behind for later tests; that state needs explicit cleanup/reset and is not merely a transient display or safely retried operation. Other filters' triggers do not match."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No missing premise for the conditional lifetime/order mechanism. The real stop/delete must remain unanswered through the test deadline and fixture disposal; this was not reproduced or frequency-measured. Promptly settled requests clean up normally, and outer stack reset/shutdown bounds the residue.",
+    "original_stronger_consequence": "The lead and both findings consistently allege only retained maintainer-owned test sessions/preferences and shared-stack contamination. They explicitly exclude an indefinite runner hang, live-install effects, user-work loss and catastrophic tooling harm. No higher consequence was lowered.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain this distinct client-lifetime boundary. It is a useful extension to the cleanup-prerequisite family, but not exact coverage by its rejecting-step item: cleanupOwnedSteps alone cannot fix an unsettled route. Reconcile the underlying key with the parent's g069/l2 without adopting an uninspected external record as an alias. Bound/abort route-owned API work while an independent cleanup client remains alive, or give teardown an independently owned client."
+  }
+]

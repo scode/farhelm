@@ -1,0 +1,95 @@
+[
+  {
+    "key": "g023/f5",
+    "latest_line": 20,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "connected-hook-extraction-loses-partial-lease-ownership",
+    "aliases": [],
+    "target_queue_file": "review_feedback_queue/credential-push-misses-retired-lifetime.md",
+    "why": "The narrow extraction concern is source-refuted: cancellation drops partial hook ownership, and relay spawning has no await before returning the owning lease. This is not a guarantee that all credential transport stops on lease Drop. The independent pusher can miss a reusable count's 1 -> 0 -> 1 transition; that residual has the same root as the existing high-priority queue item. Extend that item with the newly added Podman caller and current references, rather than recording a second defect. Bucket other applies only to the refuted extraction candidate, with no established user-visible defect; the existing residual remains high. This consultation does not authorize the security-relevant drop.",
+    "checks": [
+      {
+        "reference": "g023/findings.jsonl:19-20 in run 9d371ac6-d122-428d-ae90-113dd40439d5",
+        "result": "Read both complete own-ID events. Event 19 already presents a considered-and-refuted candidate, not a verified finding. Event 20 repeats it and adds the active-count-zero branch, parking order and base-to-extraction preservation checks. Neither event reports execution or a separate test-oracle/documentation defect. Preserve the original possible security consequence and the narrow source-refutation scope."
+      },
+      {
+        "reference": "6e423e30068b62c6cfa276c6d720ee35bb70387a..04ffdbb35773cef36e73eb798c005ddbeb9a9de6, manager.rs hunk at old 3754/new 3654; base tensorlake/hosts.rs:85-101; 04ff manager.rs:3591-3602,3647-3667; tensorlake/hosts.rs:157-173",
+        "result": "The changed seam replaces sandboxes.connected(...) with connected_resources(...), retaining the select against next_nudge and the resource binding across serve. Base and extracted Tensorlake hooks both enter the credential lease before awaiting delivery, then retain it while awaiting tunnels. A winning nudge drops the hook future before the loop can acknowledge parked. This is preservation of the assigned extraction, not a new cancellation mechanism."
+      },
+      {
+        "reference": "56659839785691f76da3af5d8f51b511cff4ba8b:environment/mod.rs:393-410; manager.rs:3721-3736; tensorlake/hosts.rs:339-355; environment/podman.rs:1383-1401",
+        "result": "The required hook contract says: 'Cancellation must drop partially acquired leases. Their lifetime covers the hook-to-Connected publication gap and ends before a hold parks.' Both concrete hooks enter before delivery.connect.await and keep the lease through tunnel acquisition. Podman's credential field is initialized before its tunnel-field await; the partially constructed aggregate retains ownership and is dropped on cancellation. ConnectedResources owns both optional leases."
+      },
+      {
+        "reference": "04ff:tensorlake/tunnels.rs:71-79,93-168; 566 and 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:tensorlake/tunnels.rs:71-79,112-182",
+        "result": "The recipe read is awaited before any view registration or worker spawn. The post-read registration/spawn-to-TunnelLease-return region contains no await (the awaits inside the spawned worker do not suspend acquisition). Cancellation while reading has no worker to strand; after spawn the owning lease is returned in the same acquisition poll. Drop aborts the worker, calls client.retire(), removes the host view, and bumps events. At 04ff the relevant no-await region is 109-168, not the later 137-182 numbering."
+      },
+      {
+        "reference": "04ff:provisioning/credential_delivery.rs:199-208,257-270; 566 and 00de:provisioning/credential_delivery.rs:199-208,286-299,330-342,375-406",
+        "result": "Drop synchronously decrements a reusable watch count; enter can raise zero to one and clears binding on that transition. push selects the current zero predicate with biased ordering, including while waiting on the serial lock. This proves release of hook registration, not a latched cancellation event: an unpolled push can still miss 1 -> 0 -> 1. The latest record's 288-299 and 375-406 references fit 566/tip; 04ff enter is 257-270. No blanket before-next-poll guarantee is inferred from the docstring or select."
+      },
+      {
+        "reference": "00de:manager.rs:3868-3879,3925-3945,4438-4452; environment/podman.rs:1381-1399; lib.rs:2460-2476; 566..00de diff of credential_delivery.rs, tensorlake/tunnels.rs and tensorlake/hosts.rs",
+        "result": "The reviewed tip retains the same acquisition select, scope-through-serve ownership and park-after-drop order. Podman's hook is unchanged apart from a two-line offset; Tensorlake, credential delivery and relay implementation have no intervening changes in this interval. Production supplies both providers the same sources.delivery Arc. Podman therefore uses the same existing watch-count cancellation mechanism, rather than a new independent lifetime implementation."
+      }
+    ],
+    "coverage_checked": [
+      {
+        "source": "Current SPEC.md:450-520, especially 469-478; SPEC_impl.md Named credential catalog:5840-5928; Disposable environments:5929-6212; Tensorlake recipe tunnels and unowned sandboxes:6777-6815; historical 566 SPEC_impl.md:6410-6423",
+        "result": "Contracts require connection-scoped leases, final-lease push cancellation and hook cancellation before hold parking. They accept neither lost partial acquisition ownership nor missed-zero pusher cancellation. Refutation rests on source ownership, not accepted behavior. The current environment contract explicitly applies the shared lifecycle to both providers."
+      },
+      {
+        "source": "TODO.md:25-27, Planned",
+        "result": "Empty at recording-time main; no planned coverage. Read as pinned current coverage for this consultation, without fetching or rebasing."
+      },
+      {
+        "source": "plans/queue/INDEX.md; plans/REPORTS.md; focused credential/lease/tunnel/cancellation searches of plans/queue; podman-environments.md:158-175; endpoint-credential-ownership.md:26-76",
+        "result": "The unlanded-plan index is empty. Podman, sandbox sessions and endpoint credential ownership are recorded as landed in REPORTS.md. Their retained plan text is not an unlanded repair covering the pusher race. The credential-ownership plan addresses image/host credential leftovers, not lease cancellation."
+      },
+      {
+        "source": "BUGS.md, full file",
+        "result": "Only the accepted local SSH helper/output-pipe install hang is recorded. It has a different trigger, operation and lifetime; no coverage."
+      },
+      {
+        "source": "review_feedback_queue/INDEX.md, all 2234 lines; credential-push-misses-retired-lifetime.md, full file",
+        "result": "The existing item exactly covers the residual reusable watch-count missed-zero race and its established obsolete-work/reconnect-delay consequence. Its concrete source discussion is Tensorlake-only and predates the Podman integration. Add the new Podman hook/current shared-service references as affected-scope evidence, keeping its high bucket and no-disclosure caveat. It does not establish a separate lost-partial-hook-ownership defect. No exact same-root alias for that refuted extraction hypothesis was found in the index."
+      },
+      {
+        "source": "Active TRIAGE_OUTCOMES.md focused searches, including settings-save-races-final-replacement.md:1756-1784",
+        "result": "No decision accepts partial-hook ownership loss or reusable watch-count cancellation failure. The active settings-save decision concerns an agent edit between digest comparison and remote file replacement; its acceptance does not cover continued obsolete push work after connection retirement. The archive was not opened."
+      },
+      {
+        "source": "review_feedback_queue/FILTER.md, full file",
+        "result": "No full boundary match. The original concern is security-relevant, which the rare-glitch and sub-second-input filters exclude; the residual pusher delay is not established as a rare safe retry/display/diagnostic-only consequence. No filter is proposed."
+      }
+    ],
+    "exact_cover_quotes": [
+      {
+        "source": "review_feedback_queue/credential-push-misses-retired-lifetime.md, TLDR",
+        "quote": "A credential push from an ended host connection can keep running if a replacement connection arrives before the push observes retirement. The new connection then waits behind obsolete transport work, potentially for the SSH operation's budget. No credential disclosure, wrong-machine delivery or loss is established.",
+        "scope": "Exact residual missed-zero race and established consequence; not proof of the extraction's alleged ownership loss."
+      },
+      {
+        "source": "review_feedback_queue/credential-push-misses-retired-lifetime.md, Details",
+        "quote": "Tokio 1.53.2's watch channel retains the latest value, so a push unpolled across `1 -> 0 -> 1` need not observe zero.",
+        "scope": "Existing cancellation limitation remains applicable to the shared delivery service. No external web or runtime verification was used for this consultation."
+      },
+      {
+        "source": "SPEC_impl.md:5905-5912, Named credential catalog",
+        "quote": "Dropping the final lease cancels in-progress pushes before their next transport poll.",
+        "scope": "Required behavior, not an acceptance of the residual defect."
+      },
+      {
+        "source": "SPEC.md:477-478",
+        "quote": "Ending the connected phase cancels its pending pushes before further transport work.",
+        "scope": "Required behavior, not coverage allowing a push to survive a retired lifetime."
+      }
+    ],
+    "missing_premise": "No source path shows the extraction losing ownership of a credential or tunnel lease during hook cancellation. No disclosure, wrong-machine delivery, unauthorized credential selection or user-work-loss route is established for the separate watch-count race; its established consequence remains obsolete work delaying a replacement connection. A command already sent is not rolled back by dropping its awaiting future. No runtime reproduction, scheduling frequency, tests or builds were performed.",
+    "original_stronger_consequence": "Investigated whether moving credential and tunnel acquisition behind the provider hook could leave a credential push or tunnel alive after a connection hold cancels acquisition, including the possible highest/security consequence of an unauthorized credential push surviving withdrawal. Both own-ID events already say that this ownership route is refuted; neither claims that such a security effect occurred. Do not broaden that refutation to all credential-pusher cancellation.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Propose refutation only of a new lost-partial-hook-ownership route in the 04ff extraction and 566 integration, retained through 00de. The original select, lease-before-await acquisition, lifetime-through-serve and no-await relay-spawn handoff remain. Keep the residual watch-count issue in credential-push-misses-retired-lifetime.md; propose a concrete extension citing the Podman connected hook at 566:1383-1401/tip:1381-1399, shared production delivery wiring at tip lib.rs:2460-2476, and current delivery.rs:199-208,286-299,375-406. No new queue file, filter, accepted-behavior dismissal or final independent-drop agreement is proposed.",
+    "new_interface_evidence": "The new Podman connected hook enters the same CredentialDelivery lifetime before either acquisition await (566 environment/podman.rs:1392-1400; tip:1390-1398), and both production providers receive the same delivery Arc (tip lib.rs:2460-2476). This extends the existing missed-retired-lifetime item's concrete affected domain to Podman. It does not establish new disclosure/misdelivery or a missing hook lease."
+  }
+]

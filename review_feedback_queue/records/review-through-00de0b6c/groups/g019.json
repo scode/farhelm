@@ -1,0 +1,576 @@
+{
+  "group": {
+    "id": "g019",
+    "domain": "agent-environment-operations",
+    "purpose": "agent-environment-operations: crates/farhelm-helm/src/agent_requests.rs, crates/farhelm/src/agent_instructions.rs, crates/farhelm/tests/e2e/agent_relay.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g018",
+      "g020",
+      "g021",
+      "g022",
+      "g023",
+      "g024",
+      "g025",
+      "g026",
+      "g027",
+      "g028",
+      "g029",
+      "g041",
+      "g052",
+      "g053",
+      "g054",
+      "g055",
+      "g056",
+      "g057",
+      "g090",
+      "g122",
+      "g123",
+      "g124",
+      "g125",
+      "g126"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00643-000.patch",
+        "ranges": [
+          [
+            1,
+            1363
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/agent_requests.rs",
+        "commit": "12c79f61a627a4241707dad0cf3b55b859d2d4fc",
+        "notes": "patch header; patch character offsets [0,59917)",
+        "lines": 1363,
+        "bytes": 59919,
+        "start": 0,
+        "end": 59917,
+        "original": "[private-run]/prep/originals/00643.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00664-000.patch",
+        "ranges": [
+          [
+            1,
+            50
+          ]
+        ],
+        "original_path": "crates/farhelm/src/agent_instructions.rs",
+        "commit": "190d844e58c96cf197aa838d0b0eea8062f48435",
+        "notes": "patch header; patch character offsets [0,4012)",
+        "lines": 50,
+        "bytes": 4012,
+        "start": 0,
+        "end": 4012,
+        "original": "[private-run]/prep/originals/00664.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00673-000.patch",
+        "ranges": [
+          [
+            1,
+            14
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/agent_requests.rs",
+        "commit": "47f33bbdbd5ff4a6e437e97a800f9083be43096e",
+        "notes": "patch header; patch character offsets [0,621)",
+        "lines": 14,
+        "bytes": 621,
+        "start": 0,
+        "end": 621,
+        "original": "[private-run]/prep/originals/00673.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00689-000.patch",
+        "ranges": [
+          [
+            1,
+            12
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/agent_relay.rs",
+        "commit": "47f33bbdbd5ff4a6e437e97a800f9083be43096e",
+        "notes": "patch header; patch character offsets [0,572)",
+        "lines": 12,
+        "bytes": 572,
+        "start": 0,
+        "end": 572,
+        "original": "[private-run]/prep/originals/00689.patch"
+      }
+    ],
+    "lines": 1439,
+    "bytes": 65124
+  },
+  "records": [
+    {
+      "key": "g019/l1",
+      "owner": "g019",
+      "id": "l1",
+      "domain": "agent-environment-operations",
+      "purpose": "agent-environment-operations: crates/farhelm-helm/src/agent_requests.rs, crates/farhelm/src/agent_instructions.rs, crates/farhelm/tests/e2e/agent_relay.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Check template changes between confinement and create resolution",
+            "location": "crates/farhelm-helm/src/agent_requests.rs:1917",
+            "detail": "Reviewed commit: 12c79f61a627a4241707dad0cf3b55b859d2d4fc (and pending interface check at 190d844e58c96cf197aa838d0b0eea8062f48435). TLDR: investigating whether an environment agent could reach outside its environment when a template changes while its create request is being resolved. Source basis: confine_create reads templates separately from resolve_agent_create; the latter rereads launch_templates at 2373. At 12c79f61 the environment branch at 2394 fixes the actual host to own, and agent_launch::resolve gives templates no known recipes, so no escape established. Need inspect the later environment-launch integration at 190d844e before concluding; this interface adds a second launch route. Contract: SPEC.md Agents and environments says agents there cannot create a new environment or reach another host. Suggested bucket: highest if an authorization escape is established; currently no consequence established. Confidence: uninvestigated lead. proposed_drop: false. possible_cover: none. Could-be-highest: yes. No execution or reproduction performed."
+          }
+        },
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Template rereads do not let confined creates escape",
+            "location": "crates/farhelm-helm/src/agent_requests.rs:2394",
+            "detail": "Reviewed commit: 12c79f61a627a4241707dad0cf3b55b859d2d4fc; interface also checked at 190d844e58c96cf197aa838d0b0eea8062f48435. TLDR: considered whether a concurrent template edit could let an agent create a session outside its disposable environment. The suspected security consequence is refuted by independent routing checks. At 12c79f61, resolve_agent_create:2394–2403 always chooses own for Environment scope; agent_launch::resolve:179–184 supplies empty known_recipes/known_places. At 190d844e, create_for_agent:1997 explicitly requires scope == Fleet before the environment-launch route; resolve_agent_create:2480–2483 rejects a remaining recipe target with target.is_none(), and :2495–2504 again forces own for Environment scope. A changed installed-host template may evade the earlier template-field refusal but cannot redirect the actual launch. Contract: SPEC.md Agents and environments: 'It cannot reach another host any further than it could from anywhere else, change templates or hosts, or create a new environment.' Suggested bucket for the suspected authorization escape: highest; no escape is established. Could-be-highest: yes, original concern preserved for independent check. Confidence: confirmed source refutation. proposed_drop: source refutation by the scope == Fleet gate, target.is_none() guard, and own-host routing described above; not based on specification acceptance. possible_cover: none. No runtime execution or reproduction performed. Revises l1 from lead to candidate; no unresolved premise remains for the security consequence."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Template rereads do not let confined creates escape",
+            "location": "crates/farhelm-helm/src/agent_requests.rs:2394",
+            "detail": "Reviewed commit: 12c79f61a627a4241707dad0cf3b55b859d2d4fc; interface also checked at 190d844e58c96cf197aa838d0b0eea8062f48435. TLDR: considered whether a concurrent template edit could let an agent create a session outside its disposable environment. The suspected security consequence is refuted by independent routing checks. At 12c79f61, resolve_agent_create:2394–2403 always chooses own for Environment scope; agent_launch::resolve:179–184 supplies empty known_recipes/known_places. At 190d844e, create_for_agent:1997 explicitly requires scope == Fleet before the environment-launch route; resolve_agent_create:2476–2479 rejects a remaining recipe target with target.is_none(), and :2495–2504 again forces own for Environment scope. A changed installed-host template may evade the earlier template-field refusal but cannot redirect the actual launch. Contract: SPEC.md Agents and environments: 'It cannot reach another host any further than it could from anywhere else, change templates or hosts, or create a new environment.' Suggested bucket for the suspected authorization escape: highest; no escape is established. Could-be-highest: yes, original concern preserved for independent check. Confidence: confirmed source refutation. proposed_drop: source refutation by the scope == Fleet gate, target.is_none() guard, and own-host routing described above; not based on specification acceptance. possible_cover: none. No runtime execution or reproduction performed. Revises l1 from lead to candidate; no unresolved premise remains for the security consequence. Synthesis revision: the same safety gates remain at 47f33bbdbd5ff4a6e437e97a800f9083be43096e: agent_requests.rs:526–530 refuses explicit CreateEnvironment for confined scope, :1997–2011 gates template environment launching on Fleet, :2476–2479 rejects any recipe target reaching ordinary create, and :2495–2503 selects own for a confined ordinary create. Corrected the earlier recipe-target guard line reference after a numbered read at 190d844e. Also checked the launch contract and caller at 190d844e: LaunchEnvironment is passed to approved with own-host eligibility false at :4493 onward; the exact precomposed request is passed to the owned task after approval. No route through template reads or direct recipe creation bypasses confinement. No remaining premise; source analysis only."
+          }
+        }
+      ],
+      "latest": {
+        "line": 5,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l1",
+          "state": "open",
+          "summary": "Template rereads do not let confined creates escape",
+          "location": "crates/farhelm-helm/src/agent_requests.rs:2394",
+          "detail": "Reviewed commit: 12c79f61a627a4241707dad0cf3b55b859d2d4fc; interface also checked at 190d844e58c96cf197aa838d0b0eea8062f48435. TLDR: considered whether a concurrent template edit could let an agent create a session outside its disposable environment. The suspected security consequence is refuted by independent routing checks. At 12c79f61, resolve_agent_create:2394–2403 always chooses own for Environment scope; agent_launch::resolve:179–184 supplies empty known_recipes/known_places. At 190d844e, create_for_agent:1997 explicitly requires scope == Fleet before the environment-launch route; resolve_agent_create:2476–2479 rejects a remaining recipe target with target.is_none(), and :2495–2504 again forces own for Environment scope. A changed installed-host template may evade the earlier template-field refusal but cannot redirect the actual launch. Contract: SPEC.md Agents and environments: 'It cannot reach another host any further than it could from anywhere else, change templates or hosts, or create a new environment.' Suggested bucket for the suspected authorization escape: highest; no escape is established. Could-be-highest: yes, original concern preserved for independent check. Confidence: confirmed source refutation. proposed_drop: source refutation by the scope == Fleet gate, target.is_none() guard, and own-host routing described above; not based on specification acceptance. possible_cover: none. No runtime execution or reproduction performed. Revises l1 from lead to candidate; no unresolved premise remains for the security consequence. Synthesis revision: the same safety gates remain at 47f33bbdbd5ff4a6e437e97a800f9083be43096e: agent_requests.rs:526–530 refuses explicit CreateEnvironment for confined scope, :1997–2011 gates template environment launching on Fleet, :2476–2479 rejects any recipe target reaching ordinary create, and :2495–2503 selects own for a confined ordinary create. Corrected the earlier recipe-target guard line reference after a numbered read at 190d844e. Also checked the launch contract and caller at 190d844e: LaunchEnvironment is passed to approved with own-host eligibility false at :4493 onward; the exact precomposed request is passed to the owned task after approval. No route through template reads or direct recipe creation bypasses confinement. No remaining premise; source analysis only."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g019/findings.jsonl",
+        "id": "l1",
+        "line": 5,
+        "disposition": "under-investigation",
+        "group": "g019-l1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-009",
+          "key": "g019/l1",
+          "latest_line": 5,
+          "recommendation": "refuted",
+          "bucket": "highest",
+          "underlying_key": "confined-agent-template-reread-host-escape",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "A template edit between the initial confinement check and resolution cannot select another actual host or the environment-launch route. The security withdrawal requires an independent drop check; this consultation is not that check.",
+          "checks": [
+            "12c79f61a627a4241707dad0cf3b55b859d2d4fc, agent_requests.rs:2372-2403: templates are reread, but Environment scope chooses own after resolution rather than the template host.",
+            "190d844e58c96cf197aa838d0b0eea8062f48435 and endpoint 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, agent_requests.rs:1997-2008: recipe-template environment launching requires Fleet scope. Lines 2476-2479 reject any recipe target entering ordinary create, and 2495-2503 force a confined create onto own.",
+            "47f33bbdbd5ff4a6e437e97a800f9083be43096e, agent_requests.rs:514-530: direct CreateEnvironment is among verbs requiring Fleet admission. No explicit recipe-verb bypass is established.",
+            "190d844e, agent_requests.rs:4493-4548: LaunchEnvironment goes through its direct-Allow card with own-host eligibility false; the precomposed request then enters the owned launch task. This is a separate launch contract, not authority conferred by rereading a template.",
+            "The earlier template-field refusal can be bypassed by a concurrent template change without redirecting the actual confined create. No runtime escape was reproduced."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:4253-4306 and SPEC_impl.md:6167-6210 were read: agents inside an environment may not reach another host or create a new environment, and shared scope checks govern routing. This is a required boundary, not spec acceptance of an escape.",
+            "TODO.md Planned is empty; BUGS.md has no accepted template/confinement escape.",
+            "plans/queue searched for confinement/template rereads and environment-agent operations. The unlanded index is empty; retained environment-agent-operations.md repeats the own-environment rule rather than accepting this suspected escape or scheduling a remaining fix.",
+            "Queue index/files and active TRIAGE_OUTCOMES.md searched for confined creates, template rereads, recipe placement and authorization escape. No exact coverage, existing same-root item or alias found. Archive not read.",
+            "FILTER.md read. A security/trust-boundary consequence is outside its general rare-glitch filters. No filter is proposed."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No shipped path that routes a confined create beyond own, or admits it to environment creation, was established. Those would be needed to restore the original security claim.",
+          "original_stronger_consequence": "A concurrent template edit could let an environment agent create outside its environment, crossing the authorization boundary. The lead and subsequent withdrawal both identify this as potentially highest. All assessments were source-only.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Propose source refutation of the security route through the independent Fleet gate, recipe-target refusal and actual own-host selection. Keep the original highest consequence in the drop register; no parent drop decision inferred."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-009.json",
+          "key": "g019/l1",
+          "proposal": "claim-checks/claims-009/result.json",
+          "parent_proposal": "source-refuted-confined-routing",
+          "final_independent_gate": "required-before-security-withdrawal",
+          "reason": "Parentreadfull009. Concurrenttemplatereadcanalterearlierfieldcheckbut actualEnvironmentcreatesforceownhostafterresolver, recipeordinarycreaterejected, recipeenvironmentlaunch/directverbrequiresFleet. IndependentdirectAllowcardnotauthorityfromreread. Refutescross-environmentsecurityroute, preservepotentialhighestwithdrawal andlackruntimeescape. Freshcheckactualrouteownselection/Fleetgates ratherthaninputvalidationalone; no broadapprovalcorrectnessclaim."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "confined-agent-template-reread-host-escape",
+        "destination": null
+      }
+    },
+    {
+      "key": "g019/c2",
+      "owner": "g019",
+      "id": "c2",
+      "domain": "agent-environment-operations",
+      "purpose": "agent-environment-operations: crates/farhelm-helm/src/agent_requests.rs, crates/farhelm/src/agent_instructions.rs, crates/farhelm/tests/e2e/agent_relay.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Confined sibling deletion cannot destroy its environment",
+            "location": "crates/farhelm-helm/src/agent_requests.rs:2729",
+            "detail": "Reviewed commit: 12c79f61a627a4241707dad0cf3b55b859d2d4fc. TLDR: checked whether lifting the deletion refusal could let an agent delete its entire sandbox or container and lose the asking session's work. Source refutes this route. resolve_scoped_target:1437–1449 restricts the target host before the delete arm proceeds; the arm at 678–686 rejects self deletion; agent_delete:2724–2735 dispatches Environment scope to sessions::delete_session_within_environment. That helper at sessions.rs:3469–3476 enters delete_session_teardown directly, and :3502–3504 calls client.delete_session_fenced. client.rs:3923–3940 sends ControlMsg::DeleteSession, with the agent-request fence flag true; no environment deletion/provider method is reached. Guard and expected connection checks remain in sessions.rs:3482–3504. Contract: SPEC.md Agents and environments: 'Deleting another session in the environment removes that session only, through the ordinary session teardown, and never the environment: the asking session is still in it, so it cannot be the environment’s last session.' Suggested bucket for the suspected whole-resource loss: highest. Could-be-highest: yes. Confidence: confirmed source refutation. proposed_drop: source route uses session-only DeleteSession and preserves guard/fence checks, rather than calling environment deletion; not specification acceptance alone. possible_cover: none. No runtime execution or reproduction performed. The fixture's host-row survival assertion was inspected as supporting test intent, not treated as observed execution."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Confined sibling deletion cannot destroy its environment",
+            "location": "crates/farhelm-helm/src/agent_requests.rs:2729",
+            "detail": "Reviewed commit: 12c79f61a627a4241707dad0cf3b55b859d2d4fc. TLDR: checked whether lifting the deletion refusal could let an agent delete its entire sandbox or container and lose the asking session's work. Source refutes this route. resolve_scoped_target:1437–1449 restricts the target host before the delete arm proceeds; the arm at 678–686 rejects self deletion; agent_delete:2724–2735 dispatches Environment scope to sessions::delete_session_within_environment. That helper at sessions.rs:3469–3476 enters delete_session_teardown directly, and :3502–3504 calls client.delete_session_fenced. client.rs:3923–3940 sends ControlMsg::DeleteSession, with the agent-request fence flag true; no environment deletion/provider method is reached. Guard and expected connection checks remain in sessions.rs:3482–3504. Contract: SPEC.md Agents and environments: 'Deleting another session in the environment removes that session only, through the ordinary session teardown, and never the environment: the asking session is still in it, so it cannot be the environment's last session.' Suggested bucket for the suspected whole-resource loss: highest. Could-be-highest: yes. Confidence: confirmed source refutation. proposed_drop: source route uses session-only DeleteSession and preserves guard/fence checks, rather than calling environment deletion; not specification acceptance alone. possible_cover: none. No runtime execution or reproduction performed. The fixture's host-row survival assertion was inspected as supporting test intent, not treated as observed execution. Synthesis revision: checked integration at 47f33bbdbd5ff4a6e437e97a800f9083be43096e. agent_requests.rs:2797–2835 still sends confined deletion through delete_session_within_environment; sessions.rs:3658–3685 still uses plain teardown; client.rs:3930–3956 still sends DeleteSession and sets environment_remaining: None in the reply projection. The new seal-aware outcome field therefore neither switches this operation to DeleteSessionOrSeal nor changes its guards. No new finding or remaining premise. Source analysis only."
+          }
+        }
+      ],
+      "latest": {
+        "line": 4,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Confined sibling deletion cannot destroy its environment",
+          "location": "crates/farhelm-helm/src/agent_requests.rs:2729",
+          "detail": "Reviewed commit: 12c79f61a627a4241707dad0cf3b55b859d2d4fc. TLDR: checked whether lifting the deletion refusal could let an agent delete its entire sandbox or container and lose the asking session's work. Source refutes this route. resolve_scoped_target:1437–1449 restricts the target host before the delete arm proceeds; the arm at 678–686 rejects self deletion; agent_delete:2724–2735 dispatches Environment scope to sessions::delete_session_within_environment. That helper at sessions.rs:3469–3476 enters delete_session_teardown directly, and :3502–3504 calls client.delete_session_fenced. client.rs:3923–3940 sends ControlMsg::DeleteSession, with the agent-request fence flag true; no environment deletion/provider method is reached. Guard and expected connection checks remain in sessions.rs:3482–3504. Contract: SPEC.md Agents and environments: 'Deleting another session in the environment removes that session only, through the ordinary session teardown, and never the environment: the asking session is still in it, so it cannot be the environment's last session.' Suggested bucket for the suspected whole-resource loss: highest. Could-be-highest: yes. Confidence: confirmed source refutation. proposed_drop: source route uses session-only DeleteSession and preserves guard/fence checks, rather than calling environment deletion; not specification acceptance alone. possible_cover: none. No runtime execution or reproduction performed. The fixture's host-row survival assertion was inspected as supporting test intent, not treated as observed execution. Synthesis revision: checked integration at 47f33bbdbd5ff4a6e437e97a800f9083be43096e. agent_requests.rs:2797–2835 still sends confined deletion through delete_session_within_environment; sessions.rs:3658–3685 still uses plain teardown; client.rs:3930–3956 still sends DeleteSession and sets environment_remaining: None in the reply projection. The new seal-aware outcome field therefore neither switches this operation to DeleteSessionOrSeal nor changes its guards. No new finding or remaining premise. Source analysis only."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g019/findings.jsonl",
+        "id": "c2",
+        "line": 4,
+        "disposition": "under-investigation",
+        "group": "g019-c2",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-009",
+          "key": "g019/c2",
+          "latest_line": 4,
+          "recommendation": "refuted",
+          "bucket": "highest",
+          "underlying_key": "confined-agent-sibling-delete-whole-environment-loss",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Confined deletion reaches ordinary session teardown and sends DeleteSession, never the environment-delete or delete-or-seal operation. The original whole-environment/work-loss concern remains a highest withdrawal for independent checking.",
+          "checks": [
+            "12c79f61a627a4241707dad0cf3b55b859d2d4fc, agent_requests.rs:1432-1446 scopes the resolved target before routing; 672-686 preserves fleet environment-delete refusal and self-delete refusal.",
+            "47f33bbdbd5ff4a6e437e97a800f9083be43096e, agent_requests.rs:2797-2835 dispatches Environment scope to delete_session_within_environment. sessions.rs:3658-3685 directly uses teardown with connection/guard checks, and client.rs:3930-3956 sends DeleteSession with the request fence and projects environment_remaining: None.",
+            "Reviewed endpoint 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db preserves that route at agent_requests.rs:2798-2835, sessions.rs:3699-3727 and client.rs:3811-3838. The later seal support does not change confined agent deletion into DeleteSessionOrSeal.",
+            "No provider destruction method lies on this inspected confined-delete route. The fixture's host-row survival assertion is intent/source evidence only; no runtime execution was performed."
+          ],
+          "coverage_checked": [
+            "SPEC.md Agents and environments explicitly says sibling deletion removes that session only, never its environment. SPEC_impl.md:6180-6184 explicitly separates session-only confined delete from user environment deletion. These state the contract rather than accept the suspected loss.",
+            "TODO.md Planned is empty. BUGS.md has no accepted confined-delete data-loss route.",
+            "plans/queue searched for sibling deletion, session-only delete and environment lifetime. Its unlanded index is empty; retained environment-agent-operations.md repeats session-only agent deletion and user seal semantics, not a pending fix for the named route.",
+            "Queue index/files and active TRIAGE_OUTCOMES.md searched for confined/sibling delete and whole-environment loss. No exact existing item, decision or same-root alias found. Archive not read.",
+            "FILTER.md read; no filter matches or is proposed for this security/work-loss concern."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "A shipped path from confined sibling Delete into environment sealing/provider destruction would be required for the original whole-resource loss. The checked dispatch instead ends in session-only DeleteSession.",
+          "original_stronger_consequence": "Lifting the prior deletion refusal might let an agent destroy its entire sandbox/container, losing the asking session and its work. The reviewer set this aside as source-refuted and retained highest classification for the suspected loss. Later synthesis rechecked seal integration without claiming runtime validation.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Propose source refutation specifically of whole-environment destruction, supported by target scoping, self-delete refusal, session-only dispatch and guarded/fenced DeleteSession. Independent agreement is still required before any drop."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-009.json",
+          "key": "g019/c2",
+          "proposal": "claim-checks/claims-009/result.json",
+          "parent_proposal": "source-refuted-session-only-confined-delete",
+          "final_independent_gate": "required-before-highest-drop",
+          "reason": "Full009targetscopedbeforeswitch,selfdeleterefused, Environmentbranchusessession-onlyteardown/clientDeleteSessionfence/environment_remainingNone, notDeleteSessionOrSeal/providerdestructionevenafterlatersealchange. Refuteswholeenvironment/askingsessionworkloss route, notallDelete/cleanupcorrectness. Preservehighestoriginalconcernandfreshcheckexactdispatch/providercallabsencewithbounds; sourcefixtureintentnotruntimepass."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "confined-agent-sibling-delete-whole-environment-loss",
+        "destination": null
+      }
+    },
+    {
+      "key": "g019/l3",
+      "owner": "g019",
+      "id": "l3",
+      "domain": "agent-environment-operations",
+      "purpose": "agent-environment-operations: crates/farhelm-helm/src/agent_requests.rs, crates/farhelm/src/agent_instructions.rs, crates/farhelm/tests/e2e/agent_relay.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l3",
+            "state": "open",
+            "summary": "Check whether clone instructions falsely promise copying an environment's directory",
+            "location": "crates/farhelm/src/agent_instructions.rs:197",
+            "detail": "Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435. TLDR: investigating whether agents are told that cloning a disposable-environment session copies the source directory and its local changes, although the new environment should be created from recipe and repository intent. Source basis already read: the changed Clone description qualifies only its required host for ordinary sources, then says cwd/title/source launch inherit; nearby text says 'Clone takes no repository option and copies the source’s existing directory.' The new environment paragraph says clone copies the session into a new sandbox/container but does not clearly state that its disk is not copied. Contract already read: SPEC.md Agents and environments says environment Clone uses source recipe/place with launch and repository intent, 'never a copy of its disk.' Need inspect exact numbered text, the environment clone planner and initial range attribution to distinguish a false promise of content-copying from an accurate statement about path inheritance with a later exception. Suggested bucket: other (agent-facing instructions); no established destructive action or data-loss route. Could-be-highest: no established route. Confidence: lead requiring source/wording checks, no runtime behavior claimed. proposed_drop: false. possible_cover: neighbour records contain no same instruction concern; prohibited coverage sources not read."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l3",
+            "state": "open",
+            "summary": "Full instructions state the environment-clone folder exception",
+            "location": "crates/farhelm/src/agent_instructions.rs:258",
+            "detail": "Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435. TLDR: considered whether the agent-facing instructions promise that cloning a disposable-environment session preserves its old directory or local disk changes. The full wording supplies the new-environment exception, so no false unconditional filesystem-copy promise is established. Exact text at agent_instructions.rs:260–263: ‘A template whose target is a recipe does the same, and clone of a sandbox or container session (with no --host or --cwd) copies it into a new one. These always show the user a card, whatever the host’s settings, and a Tensorlake sandbox bills while it runs. They take no --host or --idempotency-key; the folder is the new home, or --gh clones there.’ This specifically overrides the earlier ordinary-clone cwd inheritance description at :197–201. The phrase about copying a source directory at :201 was already present at the exclusive range base 6e423e30068b62c6cfa276c6d720ee35bb70387a, where ordinary Clone copied the path into launch configuration rather than copying filesystem contents; its use does not by itself promise disk replication. Attribution was checked across the full range using the path log: 12c79f61 adds confined-agent rules; 190d844e adds the environment-clone exception; no later in-range instruction changes. Source corroboration at 190d844e: agent_requests.rs:4294–4305 explicitly documents recipe/place/launch/repository rather than disk copying, and :4360–4387 builds the clone plan from repo and launch without source.cwd. Contract: SPEC.md Agents and environments says environment clone takes source recipe/place with launch and repository intent, never a copy of its disk. This is a documentation assessment based on the full instruction text, not a drop based solely on production correctness. Suggested bucket for the suspected misleading instruction: other. Could-be-highest: no established security or work-loss route. Confidence: confirmed source/wording assessment; no runtime execution. proposed_drop: the explicit later environment-clone exception specifies no --cwd and new-home placement, and the older ordinary-clone wording never specified copying filesystem contents. A clearer explicit statement about not copying disk could improve the wording, but the suspected unconditional promise is not established. possible_cover: none of the supplied neighbour records covers this instruction concern; prohibited coverage sources not read. Revises l3 from lead to candidate; no unresolved premise remains. Original suspected consequence preserved above for independent assessment."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l3",
+            "state": "open",
+            "summary": "Full instructions state the environment-clone folder exception",
+            "location": "crates/farhelm/src/agent_instructions.rs:258",
+            "detail": "Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435. TLDR: considered whether the agent-facing instructions promise that cloning a disposable-environment session preserves its old directory or local disk changes. The full wording supplies the new-environment exception, so no false unconditional filesystem-copy promise is established. Exact text at agent_instructions.rs:260–263: ‘A template whose target is a recipe does the same, and clone of a sandbox or container session (with no --host or --cwd) copies it into a new one. These always show the user a card, whatever the host's settings, and a Tensorlake sandbox bills while it runs. They take no --host or --idempotency-key; the folder is the new home, or --gh clones there.' This specifically overrides the earlier ordinary-clone cwd inheritance description at :197–201. The phrase about copying a source directory at :201 was already present at the exclusive range base 6e423e30068b62c6cfa276c6d720ee35bb70387a, where ordinary Clone copied the path into launch configuration rather than copying filesystem contents; its use does not by itself promise disk replication. Attribution was checked across the full range using the path log: 12c79f61 adds confined-agent rules; 190d844e adds the environment-clone exception; no later in-range instruction changes. Source corroboration at 190d844e: agent_requests.rs:4294–4305 explicitly documents recipe/place/launch/repository rather than disk copying, and :4360–4387 builds the clone plan from repo and launch without source.cwd. Contract: SPEC.md Agents and environments says environment clone takes source recipe/place with launch and repository intent, never a copy of its disk. This is a documentation assessment based on the full instruction text, not a drop based solely on production correctness. Suggested bucket for the suspected misleading instruction: other. Could-be-highest: no established security or work-loss route. Confidence: confirmed source/wording assessment; no runtime execution. proposed_drop: the explicit later environment-clone exception specifies no --cwd and new-home placement, and the older ordinary-clone wording never specified copying filesystem contents. A clearer explicit statement about not copying disk could improve the wording, but the suspected unconditional promise is not established. possible_cover: none of the supplied neighbour records covers this instruction concern; prohibited coverage sources not read. Revises l3 from lead to candidate; no unresolved premise remains. Original suspected consequence preserved above for independent assessment. Citation normalization: source apostrophes in the quoted instruction text are ASCII, restored here; line wrapping alone is removed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 8,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l3",
+          "state": "open",
+          "summary": "Full instructions state the environment-clone folder exception",
+          "location": "crates/farhelm/src/agent_instructions.rs:258",
+          "detail": "Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435. TLDR: considered whether the agent-facing instructions promise that cloning a disposable-environment session preserves its old directory or local disk changes. The full wording supplies the new-environment exception, so no false unconditional filesystem-copy promise is established. Exact text at agent_instructions.rs:260–263: ‘A template whose target is a recipe does the same, and clone of a sandbox or container session (with no --host or --cwd) copies it into a new one. These always show the user a card, whatever the host's settings, and a Tensorlake sandbox bills while it runs. They take no --host or --idempotency-key; the folder is the new home, or --gh clones there.' This specifically overrides the earlier ordinary-clone cwd inheritance description at :197–201. The phrase about copying a source directory at :201 was already present at the exclusive range base 6e423e30068b62c6cfa276c6d720ee35bb70387a, where ordinary Clone copied the path into launch configuration rather than copying filesystem contents; its use does not by itself promise disk replication. Attribution was checked across the full range using the path log: 12c79f61 adds confined-agent rules; 190d844e adds the environment-clone exception; no later in-range instruction changes. Source corroboration at 190d844e: agent_requests.rs:4294–4305 explicitly documents recipe/place/launch/repository rather than disk copying, and :4360–4387 builds the clone plan from repo and launch without source.cwd. Contract: SPEC.md Agents and environments says environment clone takes source recipe/place with launch and repository intent, never a copy of its disk. This is a documentation assessment based on the full instruction text, not a drop based solely on production correctness. Suggested bucket for the suspected misleading instruction: other. Could-be-highest: no established security or work-loss route. Confidence: confirmed source/wording assessment; no runtime execution. proposed_drop: the explicit later environment-clone exception specifies no --cwd and new-home placement, and the older ordinary-clone wording never specified copying filesystem contents. A clearer explicit statement about not copying disk could improve the wording, but the suspected unconditional promise is not established. possible_cover: none of the supplied neighbour records covers this instruction concern; prohibited coverage sources not read. Revises l3 from lead to candidate; no unresolved premise remains. Original suspected consequence preserved above for independent assessment. Citation normalization: source apostrophes in the quoted instruction text are ASCII, restored here; line wrapping alone is removed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g019/findings.jsonl",
+        "id": "l3",
+        "line": 8,
+        "disposition": "under-investigation",
+        "group": "g019-l3",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-009",
+          "key": "g019/l3",
+          "latest_line": 8,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "agent-environment-clone-guide-disk-copy-promise",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The full guide specifically places an environment clone in a new environment's home, with no cwd override, qualifying ordinary clone's directory inheritance. An unconditional promise to preserve source disk/local changes is not established. Because the original suspicion involves copying user work, flag the withdrawal for independent assessment.",
+          "checks": [
+            "190d844e58c96cf197aa838d0b0eea8062f48435, agent_instructions.rs:197-201 describes ordinary inheritance. Lines 258-263 separately describe cloning an environment into a new one with no --host/--cwd and new-home placement. No explicit promise to copy local changes appears.",
+            "Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a, agent_instructions.rs:197-201 already contains the source existing-directory sentence. This old ordinary-clone wording is not itself a newly introduced disk-copy mechanism or promise in this range.",
+            "190d844e, agent_requests.rs:4294-4305 explicitly describes recipe/place/launch/repository, never disk copy. Lines 4360-4387 build the plan from repository and launch, without source cwd. This corroborates the new-home meaning but is not used alone to excuse instruction defects.",
+            "The instruction path history and empty diff from 190d844e through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db confirm the exception remains. Source/wording assessment only; no runtime observation."
+          ],
+          "coverage_checked": [
+            "Both specifications searched/read for environment clone placement and disk semantics. SPEC.md:4291-4292 says recipe/place plus launch/repository intent, never a disk copy; SPEC_impl.md:6189-6192 describes that same plan. Neither accepts a misleading disk-copy promise.",
+            "TODO.md Planned is empty. BUGS.md has no accepted environment-clone instruction defect.",
+            "plans/queue searched for clone disk/folder/instruction semantics. Unlanded index is empty; retained sandbox-sessions/environment-agent-operations plans describe new environments, not a pending guide fix.",
+            "Queue index/files and active TRIAGE_OUTCOMES.md searched for clone disk-copy promises, inherited directories and environment guide exceptions. No exact cover or alias found. clone-read-overwrites-manual-recipe-choice.md was read and concerns GUI draft edits, not instruction wording. Archive not read.",
+            "FILTER.md read. No filter is used; ambiguity about copying user work would not be a rare-diagnostic dismissal."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "The wording could be clearer about disk contents, but no unconditional contents-copy guarantee or shipped destructive action induced by it was established. A path relocating content into a new home would also be compatible with new-home wording, so the refutation is limited to the asserted unconditional promise.",
+          "original_stronger_consequence": "Agents might be told cloning an environment preserves its old directory and local changes even though the clone only recreates recipe and repository intent. History withdrew the unconditional-promise interpretation after reading the specific exception. The reviewer established no destructive action or data-loss route and suggested other throughout.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Propose refutation of the claimed unconditional promise based on the complete agent-facing wording and pre-range attribution of the older sentence. Preserve residual wording ambiguity and let the independent check assess the user-work implication before dropping."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-009.json",
+          "key": "g019/l3",
+          "proposal": "claim-checks/claims-009/result.json",
+          "parent_proposal": "source-refuted-unconditional-clone-promise",
+          "final_independent_gate": "required-before-user-work-withdrawal",
+          "reason": "Full009prebaseordinarycloneinheritsdirectorywordingqualifiedbynewenvironment-specificnonehost/cwd/newhomeparagraph. Noexplicitdisk/localchanges-copyguarantee; actualplanrecipe/place/launch/repositorycorroboratesbutisnotaloneexcuseforfalseguide. Residualnewhomecouldstillcontaincopiedcontentsmean wordingcouldclearer, notunconditionalpromiseproven. Preserveoriginalpossiblelostlocalchanges/relianceinterpretation/noactualdestructiveaction; freshgatejudgefullguide, notlabelproductioncorrectasdocrefutation."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "agent-environment-clone-guide-disk-copy-promise",
+        "destination": null
+      }
+    },
+    {
+      "key": "g019/l4",
+      "owner": "g019",
+      "id": "l4",
+      "domain": "agent-environment-operations",
+      "purpose": "agent-environment-operations: crates/farhelm-helm/src/agent_requests.rs, crates/farhelm/src/agent_instructions.rs, crates/farhelm/tests/e2e/agent_relay.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l4",
+            "state": "open",
+            "summary": "Check whether cross-host no-contact assertions count only list RPCs",
+            "location": "crates/farhelm-helm/src/agent_requests.rs:14042",
+            "detail": "Reviewed commit: 12c79f61a627a4241707dad0cf3b55b859d2d4fc. TLDR: investigating whether the new confinement tests can establish their promised no-supervisor-contact boundary. Source already checked: the changed confined_agents_reach_only_their_own_environment and confined_prompts_reach_only_their_own_environment snapshot h.fleet.host_requests for ordinary hosts and compare afterward. rest_harness.rs:280–289 explicitly counts only ListSessions requests, not arbitrary RPCs. A target-info read or mutation might therefore not change this asserted observable. Need inspect the fixture’s actual RPC handlers and refusal assertions to determine what competing incorrect ordering could pass rather than assuming a test is vacuous. Contract: changed test docs promise refusal before any supervisor contact; test checklist requires an observable distinguishing competing mechanisms. Suggested bucket: other (test evidence), could-be-highest: no established user harm. Confidence: unresolved lead; no runtime observation. proposed_drop: false. possible_cover: neighbour g126/l1 concerns a different reply-cache negative oracle, not these request counters. No prohibited coverage sources read."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l4",
+            "state": "open",
+            "summary": "List counters are limited but the test also checks the exact handler refusal",
+            "location": "crates/farhelm-helm/src/agent_requests.rs:14033",
+            "detail": "Reviewed commit: 12c79f61a627a4241707dad0cf3b55b859d2d4fc. TLDR: considered whether the new cross-host confinement tests are unable to detect wrong supervisor routing because their request counters count only lists. The counters are indeed narrower than the test commentary, but a concrete false pass for the ordinary misrouting path was not established after inspecting the full fixture and assertions. Test facts: rest_harness.rs:280–289 counts only ListSessions; run_standalone at :503–558 acknowledges connection browser setup, replies to ListSessions and ignores other RPCs. The foreign hosts in environment_fleet are standalone, while the asking environment alone has a spliced operation responder. The changed tests at agent_requests.rs:13911–13920 and :14039–14052 both await the handler and demand ErrorKind::Unauthorized with the exact ENVIRONMENT_SCOPE_REFUSAL as well as unchanged counters. A removed/misplaced confinement check that enters the ordinary awaited cross-host PromptTargetInfo path cannot silently succeed on these peers: the request receives no answer and the client returns a transport/timeout outcome rather than the asserted policy refusal. The same exact refusal oracle checks the other verb cases, while ListSessions-based work additionally trips the per-host counter. Thus this is not the undrained-cache-only assertion defect in neighbour g126/l1. The literal counter equality alone does not certify absence of arbitrary non-list or fire-and-forget traffic; the original concern about overclaiming an all-RPC boundary remains bounded here. No shipped non-list fire-and-forget operation before a later scope refusal was found in the assigned code. A deliberately reordered handler that attempted an RPC then discarded its result and returned the scope refusal might pass, but no distinct useful regression of that form was established and this is not reported as a test bug based solely on that hypothetical. Suggested bucket for the suspected test-evidence defect: other. Could-be-highest: no established user impact. Confidence: source/fixture assessment, not runtime observation. proposed_drop: combined awaited-handler and exact-refusal oracle distinguishes ordinary foreign-host dispatch from policy refusal; no source-established false-pass path remains after checking the fixture. This is a test-oracle assessment, not an assertion that production correctness alone excuses a broken test. possible_cover: none; no excluded coverage searches. Revises l4 from lead to candidate. No unresolved premise retained."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l4",
+          "state": "open",
+          "summary": "List counters are limited but the test also checks the exact handler refusal",
+          "location": "crates/farhelm-helm/src/agent_requests.rs:14033",
+          "detail": "Reviewed commit: 12c79f61a627a4241707dad0cf3b55b859d2d4fc. TLDR: considered whether the new cross-host confinement tests are unable to detect wrong supervisor routing because their request counters count only lists. The counters are indeed narrower than the test commentary, but a concrete false pass for the ordinary misrouting path was not established after inspecting the full fixture and assertions. Test facts: rest_harness.rs:280–289 counts only ListSessions; run_standalone at :503–558 acknowledges connection browser setup, replies to ListSessions and ignores other RPCs. The foreign hosts in environment_fleet are standalone, while the asking environment alone has a spliced operation responder. The changed tests at agent_requests.rs:13911–13920 and :14039–14052 both await the handler and demand ErrorKind::Unauthorized with the exact ENVIRONMENT_SCOPE_REFUSAL as well as unchanged counters. A removed/misplaced confinement check that enters the ordinary awaited cross-host PromptTargetInfo path cannot silently succeed on these peers: the request receives no answer and the client returns a transport/timeout outcome rather than the asserted policy refusal. The same exact refusal oracle checks the other verb cases, while ListSessions-based work additionally trips the per-host counter. Thus this is not the undrained-cache-only assertion defect in neighbour g126/l1. The literal counter equality alone does not certify absence of arbitrary non-list or fire-and-forget traffic; the original concern about overclaiming an all-RPC boundary remains bounded here. No shipped non-list fire-and-forget operation before a later scope refusal was found in the assigned code. A deliberately reordered handler that attempted an RPC then discarded its result and returned the scope refusal might pass, but no distinct useful regression of that form was established and this is not reported as a test bug based solely on that hypothetical. Suggested bucket for the suspected test-evidence defect: other. Could-be-highest: no established user impact. Confidence: source/fixture assessment, not runtime observation. proposed_drop: combined awaited-handler and exact-refusal oracle distinguishes ordinary foreign-host dispatch from policy refusal; no source-established false-pass path remains after checking the fixture. This is a test-oracle assessment, not an assertion that production correctness alone excuses a broken test. possible_cover: none; no excluded coverage searches. Revises l4 from lead to candidate. No unresolved premise retained."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g019/findings.jsonl",
+        "id": "l4",
+        "line": 10,
+        "disposition": "under-investigation",
+        "group": "g019-l4",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-009",
+          "key": "g019/l4",
+          "latest_line": 10,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "confined-agent-tests-list-only-no-contact-counter",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The ListSessions counters alone do not establish an all-RPC boundary, but these tests also await each handler and require the exact confinement refusal. That distinguishes ordinary foreign-host dispatch on the configured peers. No concrete false-pass regression was established. The security-boundary test withdrawal is conservatively flagged for independent checking.",
+          "checks": [
+            "12c79f61a627a4241707dad0cf3b55b859d2d4fc, rest_harness.rs:280-289 documents host_requests as ListSessions only. run_standalone at 506-558 acknowledges browser forwarding, serves lists and ignores other operations.",
+            "Same revision, agent_requests.rs:13911-13920 and 14039-14052 await handle and assert Unauthorized plus exactly ENVIRONMENT_SCOPE_REFUSAL, as well as unchanged counters. The prompt test doc at 13992-14005 explicitly describes the no-supervisor-contact boundary.",
+            "Foreign ordinary hosts use standalone peers; only the owned environment has the spliced operation responder. An ordinary awaited PromptTargetInfo dispatch to a foreign standalone peer cannot return the expected scope refusal: no peer reply produces that refusal.",
+            "The exact-refusal oracle is independent evidence beyond the negative counter. It does not prove no non-list/fire-and-forget traffic ever occurs before a later refusal. A handler that attempted such traffic then discarded its outcome could pass, but no distinct useful shipped false-pass route of that shape was established in the named history or checked source.",
+            "This is a test-oracle assessment, not a claim that correct production behavior excuses a test defect. No test or reproduction was run."
+          ],
+          "coverage_checked": [
+            "SPEC.md Agents and environments and SPEC_impl.md:6167-6178 require confinement and refusal without supervisor metadata/acknowledgement. Neither accepts an oracle defect; they supply the boundary the test intends to protect.",
+            "TODO.md Planned is empty; BUGS.md has no accepted no-contact test gap.",
+            "plans/queue searched for confinement test counters, all-RPC observability and supervisor-contact tests. Unlanded index is empty; retained environment-agent-operations acceptance requires coverage but schedules no pending fix of this counter.",
+            "Queue index/files and active TRIAGE_OUTCOMES.md searched for host_requests, ListSessions-only counters, exact refusal and confined cross-host tests. No exact existing coverage or same-root alias found. The supplied history's g126/l1 is outside this batch and was not independently read; no alias to it is asserted. Archive not read.",
+            "FILTER.md read. No filter is proposed for a security-boundary test concern."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "A concrete regression that violates the promised no-contact boundary while still completing with the exact policy refusal remains unestablished. Do not claim the counter equality proves absence of arbitrary RPCs.",
+          "original_stronger_consequence": "Cross-host confinement tests might not detect supervisor contact because their observable counts only lists. The reviewer withdrew the test-bug claim after reading standalone peer behavior and exact awaited refusal assertions, while explicitly preserving the counter's limitation. No runtime security escape or user harm was established.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Propose refutation only of inability to detect ordinary foreign-host dispatch. Preserve the all-RPC observability limitation and missing counterexample; independent check should judge whether that residual limitation merits retention as a test-evidence finding."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-009.json",
+          "key": "g019/l4",
+          "proposal": "claim-checks/claims-009/result.json",
+          "parent_proposal": "source-refuted-bounded-dispatch-oracle",
+          "final_independent_gate": "required-before-security-test-withdrawal",
+          "reason": "Full009ListSessionscounteraloneisnotallRPCproof,butawaitedhandlerexactUnauthorized/ENVIRONMENT_SCOPE_REFUSALplusforeignstandalonepeeronlylists(noPromptTargetInforeply)distinguishesordinaryawaitedforeignhostdispatch; ownedresponderseparate. No concretecurrentfireforget-contact-then-discard/refuseproducerestablished, finiteoraclenotobligedexcludeeveryinventedsideeffect. Preservecounterlimitationanddocno-contactstrength,noallRPCabsencecertification; freshcheckwhethertest-evidenceresidualwarrantsretention. Possible126l1aliasrequiresactualreconciliationlater."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "confined-agent-tests-list-only-no-contact-counter",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review is blocked by invalid manifest ranges. The evidence reader rejects all reads with `Invalid source range`; the four required endpoints exceed the snapshot line counts by one.\n\nDiagnostics and unread scope are recorded in [progress.md]([private-run]/g019/progress.md). No patches were reviewed and no findings were recorded. The manifest needs corrected ranges before review can proceed."
+    },
+    {
+      "turn": 2,
+      "reply": "Completed the initial source-review pass. All corrected mandatory ranges were read; no assigned scope remains unread.\n\nNo reportable findings. Recorded two candidates refuted by source checks (`l1`, `c2`); no open leads. Findings log and progress are updated. No tests or reproductions ran."
+    },
+    {
+      "turn": 3,
+      "reply": "Revised `l1` and `c2` with cross-batch source checks; corrected `l1`’s guard line reference. Both remain refuted candidates. No new findings.\n\nUnresolved lead IDs: none."
+    },
+    {
+      "turn": 4,
+      "reply": "Discovery pass complete. Checked clone instructions against source/contracts and confinement test assertions against fixture behavior. Recorded `l3` and `l4` as candidates proposed for dropping.\n\nNew verified findings: none. New unverified findings: none. Open leads: none. No new reportable defect found. No runtime execution."
+    }
+  ],
+  "progress": "g019: initialized, awaiting initial source review.\nTurn 4 active: separate discovery pass beyond known candidates. Initial delivery and synthesis verified by caller; named pending questions empty. First reading discovery-neighbours.json in bounded chunks, then examine assigned source for new issues. No runtime tests, reproductions or live-install actions.\n\nTurn 4 boundary: separate discovery pass 1 complete. Read the full 320-line discovery-neighbours.json. The first 1–160 read was clipped; repaired with complete bounded reads 1–40, 41–80, 81–120, 121–160, 161–200, 201–240, 241–280 and 281–320. Neighbour records used for novelty/interface context only, not mandatory source credit or independent re-review. Named pending questions remained empty.\nNew search: inspected agent-facing Clone wording in the assigned 190d844e instruction patch against the complete render paragraph, full-range path history, source environment clone planning and its SPEC contract. Appended l3 as lead, then candidate with exact wording/attribution checks; normalized source quote apostrophes in a further revision. Investigated the assigned confinement tests' no-contact assertions against rest_harness counters, standalone and spliced peer behavior, awaited handler refusals and responder observations. Appended l4 as lead then candidate after settling the counter's limited semantics and the independent exact-refusal oracle. These are distinct documentation/test-oracle assessments, not drops based merely on production correctness.\nUseful results: environment clone instructions explicitly forbid --cwd and describe fresh environment placement, so no unconditional disk-copy promise was established. The per-host counter measures only ListSessions; the changed tests also await the handler and demand the exact scope refusal, while foreign standalone peers ignore operation RPCs, so ordinary wrong-host awaited dispatch cannot satisfy that oracle. No useful concrete false-pass route or new product defect was established. The standalone fixture lookup initially used a nonexistent test_support/scripted.rs path; corrected through the pinned tree/definition search to rest_harness.rs. One mistaken numeric source context read reached unrelated existing host-edit tests; it was not reviewed or used to broaden scope.\nDiscovery result: no new reportable finding. New verified finding IDs: none. New unverified-after-investigation finding IDs: none. Newly considered records: l3 and l4, both closed to candidates with source/wording bases retained for parent disposition. Open lead IDs: none. Existing l1/c2 records unchanged this turn. No omitted or unread assigned source; no runtime tests, builds, reproductions or live-install actions. No prohibited queue/coverage sources read and no checkout files changed.\nTurn type/count: separate discovery, turn 4. Completed initial passes: 1; synthesis passes: 1; discovery passes: 1 (empty of reportable findings). Next: return delta and wait for caller. No parent drop/lowering is asserted or accepted here; candidates remain reviewer proposals in the durable record.\nTurn 3 active: later-turn synthesis. Delivery audited by caller. No open leads at entry; revisit cross-batch interactions and independently check candidate premises against later seal/deletion and environment-launch integration. No runtime reproduction requested.\n\nTurn 3 boundary: synthesis complete. Rechecked the later seal-aware deletion integration at 47f33bbdbd5ff4a6e437e97a800f9083be43096e: confined deletes still use session-only teardown, the expected connection check and agent fence; client reply projection deliberately sets environment_remaining to None. Revised c2 under its original ID with these checks and normalized the exact contract quote's apostrophe. Rechecked explicit CreateEnvironment refusal and the separate template environment-launch Fleet gate, residual recipe-target rejection and own-host routing at that revision. Revised l1 under its original ID; corrected its 190d844e recipe-target guard reference to 2476–2479. Checked the environment launch caller's fixed precomposed request, direct-Allow approval with own-host eligibility false, and helm-owned task handoff at 190d844e; no new interaction defect established.\nDelta: revisions to c2 and l1 only; no new finding/candidate/lead IDs, no verified or unverified findings. Open leads: none. Remaining interface assumptions relevant to the assigned changes are settled by source; no runtime behavior claimed. Source reads only, no tests/builds/reproductions. All initial mandatory coverage remains complete with no unread assigned scope.\nTurn type/count: later-turn synthesis, turn 3. Completed initial passes: 1; completed synthesis passes: 1; discovery passes: 0. Next action: return delta and wait for caller's next review phase. Parent retains independent candidate disposition and delivery audit.\nTurn 2 active: coverage repair and initial source review. Corrected brief read in full; manifest endpoints now 1363 / 50 / 14 / 12. Findings log remains empty and intact. Next: mandatory packets and governing contracts. Discovery passes remain 0.\n\nTurn 2 boundary: assigned initial source-review pass complete after coverage repair. Every corrected mandatory range delivered through the evidence reader: 00643 1–200, 201–400, 401–600, 601–800, 801–1000, 1001–1200, 1201–1363; 00664 1–50; 00673 1–14; 00689 1–12. No assigned material remains unread. The earlier invalid-range invocations certify no coverage; the corrected invocations succeeded without altering source snapshots.\nSource/contract checks: at 12c79f61a627a4241707dad0cf3b55b859d2d4fc, read the complete SPEC.md Agent-spawned sessions section including Agents and environments, SPEC_impl.md Agent requests and environments and Permission prompts for agent actions, and GUI answer-binding rule. Checked confinement against every dispatch arm, target reference resolution, own-host create resolution, keyed create request handling, approval/dispatch, session-only deletion and its wire request, and listing filtering/cap semantics in aggregate.rs. At 190d844e58c96cf197aa838d0b0eea8062f48435, checked updated instructions and usage tests against the environment-launch contract, confined-origin environment launch gate, and placed-template resolution. At 47f33bbdbd5ff4a6e437e97a800f9083be43096e, checked the two outcome-struct test adaptations in surrounding context against the outcome field contract and Environment Delete and the seal section.\nInterface conclusions: origin scope is taken from the same live manager status as caller identity. Actual confined create routing remains on its own host even across template rereads; the later new-environment route requires Fleet and the ordinary route rejects a residual recipe target. Confined Delete uses plain DeleteSession with guards/fence and cannot call environment deletion. Host filtering occurs before output truncation and its cap notice is scoped to the same host. Acting paths retain ordinary approval and origin-liveness checks. The source-only test review found no substantive checklist violation in assigned changes.\nDurable delta: l1 appended as lead then revised to candidate with source refutation; c2 appended as candidate with source refutation. Both preserve the suspected highest consequence for independent review. Reportable findings: 0; open leads: 0; candidates: 2. No runtime tests, builds or reproductions ran; conclusions describe source analysis, not observed execution. No checkout files changed.\nNext action: return to caller for its later synthesis/discovery prompt. Turn type: coverage repair and initial review; turn count: 2 (first blocked, second completed). Completed initial passes: 1; discovery passes: 0. New verified finding IDs: none; new unverified finding IDs: none. Parent owns coverage audit and independent disposition of candidates.\nGroup: g019, agent-environment-operations.\nState: initial review, turn 1. Brief and complete inventory commits field read. Findings log exists.\nMandatory patches: 00643 (1–1364), 00664 (1–51), 00673 (1–15), 00689 (1–13); all unread at this checkpoint.\nInterface assumptions: agent request authorization, environment lifecycle and relay target binding need source/contract checks at each recorded revision.\nNext: read all mandatory packets, governing specification sections and callers; append substantive records immediately.\nDiscovery passes: 0. New verified/unverified IDs: none. Runtime execution: none requested.\n\nTurn 1 boundary: blocked before source review by invalid mandatory manifest ranges. Both evidence read attempts for 00643 (1–200 and 1–120) returned `PERSISTENT_REVIEW_TOOL_FAILED: Invalid source range. No coverage is certified by this invocation.`\nThe evidence helper validates every manifest range before delivering any source (`evidence.ts:95–113`); its line parser does not count a trailing empty line (`evidence.ts:89`). `wc -l` reports 1363 / 50 / 14 / 12 for the four snapshots, while the manifest requires endpoints 1364 / 51 / 15 / 13. No snapshot-drift error was reported. Manifest was not modified and source was not read through an unsupported fallback.\nRead scope: complete brief, inventory commits field only, priority buckets, feedback template, machine instructions, skillette and voice instructions, evidence tooling and relevant helper implementation. All assigned patch contents remain unread. Governing specification/caller analysis has not started because mandatory source delivery is blocked.\nNext action: caller corrects/reissues manifest ranges (and brief endpoints) or approves manual inspection, then resume initial review. No finding/candidate/lead exists; this is a tooling blocker rather than a product finding. Interface assumptions remain unchecked. Initial turn count: 1; completed discovery passes: 0; new verified/unverified IDs: none.\n"
+}

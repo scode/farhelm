@@ -1,0 +1,318 @@
+[
+  {
+    "key": "g169/c4",
+    "latest_line": 13,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "retired-tmux-prefix-selector-dependency",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The deleted sink's tmux prefix fallback is absent from the retained host routes. This refutes only transfer of that mechanism, not every wrong-target, history-attribution, consent, or test-sensitivity concern.",
+    "checks": [
+      "1ed482d^:crates/farhelm-supervisor/src/tmux/sink.rs:457-468 documents and tests the exact-name versus prefix-fallback mechanism. 1ed482d deletes the whole sink; tip 00de0b6 has no surviving replay/OutputStream runtime API caller.",
+      "1ed482d:service/core.rs:11915-12010 holds the session lifecycle claim, takes entry.terminal, requires liveness/caught-up/paste mode, then delivers to that host. service/core/host_tabs.rs:915-948 checks the requested tab runtime and excludes the agent runtime; :1474-1478 matches session and tab role/id.",
+      "1ed482d:service/core/tests/host_terminals.rs:1270-1295 checks refusal, surviving child, empty input and retained row for a foreign-tagged recorded host. Those assertions do not prove that no Shutdown was sent: the existing foreign-host-refusal-test-cannot-observe-shutdown.md explains that separate oracle defect.",
+      "No runtime execution. The record's g100/c1 inherited-history, g166/c5 Gone-tab confirmation, and g007/c4/g128/l1 legacy-survivor consent caveats remain outside this narrow refutation. Their supplied descriptions were not independently re-reviewed."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Terminal experience:2998-3031 preserves terminal-host sessions and retained viewer history; no acceptance of wrong-target operations.",
+      "SPEC_impl.md": "Ending the old private tmux server:2780-2821 and Grid streams:2551-2588 distinguish retirement from host/viewer ownership; no blanket acceptance of wrong-target operations.",
+      "TODO.md Planned": "Empty at lines 25-26; no cover.",
+      "plans/queue": "INDEX.md contains no unlanded plan. The tmux plans retained on disk are listed as landed in REPORTS.md:29-32, so their sweeps are not future-work coverage.",
+      "BUGS.md": "Only the local-SSH-output-holder provisioning hang; unrelated.",
+      "queue INDEX and matching files": "Read INDEX in full and searched claim terms. foreign-host-refusal-test-cannot-observe-shutdown.md covers a distinct retained test oracle, not transfer of the removed prefix selector. No exact coverage for the hypothetical production concern.",
+      "TRIAGE_OUTCOMES.md": "Searched tmux/old-terminal/prefix/replay/ownership terms; no matching active decision. Archive unread.",
+      "FILTER.md": "No filter covers wrong-target operations or user-work loss. Refutation relies on source, not rarity."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "No surviving caller or replacement path using the deleted tmux prefix selector was established. Broader host cleanup correctness and comprehensive test sensitivity are not proven by this check.",
+    "original_stronger_consequence": "Wrong-target close/Delete could end user-owned processes; a prompt delivered to the wrong terminal could act on unintended work, and stale excerpt attribution could mislead users.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Source refutation of the retired prefix-selector transfer only. Preserve the stronger consequences and all named independent neighbor routes for the parent's drop register.",
+    "new_interface_evidence": "The cited retained foreign-host refusal test is already known not to observe Shutdown (queue item foreign-host-refusal-test-cannot-observe-shutdown.md). Its child-survival assertion must not be promoted to proof that host shutdown never occurred. This does not establish a production wrong-target route."
+  },
+  {
+    "key": "g170/f1",
+    "latest_line": 3,
+    "recommendation": "covered",
+    "bucket": "highest",
+    "underlying_key": "accepted-startup-retirement-of-old-private-tmux-terminals",
+    "aliases": ["g171/f1"],
+    "target_queue_file": null,
+    "why": "Ending old terminals, their running programs and their terminal contents on upgrade is explicitly accepted. This acceptance is limited to those old terminals; it does not cover unrelated processes or surviving terminal hosts.",
+    "checks": [
+      "1ed482d:SPEC.md:3003-3016 expressly ends old terminals and their programs, loses their last screen, closes old tabs, and preserves terminal-host agents/tabs. Current SPEC.md:2998-3011 preserves the same boundary.",
+      "1ed482d:service/core.rs:6141-6185 ends the private server only with state-directory ownership before reload; :6675-6704 ignores tmux addresses and adopts Host rows separately. old_terminals.rs:176-279 identifies the peer and validates the server before signalling; :300-408 uses AgentOnly/tab sweeps and excludes host-tab launch records from scope discovery.",
+      "The immediate parent already calls end_private_server at core.rs:6434 and maps Tmux to None at :6969. This is not whole-range preexistence: git log identifies dbfc6975 (feat!: end old terminals at startup) within the reviewed range, while 1ed482d deletes the unused driver afterward.",
+      "Source-only checks support the stated retirement separation, not a universal audit of startup attribution or sweep safety. No behavior was reproduced."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Exact trigger/consequence/scope acceptance in Terminal experience:2998-3011.",
+      "SPEC_impl.md": "Ending the old private tmux server:2780-2821 explicitly describes startup ending, selective sweeps and accepted residuals.",
+      "TODO.md Planned": "Empty. Mid term phase-3 removal at :225-232 is not Planned coverage and is unnecessary to this disposition.",
+      "plans/queue": "No unlanded plan in INDEX. The retirement plan is already landed (REPORTS.md:29).",
+      "BUGS.md": "No related bug acceptance.",
+      "queue INDEX and matching files": "No additional exact queued item needed; named g171/f1 is the same retirement consequence. Other host lifecycle/test items do not broaden the acceptance.",
+      "TRIAGE_OUTCOMES.md": "No active exact retirement decision found by claim-term search; archive unread.",
+      "FILTER.md": "No filter needed; this ordinary upgrade consequence is accepted by specification, not by an extra rare-condition filter."
+    },
+    "exact_cover_quotes": [
+      {"source": "SPEC.md:3000-3002 (recording-time main)", "quote": "A supervisor that finds that\n  tmux server when it starts ends it, and with it everything that still ran in an old terminal, without needing a tmux\n  program."},
+      {"source": "SPEC.md:3003-3008 (recording-time main)", "quote": "one whose agent had already ended keeps its outcome, but its terminal's\n  last screen, which lived in the server, is gone; old tabs are closed."},
+      {"source": "SPEC.md:3007-3008 (recording-time main)", "quote": "A session whose agent or tabs already run in\n  terminal hosts keeps them."}
+    ],
+    "missing_premise": null,
+    "original_stronger_consequence": "An upgrade ends running user-owned programs in old terminals and discards their screen and scrollback. Highest remains the consequence bucket even though the specification accepts it.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Explicit specification acceptance for old-terminal retirement only, plus no additional loss attributable to deleting the already-unused stream. Do not call the retirement out-of-range merely because the assigned deletion's parent already implements it."
+  },
+  {
+    "key": "g170/c2",
+    "latest_line": 7,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "retired-tmux-stream-runtime-dependency",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The remaining attachment route resolves a HostTerminal and creates its grid sender; it has no dependent tmux replay/control-client runtime. The broad original corruption/stopping-work consequence remains conditional, not an accepted behavior.",
+    "checks": [
+      "Tip 00de0b6 supervisor-source git grep finds only connection.rs:986 for OutputStream/open_replay_stream/ReplayStreamCandidate/resume_paused_with_replay. The sole hit is the stale comment separately retained as g170/l4 and g171/f5.",
+      "1ed482d:service/handlers.rs:1688-1716 resolves a host and refuses non-grid/unreadable attachments before takeover; :1928-1966 constructs only a host GridStream and HostAttach. service/terminals.rs:232-247 resolves tabs from the session's own host-tab cell.",
+      "1ed482d:hosts/terminal.rs:3343-3503 consumes host journal output and feeds its emulator independently of viewers. service/grid_stream.rs:423-497 reads that emulator for catch-up. core.rs:11915-12010 and host_tabs.rs:915-948 retain explicit prompt/tab host selection.",
+      "No runtime tests or reproductions. These checks do not disprove the supplied independent inherited-history excerpt, startup pane-PID attribution, Gone-tab end-confirmation or hidden-legacy-survivor consent routes. Correct production is not by itself proof of test sensitivity."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Terminal experience:2998-3031 accepts only old-terminal retirement and requires host/history preservation; no corruption or arbitrary work-stopping acceptance.",
+      "SPEC_impl.md": "Terminal host/Grid streams:2551-2588 and old-server retirement:2780-2821 describe independent mechanisms. Not coverage of a generic corruption/stall defect.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "No unlanded plans in INDEX; tmux retirement/docs plans are landed, not pending cover.",
+      "BUGS.md": "Unrelated provisioning SSH-holder hang only.",
+      "queue INDEX and matching files": "No exact deleted-runtime-dependency item. Retired-runtime-retains-restart-seed-reply.md concerns a live bounded-channel lifetime mechanism, not the deleted tmux stream. Existing test-oracle items remain distinct.",
+      "TRIAGE_OUTCOMES.md": "No matching active stream-dependency/retirement decision found; archive unread.",
+      "FILTER.md": "No generic filter can excuse corruption, wrong targets or lost processes. Source refutation is the basis."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "A surviving path dependent on the deleted tmux replay, pane filtering, query stripping or output-client lifetime mechanism. This check does not certify every host replacement implementation.",
+    "original_stronger_consequence": "Removing replay, pane filtering, query stripping and guarded output-client ownership could corrupt a surviving terminal's input/output or stop its or another terminal's user-owned work.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Refute dependency on the deleted stream only. g171/f2, f3 and f4 independently name submechanisms, but are not exact whole-claim aliases of this omnibus candidate. Keep the history's limits and neighboring claims explicit."
+  },
+  {
+    "key": "g170/c3",
+    "latest_line": 5,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "retired-tmux-abandoned-candidate-test-responsibility",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The removed abandoned-candidate test asserts a tmux control-client shutdown ordering that host attachments no longer perform. Actual retained grid assertions independently exercise catch-up, pause and full writer queue history, without proving comprehensive replacement coverage.",
+    "checks": [
+      "1ed482d^:tmux/stream.rs:2625-2710 gates external no-output acknowledgement, checks that the specific client remains until acknowledgement and is then reaped, and checks private server survival. 1ed482d:handlers.rs:1928-1966 creates no equivalent process-backed viewer client.",
+      "1ed482d:service/grid_stream/tests.rs:313-333 asserts ordering and exact numbered history; :338-379 asserts incomplete catch-up before injecting additional output and then exact history after quieting; :485-506 observes the paused sender and asserts no delivery/exact history/no reset; :520-546 witnesses a full queue then checks complete exact history/no reset.",
+      "These are source-level sensitivity checks, not test execution or mutation results. They refute the narrow claim that the old candidate acknowledgement test protects a retained responsibility. They do not establish that all retired tests have equivalent coverage."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Terminal experience retains history/flow-control requirements; it does not accept ineffective tests.",
+      "SPEC_impl.md": "Grid streams:2551-2588 specifies the replacement history behavior, rather than tmux candidate-client lifetime.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "No unlanded plans in INDEX.",
+      "BUGS.md": "No related accepted test defect.",
+      "queue INDEX and matching files": "stopped-reader-output-witness.md concerns browser flood overlap; host-flood-stall-window-claim.md concerns an e2e timeout-description/premise gap. Both read in full and neither covers these grid unit-test assertions or establishes lost candidate-client responsibility. foreign-host-refusal-test-cannot-observe-shutdown.md is another distinct oracle.",
+      "TRIAGE_OUTCOMES.md": "The matching replay term belongs to removal of obsolete deflake exclusions, not these test responsibilities; relevant section read. No exact active decision.",
+      "FILTER.md": "No filter needed or applied; deterministic test-sensitivity defects would not become acceptable merely because production is correct."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "No retained tmux candidate-client acknowledgement responsibility was identified. This does not eliminate unrelated replacement test defects.",
+    "original_stronger_consequence": "Retiring tests might leave surviving output/history preservation or safe teardown unprotected. The record places potential production loss/corruption separately in g170/c2 and alleges no established catastrophic maintainer-tooling effect here.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Narrow source/test-assertion refutation. Treat g170/c2's potentially highest production consequence separately; do not use this test-only disposition to drop it."
+  },
+  {
+    "key": "g170/l4",
+    "latest_line": 9,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "connection-writer-comment-points-to-deleted-outputstream-checkpoint",
+    "aliases": ["g171/f5"],
+    "target_queue_file": "review_feedback_queue/output-trace-deleted-checkpoint.md",
+    "why": "The retained writer comment directs maintainers to a deleted first checkpoint. Historical source establishes that the reference was valid at the range base and lost its target in-range. The pointer still exists at the reviewed tip and recording-time main.",
+    "checks": [
+      "6e423e3:service/connection.rs:1035-1037 points to OutputStream::next_output; tmux/stream.rs:1320-1342 contains the first checkpoint, diagnostic hop map and no-payload rationale. Thus the reference was valid at the exclusive base.",
+      "1ed482d deletes tmux/stream.rs. The scoped range history has only this stream-file change and only this matching reference/target change; 1ed482d..00de0b6 connection.rs diff leaves the pointer untouched.",
+      "00de0b6:service/connection.rs:985-993 still contains the reference and working data-frame length debug event; source grep finds no executable OutputStream target. Current connection.rs:986 retains it too.",
+      "No runtime logging failure, disclosure, transport failure or generated-document failure is alleged or reproduced. Source comments are within scope even though ordinary workflow/docs files are excluded as independent targets."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Searched terminal/output/diagnostic terms; no accepted stale diagnostic-map behavior.",
+      "SPEC_impl.md": "Terminal host, emulator and Grid streams describe the retained path; the old-server section says only startup retirement remains. None covers a false source-navigation pointer.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "INDEX has no unlanded plans. tmux-drop-from-docs criterion 3/5 broadly required comment cleanup, but REPORTS.md:32 says it already landed. The still-present pointer is not covered by that completed plan.",
+      "BUGS.md": "No related accepted issue.",
+      "queue INDEX and matching files": "Full INDEX read and searches for OutputStream, stream.rs, deleted checkpoint and output-trace terminology found no exact existing item. g171/f5 is the exact named alias; unrelated stale-comment items concern other targets.",
+      "TRIAGE_OUTCOMES.md": "No exact active diagnostic-pointer decision; archive unread.",
+      "FILTER.md": "Rare-imprecise-diagnostic filter does not fully match: this persistent false documentation pointer exists whenever followed, with no required rare runtime trigger. Retain."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Maintainers tracing terminal-output loss are sent to a deleted checkpoint and explanation. Earlier records expressly disclaimed a runtime loss, leak or logging malfunction.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Record one other-priority source-comment finding with both g170/l4 and g171/f5 provenance. Preserve historical validity, in-range deletion and endpoint persistence."
+  },
+  {
+    "key": "g171/f1",
+    "latest_line": 11,
+    "recommendation": "covered",
+    "bucket": "highest",
+    "underlying_key": "accepted-startup-retirement-of-old-private-tmux-terminals",
+    "aliases": ["g170/f1"],
+    "target_queue_file": null,
+    "why": "Same accepted retirement consequence as g170/f1. The source also refutes an additional supported replay/viewing route lost solely through deleting the unused stream. Original running-work and history loss remain explicit.",
+    "checks": [
+      "1ed482d:SPEC.md:3003-3016 expressly ends old-terminal programs, removes old screens/tabs and preserves terminal-host agents/tabs. Current SPEC.md:2998-3011 and SPEC_impl.md:2780-2821 retain that boundary.",
+      "1ed482d:core.rs:6141-6185 runs ownership-gated retirement before reload; :6675-6704 gives old rows no terminal and adopts host rows separately. old_terminals.rs:176-279 validates the socket peer before signalling; :300-408 uses agent/tab-specific sweeps and excludes host-tab records.",
+      "The deletion's parent already contains retirement, but git log shows dbfc6975 introduced old_terminals.rs within this review range. Do not label the retirement out-of-range. Removed stream APIs have no executable tip callers; handlers.rs:1928-1966 attaches only the host grid.",
+      "No runtime reproduction. Checked targeting guards support separation but do not globally rule out independent PID-attribution, process-signalling, survivor-consent or host-cleanup defects."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Exact old-terminal upgrade/program/history/tab consequence accepted at :2998-3011, with host preservation explicit.",
+      "SPEC_impl.md": "Exact startup retirement and selective cleanup described at :2780-2821.",
+      "TODO.md Planned": "Empty; Mid term phase-3 removal is not Planned coverage.",
+      "plans/queue": "No unlanded plans in INDEX; retirement/docs plans are already landed.",
+      "BUGS.md": "No matching bug acceptance.",
+      "queue INDEX and matching files": "No separate exact queued item found; g170/f1 is the named same-root alias. Host cleanup/test items remain distinct.",
+      "TRIAGE_OUTCOMES.md": "No exact active decision found; archive unread.",
+      "FILTER.md": "No rare-upgrade-condition filter applied; this is direct explicit specification acceptance."
+    },
+    "exact_cover_quotes": [
+      {"source": "SPEC.md:3000-3002 (recording-time main)", "quote": "A supervisor that finds that\n  tmux server when it starts ends it, and with it everything that still ran in an old terminal, without needing a tmux\n  program."},
+      {"source": "SPEC.md:3003-3008 (recording-time main)", "quote": "one whose agent had already ended keeps its outcome, but its terminal's\n  last screen, which lived in the server, is gone; old tabs are closed."},
+      {"source": "SPEC.md:3007-3008 (recording-time main)", "quote": "A session whose agent or tabs already run in\n  terminal hosts keeps them."}
+    ],
+    "missing_premise": null,
+    "original_stronger_consequence": "An upgrade ends user programs still in old tmux terminals, loses their retained terminal contents and prevents viewing those contents afterward. Acceptance does not authorize harming surviving terminal hosts or unrelated processes.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Exact acceptance for old-terminal retirement plus absence of an additional live stream dependency. Independent agreement is still required; this consultation authorizes no drop."
+  },
+  {
+    "key": "g171/f2",
+    "latest_line": 9,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "deleted-tmux-query-strip-double-interpreter-premise",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The retained path interprets host output in one supervisor emulator and sends grids to viewers. Removing tmux/browser query stripping therefore does not create the claimed second interpreter.",
+    "checks": [
+      "1ed482d:handlers.rs:1688-1716 refuses non-grid clients before takeover and :1928-1966 creates only a host GridStream. terminals.rs:232-247 resolves only the selected host terminal.",
+      "1ed482d:hosts/terminal.rs:3343-3503 feeds host Output events once past the processed position, splits replay zones, and routes resulting effects; :3250-3289 queues replies through the host input path. farhelm-terminal-emulator/src/effects.rs:199-212 suppresses ReplaySeen effects and permits only replies in ReplayUnseen.",
+      "Tip source grep finds no executable OutputStream/replay-stream caller. This refutes the deleted-path double-interpreter premise, not every possible emulator query/recovery bug. No execution or reproduction."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Terminal experience preserves host/grid behavior and forbids silent history loss; no duplicate-response acceptance.",
+      "SPEC_impl.md": "Terminal emulator:2672-2706 assigns queries to one per-terminal supervisor emulator. Grid streams:2551-2588 sends cells/history. Accepted failure-delivery ambiguity is not acceptance of a second viewer interpreter.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "No unlanded plans in INDEX.",
+      "BUGS.md": "No related accepted issue.",
+      "queue INDEX and matching files": "No exact query-stripping/double-interpreter entry. version-agreement-lifetime-doc.md (INDEX description) concerns version-lifetime wording, not duplicate query replies; no exact cover inferred.",
+      "TRIAGE_OUTCOMES.md": "No exact active query/reply decision found; archive unread.",
+      "FILTER.md": "No filter applied; absence of the alleged interpreter route is the basis."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "A surviving viewer interpreting raw output and answering queries independently. A separate command-execution or user-work-loss consequence from duplicate replies was never established.",
+    "original_stronger_consequence": "Deleting query stripping might inject duplicate terminal replies into an agent or shell. The records suggested high material terminal UX if established, and did not establish command execution or user-work loss.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Narrow source refutation of the second-interpreter route. Conservatively send the dismissal for independent checking because the preserved allegation involves input injected into agents/shells, even though no highest consequence was established."
+  },
+  {
+    "key": "g171/f3",
+    "latest_line": 8,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "deleted-tmux-control-client-teardown-shared-server-abort",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Viewer teardown no longer owns a tmux control process whose unsafe kill could abort a shared server. It ends only the connection's attachments and their input pumps; terminal hosts persist separately.",
+    "checks": [
+      "1ed482d:handlers.rs:1928-1966 attaches a GridStream to an existing host without creating a tmux client. service/connection.rs:778-794 extracts only same-channel attachments, signals their senders and joins them.",
+      "1ed482d:service/grid_stream.rs:937-963 selects stream completion against viewer shutdown and reports detach; :1169-1175 cancels the attachment input pump. hosts/terminal.rs:2388-2419 aborts a supervisor runtime without signalling or shutting down its host.",
+      "1ed482d:crates/terminal-host/SPEC.md:151-168 says host ending requires Shutdown, a killing signal or machine stop; the checked viewer-close chain does none of those. Tip has no executable deleted stream caller. No runtime behavior was reproduced.",
+      "Intentional startup old-server retirement is covered separately by g170/f1 and g171/f1. This refutation does not certify every independent host-ending, signal-identity or retirement path."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Terminal experience:2998-3031 distinguishes accepted old-server retirement from continuing host terminals and independent viewers.",
+      "SPEC_impl.md": "Grid streams and old-server retirement sections describe separate lifetimes; no acceptance of a viewer killing unrelated work.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "No unlanded plans in INDEX.",
+      "BUGS.md": "Unrelated provisioning SSH-holder hang only.",
+      "queue INDEX and matching files": "No exact remaining shared-tmux-control-client teardown item. Retired runtime reply retention and foreign-host test oracle entries have different triggers/consequences.",
+      "TRIAGE_OUTCOMES.md": "No active exact viewer-teardown/shared-server decision; archive unread.",
+      "FILTER.md": "No filter applied. A loss-of-process consequence would not fit the generic rare-diagnostic filters."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "A surviving viewer-owned tmux control client or shared tmux server on this attach/teardown path.",
+    "original_stronger_consequence": "Removing safe no-output acknowledgement and control-client teardown could crash the shared server and lose other sessions' user-owned processes.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Refute the deletion-caused shared-server abort route from the actual retained viewer lifecycle. Keep the original highest consequence for the independent drop register."
+  },
+  {
+    "key": "g171/f4",
+    "latest_line": 10,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "deleted-tmux-pause-replay-retained-history-dependency",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Pausing the retained grid sender leaves the host journal/emulator consuming output, and resumed delivery reads explicitly owed numbered history. The removed tmux capture/continue recovery is no longer a required dependency.",
+    "checks": [
+      "1ed482d:handlers.rs:1928-1966 creates the grid sender over an existing host. hosts/terminal.rs:3343-3503 consumes and interprets journal output independently of that attachment.",
+      "1ed482d:service/grid_stream.rs:423-497 sends attach screen/history and marks a live cycle due afterward; :631-675 runs immediately while history_owed; :680-792 parks before reading current emulator state, resets when needed, and sends owed history before the frame.",
+      "1ed482d:grid_output.rs:593-699 keeps the first unsent history number, resumes from it, and explicitly resets to oldest retained history on relayout/eviction. This is source evidence against silently skipping retained lines solely because intermediate screens were skipped.",
+      "Actual test assertions at grid_stream/tests.rs:485-506 and :520-546 witness a paused sender/full queue and assert exact history with no reset. No tests were run. This is not a comprehensive correctness audit of the history algorithms or recovery-gap handling."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Terminal experience:3013-3031 requires every retained history line and explicitly says normal slow-viewer flow control cannot cause a host-journal gap. It does not accept the alleged loss.",
+      "SPEC_impl.md": "Grid streams:2551-2588 specifies numbered history debt, bounded live batches, resets and whole retained-history replay. Ordinary scrollback eviction is different from the allegation.",
+      "TODO.md Planned": "Empty. Near-term back-buffer exploration is not Planned coverage and expressly preserves the history requirement.",
+      "plans/queue": "No unlanded plans in INDEX.",
+      "BUGS.md": "No related accepted issue.",
+      "queue INDEX and matching files": "stopped-reader-output-witness.md and host-flood-stall-window-claim.md were read; both concern distinct test premises, not lost pause recovery. Retained-history/reset entries have different triggers. No exact cover.",
+      "TRIAGE_OUTCOMES.md": "Replay-term hit concerns old deflake exclusions; section read and unrelated. No exact active decision; archive unread.",
+      "FILTER.md": "Extreme cumulative resize-journal exhaustion is a different specifically bounded mechanism. It cannot cover viewer-pause history loss. No filter applied."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "A retained host/grid route that still needs the removed tmux pause/capture/continue operation, or a concrete retained-history skip caused by its deletion.",
+    "original_stronger_consequence": "Deleting paused-output replay could silently lose terminal history for a slow viewer, potentially losing user-owned output. The records preserved highest as possible for that stronger consequence, alongside a high UX suggestion if established.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Source refutation of dependence on the retired tmux pause-replay path, not general acceptance of silent history loss or certification of all existing grid algorithms."
+  },
+  {
+    "key": "g171/f5",
+    "latest_line": 16,
+    "recommendation": "duplicate",
+    "bucket": "other",
+    "underlying_key": "connection-writer-comment-points-to-deleted-outputstream-checkpoint",
+    "aliases": ["g170/l4"],
+    "target_queue_file": "review_feedback_queue/output-trace-deleted-checkpoint.md",
+    "why": "Exact same writer comment, deleted target, introduction and diagnostic consequence as g170/l4. Retain one verified finding with both provenance IDs; this is not a drop of the defect.",
+    "checks": [
+      "6e423e3:connection.rs:1035-1037 has the referring comment and tmux/stream.rs:1320-1342 has its real first checkpoint. 1ed482d deletes stream.rs; range history confirms that target removal is in-range.",
+      "00de0b6:connection.rs:985-993 preserves the stale pointer and still logs data-frame lengths. The later-range connection.rs diff does not repair it, and current source retains it at :986.",
+      "The named g170/l4 latest record identifies those same exact lines and consequence. No extra runtime failure, mandatory logging omission, disclosure or transport defect is established. Source-only; no tests or reproductions."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "No acceptance of this false source-navigation pointer.",
+      "SPEC_impl.md": "Current terminal/grid descriptions do not cover the stale diagnostic instruction; source comments remain in review scope.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "No unlanded plans in INDEX; tmux-drop-from-docs is already landed, so its historical sweep is not future-work coverage.",
+      "BUGS.md": "No exact related issue.",
+      "queue INDEX and matching files": "No existing OutputStream/deleted-checkpoint entry found. g170/l4 is the exact same-root named alias. g008/f2, mentioned in the history, is a different specification pointer and was not independently opened.",
+      "TRIAGE_OUTCOMES.md": "No exact active pointer decision; archive unread.",
+      "FILTER.md": "Persistent stale source documentation has no required rare trigger, so rare-imprecise-diagnostic filtering does not fully match."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "A maintainer following terminal-output diagnostics is directed to a deleted checkpoint/explanation. Every history revision explicitly preserves that narrow documentation consequence and disclaims runtime loss/leak/malfunction.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Exact named-claim deduplication into the g170/l4 recording, retaining both original histories/provenance and all caveats."
+  }
+]

@@ -1,0 +1,703 @@
+{
+  "group": {
+    "id": "g133",
+    "domain": "supervisor-status-reporting",
+    "purpose": "supervisor-status-reporting: crates/farhelm-supervisor/src/service/ticker.rs; phases @@ -2196,9 +1677,8 @@ mod tests {",
+    "interfaces": [
+      "g001",
+      "g007",
+      "g008",
+      "g009",
+      "g102",
+      "g103",
+      "g104",
+      "g105",
+      "g106",
+      "g107",
+      "g108",
+      "g109",
+      "g110",
+      "g111",
+      "g112",
+      "g113",
+      "g114",
+      "g115",
+      "g116",
+      "g129",
+      "g131",
+      "g132",
+      "g134",
+      "g159",
+      "g160",
+      "g161",
+      "g162",
+      "g163",
+      "g164",
+      "g165",
+      "g166",
+      "g167",
+      "g168",
+      "g169",
+      "g170",
+      "g171",
+      "g172",
+      "g173"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00945-001.patch",
+        "ranges": [
+          [
+            1,
+            1201
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/ticker.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "@@ -2196,9 +1677,8 @@ mod tests {; patch character offsets [59798,117227)",
+        "lines": 1201,
+        "bytes": 57445,
+        "start": 59798,
+        "end": 117227,
+        "original": "[private-run]/prep/originals/00945.patch"
+      }
+    ],
+    "lines": 1201,
+    "bytes": 57445
+  },
+  "records": [
+    {
+      "key": "g133/c1",
+      "owner": "g133",
+      "id": "c1",
+      "domain": "supervisor-status-reporting",
+      "purpose": "supervisor-status-reporting: crates/farhelm-supervisor/src/service/ticker.rs; phases @@ -2196,9 +1677,8 @@ mod tests {",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Retired-session reap coverage retains its applicable host branch",
+            "location": "crates/farhelm-supervisor/src/service/ticker.rs:2370",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether removing the tmux half of the retired-session cleanup test leaves retired sessions consuming ordinary cleanup capacity. Source: ticker.rs:2370-2453 retains a full budget of retired host tabs ahead of ordinary host tabs, checks retired claims are absent, all ordinary claims are acquired, waits for close completion, and checks retired tabs remain. SPEC_impl.md:1969-1973 says every served terminal is a host and old tmux terminals are ended on startup. SPEC.md:4912-4915: \"Existing sessions support Delete only. Opening terminals or tabs, exec, Stop, Restart, Clone, Replace and Replace with are refused.\" The test still checks that contract for the only supported substrate. Suggested bucket: other (test coverage concern only). Confidence: confirmed by source, no execution. proposed_drop: removal of the unsupported tmux fixture branch is justified by the explicit substrate removal; no lost applicable assertion identified. Could-be-highest: no, this candidate concerns maintainer test coverage and establishes no shipped security or loss-of-work route. possible_cover: none searched. Caveat: this is the assigned retired-budget test, not an audit of all terminal migration or cleanup code."
+          }
+        }
+      ],
+      "latest": {
+        "line": 1,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Retired-session reap coverage retains its applicable host branch",
+          "location": "crates/farhelm-supervisor/src/service/ticker.rs:2370",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether removing the tmux half of the retired-session cleanup test leaves retired sessions consuming ordinary cleanup capacity. Source: ticker.rs:2370-2453 retains a full budget of retired host tabs ahead of ordinary host tabs, checks retired claims are absent, all ordinary claims are acquired, waits for close completion, and checks retired tabs remain. SPEC_impl.md:1969-1973 says every served terminal is a host and old tmux terminals are ended on startup. SPEC.md:4912-4915: \"Existing sessions support Delete only. Opening terminals or tabs, exec, Stop, Restart, Clone, Replace and Replace with are refused.\" The test still checks that contract for the only supported substrate. Suggested bucket: other (test coverage concern only). Confidence: confirmed by source, no execution. proposed_drop: removal of the unsupported tmux fixture branch is justified by the explicit substrate removal; no lost applicable assertion identified. Could-be-highest: no, this candidate concerns maintainer test coverage and establishes no shipped security or loss-of-work route. possible_cover: none searched. Caveat: this is the assigned retired-budget test, not an audit of all terminal migration or cleanup code."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g133/findings.jsonl",
+        "id": "c1",
+        "line": 1,
+        "disposition": "excluded",
+        "group": "retired-tab-reap-budget-host-test-preserved",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-084 after inspecting it. The retained host branch still places a full budget of retired sessions before ordinary sessions and asserts admission, completion and retired-tab preservation. The removed tmux branch is no longer applicable. The applicable assertions remain. The source refutes a lost host-budget oracle; this is not acceptance based only on correct production behavior. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333:crates/farhelm-supervisor/src/service/ticker.rs:2370-2453 sets distinct sessions, eligible gone host tabs, retired launches, full ordinary admission and teardown completion; retired tabs remain.\",\"Current SPEC_impl.md:1898-1905 says all served terminals are hosts; SPEC.md:4892-4900 makes retired containerized sessions Delete-only.\",\"Test assertions were read, not executed. This settles the retired-budget test only, not all migration or cleanup tests.\"] Current coverage/results: [\"Both specifications require the retained behavior and remove the old substrate; they do not independently accept missing budget coverage.\",\"TODO Planned is empty; BUGS, queue INDEX and active ledger have no exact missing retired-budget-test item. plans/queue/podman-environments.md:813-860 records the earlier budget problem and instruction to exclude retired tabs, but the present host test already asserts that fix; it is not evidence of a surviving defect or an unlanded repair.\",\"FILTER.md: none applied.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing the tmux test half might leave retired sessions consuming ordinary automatic-cleanup capacity without regression protection. No shipped capacity failure was established.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g133/c1",
+        "line": 1,
+        "disposition": "excluded",
+        "group": "retired-tab-reap-budget-host-test-preserved",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-084 after inspecting it. The retained host branch still places a full budget of retired sessions before ordinary sessions and asserts admission, completion and retired-tab preservation. The removed tmux branch is no longer applicable. The applicable assertions remain. The source refutes a lost host-budget oracle; this is not acceptance based only on correct production behavior. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333:crates/farhelm-supervisor/src/service/ticker.rs:2370-2453 sets distinct sessions, eligible gone host tabs, retired launches, full ordinary admission and teardown completion; retired tabs remain.\",\"Current SPEC_impl.md:1898-1905 says all served terminals are hosts; SPEC.md:4892-4900 makes retired containerized sessions Delete-only.\",\"Test assertions were read, not executed. This settles the retired-budget test only, not all migration or cleanup tests.\"] Current coverage/results: [\"Both specifications require the retained behavior and remove the old substrate; they do not independently accept missing budget coverage.\",\"TODO Planned is empty; BUGS, queue INDEX and active ledger have no exact missing retired-budget-test item. plans/queue/podman-environments.md:813-860 records the earlier budget problem and instruction to exclude retired tabs, but the present host test already asserts that fix; it is not evidence of a surviving defect or an unlanded repair.\",\"FILTER.md: none applied.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing the tmux test half might leave retired sessions consuming ordinary automatic-cleanup capacity without regression protection. No shipped capacity failure was established.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-084",
+          "key": "g133/c1",
+          "latest_line": 1,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "retired-tab-reap-budget-host-test-preserved",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The retained host branch still places a full budget of retired sessions before ordinary sessions and asserts admission, completion and retired-tab preservation. The removed tmux branch is no longer applicable.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333:crates/farhelm-supervisor/src/service/ticker.rs:2370-2453 sets distinct sessions, eligible gone host tabs, retired launches, full ordinary admission and teardown completion; retired tabs remain.",
+            "Current SPEC_impl.md:1898-1905 says all served terminals are hosts; SPEC.md:4892-4900 makes retired containerized sessions Delete-only.",
+            "Test assertions were read, not executed. This settles the retired-budget test only, not all migration or cleanup tests."
+          ],
+          "coverage_checked": [
+            "Both specifications require the retained behavior and remove the old substrate; they do not independently accept missing budget coverage.",
+            "TODO Planned is empty; BUGS, queue INDEX and active ledger have no exact missing retired-budget-test item. plans/queue/podman-environments.md:813-860 records the earlier budget problem and instruction to exclude retired tabs, but the present host test already asserts that fix; it is not evidence of a surviving defect or an unlanded repair.",
+            "FILTER.md: none applied."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Removing the tmux test half might leave retired sessions consuming ordinary automatic-cleanup capacity without regression protection. No shipped capacity failure was established.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "The applicable assertions remain. The source refutes a lost host-budget oracle; this is not acceptance based only on correct production behavior."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retired-tab-reap-budget-host-test-preserved",
+        "destination": null
+      }
+    },
+    {
+      "key": "g133/l1",
+      "owner": "g133",
+      "id": "l1",
+      "domain": "supervisor-status-reporting",
+      "purpose": "supervisor-status-reporting: crates/farhelm-supervisor/src/service/ticker.rs; phases @@ -2196,9 +1677,8 @@ mod tests {",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Check replacement coverage for real dead-tab teardown and live siblings",
+            "location": "crates/farhelm-supervisor/src/service/ticker.rs:2028",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: the assigned patch removes a real dead-tab/live-sibling test and starts removing its detached-child cleanup companion; the new local exited_tab helper uses HostTerminal::gone without a peer. Need establish whether replacement host-tab tests exercise real process cleanup and sibling preservation, rather than only close admission and bookkeeping. Source basis: assigned 00945-001.patch:827-992 deletes dead_tab helpers and dead_tab_panes_are_reaped_by_the_tick_and_live_tabs_survive; :1194-1201 begins removing the daemon-sweep test. New ticker.rs:2028-2040 constructs a gone handle; :2370-2453 checks retired-budget admission, not real child teardown. Contract: SPEC.md:2147-2154 requires closing or reaping a tab to end its shell processes and preserve other tabs; :2164-2168 requires automatic silent reap. Checks actually made: all assigned patch lines read; host-tab contract read in SPEC_impl.md:2310-2347. Missing premise: whether existing host-tab/core tests cover the removed real-process guarantees and use the same close path. Available source checks can settle this; next inspect host_tabs tests and ticker close routing. Suspected consequence is weakened regression coverage only until an actual production violation is established. Suggested bucket: other. Confidence: unverified, investigation in progress. Could-be-highest: no established shipped security or loss-of-work route; test coverage alone stays other. proposed_drop: false pending investigation. possible_cover: none searched."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Real host tests and shared close preserve the removed teardown guarantees",
+            "location": "crates/farhelm-supervisor/src/service/ticker.rs:2028",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether replacing real tmux reap fixtures with gone host handles removed applicable process-cleanup and live-sibling coverage. Investigation settles the lead without a finding. Source: ticker.rs:1641-1670 starts try_close_tab; core.rs:13969-14062 routes automatic and explicit closes through the same close_tab_under_claim and close_host_tab_under_claim. host_tabs.rs:965-970 adds only an automatic deadness recheck; :980-1012 still runs the ordinary tab-specific sweep, ends the host, and runs a marker-only sweep for survivors after hangup. Existing tests at the reviewed commit cover the complementary pieces: crates/farhelm/tests/e2e/host_tabs.rs:531-565 starts a real host tab, exits its shell with the ticker interval at 600 seconds, and requires the host process, socket and record to disappear; terminal_tabs.rs:552-663 closes a real tab with a daemonized child, requires shell and daemon death, then proves the sibling tab and agent still answer; e2e/tests/terminal-tabs.spec.ts:1849-1916 exercises automatic exit with a preserved sibling strip/island and scrollback. SPEC.md:2164-2168 requires automatic silent tab removal; SPEC_impl.md:2333-2346 requires the deadness recheck followed by the same end-and-sweep close. Suggested bucket: other (test coverage concern only). Confidence: confirmed source analysis, no runtime execution. proposed_drop: the removed tmux fixture exercised an unsupported substrate; real host exit cleanup and tab-specific daemon/sibling protection retain source-level regression coverage through the shared close. Could-be-highest: no established shipped security or loss-of-work defect; the original concern was weakened test coverage, not evidence of unsafe process selection. possible_cover: none searched. Caveat preserved: no one test read here combines automatic shell exit, a detached daemon and a live sibling; the conclusion rests on the shared unconditional close implementation plus complementary tests, and claims no test pass."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Narrow teardown-coverage conclusion against the unmarked-shell premise",
+            "location": "crates/farhelm-supervisor/src/service/ticker.rs:2028",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Synthesis revision: the parent reports that g134 independently corroborates the real automatic-exit notifier test and shared explicit daemon/sibling close path, but that g103/f1 identifies an unmarked-shell root premise absent from the retained explicit host daemon fixture. My earlier claim that the removed teardown guarantees are preserved was too broad until that distinction is checked. Original concern remains weakened regression coverage of real tab cleanup and live-sibling survival; no shipped process-selection defect was established. Checks already made: ticker automatic close routing, unconditional host close sweeps, real host automatic-exit test, explicit daemon/sibling test, browser automatic-exit sibling test. Next readily available check: compare the removed ticker test's exact marker/root premise with the retained explicit host test and shared close implementation; distinguish an existing parent finding from any independent assigned-scope gap. Suggested bucket: other (test coverage). Confidence: unverified on the exact root-premise distinction pending source comparison; other complementary source coverage remains established, not observed execution. proposed_drop: false while this premise is checked; no parent drop accepted. Could-be-highest: no established shipped security or loss-of-work route from this test-coverage concern. possible_cover: parent supplied g103/f1 for the precise unmarked-shell root coverage gap; no coverage sources searched. Missing premise: whether the assigned removed test itself exercised that shape, or only the adjacent explicit-close test did. No runtime tests or reproductions."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Complementary close tests do not certify the unmarked-shell root or combined automatic schedule",
+            "location": "crates/farhelm-supervisor/src/service/ticker.rs:2028",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Synthesis revision narrows the prior conclusion. TLDR: removing the real tmux ticker fixture does not itself establish a shipped tab-cleanup defect. Real-host automatic exit cleanup and explicit tab-specific daemon/sibling close retain complementary coverage, but they do not certify every removed scenario or the unmarked-shell root case. Source comparison: parent-revision ticker.rs:3300-3336 launches the automatically reaped daemon through dead_tab_running, whose env carries session/tab markers, waits for detached daemon existence and dead pane, then checks tick close plus daemon disappearance; it does not scrub the shell marker to force a root-only sweep. Current terminal_tabs.rs:552-663 opens a normally marked host shell, starts a detached daemon, explicitly closes and checks daemon death and sibling/agent responsiveness. Thus that explicit test cannot refute the separate root-only coverage gap reported by parent as g103/f1. Current host_tabs.rs:531-565 separately proves the automatic notifier route and host/socket/record removal; ticker/core close routing and host_tabs.rs:965-1012 show the automatic deadness recheck followed by the ordinary sweep-and-end implementation. Parent g134 independently corroborates those complementary pieces. Contract: SPEC.md:2164-2168 requires automatic silent tab removal; SPEC_impl.md:2333-2346 requires the same close with deadness revalidation. Suggested bucket: other (test coverage). Confidence: confirmed source distinction; no execution. proposed_drop: no independent assigned-scope production defect established; complementary coverage supports only the stated pieces, not equivalence of every test schedule. No parent drop accepted. Could-be-highest: no established shipped security or loss-of-work route from this coverage concern. possible_cover: g103/f1, supplied by parent, for the precise unmarked-shell root premise; no queue/coverage sources searched. Caveats retained: no single test read combines automatic shell exit, detached daemon and live sibling; root-only cleanup remains outside the evidence this candidate cited. The original suspected loss of regression coverage remains distinguished from a demonstrated runtime bug. No remaining readily checkable premise under l1; the source comparison settles its exact scope."
+          }
+        }
+      ],
+      "latest": {
+        "line": 11,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l1",
+          "state": "open",
+          "summary": "Complementary close tests do not certify the unmarked-shell root or combined automatic schedule",
+          "location": "crates/farhelm-supervisor/src/service/ticker.rs:2028",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Synthesis revision narrows the prior conclusion. TLDR: removing the real tmux ticker fixture does not itself establish a shipped tab-cleanup defect. Real-host automatic exit cleanup and explicit tab-specific daemon/sibling close retain complementary coverage, but they do not certify every removed scenario or the unmarked-shell root case. Source comparison: parent-revision ticker.rs:3300-3336 launches the automatically reaped daemon through dead_tab_running, whose env carries session/tab markers, waits for detached daemon existence and dead pane, then checks tick close plus daemon disappearance; it does not scrub the shell marker to force a root-only sweep. Current terminal_tabs.rs:552-663 opens a normally marked host shell, starts a detached daemon, explicitly closes and checks daemon death and sibling/agent responsiveness. Thus that explicit test cannot refute the separate root-only coverage gap reported by parent as g103/f1. Current host_tabs.rs:531-565 separately proves the automatic notifier route and host/socket/record removal; ticker/core close routing and host_tabs.rs:965-1012 show the automatic deadness recheck followed by the ordinary sweep-and-end implementation. Parent g134 independently corroborates those complementary pieces. Contract: SPEC.md:2164-2168 requires automatic silent tab removal; SPEC_impl.md:2333-2346 requires the same close with deadness revalidation. Suggested bucket: other (test coverage). Confidence: confirmed source distinction; no execution. proposed_drop: no independent assigned-scope production defect established; complementary coverage supports only the stated pieces, not equivalence of every test schedule. No parent drop accepted. Could-be-highest: no established shipped security or loss-of-work route from this coverage concern. possible_cover: g103/f1, supplied by parent, for the precise unmarked-shell root premise; no queue/coverage sources searched. Caveats retained: no single test read combines automatic shell exit, detached daemon and live sibling; root-only cleanup remains outside the evidence this candidate cited. The original suspected loss of regression coverage remains distinguished from a demonstrated runtime bug. No remaining readily checkable premise under l1; the source comparison settles its exact scope."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g133/findings.jsonl",
+        "id": "l1",
+        "line": 11,
+        "disposition": "excluded",
+        "group": "removed-tmux-automatic-tab-cleanup-test-composition",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-084 after inspecting it. The narrow missing-cleanup-mechanism concern has complementary host oracles. This does not establish complete schedule equivalence or an unmarked-shell root oracle. Source/test-oracle refutation only of the narrow mechanism claim, with the earlier overstatement and later caveats preserved. Exact alias g134/l1 adds the distinguishing rootless sweep oracle; it is not a second defect. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333^:crates/farhelm-supervisor/src/service/ticker.rs:2992-3021 creates dead_tab_running with session/tab markers; :3298-3335 reaps a marked detached daemon after its shell exits. It does not scrub the shell to force explicit-root-only cleanup.\",\"At 1ed482dde220452e424973faf38a5e1318986333, crates/farhelm/tests/e2e/host_tabs.rs:531-565 requires actual host/socket/record removal after shell exit with a 600-second tick interval; terminal_tabs.rs:310-344,552-661 requires a detached HUP-immune daemon and shell gone after explicit close while another tab and the agent answer.\",\"service/core.rs:13937-14059 routes automatic and explicit closes through the same close; core/host_tabs.rs:964-1040 adds only the automatic deadness recheck before shared cleanup. service/sweep.rs:3366-3419 separately tests a rootless tab-marker sweep and surviving agent. e2e/tests/terminal-tabs.spec.ts:1849-1914 checks silent automatic UI removal and preserved sibling contents.\",\"No one cited test combines automatic shell exit, daemon and live sibling. The explicit daemon test uses default systemd scope seams and cannot establish marker scanning alone. No unmarked-shell premise or runtime test pass is claimed.\"] Current coverage/results: [\"Current SPEC.md Session view:2147-2173 and SPEC_impl.md Tabs in hosts:2234-2270 require silent automatic cleanup and tab-specific teardown; neither accepts a regression-test omission.\",\"TODO Planned empty. plans/queue searches found no unlanded exact combined-test repair; user-tmux-jobs-outlive-cleanup.md:23-75 concerns user-run tmux pane scope migration, not this marked daemon. BUGS and active ledger have no matching claim.\",\"Queue INDEX matching entries and full child-hangup-masks-missing-stop-tree-sweep.md, tab-reap-deadline-excludes-listing-request.md, placeholder-grid-fixture-readoption-uncertainty.md were checked: different tests and mechanisms, no exact coverage. Parent-supplied g103/f1 is not this batch's input; its unmarked-shell claim is not refuted or merged here.\",\"FILTER.md: none applied.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Deleting real dead-tab/live-sibling and daemon fixtures could weaken regression protection for real process cleanup and sibling preservation. Earlier broad preservation wording was reopened and narrowed at lines 9 and 11; no shipped unsafe process selection was established.\"; \"None for the narrowly refuted missing-mechanism claim. Equivalence of all combined schedules and the separate unmarked-shell root case remain outside these oracles.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g133/l1",
+        "line": 11,
+        "disposition": "excluded",
+        "group": "removed-tmux-automatic-tab-cleanup-test-composition",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-084 after inspecting it. The narrow missing-cleanup-mechanism concern has complementary host oracles. This does not establish complete schedule equivalence or an unmarked-shell root oracle. Source/test-oracle refutation only of the narrow mechanism claim, with the earlier overstatement and later caveats preserved. Exact alias g134/l1 adds the distinguishing rootless sweep oracle; it is not a second defect. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333^:crates/farhelm-supervisor/src/service/ticker.rs:2992-3021 creates dead_tab_running with session/tab markers; :3298-3335 reaps a marked detached daemon after its shell exits. It does not scrub the shell to force explicit-root-only cleanup.\",\"At 1ed482dde220452e424973faf38a5e1318986333, crates/farhelm/tests/e2e/host_tabs.rs:531-565 requires actual host/socket/record removal after shell exit with a 600-second tick interval; terminal_tabs.rs:310-344,552-661 requires a detached HUP-immune daemon and shell gone after explicit close while another tab and the agent answer.\",\"service/core.rs:13937-14059 routes automatic and explicit closes through the same close; core/host_tabs.rs:964-1040 adds only the automatic deadness recheck before shared cleanup. service/sweep.rs:3366-3419 separately tests a rootless tab-marker sweep and surviving agent. e2e/tests/terminal-tabs.spec.ts:1849-1914 checks silent automatic UI removal and preserved sibling contents.\",\"No one cited test combines automatic shell exit, daemon and live sibling. The explicit daemon test uses default systemd scope seams and cannot establish marker scanning alone. No unmarked-shell premise or runtime test pass is claimed.\"] Current coverage/results: [\"Current SPEC.md Session view:2147-2173 and SPEC_impl.md Tabs in hosts:2234-2270 require silent automatic cleanup and tab-specific teardown; neither accepts a regression-test omission.\",\"TODO Planned empty. plans/queue searches found no unlanded exact combined-test repair; user-tmux-jobs-outlive-cleanup.md:23-75 concerns user-run tmux pane scope migration, not this marked daemon. BUGS and active ledger have no matching claim.\",\"Queue INDEX matching entries and full child-hangup-masks-missing-stop-tree-sweep.md, tab-reap-deadline-excludes-listing-request.md, placeholder-grid-fixture-readoption-uncertainty.md were checked: different tests and mechanisms, no exact coverage. Parent-supplied g103/f1 is not this batch's input; its unmarked-shell claim is not refuted or merged here.\",\"FILTER.md: none applied.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Deleting real dead-tab/live-sibling and daemon fixtures could weaken regression protection for real process cleanup and sibling preservation. Earlier broad preservation wording was reopened and narrowed at lines 9 and 11; no shipped unsafe process selection was established.\"; \"None for the narrowly refuted missing-mechanism claim. Equivalence of all combined schedules and the separate unmarked-shell root case remain outside these oracles.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-084",
+          "key": "g133/l1",
+          "latest_line": 11,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "removed-tmux-automatic-tab-cleanup-test-composition",
+          "aliases": [
+            "g134/l1"
+          ],
+          "target_queue_file": null,
+          "why": "The narrow missing-cleanup-mechanism concern has complementary host oracles. This does not establish complete schedule equivalence or an unmarked-shell root oracle.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333^:crates/farhelm-supervisor/src/service/ticker.rs:2992-3021 creates dead_tab_running with session/tab markers; :3298-3335 reaps a marked detached daemon after its shell exits. It does not scrub the shell to force explicit-root-only cleanup.",
+            "At 1ed482dde220452e424973faf38a5e1318986333, crates/farhelm/tests/e2e/host_tabs.rs:531-565 requires actual host/socket/record removal after shell exit with a 600-second tick interval; terminal_tabs.rs:310-344,552-661 requires a detached HUP-immune daemon and shell gone after explicit close while another tab and the agent answer.",
+            "service/core.rs:13937-14059 routes automatic and explicit closes through the same close; core/host_tabs.rs:964-1040 adds only the automatic deadness recheck before shared cleanup. service/sweep.rs:3366-3419 separately tests a rootless tab-marker sweep and surviving agent. e2e/tests/terminal-tabs.spec.ts:1849-1914 checks silent automatic UI removal and preserved sibling contents.",
+            "No one cited test combines automatic shell exit, daemon and live sibling. The explicit daemon test uses default systemd scope seams and cannot establish marker scanning alone. No unmarked-shell premise or runtime test pass is claimed."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md Session view:2147-2173 and SPEC_impl.md Tabs in hosts:2234-2270 require silent automatic cleanup and tab-specific teardown; neither accepts a regression-test omission.",
+            "TODO Planned empty. plans/queue searches found no unlanded exact combined-test repair; user-tmux-jobs-outlive-cleanup.md:23-75 concerns user-run tmux pane scope migration, not this marked daemon. BUGS and active ledger have no matching claim.",
+            "Queue INDEX matching entries and full child-hangup-masks-missing-stop-tree-sweep.md, tab-reap-deadline-excludes-listing-request.md, placeholder-grid-fixture-readoption-uncertainty.md were checked: different tests and mechanisms, no exact coverage. Parent-supplied g103/f1 is not this batch's input; its unmarked-shell claim is not refuted or merged here.",
+            "FILTER.md: none applied."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "None for the narrowly refuted missing-mechanism claim. Equivalence of all combined schedules and the separate unmarked-shell root case remain outside these oracles.",
+          "original_stronger_consequence": "Deleting real dead-tab/live-sibling and daemon fixtures could weaken regression protection for real process cleanup and sibling preservation. Earlier broad preservation wording was reopened and narrowed at lines 9 and 11; no shipped unsafe process selection was established.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source/test-oracle refutation only of the narrow mechanism claim, with the earlier overstatement and later caveats preserved. Exact alias g134/l1 adds the distinguishing rootless sweep oracle; it is not a second defect."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "removed-tmux-automatic-tab-cleanup-test-composition",
+        "destination": null
+      }
+    },
+    {
+      "key": "g133/c2",
+      "owner": "g133",
+      "id": "c2",
+      "domain": "supervisor-status-reporting",
+      "purpose": "supervisor-status-reporting: crates/farhelm-supervisor/src/service/ticker.rs; phases @@ -2196,9 +1677,8 @@ mod tests {",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Removed capture-timeout test targets an eliminated asynchronous operation",
+            "location": "crates/farhelm-supervisor/src/service/ticker.rs:2024",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether removing one_excerpt_timeout_disables_the_rest_of_the_observer_pass loses protection against a failed launch delaying every other session. The old test wrapped tmux capture-pane and asserted one timed-out optional capture disabled later captures. The replacement observer no longer makes that operation: status.rs:637-657 obtains wrapper_failure_detail, then calls synchronous append_launch_excerpt; launch_artifacts.rs:59-77 checks processed owned-dead evidence and reads the host emulator through screen_tail in memory, without a subprocess, async request, or per-entry capture deadline. SPEC_impl.md:2756-2765 specifies quoting the host emulator only after its drained exit record. Suggested bucket: other (test coverage concern). Confidence: confirmed from source, no execution. proposed_drop: the removed timeout test guards an eliminated tmux operation; no corresponding host capture timeout remains to exercise. Could-be-highest: no, no shipped security or loss-of-work route established. possible_cover: none searched. Caveat: memory read performance and arbitrary artifact I/O failures are separate concerns; this record settles only this removed capture-timeout test."
+          }
+        }
+      ],
+      "latest": {
+        "line": 3,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Removed capture-timeout test targets an eliminated asynchronous operation",
+          "location": "crates/farhelm-supervisor/src/service/ticker.rs:2024",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether removing one_excerpt_timeout_disables_the_rest_of_the_observer_pass loses protection against a failed launch delaying every other session. The old test wrapped tmux capture-pane and asserted one timed-out optional capture disabled later captures. The replacement observer no longer makes that operation: status.rs:637-657 obtains wrapper_failure_detail, then calls synchronous append_launch_excerpt; launch_artifacts.rs:59-77 checks processed owned-dead evidence and reads the host emulator through screen_tail in memory, without a subprocess, async request, or per-entry capture deadline. SPEC_impl.md:2756-2765 specifies quoting the host emulator only after its drained exit record. Suggested bucket: other (test coverage concern). Confidence: confirmed from source, no execution. proposed_drop: the removed timeout test guards an eliminated tmux operation; no corresponding host capture timeout remains to exercise. Could-be-highest: no, no shipped security or loss-of-work route established. possible_cover: none searched. Caveat: memory read performance and arbitrary artifact I/O failures are separate concerns; this record settles only this removed capture-timeout test."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g133/findings.jsonl",
+        "id": "c2",
+        "line": 3,
+        "disposition": "excluded",
+        "group": "removed-tmux-launch-excerpt-capture-budget",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-084 after inspecting it. The removed timeout regression exercised a subprocess capture operation that the host-only observer no longer performs. Obsolete-operation test concern, refuted by the retained path and its pre-change dispatch. Preserve as the test aspect of g132/c4 rather than claiming an independently verified runtime bound. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333:crates/farhelm-supervisor/src/service/status.rs:637-657 calls synchronous append_launch_excerpt after wrapper-failure classification; service/launch_artifacts.rs:59-76 reads processed final host screen evidence in memory.\",\"The parent launch_artifacts.rs:67-98 explicitly bypasses the capture budget for Host. Thus g132/c4 and this test concern share the same removed tmux-capture dependency.\",\"Source only. No memory-read latency or unrelated artifact-I/O guarantee; no execution.\"] Current coverage/results: [\"Current SPEC.md:2888-2900 and SPEC_impl.md:2658-2667 describe bounded safely attributed host excerpts; neither accepts an applicable missing timeout test.\",\"TODO Planned empty; exact operation/test-name and capture-budget searches across plans/queue, BUGS, queue INDEX and active ledger found no exact item. No filter applied.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Deleting one_excerpt_timeout_disables_the_rest_of_the_observer_pass could leave failed launch capture delaying every other session without regression protection.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g133/c2",
+        "line": 3,
+        "disposition": "excluded",
+        "group": "removed-tmux-launch-excerpt-capture-budget",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-084 after inspecting it. The removed timeout regression exercised a subprocess capture operation that the host-only observer no longer performs. Obsolete-operation test concern, refuted by the retained path and its pre-change dispatch. Preserve as the test aspect of g132/c4 rather than claiming an independently verified runtime bound. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333:crates/farhelm-supervisor/src/service/status.rs:637-657 calls synchronous append_launch_excerpt after wrapper-failure classification; service/launch_artifacts.rs:59-76 reads processed final host screen evidence in memory.\",\"The parent launch_artifacts.rs:67-98 explicitly bypasses the capture budget for Host. Thus g132/c4 and this test concern share the same removed tmux-capture dependency.\",\"Source only. No memory-read latency or unrelated artifact-I/O guarantee; no execution.\"] Current coverage/results: [\"Current SPEC.md:2888-2900 and SPEC_impl.md:2658-2667 describe bounded safely attributed host excerpts; neither accepts an applicable missing timeout test.\",\"TODO Planned empty; exact operation/test-name and capture-budget searches across plans/queue, BUGS, queue INDEX and active ledger found no exact item. No filter applied.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Deleting one_excerpt_timeout_disables_the_rest_of_the_observer_pass could leave failed launch capture delaying every other session without regression protection.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-084",
+          "key": "g133/c2",
+          "latest_line": 3,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "removed-tmux-launch-excerpt-capture-budget",
+          "aliases": [
+            "g132/c4"
+          ],
+          "target_queue_file": null,
+          "why": "The removed timeout regression exercised a subprocess capture operation that the host-only observer no longer performs.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333:crates/farhelm-supervisor/src/service/status.rs:637-657 calls synchronous append_launch_excerpt after wrapper-failure classification; service/launch_artifacts.rs:59-76 reads processed final host screen evidence in memory.",
+            "The parent launch_artifacts.rs:67-98 explicitly bypasses the capture budget for Host. Thus g132/c4 and this test concern share the same removed tmux-capture dependency.",
+            "Source only. No memory-read latency or unrelated artifact-I/O guarantee; no execution."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:2888-2900 and SPEC_impl.md:2658-2667 describe bounded safely attributed host excerpts; neither accepts an applicable missing timeout test.",
+            "TODO Planned empty; exact operation/test-name and capture-budget searches across plans/queue, BUGS, queue INDEX and active ledger found no exact item. No filter applied."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Deleting one_excerpt_timeout_disables_the_rest_of_the_observer_pass could leave failed launch capture delaying every other session without regression protection.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Obsolete-operation test concern, refuted by the retained path and its pre-change dispatch. Preserve as the test aspect of g132/c4 rather than claiming an independently verified runtime bound."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "removed-tmux-launch-excerpt-capture-budget",
+        "destination": null
+      }
+    },
+    {
+      "key": "g133/c3",
+      "owner": "g133",
+      "id": "c3",
+      "domain": "supervisor-status-reporting",
+      "purpose": "supervisor-status-reporting: crates/farhelm-supervisor/src/service/ticker.rs; phases @@ -2196,9 +1677,8 @@ mod tests {",
+      "history": [
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Trust and permission tests preserve their distinct run-lifetime contracts",
+            "location": "crates/farhelm-supervisor/src/service/ticker.rs:1681",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether removing forget_tail assertions and the tmux liveness map allows an old workspace-trust hint to remain visible after its terminal disappears, or clears bypass evidence too soon. New ticker.rs:1681-1745 checks live trust evidence, ordinary-screen clearing, an entry with terminal None, replacement and reload. :1752-1789 retains bypass latching across non-bypass and unrecognized screens and resets it for replacement/reload. status.rs:192-249 classifies an absent or unreadable unsettled terminal as Exited or Unknown, and :425-428 gates both trust hints on the resulting live status. ticker.rs:466-482 replaces both trust signals from every current sampled screen; :487-501 only sets the bypass latch. sample_pass :1328-1343 excludes unreadable or not-caught-up hosts, and :1374-1392 reads the in-memory screen and updates trust and permission independently. SPEC.md:1623-1628 and :1645-1650 limit discovery hints to a current recognized question; SPEC_impl.md:4375-4385 explicitly requires bypass to latch for the run, including after covered or non-bypass screens. Suggested bucket: other. Confidence: confirmed by source, no execution. proposed_drop: the replaced reply fixture and remaining assertions preserve the applicable contracts; the old forget_tail capture-failure boundary no longer exists in this host-only sampler. Could-be-highest: no established security or loss-of-work route; these flags report evidence and this patch changes tests. possible_cover: none searched. Caveat: this review checks the assigned tests and their status/sampler interfaces, not unrelated trust-setting handlers or admission paths."
+          }
+        }
+      ],
+      "latest": {
+        "line": 5,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Trust and permission tests preserve their distinct run-lifetime contracts",
+          "location": "crates/farhelm-supervisor/src/service/ticker.rs:1681",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether removing forget_tail assertions and the tmux liveness map allows an old workspace-trust hint to remain visible after its terminal disappears, or clears bypass evidence too soon. New ticker.rs:1681-1745 checks live trust evidence, ordinary-screen clearing, an entry with terminal None, replacement and reload. :1752-1789 retains bypass latching across non-bypass and unrecognized screens and resets it for replacement/reload. status.rs:192-249 classifies an absent or unreadable unsettled terminal as Exited or Unknown, and :425-428 gates both trust hints on the resulting live status. ticker.rs:466-482 replaces both trust signals from every current sampled screen; :487-501 only sets the bypass latch. sample_pass :1328-1343 excludes unreadable or not-caught-up hosts, and :1374-1392 reads the in-memory screen and updates trust and permission independently. SPEC.md:1623-1628 and :1645-1650 limit discovery hints to a current recognized question; SPEC_impl.md:4375-4385 explicitly requires bypass to latch for the run, including after covered or non-bypass screens. Suggested bucket: other. Confidence: confirmed by source, no execution. proposed_drop: the replaced reply fixture and remaining assertions preserve the applicable contracts; the old forget_tail capture-failure boundary no longer exists in this host-only sampler. Could-be-highest: no established security or loss-of-work route; these flags report evidence and this patch changes tests. possible_cover: none searched. Caveat: this review checks the assigned tests and their status/sampler interfaces, not unrelated trust-setting handlers or admission paths."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g133/findings.jsonl",
+        "id": "c3",
+        "line": 5,
+        "disposition": "under-investigation",
+        "group": "g133-c3",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-084",
+          "key": "g133/c3",
+          "latest_line": 5,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "host-only-trust-and-bypass-test-lifetime-contracts",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The retained tests pin current-question clearing, absent-terminal suppression, run replacement/reload, and the separate bypass latch. The deleted capture-error boundary is not a fallible host screen read.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333:crates/farhelm-supervisor/src/service/ticker.rs:1681-1786 retains those concrete assertions; :466-500 replaces trust evidence but only sets bypass evidence; :1327-1393 filters unreadable/replaying hosts and samples their memory.",
+            "service/status.rs:192-249 maps absent/unattributed unsettled terminals to Exited/Unknown; :425-428 gates both trust hints on live status. Parent terminals.rs:319-340 returns host screen/title successfully without the tmux capture error.",
+            "Current SPEC_impl.md:4218-4227 explicitly states no admission or inheritance path reads screen_yolo. This check does not cover unrelated trust-setting handlers. No runtime execution."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:1627-1654 requires recognized current trust questions; SPEC_impl.md:3731-3739 describes trust evidence, and :4218-4227 requires run-long bypass latching. These settle the contracts, not blanket acceptance of missing tests.",
+            "Empty TODO Planned; searches of plans/queue, BUGS, queue INDEX and active ledger found no exact trust/bypass test-lifetime claim. Other trust queue entries concern actual launch/trust edits and do not match. FILTER.md: none applied."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Old trust hints might remain visible after a terminal disappears, or observed bypass evidence might be cleared too early. The reviewer established no security or work-loss route and confined the claim to reporting/test interfaces.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Narrow retained-oracle/source refutation. Flagged conservatively for independent checking because the original consequence concerns trust and permission reporting."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "host-only-trust-and-bypass-test-lifetime-contracts",
+        "destination": null
+      }
+    },
+    {
+      "key": "g133/c4",
+      "owner": "g133",
+      "id": "c4",
+      "domain": "supervisor-status-reporting",
+      "purpose": "supervisor-status-reporting: crates/farhelm-supervisor/src/service/ticker.rs; phases @@ -2196,9 +1677,8 @@ mod tests {",
+      "history": [
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Real-host ticker fixtures intentionally require glibc Linux",
+            "location": "crates/farhelm-supervisor/src/service/ticker.rs:1879",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: the new real-terminal fixture starts the unit-test executable as a host, so these tests refuse host startup outside glibc Linux. This is an explicit test-platform choice, not an unreported portability regression. Source: ticker.rs:1879-1886 passes unit_test_host_program to spawn_host; hosts/test_program.rs:32-40 and :51-52 limit the initializer to Linux GNU. Contract: SPEC_impl.md:2242-2247 says: \"It is registered on glibc Linux only; elsewhere every host start from a unit test is refused (libtest rejects the arguments), so those tests fail by name rather than run on another kind of terminal. Those that need a real terminal run on such hosts (`tests::host_supervisor`); the tests of ending the old terminals build an earlier release's tmux server by hand.\" Suggested bucket: other (maintainer test portability only). Confidence: confirmed source and explicit specification acceptance, no execution. proposed_drop: exact specification acceptance quoted above. Could-be-highest: no, this concerns test executability and establishes no shipped security or loss-of-work route. possible_cover: none searched. Caveat: no claim that the unit suite passes on any platform; no tests were run."
+          }
+        }
+      ],
+      "latest": {
+        "line": 6,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c4",
+          "state": "open",
+          "summary": "Real-host ticker fixtures intentionally require glibc Linux",
+          "location": "crates/farhelm-supervisor/src/service/ticker.rs:1879",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: the new real-terminal fixture starts the unit-test executable as a host, so these tests refuse host startup outside glibc Linux. This is an explicit test-platform choice, not an unreported portability regression. Source: ticker.rs:1879-1886 passes unit_test_host_program to spawn_host; hosts/test_program.rs:32-40 and :51-52 limit the initializer to Linux GNU. Contract: SPEC_impl.md:2242-2247 says: \"It is registered on glibc Linux only; elsewhere every host start from a unit test is refused (libtest rejects the arguments), so those tests fail by name rather than run on another kind of terminal. Those that need a real terminal run on such hosts (`tests::host_supervisor`); the tests of ending the old terminals build an earlier release's tmux server by hand.\" Suggested bucket: other (maintainer test portability only). Confidence: confirmed source and explicit specification acceptance, no execution. proposed_drop: exact specification acceptance quoted above. Could-be-highest: no, this concerns test executability and establishes no shipped security or loss-of-work route. possible_cover: none searched. Caveat: no claim that the unit suite passes on any platform; no tests were run."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g133/findings.jsonl",
+        "id": "c4",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "unit-host-test-glibc-platform-contract",
+        "reason": "Parent explicitly accepted named covered proposal from claims-084 after inspecting it. The specifications explicitly accept these unit tests failing by name outside glibc Linux when they need a real terminal host. Exact explicit specification acceptance, not inferred platform support or a claim that tests ran. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333:crates/farhelm-supervisor/src/service/ticker.rs:1858-1889 launches unit_test_host_program; hosts/test_program.rs:32-38 documents refusal elsewhere and :49-66 registers its initializer only under linux/gnu.\",\"Current SPEC_impl.md:2160-2176 states the same precise test-platform choice. No unit-suite pass or observed portability failure is claimed.\"] Current coverage/results: [\"SPEC_impl.md:2160-2176 exactly accepts the trigger, test failure consequence and unit-test scope. SPEC.md's product terminal-host contract supplies no conflicting unit-test portability promise.\",\"TODO Planned empty; plans/queue, BUGS, queue INDEX and active ledger searches for glibc/unit host fixtures found no additional exact record. No FILTER.md basis is needed or applied.\"] Exact cited cover: [\"SPEC_impl.md:2169-2172: 'registered on glibc Linux only; elsewhere every host start from a unit test is refused (libtest rejects the arguments), so those tests fail by name rather than run on another kind of terminal.'\"] Original stronger consequence and missing premise remain preserved: \"The real-host ticker fixtures fail to start hosts outside glibc Linux, potentially appearing to be an unreported test portability regression. No shipped security or user-work consequence was claimed.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g133/c4",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "unit-host-test-glibc-platform-contract",
+        "bucket": "other",
+        "recording": "covered",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named covered proposal from claims-084 after inspecting it. The specifications explicitly accept these unit tests failing by name outside glibc Linux when they need a real terminal host. Exact explicit specification acceptance, not inferred platform support or a claim that tests ran. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333:crates/farhelm-supervisor/src/service/ticker.rs:1858-1889 launches unit_test_host_program; hosts/test_program.rs:32-38 documents refusal elsewhere and :49-66 registers its initializer only under linux/gnu.\",\"Current SPEC_impl.md:2160-2176 states the same precise test-platform choice. No unit-suite pass or observed portability failure is claimed.\"] Current coverage/results: [\"SPEC_impl.md:2160-2176 exactly accepts the trigger, test failure consequence and unit-test scope. SPEC.md's product terminal-host contract supplies no conflicting unit-test portability promise.\",\"TODO Planned empty; plans/queue, BUGS, queue INDEX and active ledger searches for glibc/unit host fixtures found no additional exact record. No FILTER.md basis is needed or applied.\"] Exact cited cover: [\"SPEC_impl.md:2169-2172: 'registered on glibc Linux only; elsewhere every host start from a unit test is refused (libtest rejects the arguments), so those tests fail by name rather than run on another kind of terminal.'\"] Original stronger consequence and missing premise remain preserved: \"The real-host ticker fixtures fail to start hosts outside glibc Linux, potentially appearing to be an unreported test portability regression. No shipped security or user-work consequence was claimed.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-084",
+          "key": "g133/c4",
+          "latest_line": 6,
+          "recommendation": "covered",
+          "bucket": "other",
+          "underlying_key": "unit-host-test-glibc-platform-contract",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The specifications explicitly accept these unit tests failing by name outside glibc Linux when they need a real terminal host.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333:crates/farhelm-supervisor/src/service/ticker.rs:1858-1889 launches unit_test_host_program; hosts/test_program.rs:32-38 documents refusal elsewhere and :49-66 registers its initializer only under linux/gnu.",
+            "Current SPEC_impl.md:2160-2176 states the same precise test-platform choice. No unit-suite pass or observed portability failure is claimed."
+          ],
+          "coverage_checked": [
+            "SPEC_impl.md:2160-2176 exactly accepts the trigger, test failure consequence and unit-test scope. SPEC.md's product terminal-host contract supplies no conflicting unit-test portability promise.",
+            "TODO Planned empty; plans/queue, BUGS, queue INDEX and active ledger searches for glibc/unit host fixtures found no additional exact record. No FILTER.md basis is needed or applied."
+          ],
+          "exact_cover_quotes": [
+            "SPEC_impl.md:2169-2172: 'registered on glibc Linux only; elsewhere every host start from a unit test is refused (libtest rejects the arguments), so those tests fail by name rather than run on another kind of terminal.'"
+          ],
+          "missing_premise": null,
+          "original_stronger_consequence": "The real-host ticker fixtures fail to start hosts outside glibc Linux, potentially appearing to be an unreported test portability regression. No shipped security or user-work consequence was claimed.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Exact explicit specification acceptance, not inferred platform support or a claim that tests ran."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "unit-host-test-glibc-platform-contract",
+        "destination": null
+      }
+    },
+    {
+      "key": "g133/l2",
+      "owner": "g133",
+      "id": "l2",
+      "domain": "supervisor-status-reporting",
+      "purpose": "supervisor-status-reporting: crates/farhelm-supervisor/src/service/ticker.rs; phases @@ -2196,9 +1677,8 @@ mod tests {",
+      "history": [
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l2",
+            "state": "open",
+            "summary": "Check host-adoption readiness before deterministic sampler assertions",
+            "location": "crates/farhelm-supervisor/src/service/ticker.rs:1887",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: changed live-session fixtures return immediately from HostTerminal::adopt; deterministic rotation tests then demand that the next sampler pass visits every installed host. sample_pass excludes any host whose status.caught_up is false. Need determine whether Fresh adoption guarantees caught_up before returning, or whether the fixture now admits a startup race. Source: ticker.rs:1887-1894 returns adopted terminal without a readiness wait; :1937-1950 installs it; :1328-1343 filters caught_up. Caller :4689-4723 immediately makes budget-one passes and asserts a/b/c cursor order, and :4767-4780 installs z and immediately requires one sample. Checks actually made: assigned patch fully read, fixture and representative deterministic caller read; terminal.rs Adoption::Fresh docs establish replay policy but not readiness. Exact missing premise: HostTerminal::adopt return contract for Fresh and initialization/publication of caught_up. Next inspect adoption/runtime source, which can settle it. Suggested bucket: other (possible test race). Confidence: unverified investigation in progress. Could-be-highest: no, this is a test readiness concern without an established shipped loss route. proposed_drop: false pending source check. possible_cover: none searched. No execution or reproduction."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l2",
+            "state": "open",
+            "summary": "Deterministic rotation fixtures do not carry an output backlog at adoption",
+            "location": "crates/farhelm-supervisor/src/service/ticker.rs:1887",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: checked whether the new host-adoption fixture races deterministic sampler rotation assertions. HostTerminal::adopt does not promise full journal catch-up: terminal.rs:1731-1739 states that explicitly; :1851-1858 initializes caught_up only when no queued event or adopted journal position remains, and :1916-1927 processes one queued record before spawning the runtime. The specific immediate rotation assertions use only output-free sh -c sleep 300 programs, with no recovered host/snapshot or resize request: ticker.rs:4692-4694, :4768 and :4798-4800. Their host journals have no producer output to catch up with, so those examples do not establish the suspected race. Other representative consumers explicitly wait on processed exit evidence (:2875-2883), complete screen frames (:2774-2780, :2811-2814), or sample/quiet-count progress (:3380-3411, :5137-5182). Checks actually made: adoption initialization and first-event processing; sampler caught_up filter; all fixture call-site locations; representative deterministic/output/exit wait callers. Suggested bucket: other. Confidence: confirmed refutation of the cited rotation examples; no runtime execution. proposed_drop: no backlog is produced by the deterministic output-free fixtures; the absence of a general caught_up guarantee alone is not a failing caller. Could-be-highest: no, this remains a test-readiness concern with no shipped loss route. possible_cover: none searched. Caveat preserved: Fresh adoption is not a general readiness oracle, so future tests that require arbitrary multi-record output must wait for their intended frame/processed state. This is not a claim that every caller elsewhere in the commit was exhaustively reviewed."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l2",
+            "state": "open",
+            "summary": "Verify setup journal records before dropping deterministic-sampling race",
+            "location": "crates/farhelm-supervisor/src/service/ticker.rs:1887",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Synthesis revision: reopen the adoption-readiness premise. My earlier candidate established that deterministic rotation fixtures emit no stdout, but did not establish that fresh-host protocol/journal setup emits no pending records. HostTerminal::adopt processes at most one queued record before returning, initializes caught_up from queued events and adopted end, and sample_pass skips a false caught_up flag. The original suspected consequence remains a startup race in deterministic sampler tests, not shipped behavior. Next checks: fresh journal construction, initial records/resize/snapshot setup, Info/Read ordering, and the first event's caught_up publication. Exact missing premise: whether an output-free fresh host can owe more setup records than adoption consumes, or whether its first setup event necessarily reaches adopted end and clears the fence. Available source can settle this; not an irreducible uncertainty. Suggested bucket: other. Confidence: unverified investigation resumed. proposed_drop: false pending source checks; no parent drop accepted. Could-be-highest: no established security or loss-of-work route. possible_cover: none searched. No execution or reproduction."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l2",
+            "state": "open",
+            "summary": "Fresh output-free rotation fixtures have no setup records pending at adoption",
+            "location": "crates/farhelm-supervisor/src/service/ticker.rs:1887",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Synthesis revision replaces the earlier inference from no stdout with the complete setup-record check. TLDR: the immediate deterministic rotation samples do not race a protocol/journal setup backlog under their stated fixture premise. ticker.rs:1858-1870 starts fresh sh -c sleep 300 hosts with initial_snapshot None and an explicit 80x24 initial size; :4692-4694, :4768 and :4798-4800 issue no input/resize before sampling. terminal-host/src/journal.rs:137-154 initializes no output, resize, exit or snapshot record, with end=0 and resize_count=0. Its read at Position::default is within that empty retained tail (:344-355), and next_in_tail returns None rather than a setup record when the offset is at end (:406-445). Host::new only constructs that journal (host.rs:225-244); resize records are appended only on an actual ClientMessage::Resize (:805-820). Connection setup queues Welcome only (:961-977); Info queues an InfoReply and Read only creates the cursor (:757-785), neither changing the journal. Input acknowledgements are queued only for resolved/discarded input (:557-567, :585-625); adoption sends none. hosts/client.rs:1103-1140 routes InfoReply to its request cell rather than the event queue; the event queue contains journal records or input acknowledgements. Thus the empty journal has no queued setup event: hosts/terminal.rs:1821-1826 sees fence=0 and adopted_end=(0,0), and :1858 initializes caught_up=true before the runtime is spawned. The first-record guarantee is not needed for this empty-stream case: terminal-host/SPEC.md:237-242 explicitly conditions it on an existing record; Terms:33-34 states \"The size given at spawn is not a resize.\" For a nonempty stream, adopt processes only one queued event (:1916-1925); on_event decrements the fence (:3343-3344), and record publication sets caught_up only after fence=0 and the adopted position is reached (:4010-4019). Suggested bucket: other (test readiness concern). Confidence: confirmed by source and contract, no execution. proposed_drop: no pending setup record exists in the specific fresh output-free fixtures, so the claimed deterministic-sample race is not established; no parent drop accepted. Could-be-highest: no established security or loss-of-work route. possible_cover: none searched. Caveats preserved: this does not turn Fresh adoption into a general full-journal readiness guarantee; output-producing/recovered fixtures still require their own processed-state oracle, and unexpected child output or an early child exit violates the quiet live fixture premise. No unresolved source premise remains for the setup-record concern."
+          }
+        }
+      ],
+      "latest": {
+        "line": 12,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l2",
+          "state": "open",
+          "summary": "Fresh output-free rotation fixtures have no setup records pending at adoption",
+          "location": "crates/farhelm-supervisor/src/service/ticker.rs:1887",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Synthesis revision replaces the earlier inference from no stdout with the complete setup-record check. TLDR: the immediate deterministic rotation samples do not race a protocol/journal setup backlog under their stated fixture premise. ticker.rs:1858-1870 starts fresh sh -c sleep 300 hosts with initial_snapshot None and an explicit 80x24 initial size; :4692-4694, :4768 and :4798-4800 issue no input/resize before sampling. terminal-host/src/journal.rs:137-154 initializes no output, resize, exit or snapshot record, with end=0 and resize_count=0. Its read at Position::default is within that empty retained tail (:344-355), and next_in_tail returns None rather than a setup record when the offset is at end (:406-445). Host::new only constructs that journal (host.rs:225-244); resize records are appended only on an actual ClientMessage::Resize (:805-820). Connection setup queues Welcome only (:961-977); Info queues an InfoReply and Read only creates the cursor (:757-785), neither changing the journal. Input acknowledgements are queued only for resolved/discarded input (:557-567, :585-625); adoption sends none. hosts/client.rs:1103-1140 routes InfoReply to its request cell rather than the event queue; the event queue contains journal records or input acknowledgements. Thus the empty journal has no queued setup event: hosts/terminal.rs:1821-1826 sees fence=0 and adopted_end=(0,0), and :1858 initializes caught_up=true before the runtime is spawned. The first-record guarantee is not needed for this empty-stream case: terminal-host/SPEC.md:237-242 explicitly conditions it on an existing record; Terms:33-34 states \"The size given at spawn is not a resize.\" For a nonempty stream, adopt processes only one queued event (:1916-1925); on_event decrements the fence (:3343-3344), and record publication sets caught_up only after fence=0 and the adopted position is reached (:4010-4019). Suggested bucket: other (test readiness concern). Confidence: confirmed by source and contract, no execution. proposed_drop: no pending setup record exists in the specific fresh output-free fixtures, so the claimed deterministic-sample race is not established; no parent drop accepted. Could-be-highest: no established security or loss-of-work route. possible_cover: none searched. Caveats preserved: this does not turn Fresh adoption into a general full-journal readiness guarantee; output-producing/recovered fixtures still require their own processed-state oracle, and unexpected child output or an early child exit violates the quiet live fixture premise. No unresolved source premise remains for the setup-record concern."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g133/findings.jsonl",
+        "id": "l2",
+        "line": 12,
+        "disposition": "excluded",
+        "group": "fresh-quiet-host-fixture-setup-backlog",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-084 after inspecting it. The specific immediate rotation fixtures have empty fresh journals and no protocol setup record. Their caught_up flag is true at adoption; the general absence of a full-replay guarantee does not establish a race in these callers. Specific caller/premise refutation, not a universal Fresh-adoption readiness guarantee and not an exhaustive claim about all fixture consumers. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333:crates/farhelm-supervisor/src/service/ticker.rs:1858-1889 uses sh -c sleep 300, initial_snapshot=None and initial 80x24; :4692-4725,4768-4774,4798-4814 samples without sending input/resize.\",\"At that revision terminal-host/src/journal.rs:137-154 starts empty with end/resizes zero; :344-355 chooses Tail at (0,0); :408-445 has no record at empty end. host.rs:225-244 constructs this journal; :758-787 Info/Read neither append records; :804-819 appends a resize only on Resize; :961-977 queues Welcome outside the journal.\",\"hosts/client.rs:1103-1141 routes InfoReply to its request cell; hosts/terminal.rs:1821-1858 sets caught_up when the queued-event fence and adopted end are zero. :1727-1739 and :1916-1926 still provide no general all-records-before-return guarantee.\",\"terminal-host/SPEC.md:33-34 says spawn size is not a resize; :236-242 conditions first-record ordering on a record existing. Earlier line-8 inference from no stdout alone was reopened at line 10 and replaced by this complete setup-record check at line 12. No tests executed.\"] Current coverage/results: [\"Both current specifications' host/sampling contracts were searched; SPEC_impl.md Terminal host and Runtime state supply readiness and sampling context, not acceptance of racy tests.\",\"TODO Planned empty. No exact quiet-fixture/setup-backlog item in unlanded plans, BUGS or active ledger. Full reconnect-replay-keeps-obsolete-event-count-fence.md and placeholder-grid-fixture-readoption-uncertainty.md concern reconnect/backlog and independently scheduled readoption, not this empty fresh stream. No exact queue coverage or filter match.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Fresh adoption might return before caught_up, causing deterministic next-pass rotation/count assertions to race startup. The initial no-stdout refutation was withdrawn pending setup-record analysis; only the specific quiet callers are now refuted.\"; \"None under the stated quiet live-child premise. Unexpected child output or early exit violates that premise; output-producing/recovered fixtures still need processed-state/frame waits.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g133/l2",
+        "line": 12,
+        "disposition": "excluded",
+        "group": "fresh-quiet-host-fixture-setup-backlog",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-084 after inspecting it. The specific immediate rotation fixtures have empty fresh journals and no protocol setup record. Their caught_up flag is true at adoption; the general absence of a full-replay guarantee does not establish a race in these callers. Specific caller/premise refutation, not a universal Fresh-adoption readiness guarantee and not an exhaustive claim about all fixture consumers. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333:crates/farhelm-supervisor/src/service/ticker.rs:1858-1889 uses sh -c sleep 300, initial_snapshot=None and initial 80x24; :4692-4725,4768-4774,4798-4814 samples without sending input/resize.\",\"At that revision terminal-host/src/journal.rs:137-154 starts empty with end/resizes zero; :344-355 chooses Tail at (0,0); :408-445 has no record at empty end. host.rs:225-244 constructs this journal; :758-787 Info/Read neither append records; :804-819 appends a resize only on Resize; :961-977 queues Welcome outside the journal.\",\"hosts/client.rs:1103-1141 routes InfoReply to its request cell; hosts/terminal.rs:1821-1858 sets caught_up when the queued-event fence and adopted end are zero. :1727-1739 and :1916-1926 still provide no general all-records-before-return guarantee.\",\"terminal-host/SPEC.md:33-34 says spawn size is not a resize; :236-242 conditions first-record ordering on a record existing. Earlier line-8 inference from no stdout alone was reopened at line 10 and replaced by this complete setup-record check at line 12. No tests executed.\"] Current coverage/results: [\"Both current specifications' host/sampling contracts were searched; SPEC_impl.md Terminal host and Runtime state supply readiness and sampling context, not acceptance of racy tests.\",\"TODO Planned empty. No exact quiet-fixture/setup-backlog item in unlanded plans, BUGS or active ledger. Full reconnect-replay-keeps-obsolete-event-count-fence.md and placeholder-grid-fixture-readoption-uncertainty.md concern reconnect/backlog and independently scheduled readoption, not this empty fresh stream. No exact queue coverage or filter match.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Fresh adoption might return before caught_up, causing deterministic next-pass rotation/count assertions to race startup. The initial no-stdout refutation was withdrawn pending setup-record analysis; only the specific quiet callers are now refuted.\"; \"None under the stated quiet live-child premise. Unexpected child output or early exit violates that premise; output-producing/recovered fixtures still need processed-state/frame waits.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-084",
+          "key": "g133/l2",
+          "latest_line": 12,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "fresh-quiet-host-fixture-setup-backlog",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The specific immediate rotation fixtures have empty fresh journals and no protocol setup record. Their caught_up flag is true at adoption; the general absence of a full-replay guarantee does not establish a race in these callers.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333:crates/farhelm-supervisor/src/service/ticker.rs:1858-1889 uses sh -c sleep 300, initial_snapshot=None and initial 80x24; :4692-4725,4768-4774,4798-4814 samples without sending input/resize.",
+            "At that revision terminal-host/src/journal.rs:137-154 starts empty with end/resizes zero; :344-355 chooses Tail at (0,0); :408-445 has no record at empty end. host.rs:225-244 constructs this journal; :758-787 Info/Read neither append records; :804-819 appends a resize only on Resize; :961-977 queues Welcome outside the journal.",
+            "hosts/client.rs:1103-1141 routes InfoReply to its request cell; hosts/terminal.rs:1821-1858 sets caught_up when the queued-event fence and adopted end are zero. :1727-1739 and :1916-1926 still provide no general all-records-before-return guarantee.",
+            "terminal-host/SPEC.md:33-34 says spawn size is not a resize; :236-242 conditions first-record ordering on a record existing. Earlier line-8 inference from no stdout alone was reopened at line 10 and replaced by this complete setup-record check at line 12. No tests executed."
+          ],
+          "coverage_checked": [
+            "Both current specifications' host/sampling contracts were searched; SPEC_impl.md Terminal host and Runtime state supply readiness and sampling context, not acceptance of racy tests.",
+            "TODO Planned empty. No exact quiet-fixture/setup-backlog item in unlanded plans, BUGS or active ledger. Full reconnect-replay-keeps-obsolete-event-count-fence.md and placeholder-grid-fixture-readoption-uncertainty.md concern reconnect/backlog and independently scheduled readoption, not this empty fresh stream. No exact queue coverage or filter match."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "None under the stated quiet live-child premise. Unexpected child output or early exit violates that premise; output-producing/recovered fixtures still need processed-state/frame waits.",
+          "original_stronger_consequence": "Fresh adoption might return before caught_up, causing deterministic next-pass rotation/count assertions to race startup. The initial no-stdout refutation was withdrawn pending setup-record analysis; only the specific quiet callers are now refuted.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Specific caller/premise refutation, not a universal Fresh-adoption readiness guarantee and not an exhaustive claim about all fixture consumers."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "fresh-quiet-host-fixture-setup-backlog",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete: all 1,201 assigned patch lines reviewed.\n\nNo reportable findings. Six candidates recorded; both leads resolved, none remain open. Findings log and progress updated.\n\nSource-only analysis; no tests or reproductions run. Ready for the later synthesis turn."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised l1 to distinguish complementary cleanup coverage from the unmarked-shell root gap and combined automatic-exit schedule.\n\nRevised l2: source confirms no setup records remain pending for the fresh, output-free rotation fixtures.\n\nNo new findings. Unresolved lead IDs: none."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 complete. Checked fixture field sharing, generation consistency, waiters, close-gate lifetime, and completion assertions against pinned callers.\n\n- New verified IDs: none.\n- New unverified-after-investigation IDs: none.\n- Open leads: none.\n- Anything new found: no.\n\nProgress updated; findings log unchanged. No runtime execution."
+    }
+  ],
+  "progress": "g133 supervisor-status-reporting: discovery pass 1 complete; no new issue found.\nTurn type/count: discovery/3 overall (initial 1, synthesis 1, discovery 1). Discovery-pass count: 1.\nReviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Original assigned patch coverage remains all 1201 lines, audited by parent. No unread assigned material.\nDiscovery input: read discovery-neighbours.json completely, lines 1-575, before fresh source search. Existing own 12-event history and preceding synthesis context retained. No excluded inventory metadata or prohibited queue/coverage sources read.\nInterface synthesis before new search: supplied g131/l1 concerns an output-producing one-pass caller outside this assigned patch; it does not refute l2's carefully limited empty-journal result. Supplied g132/c3 concerns production sampler field comments and the removed failure-reset path; c3 here concerns the assigned trust/permission tests, not a dismissal of that independent documentation defect. Supplied daemon/sibling and cleanup records do not add a new assigned-scope premise beyond l1's existing narrowed conclusion. No parent drop/lowering accepted or inferred.\nFresh checks: reread assigned replacement fixture/helper source at ticker.rs:1832-2138 and :2156-2454, then trust/permission tests and classifier/sample accessors (:1677-1792, :2127-2154). Inspected field copying and shared-cell identity in on_terminal and without_terminal against core entry_with (:19139-19201), consistent generation zero across host tags/durable fixtures, explicit child environment vectors rather than process environment changes, bounded exit/frame/busy-output waiters, and timeout/completion oracles. Traced the held-close gate through try_close_tab and close_tab_claimed (core.rs:13969-14063), and host-tab finished/reap_due, forgetting and failed-end retention (host_tabs.rs:172-206, :290-337, :953-1039).\nResults: cloned entries retain the intended run/session cells and generation; waiters do not mutate the sampler cursor while observing readiness; completed-close waiting requires both empty tab cells and released lifecycle claims; the current-thread admission test inspects acquired claims before spawned closes can refuse; its held gate is released on unwind. No new fixture-contract, oracle, documentation, source correctness or security defect established within assigned scope. Existing limitations remain under their original IDs, without broadening their proposed-drop bases.\nNew verified finding IDs this discovery: none. New unverified-after-investigation finding IDs: none. New candidate/lead IDs: none. Revised IDs this turn: none. Remaining open lead IDs: none. Durable findings log unchanged at 12 events; no invented activity record added for the empty pass.\nValidation: source/contract checks only. No runtime test, build, reproduction or live-install action. No execution observations claimed. No checkout modifications or helper agents.\nNext action: return discovery result only. Further discovery/synthesis waits for caller direction; no final report file rendered.\n"
+}

@@ -1,0 +1,356 @@
+{
+  "group": {
+    "id": "g080",
+    "domain": "terminal-view-rendering",
+    "purpose": "terminal-view-rendering: crates/farhelm-ui/assets/grid-terminal.js, crates/farhelm-ui/assets/grid-style.js, crates/farhelm-ui/js-tests/grid-buffer.test.js, crates/farhelm-ui/js-tests/grid-style.test.js; phases complete small per-commit changes",
+    "interfaces": [
+      "g002",
+      "g009",
+      "g010",
+      "g011",
+      "g052",
+      "g053",
+      "g054",
+      "g079",
+      "g081",
+      "g084",
+      "g088",
+      "g089",
+      "g117",
+      "g118",
+      "g119",
+      "g120",
+      "g121",
+      "g135",
+      "g136",
+      "g174",
+      "g175",
+      "g176",
+      "g177",
+      "g178",
+      "g179",
+      "g180",
+      "g181",
+      "g182",
+      "g184",
+      "g186",
+      "g187",
+      "g188",
+      "g189",
+      "g190",
+      "g191",
+      "g192",
+      "g193",
+      "g194",
+      "g195",
+      "g196",
+      "g197"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/01065-000.patch",
+        "ranges": [
+          [
+            1,
+            703
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/assets/grid-terminal.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,40045)",
+        "lines": 703,
+        "bytes": 40045,
+        "start": 0,
+        "end": 40045,
+        "original": "[private-run]/prep/originals/01065.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01494-000.patch",
+        "ranges": [
+          [
+            1,
+            61
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/assets/grid-style.js",
+        "commit": "61e632323dbc6b4a35ed27bf5b9833102ffd5a4e",
+        "notes": "patch header; patch character offsets [0,2976)",
+        "lines": 61,
+        "bytes": 2976,
+        "start": 0,
+        "end": 2976,
+        "original": "[private-run]/prep/originals/01494.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01497-000.patch",
+        "ranges": [
+          [
+            1,
+            37
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/js-tests/grid-buffer.test.js",
+        "commit": "61e632323dbc6b4a35ed27bf5b9833102ffd5a4e",
+        "notes": "patch header; patch character offsets [0,2238)",
+        "lines": 37,
+        "bytes": 2238,
+        "start": 0,
+        "end": 2238,
+        "original": "[private-run]/prep/originals/01497.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01500-000.patch",
+        "ranges": [
+          [
+            1,
+            34
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/js-tests/grid-style.test.js",
+        "commit": "61e632323dbc6b4a35ed27bf5b9833102ffd5a4e",
+        "notes": "patch header; patch character offsets [0,1962)",
+        "lines": 34,
+        "bytes": 1962,
+        "start": 0,
+        "end": 1962,
+        "original": "[private-run]/prep/originals/01500.patch"
+      }
+    ],
+    "lines": 835,
+    "bytes": 47221
+  },
+  "records": [
+    {
+      "key": "g080/l1",
+      "owner": "g080",
+      "id": "l1",
+      "domain": "terminal-view-rendering",
+      "purpose": "terminal-view-rendering: crates/farhelm-ui/assets/grid-terminal.js, crates/farhelm-ui/assets/grid-style.js, crates/farhelm-ui/js-tests/grid-buffer.test.js, crates/farhelm-ui/js-tests/grid-style.test.js; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Check whether removing inherited grid size leaves any attachment path using an obsolete size",
+            "location": "crates/farhelm-ui/assets/grid-terminal.js:407",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: a surviving caller that expects the grid to preserve its prior size could attach or resize the program at dimensions different from the pane. Details: the assigned patch removes options.size from fitted initialization and the first-fit early return; grid-terminal.js now starts fitted at DEFAULT_SIZE and computes the first observation normally. SPEC_impl.md:1835-1855 says terminal.js mounts the grid before the socket exists because the URL carries its fitted size, and no sizing state is retained across visits. Suggested bucket: high/material UX if a surviving dependency is established; could-be-highest: no established security or loss-of-work route. Confidence: unverified, caller investigation pending. proposed_drop: false. possible_cover: none. Checks made: complete assigned patch read and pinned grid-client contract read; these establish the changed behavior but not all callers. Missing premise: whether any shipped construction or reconnect path still supplies or depends on inherited options.size. Next source check: enumerate pinned farhelmGridTerminal.create callers, inspect first fit and socket URL construction. No execution or reproduction performed."
+          }
+        },
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Inherited-size removal has no surviving production dependency",
+            "location": "crates/farhelm-ui/assets/grid-terminal.js:407",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether removing inherited sizing could attach or resize the program at dimensions different from the pane; source checks refute a surviving dependency. Details: grid-terminal.js:407 initializes DEFAULT_SIZE and :474-497 computes its normal first fit; a pinned git grep of UI src/assets finds exactly one production farhelmGridTerminal.create call, terminal.js:4313. Its complete options object at :4313-4365 supplies no size. terminal.js:3389-3393 installs the component, fits it and reads grid.size before constructing the socket URL at :3424-3426. sendResize at :4560-4565 reads the grid's fitted size; :4596-4605 sends it again on socket open, covering resize during handshake. Therefore the removed renderer-swap exception has no surviving caller that requires its inherited answer. SPEC_impl.md:1842-1852 says \"mounts the grid component for every terminal before the socket exists, because the socket URL carries its fitted size\" and \"no per-terminal sizing state is retained across visits\"; source implements that contract. Suggested bucket if the disproved route existed: high/material UX. Could-be-highest: no, no established security or loss-of-work route. Confidence: confirmed source refutation. proposed_drop: no surviving options.size caller; ordinary first-fit size is read before attach and sent again on open. possible_cover: none. No tests, builds or reproductions run. Scope caveat: this conclusion concerns the removed inherited-size exception, not a general proof of every fitting edge case."
+          }
+        },
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Inherited-size removal has no surviving production dependency",
+            "location": "crates/farhelm-ui/assets/grid-terminal.js:407",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether removing inherited renderer sizing could attach or resize the terminal program at dimensions different from the pane. The specific surviving-caller route is refuted by source, including reconnect and handshake ordering; this does not certify every size or pixel-timing edge case. Details: grid-terminal.js:407 starts fitted at DEFAULT_SIZE and :474-497 computes the ordinary first fit. The sole production farhelmGridTerminal.create caller is terminal.js:4313; its full options object at :4313-4365 supplies no size. terminal.js:3389-3393 assigns the new component before calling fit, then reads grid.size before constructing the URL at :3424-3426. The component constructor itself finishes by measureChar/currentCell/watchPixelRatio at grid-terminal.js:1961-1963, with no synchronous fit callback before the component is assigned. fit updates fitted before invoking onResize (:495-497); sendResize reads grid.size rather than callback arguments (:4560-4565). A fit during CONNECTING retains its answer while sendResize declines the not-yet-open socket; onopen sends the latest answer at :4594-4605. Later window and pane observations invoke that mount's grid.fit (:4606-4636), and a hello mismatch also requests its fitted size (grid-terminal.js:1984-1988). Reconnect creates a fresh component: terminal.js:1556-1579 saves only the old component as a snapshot, unmounts it, then invokes mountWhenReady. Unmount removes the old window listener and pane observer (:4769-4774), nulls all old socket callbacks before close (:4810-4814), freezes a retained grid and removes its island entry (:4819-4831). freeze irreversibly clears send and onResize (grid-terminal.js:2075-2084); restoration installs the held component only as a non-live tombstone (terminal.js:1614-1629). Thus neither a retained snapshot nor a replacement attachment needs inherited options.size, and the old snapshot cannot send a resize into the replacement. The global font-size operation targets islands, excluding the held/tombstone component (terminal.js:2715-2717). Contract: SPEC_impl.md:1842-1852 says \"mounts the grid component for every terminal before the socket exists, because the socket URL carries its fitted size\" and \"no per-terminal sizing state is retained across visits\". Its terminal-size contract says a held reconnect/takeover screen is frozen with no program to tell; the checked lifecycle implements that boundary. Suggested bucket if the refuted route existed: high/material UX. Could-be-highest: no established security or loss-of-work route. Confidence: confirmed source refutation for inherited-size dependency. proposed_drop: no surviving options.size caller; new components own fitted dimensions, handshake open resends them, and retained components lose their resize sink. possible_cover: none; no coverage sources consulted. Synthesis revision adds lifecycle and ordering evidence and preserves the original potential consequence and narrow scope. Interface to g084/g085 onward: grid owns fitted dimensions and commits them before callbacks; terminal.js owns socket availability, URL sizing, open-time resend, observer lifetime and replacement construction. No claim that a browser has measured every layout/pixel change before onopen, or that unrelated timing behavior is correct. No tests, builds or reproductions run; all conclusions are source-supported."
+          }
+        }
+      ],
+      "latest": {
+        "line": 3,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l1",
+          "state": "open",
+          "summary": "Inherited-size removal has no surviving production dependency",
+          "location": "crates/farhelm-ui/assets/grid-terminal.js:407",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether removing inherited renderer sizing could attach or resize the terminal program at dimensions different from the pane. The specific surviving-caller route is refuted by source, including reconnect and handshake ordering; this does not certify every size or pixel-timing edge case. Details: grid-terminal.js:407 starts fitted at DEFAULT_SIZE and :474-497 computes the ordinary first fit. The sole production farhelmGridTerminal.create caller is terminal.js:4313; its full options object at :4313-4365 supplies no size. terminal.js:3389-3393 assigns the new component before calling fit, then reads grid.size before constructing the URL at :3424-3426. The component constructor itself finishes by measureChar/currentCell/watchPixelRatio at grid-terminal.js:1961-1963, with no synchronous fit callback before the component is assigned. fit updates fitted before invoking onResize (:495-497); sendResize reads grid.size rather than callback arguments (:4560-4565). A fit during CONNECTING retains its answer while sendResize declines the not-yet-open socket; onopen sends the latest answer at :4594-4605. Later window and pane observations invoke that mount's grid.fit (:4606-4636), and a hello mismatch also requests its fitted size (grid-terminal.js:1984-1988). Reconnect creates a fresh component: terminal.js:1556-1579 saves only the old component as a snapshot, unmounts it, then invokes mountWhenReady. Unmount removes the old window listener and pane observer (:4769-4774), nulls all old socket callbacks before close (:4810-4814), freezes a retained grid and removes its island entry (:4819-4831). freeze irreversibly clears send and onResize (grid-terminal.js:2075-2084); restoration installs the held component only as a non-live tombstone (terminal.js:1614-1629). Thus neither a retained snapshot nor a replacement attachment needs inherited options.size, and the old snapshot cannot send a resize into the replacement. The global font-size operation targets islands, excluding the held/tombstone component (terminal.js:2715-2717). Contract: SPEC_impl.md:1842-1852 says \"mounts the grid component for every terminal before the socket exists, because the socket URL carries its fitted size\" and \"no per-terminal sizing state is retained across visits\". Its terminal-size contract says a held reconnect/takeover screen is frozen with no program to tell; the checked lifecycle implements that boundary. Suggested bucket if the refuted route existed: high/material UX. Could-be-highest: no established security or loss-of-work route. Confidence: confirmed source refutation for inherited-size dependency. proposed_drop: no surviving options.size caller; new components own fitted dimensions, handshake open resends them, and retained components lose their resize sink. possible_cover: none; no coverage sources consulted. Synthesis revision adds lifecycle and ordering evidence and preserves the original potential consequence and narrow scope. Interface to g084/g085 onward: grid owns fitted dimensions and commits them before callbacks; terminal.js owns socket availability, URL sizing, open-time resend, observer lifetime and replacement construction. No claim that a browser has measured every layout/pixel change before onopen, or that unrelated timing behavior is correct. No tests, builds or reproductions run; all conclusions are source-supported."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g080/findings.jsonl",
+        "id": "l1",
+        "line": 3,
+        "disposition": "excluded",
+        "group": "grid-inherited-size-removal-has-no-surviving-caller",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-052 after inspecting it. The sole production grid constructor supplies no inherited size. Each replacement fits its own component before constructing the socket URL and sends its latest size again on open. Retained snapshots cannot resize a replacement program. Source-refuted surviving-caller regression, bounded to deletion of the inherited-size exception. Existing oversized supervisor admission is a different root. Checked source/results: [\"At f560058, git grep finds exactly one production farhelmGridTerminal.create call in UI src/assets, terminal.js:4313. Its options at :4313-4355 contain no size; :3389-3393 assigns, installs, fits, then reads size before URL construction :3424-3426.\",\"grid-terminal.js:473-497 commits fitted before calling onResize. Constructor tail :1961-1963 measures/watches pixel ratio; the first explicit fit is after component assignment. terminal.js:4560-4565 skips unavailable sockets; :4594-4605 resends on open; :4606-4636 refits for window/pane changes.\",\"terminal.js:1556-1579 makes a fresh recovery mount; :4769-4832 removes old observers/socket callbacks and freezes retained grids. grid-terminal.js:2080-2085 clears onResize/send irreversibly. Held/tombstoned grids are separate from islands targeted by stepFontSize:2717.\"] Current coverage/results: [\"Current SPEC_impl.md:1844-1857 specifies pre-socket fitting and no per-terminal sizing state across visits; :1551-1552 accepts frozen retained-screen size. SPEC.md terminal-size/reconnect contract was read; no acceptance of arbitrary wrong live sizing was inferred.\",\"TODO Planned and unlanded-plan index are empty; BUGS.md unrelated. Queue initial-oversized-grid-cannot-attach.md was read in full: its browser/inherited handoff half is already narrowed away, and remaining supervisor oversized-admission consequence is distinct. No extension is supplied by this refutation. Active ledger has no exact inherited-size decision. No filter used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing inherited size could attach or resize a terminal at dimensions different from its pane; high material UX if a surviving dependency existed. No security or work-loss route established.\"; \"No surviving production caller depends on options.size. This does not prove all browser pixel/layout timing or every fit edge case correct.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g080/l1",
+        "line": 3,
+        "disposition": "excluded",
+        "group": "grid-inherited-size-removal-has-no-surviving-caller",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-052 after inspecting it. The sole production grid constructor supplies no inherited size. Each replacement fits its own component before constructing the socket URL and sends its latest size again on open. Retained snapshots cannot resize a replacement program. Source-refuted surviving-caller regression, bounded to deletion of the inherited-size exception. Existing oversized supervisor admission is a different root. Checked source/results: [\"At f560058, git grep finds exactly one production farhelmGridTerminal.create call in UI src/assets, terminal.js:4313. Its options at :4313-4355 contain no size; :3389-3393 assigns, installs, fits, then reads size before URL construction :3424-3426.\",\"grid-terminal.js:473-497 commits fitted before calling onResize. Constructor tail :1961-1963 measures/watches pixel ratio; the first explicit fit is after component assignment. terminal.js:4560-4565 skips unavailable sockets; :4594-4605 resends on open; :4606-4636 refits for window/pane changes.\",\"terminal.js:1556-1579 makes a fresh recovery mount; :4769-4832 removes old observers/socket callbacks and freezes retained grids. grid-terminal.js:2080-2085 clears onResize/send irreversibly. Held/tombstoned grids are separate from islands targeted by stepFontSize:2717.\"] Current coverage/results: [\"Current SPEC_impl.md:1844-1857 specifies pre-socket fitting and no per-terminal sizing state across visits; :1551-1552 accepts frozen retained-screen size. SPEC.md terminal-size/reconnect contract was read; no acceptance of arbitrary wrong live sizing was inferred.\",\"TODO Planned and unlanded-plan index are empty; BUGS.md unrelated. Queue initial-oversized-grid-cannot-attach.md was read in full: its browser/inherited handoff half is already narrowed away, and remaining supervisor oversized-admission consequence is distinct. No extension is supplied by this refutation. Active ledger has no exact inherited-size decision. No filter used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing inherited size could attach or resize a terminal at dimensions different from its pane; high material UX if a surviving dependency existed. No security or work-loss route established.\"; \"No surviving production caller depends on options.size. This does not prove all browser pixel/layout timing or every fit edge case correct.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-052",
+          "key": "g080/l1",
+          "latest_line": 3,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "grid-inherited-size-removal-has-no-surviving-caller",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The sole production grid constructor supplies no inherited size. Each replacement fits its own component before constructing the socket URL and sends its latest size again on open. Retained snapshots cannot resize a replacement program.",
+          "checks": [
+            "At f560058, git grep finds exactly one production farhelmGridTerminal.create call in UI src/assets, terminal.js:4313. Its options at :4313-4355 contain no size; :3389-3393 assigns, installs, fits, then reads size before URL construction :3424-3426.",
+            "grid-terminal.js:473-497 commits fitted before calling onResize. Constructor tail :1961-1963 measures/watches pixel ratio; the first explicit fit is after component assignment. terminal.js:4560-4565 skips unavailable sockets; :4594-4605 resends on open; :4606-4636 refits for window/pane changes.",
+            "terminal.js:1556-1579 makes a fresh recovery mount; :4769-4832 removes old observers/socket callbacks and freezes retained grids. grid-terminal.js:2080-2085 clears onResize/send irreversibly. Held/tombstoned grids are separate from islands targeted by stepFontSize:2717."
+          ],
+          "coverage_checked": [
+            "Current SPEC_impl.md:1844-1857 specifies pre-socket fitting and no per-terminal sizing state across visits; :1551-1552 accepts frozen retained-screen size. SPEC.md terminal-size/reconnect contract was read; no acceptance of arbitrary wrong live sizing was inferred.",
+            "TODO Planned and unlanded-plan index are empty; BUGS.md unrelated. Queue initial-oversized-grid-cannot-attach.md was read in full: its browser/inherited handoff half is already narrowed away, and remaining supervisor oversized-admission consequence is distinct. No extension is supplied by this refutation. Active ledger has no exact inherited-size decision. No filter used."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No surviving production caller depends on options.size. This does not prove all browser pixel/layout timing or every fit edge case correct.",
+          "original_stronger_consequence": "Removing inherited size could attach or resize a terminal at dimensions different from its pane; high material UX if a surviving dependency existed. No security or work-loss route established.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source-refuted surviving-caller regression, bounded to deletion of the inherited-size exception. Existing oversized supervisor admission is a different root."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "grid-inherited-size-removal-has-no-surviving-caller",
+        "destination": null
+      }
+    },
+    {
+      "key": "g080/l2",
+      "owner": "g080",
+      "id": "l2",
+      "domain": "terminal-view-rendering",
+      "purpose": "terminal-view-rendering: crates/farhelm-ui/assets/grid-terminal.js, crates/farhelm-ui/assets/grid-style.js, crates/farhelm-ui/js-tests/grid-buffer.test.js, crates/farhelm-ui/js-tests/grid-style.test.js; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l2",
+            "state": "open",
+            "summary": "Check range attribution of the input-clearing comment's composition exception",
+            "location": "crates/farhelm-ui/assets/grid-terminal.js:374",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: a comment beside inline-prediction suppression says the hidden field is emptied after every input, but active composition input is retained until composition ends. The possible consequence is inaccurate maintenance documentation, not an established typing or security failure. Details: grid-terminal.js:374-377 repeats the field-is-emptied claim in a changed comment; the input listener at :1530-1535 only empties when !composing, and :1539-1547 clears at compositionend. The assigned patch shows the emptied-after-every-input clause unchanged from the immediate parent. Suggested bucket: other, documentation precision only. Could-be-highest: no established security or loss-of-work route. Confidence: source confirms the exception; full-range introduction attribution not yet checked. proposed_drop: not decided until checking the exclusive base and intervening history; predating the immediate parent alone is insufficient. possible_cover: none. Missing premise: whether this same wording and exception predate the entire pinned range. Next useful source check: inspect the exclusive-base field/input handlers and the pinned range's history for the phrase. No runtime test, build or reproduction performed."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l2",
+            "state": "open",
+            "summary": "Input-clearing comment precision predates the entire review range",
+            "location": "crates/farhelm-ui/assets/grid-terminal.js:374",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered an inaccurate maintenance comment saying the hidden input is emptied after every input, although active composition retains its value until compositionend. Original possible consequence preserved: misleading maintenance documentation only; no typing, security or work-loss failure established. Details: reviewed grid-terminal.js:374-377 repeats that claim; :1530-1535 empties only when !composing, and :1539-1547 clears at compositionend. Whole-range attribution is now settled: the exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a already has the identical claim at grid-terminal.js:383-385 and identical composing exception at :1550-1567. git log -S 'this field is emptied after every input anyway' over 6e423e30068b62c6cfa276c6d720ee35bb70387a..00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db returned no commits. The assigned comment edit adds inline-prediction context and removes the old renderer cross-reference; it does not introduce that universal claim or change the composition lifecycle. Suggested bucket if in scope: other/documentation precision. Could-be-highest: no established security or loss-of-work route. Confidence: confirmed source and full-range attribution, not execution. proposed_drop: independent comment precision issue present before the exclusive base and unrelated to removal of inherited renderer sizing or the old renderer; no in-range introduction or changed contract was found. This is not refuted merely by correct production behavior: the documentary imprecision is acknowledged and excluded on source attribution/scope. possible_cover: none; no prohibited coverage sources consulted. No missing premise remains. No runtime test, build or reproduction performed. Revision changes l2 from an attribution lead to this source-settled candidate under its original ID."
+          }
+        }
+      ],
+      "latest": {
+        "line": 5,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l2",
+          "state": "open",
+          "summary": "Input-clearing comment precision predates the entire review range",
+          "location": "crates/farhelm-ui/assets/grid-terminal.js:374",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered an inaccurate maintenance comment saying the hidden input is emptied after every input, although active composition retains its value until compositionend. Original possible consequence preserved: misleading maintenance documentation only; no typing, security or work-loss failure established. Details: reviewed grid-terminal.js:374-377 repeats that claim; :1530-1535 empties only when !composing, and :1539-1547 clears at compositionend. Whole-range attribution is now settled: the exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a already has the identical claim at grid-terminal.js:383-385 and identical composing exception at :1550-1567. git log -S 'this field is emptied after every input anyway' over 6e423e30068b62c6cfa276c6d720ee35bb70387a..00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db returned no commits. The assigned comment edit adds inline-prediction context and removes the old renderer cross-reference; it does not introduce that universal claim or change the composition lifecycle. Suggested bucket if in scope: other/documentation precision. Could-be-highest: no established security or loss-of-work route. Confidence: confirmed source and full-range attribution, not execution. proposed_drop: independent comment precision issue present before the exclusive base and unrelated to removal of inherited renderer sizing or the old renderer; no in-range introduction or changed contract was found. This is not refuted merely by correct production behavior: the documentary imprecision is acknowledged and excluded on source attribution/scope. possible_cover: none; no prohibited coverage sources consulted. No missing premise remains. No runtime test, build or reproduction performed. Revision changes l2 from an attribution lead to this source-settled candidate under its original ID."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g080/findings.jsonl",
+        "id": "l2",
+        "line": 5,
+        "disposition": "excluded",
+        "group": "grid-hidden-input-comment-omits-composition-retention-exception",
+        "reason": "Parent explicitly accepted named out-of-range proposal from claims-052 after inspecting it. The comment is imprecise: composition keeps the hidden input until compositionend. The same universal wording and exception already exist at the exclusive base, and the assigned comment edit does not alter that claim or lifecycle. Acknowledged documentation imprecision excluded by whole-range attribution, not by asserting production correctness. Checked source/results: [\"f560058 grid-terminal.js:374-377 claims the field is emptied after every input; :1530-1547 only clears ordinary input when !composing and clears committed composition at compositionend.\",\"Exclusive base 6e423e30 grid-terminal.js:383-385 has the identical emptied-after-every-input claim; :1550-1567 has the same composing exception. git log -S 'this field is emptied after every input anyway' across the exact review range returns no commits.\"] Current coverage/results: [\"Current SPEC.md terminal input contract and SPEC_impl.md grid-client section do not expressly accept this comment imprecision; production input behavior is not its refutation.\",\"TODO Planned and unlanded-plan index are empty. BUGS.md unrelated. Full queue INDEX.md plus composing/compositionend/emptied-input searches and active-ledger searches found no exact item. No FILTER.md boundary clearly applies to a persistent maintenance statement.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"An inaccurate maintenance comment omits composition retention; no typing, security or user-work-loss failure was established.\"; \"No in-range introduction or changed composition contract exists in the checked attribution.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g080/l2",
+        "line": 5,
+        "disposition": "excluded",
+        "group": "grid-hidden-input-comment-omits-composition-retention-exception",
+        "bucket": "other",
+        "recording": "out-of-range",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named out-of-range proposal from claims-052 after inspecting it. The comment is imprecise: composition keeps the hidden input until compositionend. The same universal wording and exception already exist at the exclusive base, and the assigned comment edit does not alter that claim or lifecycle. Acknowledged documentation imprecision excluded by whole-range attribution, not by asserting production correctness. Checked source/results: [\"f560058 grid-terminal.js:374-377 claims the field is emptied after every input; :1530-1547 only clears ordinary input when !composing and clears committed composition at compositionend.\",\"Exclusive base 6e423e30 grid-terminal.js:383-385 has the identical emptied-after-every-input claim; :1550-1567 has the same composing exception. git log -S 'this field is emptied after every input anyway' across the exact review range returns no commits.\"] Current coverage/results: [\"Current SPEC.md terminal input contract and SPEC_impl.md grid-client section do not expressly accept this comment imprecision; production input behavior is not its refutation.\",\"TODO Planned and unlanded-plan index are empty. BUGS.md unrelated. Full queue INDEX.md plus composing/compositionend/emptied-input searches and active-ledger searches found no exact item. No FILTER.md boundary clearly applies to a persistent maintenance statement.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"An inaccurate maintenance comment omits composition retention; no typing, security or user-work-loss failure was established.\"; \"No in-range introduction or changed composition contract exists in the checked attribution.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-052",
+          "key": "g080/l2",
+          "latest_line": 5,
+          "recommendation": "out-of-range",
+          "bucket": "other",
+          "underlying_key": "grid-hidden-input-comment-omits-composition-retention-exception",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The comment is imprecise: composition keeps the hidden input until compositionend. The same universal wording and exception already exist at the exclusive base, and the assigned comment edit does not alter that claim or lifecycle.",
+          "checks": [
+            "f560058 grid-terminal.js:374-377 claims the field is emptied after every input; :1530-1547 only clears ordinary input when !composing and clears committed composition at compositionend.",
+            "Exclusive base 6e423e30 grid-terminal.js:383-385 has the identical emptied-after-every-input claim; :1550-1567 has the same composing exception. git log -S 'this field is emptied after every input anyway' across the exact review range returns no commits."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md terminal input contract and SPEC_impl.md grid-client section do not expressly accept this comment imprecision; production input behavior is not its refutation.",
+            "TODO Planned and unlanded-plan index are empty. BUGS.md unrelated. Full queue INDEX.md plus composing/compositionend/emptied-input searches and active-ledger searches found no exact item. No FILTER.md boundary clearly applies to a persistent maintenance statement."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No in-range introduction or changed composition contract exists in the checked attribution.",
+          "original_stronger_consequence": "An inaccurate maintenance comment omits composition retention; no typing, security or user-work-loss failure was established.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Acknowledged documentation imprecision excluded by whole-range attribution, not by asserting production correctness."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "grid-hidden-input-comment-omits-composition-retention-exception",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete: all 835 assigned patch lines reviewed at their pinned revisions.\n\nNo reportable findings or unresolved leads. Recorded `l1` as a source-refuted sizing concern. Findings log and progress updated. No tests or reproductions run; no checkout files changed."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised `l1` with source evidence for handshake resize ordering, fresh reconnect construction, and frozen snapshots losing their resize callback. The refutation remains limited to inherited-size dependency.\n\nNo new findings. Unresolved lead IDs: none. Progress updated; no execution performed."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 complete. Checked changed comments against rendering/input behavior, preserved test assertions, and test-title references.\n\nRecorded `l2`, then resolved it to a candidate: the documentation imprecision predates the entire range.\n\nNew in-scope findings: none. New verified IDs: none. New unverified IDs: none. Open leads: none. No execution performed."
+    }
+  ],
+  "progress": "g080: initialized, awaiting initial source review.\nGroup g080 (terminal-view-rendering). Initial review, turn 1 complete; discovery passes 0.\nState: all four assigned patches delivered through evidence read (835 lines total), reviewed at f560058da19e02716e6f943883a9508b447aff4e and 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e. Read the complete inventory commits field, without excluded coverage metadata.\nContracts read: pinned SPEC.md Terminal experience at both revisions; pinned SPEC_impl.md Terminal widget and The grid client at both revisions; Answers bind to what was drawn at f560058d. Root AGENTS.md End sentinel was present. Priority buckets and recording format read.\nChecks: traced first-fit initialization, sole production grid constructor, pre-socket fit and size read, socket-open resize, and hello size reconciliation. Read the deterministic-fit test's independent formula without executing it. Checked the style rules against style resolution, CSS construction, hidden-text painting and style assertions. Checked changed buffer-test comments against modelSource/linkLines and the actual fixtures. Remaining patches only change comments or one test title; their executable assertions are unchanged.\nInterfaces: terminal.js owns attachment dimensions and always fits before opening the socket. No production options.size caller survives. Historical lines expose their stored width; hidden text is replaced with spaces before painting. No confirmation handler was added or changed in this assignment.\nRecords: l1 appended as a sizing lead, then revised to a source-refuted candidate. No reported findings, no unresolved leads, no new verified or unverified finding IDs. The recorder rejected state closed once; corrected to state open for the candidate and appended successfully. No coverage claim rests on the rejected invocation.\nUnread assigned scope: none. No tests, builds or reproductions run; conclusions are source analysis only. No checkout files changed.\nLater-turn synthesis, turn 2 complete; discovery passes remain 0. Caller audited all 835 mandatory lines successfully. No open leads at entry or exit.\nTurn 2 checks: grid construction does not synchronously fit before assignment; fit commits fitted before invoking its callback. The socket URL reads the first fit, CONNECTING callbacks retain the fitted answer without sending, and open resends the latest fitted answer. Window/pane observers belong to that mount. Reconnect saves the old component only as a snapshot, unmounts, and mounts a fresh component. Teardown removes old observers and socket callbacks; freeze clears the retained component's send and onResize. Restore puts that frozen component in a tombstone, not a live island; font-size iteration targets live islands.\nTurn 2 record delta: appended one revision of l1 as a source-refuted candidate with precise lifecycle references. No new finding IDs, no verified or unverified findings, no unresolved lead IDs. An attempted replace of the private event file was rejected by apply_patch before mutation; the revision was then written to event-synthesis.json and appended through evidence record successfully.\nCross-group interface: g084's grid contract owns the fitted answer and commits it before callbacks; g085 onward's connection phases own pre-socket fit, URL dimensions, open-time resend, observer lifetime and fresh replacement construction. Snapshot retention carries display state, not a resize sink or inherited fit contract. This only refutes a surviving inherited-size dependency; it does not certify all size/pixel timing behavior.\nOther assigned batches remain comments/test-title changes without changed executable style or assertion behavior; no new interaction with the removed size exception was found. No unread assigned scope. No execution, reproductions or checkout changes in this turn.\nDiscovery turn 3 complete; discovery pass 1. Read discovery-neighbours.json through its final closing brace in bounded ranges. No named pending questions were supplied. Neighbour records distinguish documentation/test defects from product correctness; unrelated interface findings were used for novelty context, not duplicated as g080 findings.\nDiscovery checks: compared the three later patches at word level and confirmed their executable assertions are retained; only one test title changes. A pinned search of scripts, workflows, UI and e2e found no remaining use of the old full test title. Rechecked the assigned renderer comments against DOM/input construction, selection initiation, input/selection clearing, local wheel normalization, program-wheel dispatch and link jitter/currentness admission. The retained accessibility markup and fixed-reference sizing formula match their described responsibilities. No new in-range rendering, test-oracle or documentation defect was established.\nNew record history: l2 was recorded immediately for a specific comment-composition mismatch, then revised to candidate after full-range attribution. The exclusive base already contains both the same universal input-clearing phrase and the composing exception, and a range-wide -S search found no introduction/removal of that phrase. This acknowledges the independent documentation precision concern and proposes exclusion only on pre-range attribution and unrelated scope, not on production correctness. No parent drop is assumed accepted. l1 unchanged.\nDiscovery result: no new in-scope finding. New verified finding IDs: none. New unverified-after-investigation finding IDs: none. New candidate ID: l2. Open lead IDs: none. No unread assigned scope; no runtime tests, builds, reproductions, live-install actions or checkout changes.\nNext: return discovery delta and await caller direction.\n"
+}

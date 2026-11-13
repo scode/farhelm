@@ -1,0 +1,38 @@
+# Interruption documentation still claims boot-id change is its only detector
+
+Reviewed commit: 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db
+
+## TLDR
+
+Source-confirmed review record: a developer reading the shared protocol contract is told an interrupted session proves a reboot detector ran, although an ordinary update can produce the same status without a reboot. This is misleading internal documentation, with no observed runtime malfunction.
+
+## Details
+
+Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes after the pinned tip.
+
+Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket does not approve any proposed lowering.
+
+Contributing records: `g054/c1`.
+
+### g054/c1
+
+Confidence: Source-confirmed by an existing parent decision; not runtime reproduced.
+
+Latest reviewer record, event 6 (finding, open):
+
+Reviewed commit: 08399d092d20815ced6619c26df2391944ae2b4a; introduced by dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 within the pinned range. TLDR: a developer reading the shared protocol contract is told an interrupted session proves a reboot detector ran, although an ordinary update can produce the same status without a reboot. This is misleading internal documentation, with no observed runtime malfunction. Details: at reviewed lib.rs:849-859, the first paragraph correctly includes startup retirement of an old terminal, but lines 855-857 still define Interrupted as 'asked, via the one reboot detector this system has (a changed stored boot id)'. The exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a lib.rs:842-852 described only reboot. The full-range -G history identifies dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 as adding the update-ended-terminal route while retaining that definition; its lib.rs patch shows both claims together. Its SPEC_impl.md:2978-2980 says: 'The reload then takes every old-kind row as having no terminal, in any state, without looking its recorded pane id up: one whose agent was launching, running or being stopped is converted to interrupted (`Transition::TerminalEnded`, beside the reboot conversion) unless its launch sentinel makes it an error'. This is a second attribution path, not evidence of a changed boot id. At the assigned cleanup commit, the parent paragraph already has the contradiction, but that is insufficient grounds to drop a range-review finding. Additional source check: at dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 service/core.rs:7097-7114, an old-kind row with a launching, running, or stop-requested outcome unconditionally queues Transition::TerminalEnded after the no-sentinel case; that branch does not require a changed boot id. The complete new startup-retirement contract was read at SPEC_impl.md:2954-3004. Suggested fix: describe interruption as a durable lost-track outcome established by reboot or retirement of an old terminal, without claiming all instances come from a boot-id change. Suggested bucket: other. Confidence: confirmed by source, introducing patch and exact specification contract; no execution. proposed_drop: false; the original proposed drop (pre-existing outside scope) is retracted because the contract change is inside the reviewed range. possible_cover: none; parent owns queue coverage and excluded sources were not read. Could-be-highest: false; the consequence remains inaccurate internal documentation, with no operational instruction or established security/data-loss route. Caveat: the executable retirement behavior is specified and accepted; this finding concerns the explanation only and must not be rendered as a runtime correctness failure.
+
+Returned proposal (claims-034, event 6): **retain-verified**, suggested bucket **other**.
+
+The protocol docstring explains Interrupted in terms of a changed boot ID after the same docstring adds startup retirement as a second route. The new route entered within the pinned range. Retain the documentation inconsistency; do not turn it into a claim that retirement behavior is incorrect.
+
+Original stronger consequence: Misleading internal explanation only; no operational instruction, observed runtime defect, or established security/data-loss route. The initial outside-assigned-patch drop was expressly withdrawn after range-history checks showed dbfc introduced the second route inside the range.
+
+Unresolved premise or limitation: No missing premise stated in this returned proposal.
+
+Proposed basis: Retain as other for documentation accuracy. The earlier outside-range rationale is refuted; pre-existing at the final cleanup commit is not pre-existing at the range base.
+
+Existing parent disposition (event 6): verified. Parent explicitly accepted named retain-verified proposal from claims-034 after inspecting it. The protocol docstring explains Interrupted in terms of a changed boot ID after the same docstring adds startup retirement as a second route. The new route entered within the pinned range. Retain the documentation inconsistency; do not turn it into a claim that retirement behavior is incorrect. Retain as other for documentation accuracy. The earlier outside-range rationale is refuted; pre-existing at the final cleanup commit is not pre-existing at the range base. Checked source/results: ["08399d092d20815ced6619c26df2391944ae2b4a:proto/lib.rs:849-859 includes private-server retirement, then says Interrupted means asked via the reboot detector/changed stored boot ID. Current lib.rs:855 retains that wording.","6e423e30068b62c6cfa276c6d720ee35bb70387a:proto/lib.rs:842-852 describes only reboot. dbfc69751215dbf15e1d31d5bed73c3754c4ebc4's proto/lib.rs patch adds update-ended terminals while leaving the reboot-only explanatory clause.","dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:service/core.rs:7097-7114 queues Transition::TerminalEnded for old-kind Launching/Running/StopRequested without a boot-ID-change condition. Current SPEC_impl.md:2799-2803 explicitly describes this second conversion. No runtime malfunction or reproduction."] Current coverage/results: ["SPEC.md:2665-2668 and :2998-3011, SPEC_impl.md Ending the old private tmux server accept retirement as an interruption route. That accepted executable behavior does not cover a contradictory explanation in protocol source.","SPEC_impl.md Runtime state:4111-4136 retains a boot-ID explanation, but does not explicitly authorize the protocol docstring's implication that all interruptions take that route. It supplies context, not exact acceptance.","TODO.md Planned is empty. BUGS.md, active TRIAGE_OUTCOMES.md, plans/queue and the full INDEX.md contain no exact boot-ID-only Interrupted docstring item. plans/REPORTS.md:32 records the broad tmux documentation cleanup landed; it is not an unlanded plan to fix this residual wording.","No FILTER.md boundary fits an ordinary source-contract explanation error. It is not an emitted rare diagnostic."] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: "Misleading internal explanation only; no operational instruction, observed runtime defect, or established security/data-loss route. The initial outside-assigned-patch drop was expressly withdrawn after range-history checks showed dbfc introduced the second route inside the range."; null.
+
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g054 record](records/review-through-00de0b6c/groups/g054.json). Record ID: `c1`.
+

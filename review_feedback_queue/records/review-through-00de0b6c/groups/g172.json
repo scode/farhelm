@@ -1,0 +1,579 @@
+{
+  "group": {
+    "id": "g172",
+    "domain": "retired-supervisor-tmux",
+    "purpose": "retired-supervisor-tmux: crates/farhelm-supervisor/src/tmux/stream.rs; phases -    async fn scroll_region_and_origin_mode_are_read_from_a_real_pane() {",
+    "interfaces": [
+      "g001",
+      "g007",
+      "g008",
+      "g009",
+      "g071",
+      "g072",
+      "g073",
+      "g097",
+      "g098",
+      "g099",
+      "g100",
+      "g101",
+      "g102",
+      "g103",
+      "g104",
+      "g105",
+      "g106",
+      "g107",
+      "g108",
+      "g109",
+      "g110",
+      "g111",
+      "g112",
+      "g113",
+      "g114",
+      "g115",
+      "g116",
+      "g117",
+      "g118",
+      "g119",
+      "g120",
+      "g121",
+      "g127",
+      "g128",
+      "g129",
+      "g130",
+      "g131",
+      "g132",
+      "g133",
+      "g134",
+      "g144",
+      "g145",
+      "g146",
+      "g149",
+      "g150",
+      "g151",
+      "g152",
+      "g153",
+      "g154",
+      "g155",
+      "g156",
+      "g157",
+      "g158",
+      "g170",
+      "g171",
+      "g173"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00957-002.patch",
+        "ranges": [
+          [
+            1,
+            1081
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/tmux/stream.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "-    async fn scroll_region_and_origin_mode_are_read_from_a_real_pane() {; patch character offsets [117655,165755)",
+        "lines": 1081,
+        "bytes": 48146,
+        "start": 117655,
+        "end": 165755,
+        "original": "[private-run]/prep/originals/00957.patch"
+      }
+    ],
+    "lines": 1081,
+    "bytes": 48146
+  },
+  "records": [
+    {
+      "key": "g172/c1",
+      "owner": "g172",
+      "id": "c1",
+      "domain": "retired-supervisor-tmux",
+      "purpose": "retired-supervisor-tmux: crates/farhelm-supervisor/src/tmux/stream.rs; phases -    async fn scroll_region_and_origin_mode_are_read_from_a_real_pane() {",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Retired tmux control-protocol tests have no surviving caller",
+            "location": "crates/farhelm-supervisor/src/tmux/stream.rs:2411-3491 (parent revision; removed)",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Removing the tests for tmux command spelling, pane filtering, pause recovery and safe control-client shutdown does not establish a regression for users; the protocol implementation they exercised is removed too. Details: All 1081 assigned patch lines are deletions of the stream module's final test section. At the reviewed revision, crates/farhelm-supervisor/src/tmux.rs:1-13 retains installation/version policy only, and service/terminals.rs:1-7 and resolve_terminal return HostTerminal exclusively. SPEC_impl.md:2882-2889 says exactly: 'This release ends them at startup (below); every terminal runs in a terminal host' and 'The running supervisor runs no tmux at all, and its driver of the old terminals is gone'. The old tmux-specific refresh-client, foreign-pane memo, positional reply, pane-id command injection and no-output-before-reap contracts therefore have no remaining tmux-driver call path to protect. Source conclusion only; no runtime behavior observed. Suggested bucket: other (test-removal concern refuted). Confidence: confirmed for the removed driver-specific paths. proposed_drop: removal is consistent with the quoted pinned contract and the surviving HostTerminal-only resolution surface. possible_cover: none; no coverage sources searched. Could-be-highest: false for this candidate; no shipped path to security impact or loss of work is established. This does not settle replacement scroll-region state, query handling, replay identity or slow-viewer guarantees, which remain to inspect."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Retired tmux control-protocol tests have no surviving caller",
+            "location": "crates/farhelm-supervisor/src/tmux/stream.rs:2411-3491 (parent revision; removed)",
+            "detail": "Synthesis turn 2 impact clarification: Preserve the considered loss-of-work consequence of the removed teardown tests explicitly: closing a tmux output client before no-output acknowledgement could abort the private tmux server, losing every old terminal and its running work. Could-be-highest: true for that historical failure class, if a surviving supervisor path still created or closed those clients. This is source-refuted at the replacement boundary, not lowered for rarity or accepted merely because old terminals are intentionally ended. The reviewed commit deletes the entire stream module and its tmux control-client ownership. c1 remains a candidate with proposed_drop on that source basis, pending independent check; it is not a spec-accepted highest finding. The original statement of no established shipped path remains accurate but did not spell out the historical consequence. The earlier deliberate retirement and failed-termination duplicate-agent residual belong to the predecessor startup change identified in this reviewed commit message and SPEC.md:3003-3016; they are provenance, not a new discovery or blanket approval for wrong-target cleanup. Remaining synthesis check: replacement viewer shutdown and runtime ownership. Original assessment preserved: Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Removing the tests for tmux command spelling, pane filtering, pause recovery and safe control-client shutdown does not establish a regression for users; the protocol implementation they exercised is removed too. Details: All 1081 assigned patch lines are deletions of the stream module's final test section. At the reviewed revision, crates/farhelm-supervisor/src/tmux.rs:1-13 retains installation/version policy only, and service/terminals.rs:1-7 and resolve_terminal return HostTerminal exclusively. SPEC_impl.md:2882-2889 says exactly: 'This release ends them at startup (below); every terminal runs in a terminal host' and 'The running supervisor runs no tmux at all, and its driver of the old terminals is gone'. The old tmux-specific refresh-client, foreign-pane memo, positional reply, pane-id command injection and no-output-before-reap contracts therefore have no remaining tmux-driver call path to protect. Source conclusion only; no runtime behavior observed. Suggested bucket: other (test-removal concern refuted). Confidence: confirmed for the removed driver-specific paths. proposed_drop: removal is consistent with the quoted pinned contract and the surviving HostTerminal-only resolution surface. possible_cover: none; no coverage sources searched. Could-be-highest: false for this candidate; no shipped path to security impact or loss of work is established. This does not settle replacement scroll-region state, query handling, replay identity or slow-viewer guarantees, which remain to inspect."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Retired tmux control-protocol tests have no surviving caller",
+            "location": "crates/farhelm-supervisor/src/tmux/stream.rs:2411-3491 (parent revision; removed)",
+            "detail": "Synthesis turn 2 completion: Replacement shutdown/ownership premise checked. GridSender::run at service/grid_stream.rs:925-964 cancels only stream.run and reports ForwarderEnd::Requested; it neither creates nor closes a tmux control process and sends no host Shutdown. The session entry retains the HostTerminal runtime independently of this viewer. The supervisor exit checkpoint path at core/host_handover.rs:323-370 checkpoints or skips the current host tail, then calls HostTerminal::abort; hosts/terminal.rs:2388-2420 aborts its runtime task and cancels encodes, leaving the terminal host running. Explicit destructive host shutdown is a separate control method at :2374-2386. Combined with terminal-host/SPEC.md:151-168 and the already-read one-terminal journal contract, viewer teardown cannot follow the removed shared-server crash route. The potentially highest historical consequence remains preserved below, with a source-refuted route rather than specification acceptance of arbitrary session loss. Could-be-highest: true for the historical scenario only; this supersedes the initial false classification retained verbatim below. No readily checkable premise remains open and no distinct wrong-target, missing-warning or unconfirmed-Delete route is supplied by this assigned deletion. Proposed drop remains provisional for independent check. Earlier assessment preserved: Synthesis turn 2 impact clarification: Preserve the considered loss-of-work consequence of the removed teardown tests explicitly: closing a tmux output client before no-output acknowledgement could abort the private tmux server, losing every old terminal and its running work. Could-be-highest: true for that historical failure class, if a surviving supervisor path still created or closed those clients. This is source-refuted at the replacement boundary, not lowered for rarity or accepted merely because old terminals are intentionally ended. The reviewed commit deletes the entire stream module and its tmux control-client ownership. c1 remains a candidate with proposed_drop on that source basis, pending independent check; it is not a spec-accepted highest finding. The original statement of no established shipped path remains accurate but did not spell out the historical consequence. The earlier deliberate retirement and failed-termination duplicate-agent residual belong to the predecessor startup change identified in this reviewed commit message and SPEC.md:3003-3016; they are provenance, not a new discovery or blanket approval for wrong-target cleanup. Remaining synthesis check: replacement viewer shutdown and runtime ownership. Original assessment preserved: Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Removing the tests for tmux command spelling, pane filtering, pause recovery and safe control-client shutdown does not establish a regression for users; the protocol implementation they exercised is removed too. Details: All 1081 assigned patch lines are deletions of the stream module's final test section. At the reviewed revision, crates/farhelm-supervisor/src/tmux.rs:1-13 retains installation/version policy only, and service/terminals.rs:1-7 and resolve_terminal return HostTerminal exclusively. SPEC_impl.md:2882-2889 says exactly: 'This release ends them at startup (below); every terminal runs in a terminal host' and 'The running supervisor runs no tmux at all, and its driver of the old terminals is gone'. The old tmux-specific refresh-client, foreign-pane memo, positional reply, pane-id command injection and no-output-before-reap contracts therefore have no remaining tmux-driver call path to protect. Source conclusion only; no runtime behavior observed. Suggested bucket: other (test-removal concern refuted). Confidence: confirmed for the removed driver-specific paths. proposed_drop: removal is consistent with the quoted pinned contract and the surviving HostTerminal-only resolution surface. possible_cover: none; no coverage sources searched. Could-be-highest: false for this candidate; no shipped path to security impact or loss of work is established. This does not settle replacement scroll-region state, query handling, replay identity or slow-viewer guarantees, which remain to inspect."
+          }
+        },
+        {
+          "line": 14,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Retired tmux control-protocol tests have no surviving caller",
+            "location": "crates/farhelm-supervisor/src/tmux/stream.rs:2411-3491 (parent revision; removed)",
+            "detail": "Synthesis lifecycle completion: Also checked explicit host-ending callers separately from viewer teardown. session_hosts.rs:687-793 collects each terminal end result, returns Err for failures and timeouts, and teardown.rs:557-561 propagates that error before attachment teardown and durable session removal. host_restart.rs:657-680 removes old-host records only after a confirmed end; an unconfirmed end aborts the old runtime, logs the retained host and leaves it to Delete or next startup. This does not reuse the known tmux-retirement acceptance to excuse an unconfirmed later Delete. No concrete distinct such route is present in the assigned stream-test deletion. The retained test delete_never_signals_an_unrecorded_placeholders_unreadable_socket in core/tests/host_terminals.rs:3636-3686 asserts the foreign process remains alive and the session row remains, alongside a refusal naming the missing record. It exercises a surviving host-identity safety boundary that the removed tmux shutdown tests never did. All conclusions are source-derived; no tests ran. No new issue or open premise; preserve all historical loss-of-work wording below. Earlier assessments preserved: Synthesis turn 2 completion: Replacement shutdown/ownership premise checked. GridSender::run at service/grid_stream.rs:925-964 cancels only stream.run and reports ForwarderEnd::Requested; it neither creates nor closes a tmux control process and sends no host Shutdown. The session entry retains the HostTerminal runtime independently of this viewer. The supervisor exit checkpoint path at core/host_handover.rs:323-370 checkpoints or skips the current host tail, then calls HostTerminal::abort; hosts/terminal.rs:2388-2420 aborts its runtime task and cancels encodes, leaving the terminal host running. Explicit destructive host shutdown is a separate control method at :2374-2386. Combined with terminal-host/SPEC.md:151-168 and the already-read one-terminal journal contract, viewer teardown cannot follow the removed shared-server crash route. The potentially highest historical consequence remains preserved below, with a source-refuted route rather than specification acceptance of arbitrary session loss. Could-be-highest: true for the historical scenario only; this supersedes the initial false classification retained verbatim below. No readily checkable premise remains open and no distinct wrong-target, missing-warning or unconfirmed-Delete route is supplied by this assigned deletion. Proposed drop remains provisional for independent check. Earlier assessment preserved: Synthesis turn 2 impact clarification: Preserve the considered loss-of-work consequence of the removed teardown tests explicitly: closing a tmux output client before no-output acknowledgement could abort the private tmux server, losing every old terminal and its running work. Could-be-highest: true for that historical failure class, if a surviving supervisor path still created or closed those clients. This is source-refuted at the replacement boundary, not lowered for rarity or accepted merely because old terminals are intentionally ended. The reviewed commit deletes the entire stream module and its tmux control-client ownership. c1 remains a candidate with proposed_drop on that source basis, pending independent check; it is not a spec-accepted highest finding. The original statement of no established shipped path remains accurate but did not spell out the historical consequence. The earlier deliberate retirement and failed-termination duplicate-agent residual belong to the predecessor startup change identified in this reviewed commit message and SPEC.md:3003-3016; they are provenance, not a new discovery or blanket approval for wrong-target cleanup. Remaining synthesis check: replacement viewer shutdown and runtime ownership. Original assessment preserved: Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Removing the tests for tmux command spelling, pane filtering, pause recovery and safe control-client shutdown does not establish a regression for users; the protocol implementation they exercised is removed too. Details: All 1081 assigned patch lines are deletions of the stream module's final test section. At the reviewed revision, crates/farhelm-supervisor/src/tmux.rs:1-13 retains installation/version policy only, and service/terminals.rs:1-7 and resolve_terminal return HostTerminal exclusively. SPEC_impl.md:2882-2889 says exactly: 'This release ends them at startup (below); every terminal runs in a terminal host' and 'The running supervisor runs no tmux at all, and its driver of the old terminals is gone'. The old tmux-specific refresh-client, foreign-pane memo, positional reply, pane-id command injection and no-output-before-reap contracts therefore have no remaining tmux-driver call path to protect. Source conclusion only; no runtime behavior observed. Suggested bucket: other (test-removal concern refuted). Confidence: confirmed for the removed driver-specific paths. proposed_drop: removal is consistent with the quoted pinned contract and the surviving HostTerminal-only resolution surface. possible_cover: none; no coverage sources searched. Could-be-highest: false for this candidate; no shipped path to security impact or loss of work is established. This does not settle replacement scroll-region state, query handling, replay identity or slow-viewer guarantees, which remain to inspect."
+          }
+        }
+      ],
+      "latest": {
+        "line": 14,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Retired tmux control-protocol tests have no surviving caller",
+          "location": "crates/farhelm-supervisor/src/tmux/stream.rs:2411-3491 (parent revision; removed)",
+          "detail": "Synthesis lifecycle completion: Also checked explicit host-ending callers separately from viewer teardown. session_hosts.rs:687-793 collects each terminal end result, returns Err for failures and timeouts, and teardown.rs:557-561 propagates that error before attachment teardown and durable session removal. host_restart.rs:657-680 removes old-host records only after a confirmed end; an unconfirmed end aborts the old runtime, logs the retained host and leaves it to Delete or next startup. This does not reuse the known tmux-retirement acceptance to excuse an unconfirmed later Delete. No concrete distinct such route is present in the assigned stream-test deletion. The retained test delete_never_signals_an_unrecorded_placeholders_unreadable_socket in core/tests/host_terminals.rs:3636-3686 asserts the foreign process remains alive and the session row remains, alongside a refusal naming the missing record. It exercises a surviving host-identity safety boundary that the removed tmux shutdown tests never did. All conclusions are source-derived; no tests ran. No new issue or open premise; preserve all historical loss-of-work wording below. Earlier assessments preserved: Synthesis turn 2 completion: Replacement shutdown/ownership premise checked. GridSender::run at service/grid_stream.rs:925-964 cancels only stream.run and reports ForwarderEnd::Requested; it neither creates nor closes a tmux control process and sends no host Shutdown. The session entry retains the HostTerminal runtime independently of this viewer. The supervisor exit checkpoint path at core/host_handover.rs:323-370 checkpoints or skips the current host tail, then calls HostTerminal::abort; hosts/terminal.rs:2388-2420 aborts its runtime task and cancels encodes, leaving the terminal host running. Explicit destructive host shutdown is a separate control method at :2374-2386. Combined with terminal-host/SPEC.md:151-168 and the already-read one-terminal journal contract, viewer teardown cannot follow the removed shared-server crash route. The potentially highest historical consequence remains preserved below, with a source-refuted route rather than specification acceptance of arbitrary session loss. Could-be-highest: true for the historical scenario only; this supersedes the initial false classification retained verbatim below. No readily checkable premise remains open and no distinct wrong-target, missing-warning or unconfirmed-Delete route is supplied by this assigned deletion. Proposed drop remains provisional for independent check. Earlier assessment preserved: Synthesis turn 2 impact clarification: Preserve the considered loss-of-work consequence of the removed teardown tests explicitly: closing a tmux output client before no-output acknowledgement could abort the private tmux server, losing every old terminal and its running work. Could-be-highest: true for that historical failure class, if a surviving supervisor path still created or closed those clients. This is source-refuted at the replacement boundary, not lowered for rarity or accepted merely because old terminals are intentionally ended. The reviewed commit deletes the entire stream module and its tmux control-client ownership. c1 remains a candidate with proposed_drop on that source basis, pending independent check; it is not a spec-accepted highest finding. The original statement of no established shipped path remains accurate but did not spell out the historical consequence. The earlier deliberate retirement and failed-termination duplicate-agent residual belong to the predecessor startup change identified in this reviewed commit message and SPEC.md:3003-3016; they are provenance, not a new discovery or blanket approval for wrong-target cleanup. Remaining synthesis check: replacement viewer shutdown and runtime ownership. Original assessment preserved: Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Removing the tests for tmux command spelling, pane filtering, pause recovery and safe control-client shutdown does not establish a regression for users; the protocol implementation they exercised is removed too. Details: All 1081 assigned patch lines are deletions of the stream module's final test section. At the reviewed revision, crates/farhelm-supervisor/src/tmux.rs:1-13 retains installation/version policy only, and service/terminals.rs:1-7 and resolve_terminal return HostTerminal exclusively. SPEC_impl.md:2882-2889 says exactly: 'This release ends them at startup (below); every terminal runs in a terminal host' and 'The running supervisor runs no tmux at all, and its driver of the old terminals is gone'. The old tmux-specific refresh-client, foreign-pane memo, positional reply, pane-id command injection and no-output-before-reap contracts therefore have no remaining tmux-driver call path to protect. Source conclusion only; no runtime behavior observed. Suggested bucket: other (test-removal concern refuted). Confidence: confirmed for the removed driver-specific paths. proposed_drop: removal is consistent with the quoted pinned contract and the surviving HostTerminal-only resolution surface. possible_cover: none; no coverage sources searched. Could-be-highest: false for this candidate; no shipped path to security impact or loss of work is established. This does not settle replacement scroll-region state, query handling, replay identity or slow-viewer guarantees, which remain to inspect."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g172/findings.jsonl",
+        "id": "c1",
+        "line": 14,
+        "disposition": "under-investigation",
+        "group": "g172-c1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-108",
+          "key": "g172/c1",
+          "latest_line": 14,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "retired-tmux-control-client-teardown-test-removal",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The removed control-client teardown mechanism has no surviving caller at the reviewed revision. Viewer cancellation only ends the grid sender, while aborting a supervisor runtime leaves the terminal host alive. This refutes the specific shared-tmux-server crash route, not arbitrary shutdown or Delete safety concerns.",
+          "checks": [
+            "At 1ed482dde220452e424973faf38a5e1318986333^, tmux/stream.rs:2578-2635 documents the pane-id command trust boundary, pause-before-off workaround and no-output-before-reap ownership. At 1ed482dde220452e424973faf38a5e1318986333 the entire stream module is deleted.",
+            "At that reviewed hash, service/terminals.rs:1-9,220-265 resolves HostTerminal only; service/grid_stream.rs:925-964 cancels stream.run and reports Requested without sending Shutdown or owning a tmux process.",
+            "At that hash, service/core/host_handover.rs:323-370 checkpoints/skips hosts then aborts runtimes; hosts/terminal.rs:2374-2420 separates explicit Shutdown from abort, which cancels encoding and aborts the task while leaving the host running. terminal-host/SPEC.md:151-168 separately defines host-ending events. Source only."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:2998-3016 and SPEC_impl.md:2780-2827 explicitly retire old terminals. That acceptance is provenance, not acceptance of unintended shared-server crashes, wrong-target signals, missing warnings or unconfirmed Delete.",
+            "TODO.md Planned is empty. Relevant tmux plans matched in plans/queue are landed per plans/REPORTS.md:29-32; no unlanded plan repairing a surviving instance of this route found.",
+            "BUGS.md has no matching server-crash entry. INDEX.md read in full, queue searched for tmux/control-client/teardown/pane claims, and active TRIAGE_OUTCOMES.md searched; no exact coverage or alias. Archive not read.",
+            "FILTER.md read; no filter invoked."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "A surviving shipped path that creates/closes these tmux output clients is absent. This is not a complete audit of all terminal-host lifecycle operations.",
+          "original_stronger_consequence": "Closing a tmux output client before no-output acknowledgement could abort the private tmux server and lose every old terminal and its running work. History line 10 corrects the initial could-be-highest=false; lines 12 and 14 preserve that highest historical class while proposing source refutation.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Proposed dismissal of this retired-client route only, pending the parent's independent drop check. The broad intentional-retirement acceptance is not the basis for excusing unintended work loss."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retired-tmux-control-client-teardown-test-removal",
+        "destination": null
+      }
+    },
+    {
+      "key": "g172/c2",
+      "owner": "g172",
+      "id": "c2",
+      "domain": "retired-supervisor-tmux",
+      "purpose": "retired-supervisor-tmux: crates/farhelm-supervisor/src/tmux/stream.rs; phases -    async fn scroll_region_and_origin_mode_are_read_from_a_real_pane() {",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Removing live-tmux mode and query tests does not remove their replacement contracts",
+            "location": "crates/farhelm-supervisor/src/tmux/stream.rs:2411-2445,3066-3167 (parent revision; removed)",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: I found no source-supported loss of terminal mode or query behavior from deleting these tmux tests. Details: The removed scroll-region/origin test and pinned-tmux query catalog test describe the removed byte-replay substrate. The replacement keeps terminal state in one emulator and sends grids to viewers (service/grid_stream.rs:1-9), instead of painting captured escape streams into a viewer. snapshot/v1/paint.rs:344-374 encodes the scroll region before origin mode; tests/snapshot_golden.rs:728-737 checks the restored clamped and empty regions. The emulator's independent query catalog is exercised through its public API in crates/farhelm-terminal-emulator/tests/queries.rs:43-126 (device attributes, DSR, foreground/background colors with both terminators, and no clipboard reads). hosts/terminal.rs:3246-3287 queues emulator answers as host input. hosts/terminal/tests.rs:320-386 independently specifies and asserts fresh, recovered and already-delivered query handling. SPEC_impl.md:2799-2803 explicitly says: 'No test holds the emulator to a live tmux: the crate’s own tests pin the answer table, the screen-text format and the modes as Farhelm’s' (apostrophes normalized here); its actual source text uses ASCII apostrophes. SPEC_impl.md:2779-2790 defines the emulator's own answers and explains intentional deviations. Suggested bucket: other (test-removal concern refuted). Confidence: confirmed from source and test inspection, not test execution. proposed_drop: the removed tests' tmux dependency is retired, and independent emulator/runtime contracts survive; no requirement that their answers stay identical to tmux remains. possible_cover: none; no coverage sources searched. Could-be-highest: false; no loss-of-work or security route was established. Caveat: this is an assessment of these deletions and their replacement interfaces, not a complete emulator or snapshot audit."
+          }
+        },
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Removing live-tmux mode and query tests does not remove their replacement contracts",
+            "location": "crates/farhelm-supervisor/src/tmux/stream.rs:2411-2445,3066-3167 (parent revision; removed)",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: I found no source-supported loss of terminal mode or query behavior from deleting these tmux tests. Details: The removed scroll-region/origin test and pinned-tmux query catalog test describe the removed byte-replay substrate. The replacement keeps terminal state in one emulator and sends grids to viewers (service/grid_stream.rs:1-9), instead of painting captured escape streams into a viewer. snapshot/v1/paint.rs:344-374 encodes the scroll region before origin mode; tests/snapshot_golden.rs:728-737 checks the restored clamped and empty regions. The emulator's independent query catalog is exercised through its public API in crates/farhelm-terminal-emulator/tests/queries.rs:43-126 (device attributes, DSR, foreground/background colors with both terminators, and no clipboard reads). hosts/terminal.rs:3246-3287 queues emulator answers as host input. hosts/terminal/tests.rs:320-386 independently specifies and asserts fresh, recovered and already-delivered query handling. SPEC_impl.md:2799-2803 explicitly says: 'No test holds the emulator to a live tmux: the crate's own tests pin the answer table, the screen-text format and the modes as Farhelm's'. SPEC_impl.md:2779-2790 defines the emulator's own answers and explains intentional deviations. Suggested bucket: other (test-removal concern refuted). Confidence: confirmed from source and test inspection, not test execution. proposed_drop: the removed tests' tmux dependency is retired, and independent emulator/runtime contracts survive; no requirement that their answers stay identical to tmux remains. possible_cover: none; no coverage sources searched. Could-be-highest: false; no loss-of-work or security route was established. Caveat: this is an assessment of these deletions and their replacement interfaces, not a complete emulator or snapshot audit."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Removing live-tmux mode and query tests does not remove their replacement contracts",
+            "location": "crates/farhelm-supervisor/src/tmux/stream.rs:2411-2445,3069-3138 (parent revision; removed)",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: I found no source-supported loss of terminal mode or query behavior from deleting these tmux tests. Details: The removed scroll-region/origin test and pinned-tmux query catalog test describe the removed byte-replay substrate. The replacement keeps terminal state in one emulator and sends grids to viewers (service/grid_stream.rs:1-9), instead of painting captured escape streams into a viewer. snapshot/v1/paint.rs:344-374 encodes the scroll region before origin mode; tests/snapshot_golden.rs:728-737 checks the restored clamped and empty regions. The emulator's independent query catalog is exercised through its public API in crates/farhelm-terminal-emulator/tests/queries.rs:43-126 (device attributes, DSR, foreground/background colors with both terminators, and no clipboard reads). hosts/terminal.rs:3246-3287 queues emulator answers as host input. hosts/terminal/tests.rs:320-386 independently specifies and asserts fresh, recovered and already-delivered query handling. SPEC_impl.md:2801-2803 explicitly says: 'No test holds the emulator to a live tmux: the crate's own tests pin the answer table, the screen-text format and the modes as Farhelm's'. SPEC_impl.md:2779-2790 defines the emulator's own answers and explains intentional deviations. Suggested bucket: other (test-removal concern refuted). Confidence: confirmed from source and test inspection, not test execution. proposed_drop: the removed tests' tmux dependency is retired, and independent emulator/runtime contracts survive; no requirement that their answers stay identical to tmux remains. possible_cover: none; no coverage sources searched. Could-be-highest: false; no loss-of-work or security route was established. Caveat: this is an assessment of these deletions and their replacement interfaces, not a complete emulator or snapshot audit."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Removing live-tmux mode and query tests does not remove their replacement contracts",
+            "location": "crates/farhelm-supervisor/src/tmux/stream.rs:2411-2445,3069-3138 (parent revision; removed)",
+            "detail": "Synthesis turn 2: Checked retained prompt and excerpt callers and their tests. core.rs:11910-12011 takes the lifecycle claim, holds the selected entry host, probes it, refuses a recovered runtime until caught_up, then reads bracketed-paste mode and sends through that host. core/tests/host_terminals.rs:541-592 proves no input with paste off and checks exact paste and submit bytes for small and split inputs. At :1484-1536 it deliberately streams only the prefix that turns paste on, asserts caught_up is false, requires the restoration-specific refusal and zero input, then streams the rest and checks exact delivered bytes. This distinguishes current replay readiness from stale mode alone. handlers.rs:998-1040 waits for final state before a durable screen excerpt; host_terminals.rs:795-823 independently proves a dead child without its exit record is not final, and verifies the last output after the record. No assigned deleted test exercised these retained host-specific branches, and these source assertions address their distinguishing boundaries; production correctness alone was not used to dismiss test sensitivity. No execution performed. The proposed drop remains provisional. Original assessment and consequences preserved: Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: I found no source-supported loss of terminal mode or query behavior from deleting these tmux tests. Details: The removed scroll-region/origin test and pinned-tmux query catalog test describe the removed byte-replay substrate. The replacement keeps terminal state in one emulator and sends grids to viewers (service/grid_stream.rs:1-9), instead of painting captured escape streams into a viewer. snapshot/v1/paint.rs:344-374 encodes the scroll region before origin mode; tests/snapshot_golden.rs:728-737 checks the restored clamped and empty regions. The emulator's independent query catalog is exercised through its public API in crates/farhelm-terminal-emulator/tests/queries.rs:43-126 (device attributes, DSR, foreground/background colors with both terminators, and no clipboard reads). hosts/terminal.rs:3246-3287 queues emulator answers as host input. hosts/terminal/tests.rs:320-386 independently specifies and asserts fresh, recovered and already-delivered query handling. SPEC_impl.md:2801-2803 explicitly says: 'No test holds the emulator to a live tmux: the crate's own tests pin the answer table, the screen-text format and the modes as Farhelm's'. SPEC_impl.md:2779-2790 defines the emulator's own answers and explains intentional deviations. Suggested bucket: other (test-removal concern refuted). Confidence: confirmed from source and test inspection, not test execution. proposed_drop: the removed tests' tmux dependency is retired, and independent emulator/runtime contracts survive; no requirement that their answers stay identical to tmux remains. possible_cover: none; no coverage sources searched. Could-be-highest: false; no loss-of-work or security route was established. Caveat: this is an assessment of these deletions and their replacement interfaces, not a complete emulator or snapshot audit."
+          }
+        },
+        {
+          "line": 15,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Removing live-tmux mode and query tests does not remove their replacement contracts",
+            "location": "crates/farhelm-supervisor/src/tmux/stream.rs:2411-2445,3069-3138 (parent revision; removed)",
+            "detail": "Discovery pass 1: Checked a narrower possible oracle gap beyond the prior general comparison. The old query catalog included explicit CSI >0c; a pinned literal search finds no explicit emulator/supervisor/host test with that spelling. This limits any claim of identical alias-by-alias replacement coverage. vendor/vte/src/ansi.rs:1616-1621 normalizes missing and zero parameters alike, :1637-1639 dispatches both to identify_terminal with the same intermediate, and its retained parse_terminal_identity_csi test at :2175-2200 separately checks absent and explicit-zero primary identity parameters. The emulator public table independently checks primary aliases and secondary identity, as previously cited. No distinct behavioral or required-oracle defect is established by omitting the retired stripping-table alias test: the production stripping table itself is gone, and the replacement alias branch is common parser dispatch, not a second per-entry filter. Also checked the exact removed region/origin obligation: snapshot_golden.rs:203-219 explicitly sets both together; :583-631 independently compares decoded golden state and live script state to saved fixtures, whose describe helper at common/describe.rs:27-31 includes all non-VI modes and exact scroll region. This is stronger than source correctness alone and catches either state disappearing from saved/restored output. No new verified or unverified issue; no unresolved premise retained. proposed_drop bases and original consequences below remain provisional and unchanged. Earlier assessments preserved: Synthesis turn 2: Checked retained prompt and excerpt callers and their tests. core.rs:11910-12011 takes the lifecycle claim, holds the selected entry host, probes it, refuses a recovered runtime until caught_up, then reads bracketed-paste mode and sends through that host. core/tests/host_terminals.rs:541-592 proves no input with paste off and checks exact paste and submit bytes for small and split inputs. At :1484-1536 it deliberately streams only the prefix that turns paste on, asserts caught_up is false, requires the restoration-specific refusal and zero input, then streams the rest and checks exact delivered bytes. This distinguishes current replay readiness from stale mode alone. handlers.rs:998-1040 waits for final state before a durable screen excerpt; host_terminals.rs:795-823 independently proves a dead child without its exit record is not final, and verifies the last output after the record. No assigned deleted test exercised these retained host-specific branches, and these source assertions address their distinguishing boundaries; production correctness alone was not used to dismiss test sensitivity. No execution performed. The proposed drop remains provisional. Original assessment and consequences preserved: Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: I found no source-supported loss of terminal mode or query behavior from deleting these tmux tests. Details: The removed scroll-region/origin test and pinned-tmux query catalog test describe the removed byte-replay substrate. The replacement keeps terminal state in one emulator and sends grids to viewers (service/grid_stream.rs:1-9), instead of painting captured escape streams into a viewer. snapshot/v1/paint.rs:344-374 encodes the scroll region before origin mode; tests/snapshot_golden.rs:728-737 checks the restored clamped and empty regions. The emulator's independent query catalog is exercised through its public API in crates/farhelm-terminal-emulator/tests/queries.rs:43-126 (device attributes, DSR, foreground/background colors with both terminators, and no clipboard reads). hosts/terminal.rs:3246-3287 queues emulator answers as host input. hosts/terminal/tests.rs:320-386 independently specifies and asserts fresh, recovered and already-delivered query handling. SPEC_impl.md:2801-2803 explicitly says: 'No test holds the emulator to a live tmux: the crate's own tests pin the answer table, the screen-text format and the modes as Farhelm's'. SPEC_impl.md:2779-2790 defines the emulator's own answers and explains intentional deviations. Suggested bucket: other (test-removal concern refuted). Confidence: confirmed from source and test inspection, not test execution. proposed_drop: the removed tests' tmux dependency is retired, and independent emulator/runtime contracts survive; no requirement that their answers stay identical to tmux remains. possible_cover: none; no coverage sources searched. Could-be-highest: false; no loss-of-work or security route was established. Caveat: this is an assessment of these deletions and their replacement interfaces, not a complete emulator or snapshot audit."
+          }
+        }
+      ],
+      "latest": {
+        "line": 15,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Removing live-tmux mode and query tests does not remove their replacement contracts",
+          "location": "crates/farhelm-supervisor/src/tmux/stream.rs:2411-2445,3069-3138 (parent revision; removed)",
+          "detail": "Discovery pass 1: Checked a narrower possible oracle gap beyond the prior general comparison. The old query catalog included explicit CSI >0c; a pinned literal search finds no explicit emulator/supervisor/host test with that spelling. This limits any claim of identical alias-by-alias replacement coverage. vendor/vte/src/ansi.rs:1616-1621 normalizes missing and zero parameters alike, :1637-1639 dispatches both to identify_terminal with the same intermediate, and its retained parse_terminal_identity_csi test at :2175-2200 separately checks absent and explicit-zero primary identity parameters. The emulator public table independently checks primary aliases and secondary identity, as previously cited. No distinct behavioral or required-oracle defect is established by omitting the retired stripping-table alias test: the production stripping table itself is gone, and the replacement alias branch is common parser dispatch, not a second per-entry filter. Also checked the exact removed region/origin obligation: snapshot_golden.rs:203-219 explicitly sets both together; :583-631 independently compares decoded golden state and live script state to saved fixtures, whose describe helper at common/describe.rs:27-31 includes all non-VI modes and exact scroll region. This is stronger than source correctness alone and catches either state disappearing from saved/restored output. No new verified or unverified issue; no unresolved premise retained. proposed_drop bases and original consequences below remain provisional and unchanged. Earlier assessments preserved: Synthesis turn 2: Checked retained prompt and excerpt callers and their tests. core.rs:11910-12011 takes the lifecycle claim, holds the selected entry host, probes it, refuses a recovered runtime until caught_up, then reads bracketed-paste mode and sends through that host. core/tests/host_terminals.rs:541-592 proves no input with paste off and checks exact paste and submit bytes for small and split inputs. At :1484-1536 it deliberately streams only the prefix that turns paste on, asserts caught_up is false, requires the restoration-specific refusal and zero input, then streams the rest and checks exact delivered bytes. This distinguishes current replay readiness from stale mode alone. handlers.rs:998-1040 waits for final state before a durable screen excerpt; host_terminals.rs:795-823 independently proves a dead child without its exit record is not final, and verifies the last output after the record. No assigned deleted test exercised these retained host-specific branches, and these source assertions address their distinguishing boundaries; production correctness alone was not used to dismiss test sensitivity. No execution performed. The proposed drop remains provisional. Original assessment and consequences preserved: Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: I found no source-supported loss of terminal mode or query behavior from deleting these tmux tests. Details: The removed scroll-region/origin test and pinned-tmux query catalog test describe the removed byte-replay substrate. The replacement keeps terminal state in one emulator and sends grids to viewers (service/grid_stream.rs:1-9), instead of painting captured escape streams into a viewer. snapshot/v1/paint.rs:344-374 encodes the scroll region before origin mode; tests/snapshot_golden.rs:728-737 checks the restored clamped and empty regions. The emulator's independent query catalog is exercised through its public API in crates/farhelm-terminal-emulator/tests/queries.rs:43-126 (device attributes, DSR, foreground/background colors with both terminators, and no clipboard reads). hosts/terminal.rs:3246-3287 queues emulator answers as host input. hosts/terminal/tests.rs:320-386 independently specifies and asserts fresh, recovered and already-delivered query handling. SPEC_impl.md:2801-2803 explicitly says: 'No test holds the emulator to a live tmux: the crate's own tests pin the answer table, the screen-text format and the modes as Farhelm's'. SPEC_impl.md:2779-2790 defines the emulator's own answers and explains intentional deviations. Suggested bucket: other (test-removal concern refuted). Confidence: confirmed from source and test inspection, not test execution. proposed_drop: the removed tests' tmux dependency is retired, and independent emulator/runtime contracts survive; no requirement that their answers stay identical to tmux remains. possible_cover: none; no coverage sources searched. Could-be-highest: false; no loss-of-work or security route was established. Caveat: this is an assessment of these deletions and their replacement interfaces, not a complete emulator or snapshot audit."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g172/findings.jsonl",
+        "id": "c2",
+        "line": 15,
+        "disposition": "excluded",
+        "group": "retired-tmux-scroll-origin-query-catalog-test-removal",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-108 after inspecting it. The removed tests pin tmux replay extraction and its query-stripping catalog. The replacement has an independent query-answer table and golden snapshots that explicitly preserve region and origin state. No identical tmux-answer obligation remains. Retired extraction/filter subject plus actual independent query and saved/restored-state oracles. The secondary-zero caveat must survive any dismissal. Checked source/results: [\"At 1ed482dde220452e424973faf38a5e1318986333^, tmux/stream.rs:2400-2445 asserts positional tmux scroll-region/origin fields. The reviewed commit removes the stream and query-strip modules.\",\"At 1ed482dde220452e424973faf38a5e1318986333, farhelm-terminal-emulator/tests/queries.rs:25-145 checks literal answers through the public API, including primary aliases, secondary identity, DSR, colors and unanswered clipboard reads.\",\"At that hash, tests/snapshot_golden.rs:203-219 sets origin mode and scroll region together; :583-631 compares restored and live state to fixed fixture descriptions; common/describe.rs:27-31 includes modes and exact region. :728-737 adds clamped/empty-region assertions.\",\"The missing explicit secondary alias CSI >0c oracle is a real limitation of the replacement-coverage claim. At the reviewed hash vendor/vte/src/ansi.rs:1616-1621,1637-1639 uses common absent/zero normalization and identity dispatch; :2175-2200 tests absent and zero primary identity forms. No distinct required alias-filter oracle remains after the old filter is deleted. No execution.\"] Current coverage/results: [\"Reviewed SPEC_impl.md:2779-2803 and current SPEC_impl.md:2681-2708 define Farhelm's own query table and mode tests, not equivalence to live tmux; current SPEC.md terminal-experience/flow-control sections do not waive supported behavior.\",\"TODO.md Planned empty; plans/queue searches for query catalog, origin/region and tmux find no unlanded fix of this claimed gap. Relevant tmux retirement plans are landed (plans/REPORTS.md:29-32).\",\"BUGS.md, full INDEX.md plus matching queue searches, and active TRIAGE_OUTCOMES.md contain no exact test-removal claim or same-root alias. Archive not read. FILTER.md read; no filter used.\"] Exact cited cover: [\"SPEC_impl.md at 1ed482dde220452e424973faf38a5e1318986333:2801-2803: No test holds the emulator to a live tmux: the crate's own tests pin the answer table, the screen-text format and the modes as Farhelm's\"] Original stronger consequence and missing premise remain preserved: \"Loss of terminal mode or query behavior after deleting tmux tests; later history narrows the replacement coverage claim because CSI >0c has no explicit replacement test. Prompt readiness and final-screen checks in the history are additional boundary checks, not a claim of exhaustive emulator correctness.\"; \"No supported missing oracle established beyond absence of an explicit secondary-zero alias test. Identical alias-by-alias or integration-equivalent replacement coverage is not claimed.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g172/c2",
+        "line": 15,
+        "disposition": "excluded",
+        "group": "retired-tmux-scroll-origin-query-catalog-test-removal",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-108 after inspecting it. The removed tests pin tmux replay extraction and its query-stripping catalog. The replacement has an independent query-answer table and golden snapshots that explicitly preserve region and origin state. No identical tmux-answer obligation remains. Retired extraction/filter subject plus actual independent query and saved/restored-state oracles. The secondary-zero caveat must survive any dismissal. Checked source/results: [\"At 1ed482dde220452e424973faf38a5e1318986333^, tmux/stream.rs:2400-2445 asserts positional tmux scroll-region/origin fields. The reviewed commit removes the stream and query-strip modules.\",\"At 1ed482dde220452e424973faf38a5e1318986333, farhelm-terminal-emulator/tests/queries.rs:25-145 checks literal answers through the public API, including primary aliases, secondary identity, DSR, colors and unanswered clipboard reads.\",\"At that hash, tests/snapshot_golden.rs:203-219 sets origin mode and scroll region together; :583-631 compares restored and live state to fixed fixture descriptions; common/describe.rs:27-31 includes modes and exact region. :728-737 adds clamped/empty-region assertions.\",\"The missing explicit secondary alias CSI >0c oracle is a real limitation of the replacement-coverage claim. At the reviewed hash vendor/vte/src/ansi.rs:1616-1621,1637-1639 uses common absent/zero normalization and identity dispatch; :2175-2200 tests absent and zero primary identity forms. No distinct required alias-filter oracle remains after the old filter is deleted. No execution.\"] Current coverage/results: [\"Reviewed SPEC_impl.md:2779-2803 and current SPEC_impl.md:2681-2708 define Farhelm's own query table and mode tests, not equivalence to live tmux; current SPEC.md terminal-experience/flow-control sections do not waive supported behavior.\",\"TODO.md Planned empty; plans/queue searches for query catalog, origin/region and tmux find no unlanded fix of this claimed gap. Relevant tmux retirement plans are landed (plans/REPORTS.md:29-32).\",\"BUGS.md, full INDEX.md plus matching queue searches, and active TRIAGE_OUTCOMES.md contain no exact test-removal claim or same-root alias. Archive not read. FILTER.md read; no filter used.\"] Exact cited cover: [\"SPEC_impl.md at 1ed482dde220452e424973faf38a5e1318986333:2801-2803: No test holds the emulator to a live tmux: the crate's own tests pin the answer table, the screen-text format and the modes as Farhelm's\"] Original stronger consequence and missing premise remain preserved: \"Loss of terminal mode or query behavior after deleting tmux tests; later history narrows the replacement coverage claim because CSI >0c has no explicit replacement test. Prompt readiness and final-screen checks in the history are additional boundary checks, not a claim of exhaustive emulator correctness.\"; \"No supported missing oracle established beyond absence of an explicit secondary-zero alias test. Identical alias-by-alias or integration-equivalent replacement coverage is not claimed.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-108",
+          "key": "g172/c2",
+          "latest_line": 15,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "retired-tmux-scroll-origin-query-catalog-test-removal",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The removed tests pin tmux replay extraction and its query-stripping catalog. The replacement has an independent query-answer table and golden snapshots that explicitly preserve region and origin state. No identical tmux-answer obligation remains.",
+          "checks": [
+            "At 1ed482dde220452e424973faf38a5e1318986333^, tmux/stream.rs:2400-2445 asserts positional tmux scroll-region/origin fields. The reviewed commit removes the stream and query-strip modules.",
+            "At 1ed482dde220452e424973faf38a5e1318986333, farhelm-terminal-emulator/tests/queries.rs:25-145 checks literal answers through the public API, including primary aliases, secondary identity, DSR, colors and unanswered clipboard reads.",
+            "At that hash, tests/snapshot_golden.rs:203-219 sets origin mode and scroll region together; :583-631 compares restored and live state to fixed fixture descriptions; common/describe.rs:27-31 includes modes and exact region. :728-737 adds clamped/empty-region assertions.",
+            "The missing explicit secondary alias CSI >0c oracle is a real limitation of the replacement-coverage claim. At the reviewed hash vendor/vte/src/ansi.rs:1616-1621,1637-1639 uses common absent/zero normalization and identity dispatch; :2175-2200 tests absent and zero primary identity forms. No distinct required alias-filter oracle remains after the old filter is deleted. No execution."
+          ],
+          "coverage_checked": [
+            "Reviewed SPEC_impl.md:2779-2803 and current SPEC_impl.md:2681-2708 define Farhelm's own query table and mode tests, not equivalence to live tmux; current SPEC.md terminal-experience/flow-control sections do not waive supported behavior.",
+            "TODO.md Planned empty; plans/queue searches for query catalog, origin/region and tmux find no unlanded fix of this claimed gap. Relevant tmux retirement plans are landed (plans/REPORTS.md:29-32).",
+            "BUGS.md, full INDEX.md plus matching queue searches, and active TRIAGE_OUTCOMES.md contain no exact test-removal claim or same-root alias. Archive not read. FILTER.md read; no filter used."
+          ],
+          "exact_cover_quotes": [
+            "SPEC_impl.md at 1ed482dde220452e424973faf38a5e1318986333:2801-2803: No test holds the emulator to a live tmux: the crate's own tests pin the answer table, the screen-text format and the modes as Farhelm's"
+          ],
+          "missing_premise": "No supported missing oracle established beyond absence of an explicit secondary-zero alias test. Identical alias-by-alias or integration-equivalent replacement coverage is not claimed.",
+          "original_stronger_consequence": "Loss of terminal mode or query behavior after deleting tmux tests; later history narrows the replacement coverage claim because CSI >0c has no explicit replacement test. Prompt readiness and final-screen checks in the history are additional boundary checks, not a claim of exhaustive emulator correctness.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retired extraction/filter subject plus actual independent query and saved/restored-state oracles. The secondary-zero caveat must survive any dismissal."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retired-tmux-scroll-origin-query-catalog-test-removal",
+        "destination": null
+      }
+    },
+    {
+      "key": "g172/c3",
+      "owner": "g172",
+      "id": "c3",
+      "domain": "retired-supervisor-tmux",
+      "purpose": "retired-supervisor-tmux: crates/farhelm-supervisor/src/tmux/stream.rs; phases -    async fn scroll_region_and_origin_mode_are_read_from_a_real_pane() {",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Exact tmux session matching and foreign-pane filtering are retired mechanisms",
+            "location": "crates/farhelm-supervisor/src/tmux/stream.rs:3174-3490 (parent revision; removed)",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: These deleted tests do not show that opening one terminal can now display another terminal or consume a neighboring tab's output. Details: The removed tests check tmux's session-name prefix matching and per-control-client foreign-pane filtering. At the reviewed revision, service/terminals.rs:232-248 resolves a tab solely in entry.session.host_tabs by its tab id; agent_terminal at :259-265 returns the host already held by that session entry. service/grid_stream.rs:259-272 and :297-313 retain that specific HostTerminal, and catch_up at :423-499 reads its emulator. No tmux session-name resolution or cross-pane notification stream remains at this boundary. crates/terminal-host/SPEC.md:19-24 says exactly: 'Not a multiplexer. It serves exactly one terminal, and one client connection at a time.' SPEC_impl.md:2326-2346 assigns every tab its own host/runtime and says a takeover displaces attachments for the session. The removed filtering mechanism's performance and reply-debt tests cannot transfer mechanically to one-host-per-terminal streams. Suggested bucket: other (removed-mechanism concern refuted). Confidence: confirmed from pinned source and contract; no execution performed. proposed_drop: the old shared tmux stream and its prefix lookup are removed, while the replacement attachment holds a terminal resolved within its session. possible_cover: none; no coverage sources searched. Could-be-highest: false; no wrong-terminal shipped path or security/loss-of-work consequence is established. Caveat: host discovery and tag adoption have their own contracts; their complete implementation is outside this assigned test-deletion slice."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Exact tmux session matching and foreign-pane filtering are retired mechanisms",
+            "location": "crates/farhelm-supervisor/src/tmux/stream.rs:3174-3490 (parent revision; removed)",
+            "detail": "Synthesis turn 2: Checked caller identity and surviving tests. handlers.rs:1631-1664 holds the session lifecycle claim across tab resolution and takeover; :1775-1799 revalidates the agent entry by generation and runtime identity before installing; :1935-1945 passes the exact resolved terminal clone to both HostAttach and GridStream. e2e/terminal_tabs.rs:1339-1393 attaches agent and tab channels on one connection and lease, sends distinct markers, requires each own marker, drains both, and asserts neither transcript contains the other marker. This asserts isolation, not merely successful delivery. At :1406-1472 a tab viewer is paused and flooded while the agent repeatedly round-trips, then the tab is resumed and must deliver flood output. These are retained host-only responsibilities; the deleted exact-prefix tmux attach and foreign-pane protocol tests cannot execute them. Original considered consequence remains opening one terminal displaying another or consuming a neighboring output stream; the cited caller/source and assertions refute a route introduced by this deletion, without claiming a complete host-discovery audit. No runtime observation, new finding or unresolved premise. Proposed drop remains pending independent check. Original assessment preserved: Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: These deleted tests do not show that opening one terminal can now display another terminal or consume a neighboring tab's output. Details: The removed tests check tmux's session-name prefix matching and per-control-client foreign-pane filtering. At the reviewed revision, service/terminals.rs:232-248 resolves a tab solely in entry.session.host_tabs by its tab id; agent_terminal at :259-265 returns the host already held by that session entry. service/grid_stream.rs:259-272 and :297-313 retain that specific HostTerminal, and catch_up at :423-499 reads its emulator. No tmux session-name resolution or cross-pane notification stream remains at this boundary. crates/terminal-host/SPEC.md:19-24 says exactly: 'Not a multiplexer. It serves exactly one terminal, and one client connection at a time.' SPEC_impl.md:2326-2346 assigns every tab its own host/runtime and says a takeover displaces attachments for the session. The removed filtering mechanism's performance and reply-debt tests cannot transfer mechanically to one-host-per-terminal streams. Suggested bucket: other (removed-mechanism concern refuted). Confidence: confirmed from pinned source and contract; no execution performed. proposed_drop: the old shared tmux stream and its prefix lookup are removed, while the replacement attachment holds a terminal resolved within its session. possible_cover: none; no coverage sources searched. Could-be-highest: false; no wrong-terminal shipped path or security/loss-of-work consequence is established. Caveat: host discovery and tag adoption have their own contracts; their complete implementation is outside this assigned test-deletion slice."
+          }
+        },
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Exact tmux session matching and foreign-pane filtering are retired mechanisms",
+            "location": "crates/farhelm-supervisor/src/tmux/stream.rs:3174-3490 (parent revision; removed)",
+            "detail": "Synthesis lifecycle check: host_launch.rs:519-543 creates an agent tag naming session and generation and spawns at a new host name; :609-620 adopts that socket as Fresh. host_tabs.rs:1476-1478 compares both session and tab id for recovered adoption, which uses adopt_found on the already-classified connection at :1496. At :907-940 close resolves the same tab id and runtime under the claim, rejects the agent runtime, and refuses an unreadable tab. At :1013-1038 it removes the tab record only after end_tab_host succeeds; failure marks the tab end_failed and returns its unconfirmed-end reason. These checked lifecycle boundaries do not yield a distinct wrong-target or forgotten-unconfirmed-tab route from the assigned obsolete stream-test removal. This extends the proposed source refutation, pending independent check; no new finding or lead. Earlier assessment preserved: Synthesis turn 2: Checked caller identity and surviving tests. handlers.rs:1631-1664 holds the session lifecycle claim across tab resolution and takeover; :1775-1799 revalidates the agent entry by generation and runtime identity before installing; :1935-1945 passes the exact resolved terminal clone to both HostAttach and GridStream. e2e/terminal_tabs.rs:1339-1393 attaches agent and tab channels on one connection and lease, sends distinct markers, requires each own marker, drains both, and asserts neither transcript contains the other marker. This asserts isolation, not merely successful delivery. At :1406-1472 a tab viewer is paused and flooded while the agent repeatedly round-trips, then the tab is resumed and must deliver flood output. These are retained host-only responsibilities; the deleted exact-prefix tmux attach and foreign-pane protocol tests cannot execute them. Original considered consequence remains opening one terminal displaying another or consuming a neighboring output stream; the cited caller/source and assertions refute a route introduced by this deletion, without claiming a complete host-discovery audit. No runtime observation, new finding or unresolved premise. Proposed drop remains pending independent check. Original assessment preserved: Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: These deleted tests do not show that opening one terminal can now display another terminal or consume a neighboring tab's output. Details: The removed tests check tmux's session-name prefix matching and per-control-client foreign-pane filtering. At the reviewed revision, service/terminals.rs:232-248 resolves a tab solely in entry.session.host_tabs by its tab id; agent_terminal at :259-265 returns the host already held by that session entry. service/grid_stream.rs:259-272 and :297-313 retain that specific HostTerminal, and catch_up at :423-499 reads its emulator. No tmux session-name resolution or cross-pane notification stream remains at this boundary. crates/terminal-host/SPEC.md:19-24 says exactly: 'Not a multiplexer. It serves exactly one terminal, and one client connection at a time.' SPEC_impl.md:2326-2346 assigns every tab its own host/runtime and says a takeover displaces attachments for the session. The removed filtering mechanism's performance and reply-debt tests cannot transfer mechanically to one-host-per-terminal streams. Suggested bucket: other (removed-mechanism concern refuted). Confidence: confirmed from pinned source and contract; no execution performed. proposed_drop: the old shared tmux stream and its prefix lookup are removed, while the replacement attachment holds a terminal resolved within its session. possible_cover: none; no coverage sources searched. Could-be-highest: false; no wrong-terminal shipped path or security/loss-of-work consequence is established. Caveat: host discovery and tag adoption have their own contracts; their complete implementation is outside this assigned test-deletion slice."
+          }
+        }
+      ],
+      "latest": {
+        "line": 13,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Exact tmux session matching and foreign-pane filtering are retired mechanisms",
+          "location": "crates/farhelm-supervisor/src/tmux/stream.rs:3174-3490 (parent revision; removed)",
+          "detail": "Synthesis lifecycle check: host_launch.rs:519-543 creates an agent tag naming session and generation and spawns at a new host name; :609-620 adopts that socket as Fresh. host_tabs.rs:1476-1478 compares both session and tab id for recovered adoption, which uses adopt_found on the already-classified connection at :1496. At :907-940 close resolves the same tab id and runtime under the claim, rejects the agent runtime, and refuses an unreadable tab. At :1013-1038 it removes the tab record only after end_tab_host succeeds; failure marks the tab end_failed and returns its unconfirmed-end reason. These checked lifecycle boundaries do not yield a distinct wrong-target or forgotten-unconfirmed-tab route from the assigned obsolete stream-test removal. This extends the proposed source refutation, pending independent check; no new finding or lead. Earlier assessment preserved: Synthesis turn 2: Checked caller identity and surviving tests. handlers.rs:1631-1664 holds the session lifecycle claim across tab resolution and takeover; :1775-1799 revalidates the agent entry by generation and runtime identity before installing; :1935-1945 passes the exact resolved terminal clone to both HostAttach and GridStream. e2e/terminal_tabs.rs:1339-1393 attaches agent and tab channels on one connection and lease, sends distinct markers, requires each own marker, drains both, and asserts neither transcript contains the other marker. This asserts isolation, not merely successful delivery. At :1406-1472 a tab viewer is paused and flooded while the agent repeatedly round-trips, then the tab is resumed and must deliver flood output. These are retained host-only responsibilities; the deleted exact-prefix tmux attach and foreign-pane protocol tests cannot execute them. Original considered consequence remains opening one terminal displaying another or consuming a neighboring output stream; the cited caller/source and assertions refute a route introduced by this deletion, without claiming a complete host-discovery audit. No runtime observation, new finding or unresolved premise. Proposed drop remains pending independent check. Original assessment preserved: Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: These deleted tests do not show that opening one terminal can now display another terminal or consume a neighboring tab's output. Details: The removed tests check tmux's session-name prefix matching and per-control-client foreign-pane filtering. At the reviewed revision, service/terminals.rs:232-248 resolves a tab solely in entry.session.host_tabs by its tab id; agent_terminal at :259-265 returns the host already held by that session entry. service/grid_stream.rs:259-272 and :297-313 retain that specific HostTerminal, and catch_up at :423-499 reads its emulator. No tmux session-name resolution or cross-pane notification stream remains at this boundary. crates/terminal-host/SPEC.md:19-24 says exactly: 'Not a multiplexer. It serves exactly one terminal, and one client connection at a time.' SPEC_impl.md:2326-2346 assigns every tab its own host/runtime and says a takeover displaces attachments for the session. The removed filtering mechanism's performance and reply-debt tests cannot transfer mechanically to one-host-per-terminal streams. Suggested bucket: other (removed-mechanism concern refuted). Confidence: confirmed from pinned source and contract; no execution performed. proposed_drop: the old shared tmux stream and its prefix lookup are removed, while the replacement attachment holds a terminal resolved within its session. possible_cover: none; no coverage sources searched. Could-be-highest: false; no wrong-terminal shipped path or security/loss-of-work consequence is established. Caveat: host discovery and tag adoption have their own contracts; their complete implementation is outside this assigned test-deletion slice."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g172/findings.jsonl",
+        "id": "c3",
+        "line": 13,
+        "disposition": "under-investigation",
+        "group": "g172-c3",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-108",
+          "key": "g172/c3",
+          "latest_line": 13,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "retired-tmux-prefix-and-foreign-pane-isolation-test-removal",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "No shared tmux notification stream or prefix-based session resolution survives this deletion. Attach input and output retain the same terminal resolved within the named session. Independent terminal-isolation assertions remain.",
+          "checks": [
+            "At 1ed482dde220452e424973faf38a5e1318986333, service/terminals.rs:232-248 looks up a tab only in entry.session.host_tabs; :259-265 returns that entry's agent host.",
+            "At that hash, handlers.rs:1631-1664 holds the tab lifecycle claim; :1775-1799 revalidates the entry/generation/runtime; :1935-1945 gives HostAttach and GridStream the same resolved terminal clone.",
+            "At that hash, crates/farhelm/tests/e2e/terminal_tabs.rs:1339-1393 sends distinct markers on agent/tab channels and asserts each transcript lacks the other's marker. The wait-based absence boundary is source-read evidence only, not runtime certification.",
+            "terminal-host/SPEC.md:19-24 states one terminal/client, not a multiplexer. This does not audit every tag-discovery/adoption or lifecycle branch."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md terminal-experience and SPEC_impl.md terminal-host/old-server sections describe the replacement; intentional retirement does not cover wrong-terminal disclosure or destructive targeting.",
+            "TODO.md Planned empty. Relevant tmux plans in plans/queue are landed (plans/REPORTS.md:29-32); other keyword hits do not fix this exact claimed test-removal route.",
+            "BUGS.md has no exact item. Full INDEX.md, matching queue source searches and active TRIAGE_OUTCOMES.md show no same-root item for this obsolete prefix/filter deletion. Archive not read. FILTER.md read and not applied."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "A surviving prefix lookup or shared foreign-pane stream is absent; no wrong-terminal shipped route introduced by the deletion is shown. Complete host discovery is outside this consultation.",
+          "original_stronger_consequence": "Opening one terminal could display another terminal or consume a neighboring tab's output. Such wrong-target handling could involve confidential output or user-owned work, even though the reviewer initially marked could-be-highest=false and no actual shipped route was established.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Specific obsolete-mechanism source refutation with surviving terminal-identity source and isolation assertions; requires independent check before dismissal because the considered consequence can cross security/work boundaries."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retired-tmux-prefix-and-foreign-pane-isolation-test-removal",
+        "destination": null
+      }
+    },
+    {
+      "key": "g172/c4",
+      "owner": "g172",
+      "id": "c4",
+      "domain": "retired-supervisor-tmux",
+      "purpose": "retired-supervisor-tmux: crates/farhelm-supervisor/src/tmux/stream.rs; phases -    async fn scroll_region_and_origin_mode_are_read_from_a_real_pane() {",
+      "history": [
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Slow-viewer recovery no longer uses tmux pause and continue",
+            "location": "crates/farhelm-supervisor/src/tmux/stream.rs:2955-3056,3330-3434 (parent revision; removed)",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Deleting the tmux pause/resume and outstanding-filter-reply tests does not establish that slow viewers can now stop agents or corrupt replay. Details: Those tests depend on a shared tmux control stream, positional reply blocks and refresh-client pause/continue. The surviving terminal host polls its pty for reading whenever it remains open, independently of the client writer's readiness (crates/terminal-host/src/host.rs:269-328); read_pty at :505-543 appends output to its journal, refill_outgoing at :628-654 stops filling only the bounded client queue, and write_client at :658-693 returns on socket backpressure. service/grid_stream.rs:799-832 pauses only its attachment sender and races queue waits against the stall deadline. catch_up at :423-499 reads the host's emulator and marks status changed for a fresh live cycle after history transfer, without tmux reply debt. crates/terminal-host/SPEC.md:233-234 says exactly: 'The host never blocks on a slow client. It writes as much as the socket accepts and keeps the rest in the journal; a client that falls behind far enough to have its next records trimmed receives the gap and continues after it.' SPEC.md:3031-3038 separately specifies coalesced new-terminal screens, retained history and stall detach; old-terminal flow-control machinery is not its implementation contract. Suggested bucket: other (removed-mechanism concern refuted). Confidence: confirmed source/contract analysis of the replacement boundary, not observed execution. proposed_drop: no surviving call uses the deleted tmux pause/reply protocol, and the replacement drains output independently of an attachment's paused sender. possible_cover: none; no coverage sources searched. Could-be-highest: false; no established security or loss-of-work path from these test deletions. Caveat: this is not a full grid-output/history cursor audit, and journal-cap loss accepted by the specification is distinct from viewer flow control."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Slow-viewer recovery no longer uses tmux pause and continue",
+            "location": "crates/farhelm-supervisor/src/tmux/stream.rs:2983-3041,3359-3428 (parent revision; removed)",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Deleting the tmux pause/resume and outstanding-filter-reply tests does not establish that slow viewers can now stop agents or corrupt replay. Details: Those tests depend on a shared tmux control stream, positional reply blocks and refresh-client pause/continue. The surviving terminal host polls its pty for reading whenever it remains open, independently of the client writer's readiness (crates/terminal-host/src/host.rs:269-328); read_pty at :505-543 appends output to its journal, refill_outgoing at :628-654 stops filling only the bounded client queue, and write_client at :658-693 returns on socket backpressure. service/grid_stream.rs:799-832 pauses only its attachment sender and races queue waits against the stall deadline. catch_up at :423-499 reads the host's emulator and marks status changed for a fresh live cycle after history transfer, without tmux reply debt. crates/terminal-host/SPEC.md:233-234 says exactly: 'The host never blocks on a slow client. It writes as much as the socket accepts and keeps the rest in the journal; a client that falls behind far enough to have its next records trimmed receives the gap and continues after it.' SPEC.md:3032-3038 separately specifies coalesced new-terminal screens, retained history and stall detach; old-terminal flow-control machinery is not its implementation contract. Suggested bucket: other (removed-mechanism concern refuted). Confidence: confirmed source/contract analysis of the replacement boundary, not observed execution. proposed_drop: no surviving call uses the deleted tmux pause/reply protocol, and the replacement drains output independently of an attachment's paused sender. possible_cover: none; no coverage sources searched. Could-be-highest: false; no established security or loss-of-work path from these test deletions. Caveat: this is not a full grid-output/history cursor audit, and journal-cap loss accepted by the specification is distinct from viewer flow control."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Slow-viewer recovery no longer uses tmux pause and continue",
+            "location": "crates/farhelm-supervisor/src/tmux/stream.rs:2983-3041,3359-3428 (parent revision; removed)",
+            "detail": "Synthesis turn 2: Checked surviving test sensitivity rather than inferring it from correct production. service/grid_stream/tests.rs:485-507 waits for the host to process the paused flood and for the sender to reach its pause, asserts no frames arrived, then checks every expected history line and zero resets after resume. At :520-550 a four-frame queue is asserted full after processing 4000 lines, then every expected history line and zero resets are checked. At :778-801 the stream must return Stalled under a short timeout. These assertions distinguish withholding, replay loss, replay duplication and missing stall expiry. They are not evidence from execution. This strengthens the proposed drop for the surviving viewer responsibilities; it does not claim identical coverage of the obsolete tmux mechanism. No new finding or unresolved premise. Proposed drop remains awaiting independent check. Original assessment and consequences preserved: Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Deleting the tmux pause/resume and outstanding-filter-reply tests does not establish that slow viewers can now stop agents or corrupt replay. Details: Those tests depend on a shared tmux control stream, positional reply blocks and refresh-client pause/continue. The surviving terminal host polls its pty for reading whenever it remains open, independently of the client writer's readiness (crates/terminal-host/src/host.rs:269-328); read_pty at :505-543 appends output to its journal, refill_outgoing at :628-654 stops filling only the bounded client queue, and write_client at :658-693 returns on socket backpressure. service/grid_stream.rs:799-832 pauses only its attachment sender and races queue waits against the stall deadline. catch_up at :423-499 reads the host's emulator and marks status changed for a fresh live cycle after history transfer, without tmux reply debt. crates/terminal-host/SPEC.md:233-234 says exactly: 'The host never blocks on a slow client. It writes as much as the socket accepts and keeps the rest in the journal; a client that falls behind far enough to have its next records trimmed receives the gap and continues after it.' SPEC.md:3032-3038 separately specifies coalesced new-terminal screens, retained history and stall detach; old-terminal flow-control machinery is not its implementation contract. Suggested bucket: other (removed-mechanism concern refuted). Confidence: confirmed source/contract analysis of the replacement boundary, not observed execution. proposed_drop: no surviving call uses the deleted tmux pause/reply protocol, and the replacement drains output independently of an attachment's paused sender. possible_cover: none; no coverage sources searched. Could-be-highest: false; no established security or loss-of-work path from these test deletions. Caveat: this is not a full grid-output/history cursor audit, and journal-cap loss accepted by the specification is distinct from viewer flow control."
+          }
+        }
+      ],
+      "latest": {
+        "line": 8,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c4",
+          "state": "open",
+          "summary": "Slow-viewer recovery no longer uses tmux pause and continue",
+          "location": "crates/farhelm-supervisor/src/tmux/stream.rs:2983-3041,3359-3428 (parent revision; removed)",
+          "detail": "Synthesis turn 2: Checked surviving test sensitivity rather than inferring it from correct production. service/grid_stream/tests.rs:485-507 waits for the host to process the paused flood and for the sender to reach its pause, asserts no frames arrived, then checks every expected history line and zero resets after resume. At :520-550 a four-frame queue is asserted full after processing 4000 lines, then every expected history line and zero resets are checked. At :778-801 the stream must return Stalled under a short timeout. These assertions distinguish withholding, replay loss, replay duplication and missing stall expiry. They are not evidence from execution. This strengthens the proposed drop for the surviving viewer responsibilities; it does not claim identical coverage of the obsolete tmux mechanism. No new finding or unresolved premise. Proposed drop remains awaiting independent check. Original assessment and consequences preserved: Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Deleting the tmux pause/resume and outstanding-filter-reply tests does not establish that slow viewers can now stop agents or corrupt replay. Details: Those tests depend on a shared tmux control stream, positional reply blocks and refresh-client pause/continue. The surviving terminal host polls its pty for reading whenever it remains open, independently of the client writer's readiness (crates/terminal-host/src/host.rs:269-328); read_pty at :505-543 appends output to its journal, refill_outgoing at :628-654 stops filling only the bounded client queue, and write_client at :658-693 returns on socket backpressure. service/grid_stream.rs:799-832 pauses only its attachment sender and races queue waits against the stall deadline. catch_up at :423-499 reads the host's emulator and marks status changed for a fresh live cycle after history transfer, without tmux reply debt. crates/terminal-host/SPEC.md:233-234 says exactly: 'The host never blocks on a slow client. It writes as much as the socket accepts and keeps the rest in the journal; a client that falls behind far enough to have its next records trimmed receives the gap and continues after it.' SPEC.md:3032-3038 separately specifies coalesced new-terminal screens, retained history and stall detach; old-terminal flow-control machinery is not its implementation contract. Suggested bucket: other (removed-mechanism concern refuted). Confidence: confirmed source/contract analysis of the replacement boundary, not observed execution. proposed_drop: no surviving call uses the deleted tmux pause/reply protocol, and the replacement drains output independently of an attachment's paused sender. possible_cover: none; no coverage sources searched. Could-be-highest: false; no established security or loss-of-work path from these test deletions. Caveat: this is not a full grid-output/history cursor audit, and journal-cap loss accepted by the specification is distinct from viewer flow control."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g172/findings.jsonl",
+        "id": "c4",
+        "line": 8,
+        "disposition": "under-investigation",
+        "group": "g172-c4",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-108",
+          "key": "g172/c4",
+          "latest_line": 8,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "retired-tmux-pause-reply-debt-test-removal",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The obsolete pause/reply-debt implementation is gone. The host reads its pty independently of viewer writes, and retained grid tests assert pause withholding, exact history after resume/full queues, and stall expiry. This is a narrow test-removal conclusion, not a full history audit.",
+          "checks": [
+            "At 1ed482dde220452e424973faf38a5e1318986333, terminal-host/src/host.rs:269-328 polls pty reads while the pty remains open; :505-543 journals output; :628-654 bounds client filling; :658-693 returns on write backpressure without suspending pty reads.",
+            "At that hash, service/grid_stream/tests.rs:485-507 waits for processed output and pause parking, asserts no frame during pause, then exact history and zero resets. :520-550 establishes a full four-frame queue, then checks exact history and no reset. :778-801 requires Stalled within a bounded wait.",
+            "terminal-host/SPEC.md:233-234 requires the host not block on a slow client; current SPEC.md:3019-3031 preserves no-agent-slowing and history guarantees. Source checks only, no tests run."
+          ],
+          "coverage_checked": [
+            "Both specifications searched/read for slow-viewer and journal behavior; accepted journal-cap/resizing losses do not cover viewer-induced loss.",
+            "TODO.md Planned empty; no matching unlanded plan. Relevant tmux plans are landed (plans/REPORTS.md:29-32). BUGS.md does not cover this route.",
+            "Full INDEX.md and queue search found stopped-reader-output-witness.md, read in full: it concerns the browser flood fixture's unproved producer/reader overlap, not deletion of tmux pause/reply-debt tests or the inspected Rust oracles. host-flood-stall-window-claim.md's indexed eight-versus-sixty-second test-description concern is also distinct; neither is an exact alias or coverage.",
+            "Active TRIAGE_OUTCOMES.md searches found only unrelated old deflake exclusion references for shallow pause. FILTER.md read, no filter applied; archive not read."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No surviving caller of tmux pause/continue or positional filter replies; no required supported oracle removed here established. Rust oracle inspection does not certify all browser timing premises.",
+          "original_stronger_consequence": "Slow viewers might stop agents or corrupt replay after tmux pause/resume and outstanding-filter-reply tests disappear. Potential loss of retained output/work is preserved; journal-cap acceptance is a separate issue, and no actual runtime loss was demonstrated.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Retired protocol plus separately inspected replacement flow-control assertions. Independent check should assess the possible work-loss consequence before dismissal, despite the reviewer's latest other classification."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retired-tmux-pause-reply-debt-test-removal",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete: all 1,081 assigned patch lines reviewed. No actionable findings or unresolved leads.\n\nRecorded four candidates with source-supported reasons for not reporting them (`c1`–`c4`) in `g172/findings.jsonl`; updated `g172/progress.md`. No tests or reproductions run. No checkout files changed."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised `c1`–`c4` with lifecycle, caller and test-sensitivity checks. `c1` now explicitly preserves the historical potentially highest loss-of-work consequence; its proposed drop rests on source refutation.\n\nNo new findings. Unresolved lead IDs: none. Updated `progress.md`; no runtime execution."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 complete. Nothing new found.\n\nChecked deleted-symbol references, query-alias dispatch and tests, region/origin snapshot assertions, and later path history. Revised `c2` with those results.\n\nNew verified IDs: none. New unverified IDs: none. Open leads: none. Progress updated; no runtime execution."
+    }
+  ],
+  "progress": "# g172 progress\n\nInitial review complete, turn 1. Discovery passes: 0. Awaiting the caller's later synthesis turn; no synthesis or discovery pass was performed inside this turn.\n\nRead the brief in full and the complete inventory commits field only. Read all 1081 assigned lines of prep/parts/00957-002.patch with six evidence-read commands: 1-180, 181-360, 361-540, 541-720, 721-900, 901-1081. No assigned material remains unread.\n\nReviewed deletion at 1ed482dde220452e424973faf38a5e1318986333, with removed symbols located against its parent. Governing pinned contracts read: SPEC.md Terminal experience in full (2855-3187); SPEC_impl.md Terminal host in full (1963-2700), supervisor emulator and terminal snapshots (2767-2879), private tmux substrate (2880-2991); terminal-host/SPEC.md What it is, Terms, Ending, Journal, Snapshots and Reading. Read the required priority buckets and feedback-file format. Root AGENTS.md End sentinel was present. Loaded skillette and scode-voice; no helper agents spawned.\n\nSource checks: surviving tmux module and HostTerminal-only terminal resolution; emulator query catalog tests and snapshot scroll-region/origin encoding; runtime query-answer queue and adoption/replay tests; replacement grid stream catch-up, terminal identity, pause/stall send path; terminal-host pty polling, journal append, bounded outgoing queue and nonblocking client writes. The source supports retirement of the deleted tmux-specific test contracts; no actionable regression was established in the assigned slice.\n\nDurable records: c1 retired control protocol, c2 mode/query replacement contracts, c3 per-terminal identity and foreign-pane isolation, c4 slow-viewer replacement. All are candidates with proposed-drop reasons, exact contract quotations, source references, confidence and impact fields. New verified findings: none. New unverified findings: none. Open leads: none. Candidate state is open as required by the recorder; each candidate's investigation is settled in its detail. The initial c1 record command rejected unsupported state 'closed'; it was corrected to 'open' and appended successfully. Source citation corrections were appended under the same IDs, preserving all previous events.\n\nInterface assumptions: supervisor attachment resolution holds the session's specific host runtime; each tab owns a separate terminal host; emulator/runtime and grid streams replace the tmux command/reply mechanisms. Host discovery/tag adoption and the complete grid/history implementation are neighboring review scopes, not assigned source omissions. No coverage metadata, queue findings, INDEX, FILTER, BUGS, TODO, plans or triage records were read. A commit stat listed filenames only, without reading their contents.\n\nNo runtime tests, builds or reproductions ran; all conclusions are source/contract analysis. No checkout files or live-install state changed. The next action is the caller's requested later-turn protocol.\n\n## Synthesis turn 2 started\n\nRevisit caller/lifecycle assumptions and actual test sensitivity for c1-c4. No prior open leads. Proposed drops remain proposals awaiting the caller's independent check. Read-only source analysis continues at the reviewed revision; no runtime reproduction requested.\n\n## Synthesis turn 2 complete\n\nTurn type/count: synthesis, turn 2. Discovery-pass count remains 0. No assigned packet was re-reviewed as a separate discovery pass. No assigned material remains unread.\n\nRevised original IDs c1-c4 immediately as their checks settled. c1 now explicitly preserves the historical potentially highest consequence: closing an old tmux output client before no-output acknowledgement could abort the shared server and lose all old running work. Its source-refuted route and provisional proposed drop remain separate from deliberate old-terminal retirement acceptance. The initial false could-be-highest field is preserved in earlier text but explicitly superseded by the synthesis clarification. No candidate is being dropped or accepted by this agent. None relies only on a specification acceptance of a potentially highest consequence, so no spec-accepted candidate needed conversion to finding.\n\nUseful checks this turn: actual attach lifecycle claim and generation/runtime revalidation; exact host passed to both grid input and output; retained input-isolation and stalled-tab integration assertions; grid flood/pause/full-queue/history assertions; host-only prompt paste/readiness assertions and final-exit-record excerpt assertions; fresh host tagging and recovered tab tag matching; viewer task cancellation without external process ownership; supervisor exit checkpoint/abort lifecycle; tab close retaining records after an unconfirmed end; explicit Delete end-result aggregation and its caller propagating failure before row removal; old-host Restart cleanup retaining records on failure. The last two were checked independently of the known old-tmux retirement/duplicate-agent residual. No distinct route in this assigned deletion establishes misleading update-survival guidance, a missing warning, wrong-target termination, or forgotten later unconfirmed Delete.\n\nNew verified findings this pass: none. New unverified findings: none. Revised records: c1, c2, c3, c4. Open lead IDs: none. All evidence is source/contract and existing-test assertion analysis; no runtime behavior was observed, no tests/builds/reproductions ran, and no checkout or live-install state changed. Proposed drops await the caller's independent check.\n\n## Discovery turn 3 started\n\nSeparate discovery pass 1. Read discovery-neighbours.json completely in bounded ranges 1-63, 64-144, 145-228, 229-278, 279-320, 321-383, 384-437, 438-522, 523-592, 593-664, 665-732 and 733-798. The first attempted 1-160 display clipped; the later complete bounded delivery supersedes it. These are interface/novelty context, not source coverage. No named pending questions were supplied. Existing c1-c4 history remains intact; all drop proposals still await independent check.\n\nNew search stays within the assigned final stream.rs test deletion. Focus: stale surviving references to its deleted test symbols, independent query-catalog alias assertions, and whether the removed region/origin oracle protects a surviving distinct obligation. No runtime execution.\n\n## Discovery turn 3 complete\n\nTurn type/count: discovery, turn 3. Discovery-pass count: 1. Result: empty; nothing new found. New verified IDs: none. New unverified-after-investigation IDs: none. Open lead IDs: none. Revised existing ID c2 to preserve the newly checked alias-coverage limitation and actual region/origin test-oracle results without creating a duplicate issue. All earlier consequences and proposed-drop bases remain append-only and provisional.\n\nChecks/results: read all exact neighboring context records in bounded packets before the new search. Compared the assigned deleted tests for novelty against those records; no named pending questions were supplied. Pinned searches for the deleted assigned test names across permitted source/docs found no surviving stale reference. Literal CSI >0c test search found no explicit retained case; checked vte zero/default normalization, identity dispatch and its existing primary alias test, then recorded that narrower coverage limitation under c2 rather than claiming identical catalog coverage. Golden snapshot scripts explicitly set scroll region plus origin; their live-state and restored-state comparisons include both fields, providing an actual replacement oracle. At pinned tip, searches for removed replay/filter/shutdown symbols, query_strip and refresh-client across supervisor/emulator/terminal-host source and allowed documentation returned no matches. Path history after the assigned deletion contains no reintroduction through tip; the complete base-to-reviewed path diff is deletion. This is not an attribution-based dismissal of an intermediate in-range issue; no new such issue was found in this assigned late deletion.\n\nNo assigned material omitted. No runtime tests, builds, reproductions or live-install actions. No prohibited coverage sources searched; discovery-neighbours.json was read only as expressly supplied interface/novelty context. No checkout files changed. Source conclusions only, no observed runtime behavior.\n"
+}

@@ -1,0 +1,282 @@
+{
+  "group": {
+    "id": "g084",
+    "domain": "terminal-view-rendering",
+    "purpose": "terminal-view-rendering: crates/farhelm-ui/assets/grid-terminal.js; phases complete small per-commit changes",
+    "interfaces": [
+      "g002",
+      "g052",
+      "g053",
+      "g054",
+      "g080",
+      "g083",
+      "g088",
+      "g089",
+      "g117",
+      "g118",
+      "g119",
+      "g120",
+      "g121",
+      "g135",
+      "g136",
+      "g174",
+      "g175",
+      "g176",
+      "g177",
+      "g178",
+      "g179",
+      "g180",
+      "g181",
+      "g182",
+      "g184",
+      "g186",
+      "g187",
+      "g188",
+      "g189",
+      "g190",
+      "g191",
+      "g192",
+      "g193",
+      "g194",
+      "g195",
+      "g196",
+      "g197"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/01495-000.patch",
+        "ranges": [
+          [
+            1,
+            652
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/assets/grid-terminal.js",
+        "commit": "61e632323dbc6b4a35ed27bf5b9833102ffd5a4e",
+        "notes": "patch header; patch character offsets [0,36472)",
+        "lines": 652,
+        "bytes": 36472,
+        "start": 0,
+        "end": 36472,
+        "original": "[private-run]/prep/originals/01495.patch"
+      }
+    ],
+    "lines": 652,
+    "bytes": 36472
+  },
+  "records": [
+    {
+      "key": "g084/c1",
+      "owner": "g084",
+      "id": "c1",
+      "domain": "terminal-view-rendering",
+      "purpose": "terminal-view-rendering: crates/farhelm-ui/assets/grid-terminal.js; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "New accessibility comment documents existing behavior",
+            "location": "crates/farhelm-ui/assets/grid-terminal.js:151",
+            "detail": "# New accessibility comment documents existing behavior\n\nReviewed commit: 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e\n\n## TLDR\nThe terminal text is hidden from assistive technology, but this patch only makes that existing limitation explicit in its comments. It does not introduce the limitation.\n\n## Details\nThe assigned patch adds the Not built bullet about accessible reading near lines 149-152 and rewrites the comment near lines 347-350. Both sides retain screen.setAttribute(\"aria-hidden\", \"true\"); there is no changed executable statement. The prior comment already said the rows were decorative and offered no accessible reading. SPEC_impl.md at the reviewed revision, The grid client (1836-1886), describes the existing DOM rendering contract and explicitly leaves composition display unbuilt; it does not establish a newly introduced accessible-reading implementation in this patch. No new functional accessibility regression is supported by this diff.\n\nSuggested bucket: high if reviewing the existing accessibility limitation independently; no new defect in this assigned change. Confidence: confirmed by source; no execution performed. Could-be-highest: false; no security or loss-of-work route established. proposed_drop: outside this change; unchanged aria-hidden implementation and prior explanatory comment in the same hunk. possible_cover: none; coverage sources were not consulted. This disposition does not claim terminal accessibility is adequate."
+          }
+        },
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "New accessibility comment accurately states the existing omission",
+            "location": "crates/farhelm-ui/assets/grid-terminal.js:151",
+            "detail": "# New accessibility comment accurately states the existing omission\n\nReviewed commit: 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e\n\n## TLDR\nThe new comment accurately warns that terminal text has no accessible reading. That limitation already existed; this change does not conceal it or claim it has been implemented.\n\n## Details\nSynthesis revision: checked the changed documentation as an explanatory contract, rather than relying only on the absence of executable changes. The new Not built bullet (149-152) states that terminal text lacks an accessible reading because the rows are aria-hidden. The DOM construction at 343-349 creates the screen and sets aria-hidden=true, and row creation at 617-631 inserts the rendered rows into that screen. The separate textarea at 366-379 is labeled Terminal input and receives browser input; it is not a reading representation of the terminal output. These sources support the new omission statement. Composition is separately and accurately described as committed text only (149-150; input/composition handlers 1527-1544), matching SPEC_impl.md The grid client at 1886. No independent accessibility review was performed.\n\nThe original consequence remains: terminal text is hidden from assistive technology, a pre-existing accessibility limitation whose impact may be high. The assigned comment change explicitly documents that limitation and introduces no contradictory accessible-reading promise. Suggested bucket: other for the considered accuracy-of-documentation concern; the original high assessment described the existing accessibility limitation, not a defect in this patch. Confidence: confirmed by source; no execution performed. Could-be-highest: false; no security or loss-of-work route established. proposed_drop: the documentation concern is refuted by the DOM and input responsibilities cited above; this is a proposed disposition only, not a claim that the parent has accepted it. possible_cover: none; coverage sources were not consulted."
+          }
+        }
+      ],
+      "latest": {
+        "line": 3,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "New accessibility comment accurately states the existing omission",
+          "location": "crates/farhelm-ui/assets/grid-terminal.js:151",
+          "detail": "# New accessibility comment accurately states the existing omission\n\nReviewed commit: 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e\n\n## TLDR\nThe new comment accurately warns that terminal text has no accessible reading. That limitation already existed; this change does not conceal it or claim it has been implemented.\n\n## Details\nSynthesis revision: checked the changed documentation as an explanatory contract, rather than relying only on the absence of executable changes. The new Not built bullet (149-152) states that terminal text lacks an accessible reading because the rows are aria-hidden. The DOM construction at 343-349 creates the screen and sets aria-hidden=true, and row creation at 617-631 inserts the rendered rows into that screen. The separate textarea at 366-379 is labeled Terminal input and receives browser input; it is not a reading representation of the terminal output. These sources support the new omission statement. Composition is separately and accurately described as committed text only (149-150; input/composition handlers 1527-1544), matching SPEC_impl.md The grid client at 1886. No independent accessibility review was performed.\n\nThe original consequence remains: terminal text is hidden from assistive technology, a pre-existing accessibility limitation whose impact may be high. The assigned comment change explicitly documents that limitation and introduces no contradictory accessible-reading promise. Suggested bucket: other for the considered accuracy-of-documentation concern; the original high assessment described the existing accessibility limitation, not a defect in this patch. Confidence: confirmed by source; no execution performed. Could-be-highest: false; no security or loss-of-work route established. proposed_drop: the documentation concern is refuted by the DOM and input responsibilities cited above; this is a proposed disposition only, not a claim that the parent has accepted it. possible_cover: none; coverage sources were not consulted."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g084/findings.jsonl",
+        "id": "c1",
+        "line": 3,
+        "disposition": "excluded",
+        "group": "grid-accessible-reading-omission-comment-is-accurate",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-054 after inspecting it. The new omission comment accurately describes the DOM. The inaccessible reading surface is older than the full range; the changed comment does not newly implement it or promise accessible output. Refute the documentation-accuracy concern using the rendered-output/input responsibilities. The functional limitation is out of this full range; do not generalize this to a product-accessibility endorsement. Checked source/results: [\"61e632323dbc6b4a35ed27bf5b9833102ffd5a4e:grid-terminal.js:149-152 explicitly lists accessible reading as unbuilt. 343-349 sets aria-hidden=true on screen; 617-631 inserts output rows inside that screen. 366-379 creates a separate Terminal input textarea, not a terminal-output reading representation.\",\"The 61e6323 patch changes comments in this scope and retains aria-hidden. Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:grid-terminal.js:352-356 already hides that screen and explicitly describes no accessible reading. Thus the original functional limitation also predates the whole pinned range, not just this patch.\",\"SPEC_impl.md The grid client leaves composition display unbuilt; the source's composition handlers send committed text. No assistive-technology run or independent accessibility review performed.\"] Current coverage/results: [\"Both specifications searched for accessible reading, aria-hidden, screen-reader and terminal terms; The grid client read in full. No newly promised accessible output was found, and no explicit acceptance is used to declare the existing limitation adequate.\",\"TODO.md Planned empty. The matched input-method TODO is outside Planned and concerns composition, not output accessibility. The tmux comment-sweep plan is landed per plans/REPORTS.md:32 and supplies no unlanded accessibility repair.\",\"BUGS.md has no matching root. INDEX.md read in full and targeted queue/active-ledger searches performed. attachment-failure-announcement-unresolved.md read in full: it concerns live announcement of separate attachment errors whose text remains manually accessible, not the grid output hidden by aria-hidden. No exact coverage or alias found.\",\"FILTER.md not used. An inaccessible output surface is not dismissed as merely scrollable dialog content.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The first record said the existing accessibility limitation could merit high priority. The latest narrows to other for comment accuracy while explicitly retaining that older high-impact limitation; neither record claims security or loss of user-owned work.\"; \"No source contradiction in the new documentation. Broader terminal accessibility adequacy and real screen-reader behavior remain outside this check.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g084/c1",
+        "line": 3,
+        "disposition": "excluded",
+        "group": "grid-accessible-reading-omission-comment-is-accurate",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-054 after inspecting it. The new omission comment accurately describes the DOM. The inaccessible reading surface is older than the full range; the changed comment does not newly implement it or promise accessible output. Refute the documentation-accuracy concern using the rendered-output/input responsibilities. The functional limitation is out of this full range; do not generalize this to a product-accessibility endorsement. Checked source/results: [\"61e632323dbc6b4a35ed27bf5b9833102ffd5a4e:grid-terminal.js:149-152 explicitly lists accessible reading as unbuilt. 343-349 sets aria-hidden=true on screen; 617-631 inserts output rows inside that screen. 366-379 creates a separate Terminal input textarea, not a terminal-output reading representation.\",\"The 61e6323 patch changes comments in this scope and retains aria-hidden. Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:grid-terminal.js:352-356 already hides that screen and explicitly describes no accessible reading. Thus the original functional limitation also predates the whole pinned range, not just this patch.\",\"SPEC_impl.md The grid client leaves composition display unbuilt; the source's composition handlers send committed text. No assistive-technology run or independent accessibility review performed.\"] Current coverage/results: [\"Both specifications searched for accessible reading, aria-hidden, screen-reader and terminal terms; The grid client read in full. No newly promised accessible output was found, and no explicit acceptance is used to declare the existing limitation adequate.\",\"TODO.md Planned empty. The matched input-method TODO is outside Planned and concerns composition, not output accessibility. The tmux comment-sweep plan is landed per plans/REPORTS.md:32 and supplies no unlanded accessibility repair.\",\"BUGS.md has no matching root. INDEX.md read in full and targeted queue/active-ledger searches performed. attachment-failure-announcement-unresolved.md read in full: it concerns live announcement of separate attachment errors whose text remains manually accessible, not the grid output hidden by aria-hidden. No exact coverage or alias found.\",\"FILTER.md not used. An inaccessible output surface is not dismissed as merely scrollable dialog content.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The first record said the existing accessibility limitation could merit high priority. The latest narrows to other for comment accuracy while explicitly retaining that older high-impact limitation; neither record claims security or loss of user-owned work.\"; \"No source contradiction in the new documentation. Broader terminal accessibility adequacy and real screen-reader behavior remain outside this check.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-054",
+          "key": "g084/c1",
+          "latest_line": 3,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "grid-accessible-reading-omission-comment-is-accurate",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The new omission comment accurately describes the DOM. The inaccessible reading surface is older than the full range; the changed comment does not newly implement it or promise accessible output.",
+          "checks": [
+            "61e632323dbc6b4a35ed27bf5b9833102ffd5a4e:grid-terminal.js:149-152 explicitly lists accessible reading as unbuilt. 343-349 sets aria-hidden=true on screen; 617-631 inserts output rows inside that screen. 366-379 creates a separate Terminal input textarea, not a terminal-output reading representation.",
+            "The 61e6323 patch changes comments in this scope and retains aria-hidden. Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:grid-terminal.js:352-356 already hides that screen and explicitly describes no accessible reading. Thus the original functional limitation also predates the whole pinned range, not just this patch.",
+            "SPEC_impl.md The grid client leaves composition display unbuilt; the source's composition handlers send committed text. No assistive-technology run or independent accessibility review performed."
+          ],
+          "coverage_checked": [
+            "Both specifications searched for accessible reading, aria-hidden, screen-reader and terminal terms; The grid client read in full. No newly promised accessible output was found, and no explicit acceptance is used to declare the existing limitation adequate.",
+            "TODO.md Planned empty. The matched input-method TODO is outside Planned and concerns composition, not output accessibility. The tmux comment-sweep plan is landed per plans/REPORTS.md:32 and supplies no unlanded accessibility repair.",
+            "BUGS.md has no matching root. INDEX.md read in full and targeted queue/active-ledger searches performed. attachment-failure-announcement-unresolved.md read in full: it concerns live announcement of separate attachment errors whose text remains manually accessible, not the grid output hidden by aria-hidden. No exact coverage or alias found.",
+            "FILTER.md not used. An inaccessible output surface is not dismissed as merely scrollable dialog content."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No source contradiction in the new documentation. Broader terminal accessibility adequacy and real screen-reader behavior remain outside this check.",
+          "original_stronger_consequence": "The first record said the existing accessibility limitation could merit high priority. The latest narrows to other for comment accuracy while explicitly retaining that older high-impact limitation; neither record claims security or loss of user-owned work.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Refute the documentation-accuracy concern using the rendered-output/input responsibilities. The functional limitation is out of this full range; do not generalize this to a product-accessibility endorsement."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "grid-accessible-reading-omission-comment-is-accurate",
+        "destination": null
+      }
+    },
+    {
+      "key": "g084/c2",
+      "owner": "g084",
+      "id": "c2",
+      "domain": "terminal-view-rendering",
+      "purpose": "terminal-view-rendering: crates/farhelm-ui/assets/grid-terminal.js; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Removed xterm comparisons retain the operative constraints",
+            "location": "crates/farhelm-ui/assets/grid-terminal.js:134",
+            "detail": "# Removed xterm comparisons retain the operative constraints\n\nReviewed commit: 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e\n\n## TLDR\nRemoving the repeated xterm comparisons does not remove the rules that preserve terminal behavior. The changed explanation still makes those behaviors Farhelm contracts and preserves the important edge cases beside their implementation.\n\n## Details\nConsidered whether the rewritten provenance section and deleted comparisons lose constraints needed when changing rendering, selection, history or input. Source checks find the opposite: lines 134-145 explicitly say the behavior is this component’s own contract and changing its details changes what users see. The fixed 80-by-24 fitting reference, padding, scrollbar reserve and authoritative committed drawing size remain explicit at 101-132 and are implemented at 475-499. Selection midpoint tie-breaking remains explicit at 1096-1102; cap trimming preserves column-selection columns at 942-947; per-report selection clearing is explicit at 1632-1643; one wheel message per qualifying event remains explicit at 1816-1826; focus-state reporting on activation remains explicit at 1974-1976. Ports still name their origins locally (positionAt 1081-1083, startSelection 1136-1138, measureChar 419-420), and THIRD_PARTY_NOTICES.md 19-44 maps the retained upstream sources and licenses. No deleted comparison is the sole remaining statement of a concrete behavior in the assigned patch.\n\nCross-batch interaction checked: the header uses row objects as shorthand for hover evidence (97-99), while the detailed Links section (1243-1257) explicitly distinguishes stable screen-row objects from separate history tokens, and rowIdentityAt (1285-1289) uses model.historyIdentity. grid-model.js 1090-1109 independently decodes history rows and exposes storage-independent tokens. The abbreviated header does not redefine history identity or omit the detailed explanation; it explicitly points to that section. No stale-link/security route is established by this documentation change.\n\nExisting browser test source independently names and checks midpoint selection, cap/anchor preservation, column trimming, input clearing, focus reports, and lazy-history link/reset handling (e2e/grid-client/grid-terminal.spec.ts 827-858, 1186-1252, 1297-1328, 1438-1470, 1541-1610); grid-fit.spec.ts 77-188 retains the history-independent sizing cases. These were source inspections, not executed observations.\n\nSuggested bucket: other for the considered documentation concern. Confidence: confirmed by source. Could-be-highest: false; source checks retain the identity and input constraints and establish no security or loss-of-work route. proposed_drop: refuted by the explicit retained contracts and implementations cited above; no missing operative constraint found. possible_cover: none; excluded coverage sources were not read. This conclusion does not certify historical benchmark numbers or claim every possible behavior has a test."
+          }
+        }
+      ],
+      "latest": {
+        "line": 2,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Removed xterm comparisons retain the operative constraints",
+          "location": "crates/farhelm-ui/assets/grid-terminal.js:134",
+          "detail": "# Removed xterm comparisons retain the operative constraints\n\nReviewed commit: 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e\n\n## TLDR\nRemoving the repeated xterm comparisons does not remove the rules that preserve terminal behavior. The changed explanation still makes those behaviors Farhelm contracts and preserves the important edge cases beside their implementation.\n\n## Details\nConsidered whether the rewritten provenance section and deleted comparisons lose constraints needed when changing rendering, selection, history or input. Source checks find the opposite: lines 134-145 explicitly say the behavior is this component’s own contract and changing its details changes what users see. The fixed 80-by-24 fitting reference, padding, scrollbar reserve and authoritative committed drawing size remain explicit at 101-132 and are implemented at 475-499. Selection midpoint tie-breaking remains explicit at 1096-1102; cap trimming preserves column-selection columns at 942-947; per-report selection clearing is explicit at 1632-1643; one wheel message per qualifying event remains explicit at 1816-1826; focus-state reporting on activation remains explicit at 1974-1976. Ports still name their origins locally (positionAt 1081-1083, startSelection 1136-1138, measureChar 419-420), and THIRD_PARTY_NOTICES.md 19-44 maps the retained upstream sources and licenses. No deleted comparison is the sole remaining statement of a concrete behavior in the assigned patch.\n\nCross-batch interaction checked: the header uses row objects as shorthand for hover evidence (97-99), while the detailed Links section (1243-1257) explicitly distinguishes stable screen-row objects from separate history tokens, and rowIdentityAt (1285-1289) uses model.historyIdentity. grid-model.js 1090-1109 independently decodes history rows and exposes storage-independent tokens. The abbreviated header does not redefine history identity or omit the detailed explanation; it explicitly points to that section. No stale-link/security route is established by this documentation change.\n\nExisting browser test source independently names and checks midpoint selection, cap/anchor preservation, column trimming, input clearing, focus reports, and lazy-history link/reset handling (e2e/grid-client/grid-terminal.spec.ts 827-858, 1186-1252, 1297-1328, 1438-1470, 1541-1610); grid-fit.spec.ts 77-188 retains the history-independent sizing cases. These were source inspections, not executed observations.\n\nSuggested bucket: other for the considered documentation concern. Confidence: confirmed by source. Could-be-highest: false; source checks retain the identity and input constraints and establish no security or loss-of-work route. proposed_drop: refuted by the explicit retained contracts and implementations cited above; no missing operative constraint found. possible_cover: none; excluded coverage sources were not read. This conclusion does not certify historical benchmark numbers or claim every possible behavior has a test."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g084/findings.jsonl",
+        "id": "c2",
+        "line": 2,
+        "disposition": "under-investigation",
+        "group": "g084-c2",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-054",
+          "key": "g084/c2",
+          "latest_line": 2,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "grid-xterm-provenance-rewrite-retains-operative-contracts",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The rewritten explanation retains concrete constraints and local provenance. The header's row-object shorthand still points to the detailed history-token contract. No named missing operative constraint or stale-link security route is established by the comment change.",
+          "checks": [
+            "Read the 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e grid-terminal.js comment diff in bounded parts. Size remains fixed-reference fitting with padding/scrollbar reserve and authoritative committed drawing size; the header at 134-145 explicitly makes retained behavior this component's contract.",
+            "Retained local explanations specify midpoint tie-breaking at 1096-1102, column trim at 942-947, every reported input clearing selection at 1632-1643, one wheel message per qualifying event at 1816-1826 and immediate focus-state reporting at 1974-1976. The rewrite retains their operative rules rather than only upstream comparisons.",
+            "61e6323:grid-terminal.js:1243-1266 distinguishes stable screen objects from history tokens, and 1285-1289 reads historyIdentity. grid-model.js:1090-1109 returns independently decoded history rows and separate storage-independent tokens. This directly supports the detailed identity explanation despite the abbreviated header.",
+            "61e6323:THIRD_PARTY_NOTICES.md:19-44 maps retained ports, and local selection/measurement comments still name origins. Source inspection only; historical benchmark numbers and universal test coverage were not certified."
+          ],
+          "coverage_checked": [
+            "SPEC.md and SPEC_impl.md searched for selection, fitting, links/history identity and xterm contracts. SPEC_impl.md The grid client read in full: it independently retains the fit formula, committed drawing size, input tables, independent history decoding and stable identity-token guarantees.",
+            "TODO.md Planned empty. plans/queue/tmux-drop-from-docs.md Acceptance criteria 3 requires retained own-behavior rationales and local port attributions; plans/REPORTS.md:32 shows it landed. It is context, not unlanded-plan coverage of a missing contract.",
+            "BUGS.md, full INDEX.md plus targeted queue-content searches, and active TRIAGE_OUTCOMES.md searches found no exact provenance-rewrite/missing-operative-constraint finding or decision. Existing link-redraw and hover-performance items have different mechanisms and are not covered or refuted by this comment assessment.",
+            "No FILTER.md rule used. Any established stale-link trust-boundary consequence would be outside the rare-glitch boundary."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "A concrete operative constraint erased by this patch, or a documentation statement that wrongly authorizes stale link identity. Neither is established by the named checks. This is not a review of every grid behavior or benchmark claim.",
+          "original_stronger_consequence": "Considered loss of selection/fitting/input constraints and a stale-link/security interpretation of row identity. The record explicitly found no such security route and proposed source refutation; no accepted parent drop is recorded. Preserve that considered security dimension for independent dismissal review.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Proposed dismissal of the comment-regression suspicion based on retained explicit contracts and the detailed history identity explanation, including the named stale-link concern. Independent drop agreement remains required for that security-related interpretation."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-054.json",
+          "key": "g084/c2",
+          "proposal": "claim-checks/claims-054/result.json",
+          "parent_proposal": "source-refuted-comment-rewrite-loses-operative-grid-or-identity-contract",
+          "final_independent_gate": "required-for-original-stale-link-security-dimension",
+          "reason": "Full054 comment rewrite retains explicit fitting/padding/committed size, midpoint/trim/input-selection/wheel/focus rules and local port provenance. Detailed screen-object versus independent history-token explanation remains and matches grid-model access; header shorthand not an operative stale-link grant. Refute named missing-contract/provenance rewrite, not all grid behavior, benchmark numbers or tests. Preserve considered stale-link/security dimension for fresh gate; related hover/redraw roots remain independent."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "grid-xterm-provenance-rewrite-retains-operative-contracts",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete. Read all 652 assigned patch lines and checked the pinned source and contracts.\n\nNo substantive findings or open leads. Recorded candidate `c1`: the accessibility note documents an existing limitation, not a regression. Findings log and progress updated. No tests or reproductions run."
+    },
+    {
+      "turn": 2,
+      "reply": "Synthesis complete; no new findings.\n\n- Revised `c1`: the omission comment accurately describes the rendered rows and separate input field.\n- Added `c2`: deleted xterm comparisons leave the operative constraints and provenance documented.\n- Checked history identities, selection, paste sanitization, clipboard, and caller responsibilities against pinned source.\n\nUnresolved lead IDs: none. Log and progress updated; source-only validation."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 complete. Nothing new found.\n\nChecked heading references, benchmark-claim provenance across the range, wheel/input encoding ownership, and public lifecycle contracts. Read all supplied interface records.\n\nNew verified IDs: none. New unverified IDs: none. Open leads: none. Progress updated; source-only review."
+    }
+  ],
+  "progress": "Group g084: terminal-view-rendering.\nInitial review turn 1 complete; discovery-pass count 0 (later discovery/synthesis not performed).\nCoverage: all assigned patch lines 1-652 delivered through four evidence packets (1-180, 181-360, 361-540, 541-652), reviewed at 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e. Complete inventory commits field read; excluded metadata not read.\nContracts read at pinned revision: SPEC.md Terminal experience (2855-3170), SPEC_impl.md Terminal widget/the grid client (1692-1887), and Answers bind to what was drawn (1069-1099). Required priority and finding-format sections read.\nSource checks: assigned diff is comment-only; pinned fit/measurement, history anchoring/selection trimming, scrollbar, link provider/evidence/press-release admission, keyboard/paste/composition, mouse/wheel, pixel-ratio watcher and focus-report reception checked. Supervisor input encoder source references confirm paste preparation and mouse encoding ownership.\nInterface assumptions: terminal.js owns connection, clipboard queue, link activation and attachment interception; supervisor owns encoded input; these remain unchanged by assigned patch. Link clicks require the press-time link object and current evidence at release.\nRecords this pass: candidate c1 (existing accessibility limitation newly documented; no new regression). New verified findings: none. New unverified findings: none. Open leads: none.\nTooling: initial c1 append rejected unsupported state closed; immediately corrected to open and appended successfully. No log truncated. No runtime tests or reproductions run; conclusions are source-only.\nUnread assigned scope: none. No checkout files changed; only private group artifacts written.\nNext action: return to parent for a separately requested synthesis or discovery turn.\n\nSynthesis turn 2 complete; discovery-pass count remains 0.\nRevisited documentation as a contract: comparisons removed by the patch do not remove midpoint rounding, selection trim columns, anchored history, per-report clearing, wheel-step cardinality, focus initial reporting, fit geometry or provenance. Exact remaining source contracts recorded in c2.\nCaller checks: terminal.js 4313-4354 wires grid copy, program clipboard, link press, resize and paste sanitization; 1900-1910 sanitizes attachment-inserted text before paste. grid_input.rs 572-595 owns sanitized paste line-ending conversion, matching rewritten comment.\nHistory checks: grid-model.js 868-1026 retains numbering during queue trims, separates resets, and anchors screenBase to accepted history. 1090-1109 separates fresh decoded history rows from stable evidence tokens, agreeing with detailed Links docs.\nRendering/input checks: paintRow/paintCursor/paint and history scheduling match retained explanatory responsibilities. Selection rounding, column trimming, lazy-history link/reset and fixed-reference fit assertions inspected in existing test source only; tests not executed.\nOmissions: new accessible-reading statement matches aria-hidden screen and its child rows; separate textarea is an input target. Composition omission matches committed-text handlers. No independent accessibility review performed.\nRecords this turn: c1 revised under its original ID to evaluate documentation accuracy and preserve the original accessibility consequence; c2 appended for considered lost-constraint concern, refuted by retained contracts and implementation. No new verified or unverified findings. No unresolved lead IDs.\nUnread assigned scope: none. All readily checkable caller/contract premises raised in synthesis resolved through pinned source. Historical measurement numbers were not independently remeasured; no measurement discrepancy identified.\nNo runtime execution or reproduction. No checkout changes. Next action: return synthesis delta to parent.\n\nDiscovery turn 3 complete; discovery-pass count 1.\nRead complete discovery-neighbours.json lines 1-442 in bounded chunks; initial 1-160 output clipped and was superseded by complete 1-60, 61-130, 131-195, 196-245, 246-295, 296-350, 351-400, 401-460 reads. Read complete local findings history; no parent disposition assumed.\nCross-group synthesis before search: supplied findings concern retirement/update wording, mounted lifecycle, failed-mount fixture fidelity, deleted integration witnesses, replay oracles, primary-selection forwarding and old-page input. None supplies an unanswered premise in the assigned explanatory-comment changes. No duplicate issue opened.\nDiscovery checks: searched pinned safe source/docs paths for old/new provenance heading references; found only the new heading and its local reference, with no stale old-heading target. Rechecked local attribution and THIRD_PARTY_NOTICES references from prior synthesis. Read benchmark/comparison documentation to distinguish current memory/attach measurements from historical renderer-flood claims; base revision 6e423e30068b62c6cfa276c6d720ee35bb70387a already contains every retained numerical renderer claim and the loaded-machine caveat. No new numerical claim or conflicting replacement constraint found.\nAdditional interface checks: grid-input.js 525-633 provides input shapes, mode filtering, wheel accumulation and program-vs-history routing; supervisor grid_input.rs 673-783 owns default/UTF8/SGR byte encoding and alternate-screen arrow substitution. This matches rewritten encoding-ownership and wheel comments; the nearby supervisor explanation disambiguates conceptual arrow input from the mouse JSON message. Read grid public API/lifecycle 1990-2141 for fit, text-size, click-admission, model reads, frozen snapshot and teardown responsibilities; no newly contradictory documentation found.\nResult: nothing new found. New verified finding IDs: none. New unverified-after-investigation IDs: none. New candidates/revisions: none. Open lead IDs: none. Existing candidate history preserved unchanged.\nUnread assigned scope: none. No tests/builds/reproductions/live-install actions or checkout modifications. Source/contract analysis only; historical benchmarks not remeasured.\nNext action: return discovery delta/results to parent.\n"
+}

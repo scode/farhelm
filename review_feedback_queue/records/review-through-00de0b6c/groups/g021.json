@@ -1,0 +1,916 @@
+{
+  "group": {
+    "id": "g021",
+    "domain": "agent-environment-operations",
+    "purpose": "agent-environment-operations: crates/farhelm-helm/src/agent_requests.rs, crates/farhelm/tests/e2e/agent_listing_real_stack.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g018",
+      "g019",
+      "g020",
+      "g022",
+      "g023",
+      "g024",
+      "g025",
+      "g026",
+      "g027",
+      "g028",
+      "g029",
+      "g041",
+      "g052",
+      "g053",
+      "g054",
+      "g055",
+      "g056",
+      "g057",
+      "g090",
+      "g122",
+      "g123",
+      "g124",
+      "g125",
+      "g126"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00691-000.patch",
+        "ranges": [
+          [
+            1,
+            589
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/agent_requests.rs",
+        "commit": "222bf6253bcd168db04bcbb1df20180c88306998",
+        "notes": "patch header; patch character offsets [0,26711)",
+        "lines": 589,
+        "bytes": 26711,
+        "start": 0,
+        "end": 26711,
+        "original": "[private-run]/prep/originals/00691.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01561-000.patch",
+        "ranges": [
+          [
+            1,
+            31
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/agent_listing_real_stack.rs",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,1720)",
+        "lines": 31,
+        "bytes": 1720,
+        "start": 0,
+        "end": 1720,
+        "original": "[private-run]/prep/originals/01561.patch"
+      }
+    ],
+    "lines": 620,
+    "bytes": 28431
+  },
+  "records": [
+    {
+      "key": "g021/f1",
+      "owner": "g021",
+      "id": "f1",
+      "domain": "agent-environment-operations",
+      "purpose": "agent-environment-operations: crates/farhelm-helm/src/agent_requests.rs, crates/farhelm/tests/e2e/agent_listing_real_stack.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "f1",
+            "state": "open",
+            "summary": "Seal-finisher tests may leave their fixture running after completion",
+            "location": "crates/farhelm-helm/src/agent_requests.rs:17990",
+            "detail": "Reviewed commit: 222bf6253bcd168db04bcbb1df20180c88306998\n\nTLDR: Two new tests start a background environment cleanup task but retain only a plain JoinHandle, whose drop normally detaches the task. This may leave test-owned connections and state alive after the test finishes.\n\nDetails: user_environment_delete::a_seal_from_an_ordinary_host_is_shown_and_never_acted_on and a_listed_seal_is_finished_by_the_helm_and_a_failure_waits_for_retry assign spawn_seal_finisher(Arc::clone(&h.state)) to _finisher and contain no explicit abort. Need inspect spawn_seal_finisher, Harness teardown and test macro/runtime lifetime before concluding that the detached task survives its test. Suggested bucket: other (test resource lifecycle); could-be-highest: false, no shipped user-data consequence established. Confidence: unresolved lead, not a confirmed bug. proposed_drop: false. possible_cover: none. No runtime execution or reproduction performed. Next checks: finisher loop shutdown, Harness Drop, farhelm_testtrace runtime expansion. If each test's owned runtime cancels all tasks, this concern is refuted."
+          }
+        },
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "f1",
+            "state": "open",
+            "summary": "Per-test runtime cancels detached seal finishers",
+            "location": "crates/farhelm-helm/src/agent_requests.rs:17990",
+            "detail": "Reviewed commit: 222bf6253bcd168db04bcbb1df20180c88306998\n\nTLDR: Considered whether the new deletion tests leave their background cleanup task and fleet alive after completion. The test runner owns and drops a separate runtime, so the suspected cross-test resource leak is refuted.\n\nDetails: The two _finisher JoinHandles in agent_requests.rs:17990 and :18055 do detach on drop; sessions/sandbox.rs:344-361 loops forever while owning Arc<AppState>. However both tests use #[farhelm_testtrace::test]. The macro expands async functions to farhelm_testtrace::run_async (crates/farhelm-testtrace-macros/src/lib.rs:53-64), whose owned runtime is explicitly dropped after block_on, including when the body unwinds (crates/farhelm-testtrace/src/lib.rs:994-1025). Exact relevant source: `let result = runtime.block_on(AssertUnwindSafe(body).catch_unwind());` followed by `drop(runtime);`. The finisher has no blocking work that would escape Tokio task cancellation. Harness state and scripted peers are test-local. The original suspected consequence was connections and state surviving the test and accumulating across the binary; the runtime boundary prevents that consequence. Suggested bucket if it were established: other (test lifecycle). Could-be-highest: false; no shipped user-data consequence. Confidence: confirmed source refutation. proposed_drop: source-refuted because the wrapper cancels the test-owned runtime tasks at completion. possible_cover: none. No runtime execution or reproduction performed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 2,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "f1",
+          "state": "open",
+          "summary": "Per-test runtime cancels detached seal finishers",
+          "location": "crates/farhelm-helm/src/agent_requests.rs:17990",
+          "detail": "Reviewed commit: 222bf6253bcd168db04bcbb1df20180c88306998\n\nTLDR: Considered whether the new deletion tests leave their background cleanup task and fleet alive after completion. The test runner owns and drops a separate runtime, so the suspected cross-test resource leak is refuted.\n\nDetails: The two _finisher JoinHandles in agent_requests.rs:17990 and :18055 do detach on drop; sessions/sandbox.rs:344-361 loops forever while owning Arc<AppState>. However both tests use #[farhelm_testtrace::test]. The macro expands async functions to farhelm_testtrace::run_async (crates/farhelm-testtrace-macros/src/lib.rs:53-64), whose owned runtime is explicitly dropped after block_on, including when the body unwinds (crates/farhelm-testtrace/src/lib.rs:994-1025). Exact relevant source: `let result = runtime.block_on(AssertUnwindSafe(body).catch_unwind());` followed by `drop(runtime);`. The finisher has no blocking work that would escape Tokio task cancellation. Harness state and scripted peers are test-local. The original suspected consequence was connections and state surviving the test and accumulating across the binary; the runtime boundary prevents that consequence. Suggested bucket if it were established: other (test lifecycle). Could-be-highest: false; no shipped user-data consequence. Confidence: confirmed source refutation. proposed_drop: source-refuted because the wrapper cancels the test-owned runtime tasks at completion. possible_cover: none. No runtime execution or reproduction performed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g021/findings.jsonl",
+        "id": "f1",
+        "line": 2,
+        "disposition": "excluded",
+        "group": "seal-finisher-test-owned-runtime-lifetime",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-010 after inspecting it. The detached finisher belongs to each test's owned Tokio runtime, which is explicitly dropped before the test wrapper returns, including on body unwind. A JoinHandle drop alone does not establish cross-test survival. Source-refuted cross-test leak; preserve that handles detach while runtime teardown cancels their tasks. Checked source/results: [\"222bf6253bcd168db04bcbb1df20180c88306998: agent_requests.rs:17980-18065 gives both named tests farhelm_testtrace::test and stores plain _finisher handles.\",\"Same revision: sessions/sandbox.rs:344-361 spawns the async lifetime loop. farhelm-testtrace-macros/src/lib.rs:53-64 lowers async tests into run_async; farhelm-testtrace/src/lib.rs:994-1025 catches the body result and explicitly drops its owned runtime before reporting/returning.\",\"No runtime run or leak measurement. The original allegation concerns test-owned connections/state accumulating across test completion, not shipped user sessions.\"] Current coverage/results: {\"SPEC.md\":\"Environment Delete/seal behavior governs product cleanup; no cross-test resource-survival acceptance or requirement settles a different lifecycle here.\",\"SPEC_impl.md\":\"Environment Delete and the seal:6137-6158 requires the helm-owned finisher during helm life, consistent with its cancellation when the test runtime ends.\",\"TODO.md Planned\":\"Empty.\",\"plans/queue\":\"INDEX.md empty.\",\"BUGS.md\":\"No matching case.\",\"queue\":\"INDEX and finisher/test-lifetime searches found no exact item; idle-readoption-task-outlives-supervisor-drop concerns a different task surviving within a still-live runtime.\",\"TRIAGE_OUTCOMES.md\":\"No exact seal-finisher test decision found.\",\"FILTER.md\":\"No filter dismissal; wrapper lifecycle refutes the claim.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Finisher-owned fixture connections/state survive a completed test and accumulate across the test binary. No user-owned-work consequence was alleged.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g021/f1",
+        "line": 2,
+        "disposition": "excluded",
+        "group": "seal-finisher-test-owned-runtime-lifetime",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-010 after inspecting it. The detached finisher belongs to each test's owned Tokio runtime, which is explicitly dropped before the test wrapper returns, including on body unwind. A JoinHandle drop alone does not establish cross-test survival. Source-refuted cross-test leak; preserve that handles detach while runtime teardown cancels their tasks. Checked source/results: [\"222bf6253bcd168db04bcbb1df20180c88306998: agent_requests.rs:17980-18065 gives both named tests farhelm_testtrace::test and stores plain _finisher handles.\",\"Same revision: sessions/sandbox.rs:344-361 spawns the async lifetime loop. farhelm-testtrace-macros/src/lib.rs:53-64 lowers async tests into run_async; farhelm-testtrace/src/lib.rs:994-1025 catches the body result and explicitly drops its owned runtime before reporting/returning.\",\"No runtime run or leak measurement. The original allegation concerns test-owned connections/state accumulating across test completion, not shipped user sessions.\"] Current coverage/results: {\"SPEC.md\":\"Environment Delete/seal behavior governs product cleanup; no cross-test resource-survival acceptance or requirement settles a different lifecycle here.\",\"SPEC_impl.md\":\"Environment Delete and the seal:6137-6158 requires the helm-owned finisher during helm life, consistent with its cancellation when the test runtime ends.\",\"TODO.md Planned\":\"Empty.\",\"plans/queue\":\"INDEX.md empty.\",\"BUGS.md\":\"No matching case.\",\"queue\":\"INDEX and finisher/test-lifetime searches found no exact item; idle-readoption-task-outlives-supervisor-drop concerns a different task surviving within a still-live runtime.\",\"TRIAGE_OUTCOMES.md\":\"No exact seal-finisher test decision found.\",\"FILTER.md\":\"No filter dismissal; wrapper lifecycle refutes the claim.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Finisher-owned fixture connections/state survive a completed test and accumulate across the test binary. No user-owned-work consequence was alleged.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-010",
+          "key": "g021/f1",
+          "latest_line": 2,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "seal-finisher-test-owned-runtime-lifetime",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The detached finisher belongs to each test's owned Tokio runtime, which is explicitly dropped before the test wrapper returns, including on body unwind. A JoinHandle drop alone does not establish cross-test survival.",
+          "checks": [
+            "222bf6253bcd168db04bcbb1df20180c88306998: agent_requests.rs:17980-18065 gives both named tests farhelm_testtrace::test and stores plain _finisher handles.",
+            "Same revision: sessions/sandbox.rs:344-361 spawns the async lifetime loop. farhelm-testtrace-macros/src/lib.rs:53-64 lowers async tests into run_async; farhelm-testtrace/src/lib.rs:994-1025 catches the body result and explicitly drops its owned runtime before reporting/returning.",
+            "No runtime run or leak measurement. The original allegation concerns test-owned connections/state accumulating across test completion, not shipped user sessions."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "Environment Delete/seal behavior governs product cleanup; no cross-test resource-survival acceptance or requirement settles a different lifecycle here.",
+            "SPEC_impl.md": "Environment Delete and the seal:6137-6158 requires the helm-owned finisher during helm life, consistent with its cancellation when the test runtime ends.",
+            "TODO.md Planned": "Empty.",
+            "plans/queue": "INDEX.md empty.",
+            "BUGS.md": "No matching case.",
+            "queue": "INDEX and finisher/test-lifetime searches found no exact item; idle-readoption-task-outlives-supervisor-drop concerns a different task surviving within a still-live runtime.",
+            "TRIAGE_OUTCOMES.md": "No exact seal-finisher test decision found.",
+            "FILTER.md": "No filter dismissal; wrapper lifecycle refutes the claim."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Finisher-owned fixture connections/state survive a completed test and accumulate across the test binary. No user-owned-work consequence was alleged.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source-refuted cross-test leak; preserve that handles detach while runtime teardown cancels their tasks."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "seal-finisher-test-owned-runtime-lifetime",
+        "destination": null
+      }
+    },
+    {
+      "key": "g021/f2",
+      "owner": "g021",
+      "id": "f2",
+      "domain": "agent-environment-operations",
+      "purpose": "agent-environment-operations: crates/farhelm-helm/src/agent_requests.rs, crates/farhelm/tests/e2e/agent_listing_real_stack.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "f2",
+            "state": "open",
+            "summary": "Lost-answer fixture may wait the full production deletion deadline",
+            "location": "crates/farhelm-helm/src/agent_requests.rs:17639",
+            "detail": "Reviewed commit: 222bf6253bcd168db04bcbb1df20180c88306998\n\nTLDR: The new test intended to simulate an environment disconnect may instead keep the helm connection open without a reply and wait four minutes. That could cause routine test timeouts or unnecessary validation cost.\n\nDetails: Answer::Hangs returns from spawn_seal_responder instead of answering. rest_harness.rs module documentation states a spliced peer EXIT is deliberately not propagated and keeps the helm connection open. sessions/sandbox.rs:145 sets ENVIRONMENT_DELETE_REPLY_DEADLINE to 240 seconds. Need inspect run_spliced and test timeout/clock settings to establish what actually happens to this request. Suggested bucket: other (test behavior); could-be-highest: false. Confidence: unresolved lead; no execution performed. proposed_drop: false. possible_cover: none. Exact missing premise: whether the splice sends an error or closes the helm transport when this operation-specific peer exits, or whether test time is paused/advanced. Next checks: run_spliced, test annotation and nextest configuration."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "f2",
+            "state": "open",
+            "summary": "Environment heartbeat bounds the lost-answer fixture's disconnect",
+            "location": "crates/farhelm-helm/src/agent_requests.rs:17639",
+            "detail": "Reviewed commit: 222bf6253bcd168db04bcbb1df20180c88306998\n\nTLDR: Considered whether the lost-answer deletion test hangs until the four-minute production deadline and causes validation timeouts. The fixture's environment heartbeat closes the remaining transport within roughly thirty seconds, so that consequence is not established.\n\nDetails: Answer::Hangs exits spawn_seal_responder; run_spliced deliberately keeps the manager-facing connection alive when its upstream peer ends (rest_harness.rs:595-613). However manager.rs:4484-4489 enables heartbeat for every environment host, including the test's Podman row: `row.kind.environment_provider().is_some()`. client.rs:1814-1836 emits an empty frame every 30 seconds. run_spliced forwards that non-ListSessions frame to the now-dropped peer; the writer failure returns from downstream and aborts the manager-facing writer (rest_harness.rs:650-664), ending the client's pending request. Thus sessions/sandbox.rs:145's 240-second deadline is not the expected completion mechanism. The test is not paused, so an incidental wait of up to one heartbeat remains, but nextest's actual kill threshold is five 60-second periods (.config/nextest.toml:20); source does not support the suspected timeout. Original suspected consequence preserved: four-minute waits or ordinary runner termination. Suggested bucket if established: other. Could-be-highest: false. Confidence: confirmed source refutation of the full-deadline/timeout claim; no runtime timing observed. proposed_drop: source-refuted by enabled environment heartbeat and splice write-failure teardown. possible_cover: none. No reproduction or test execution performed."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "f2",
+            "state": "open",
+            "summary": "Environment heartbeat bounds the lost-answer fixture's disconnect",
+            "location": "crates/farhelm-helm/src/agent_requests.rs:17639",
+            "detail": "Reviewed commit: 222bf6253bcd168db04bcbb1df20180c88306998\n\nTLDR: Considered whether the lost-answer deletion test waits four minutes and causes routine validation timeouts. Environment heartbeats reach the closed scripted peer and end the remaining transport, so the suspected timeout is refuted.\n\nDetails: Answer::Hangs returns from spawn_seal_responder. rest_harness.rs:595-613 keeps the manager-facing connection open after peer EOF, but manager.rs:4484-4489 enables heartbeat for this Podman environment via `row.kind.environment_provider().is_some()`. Synthesis checked the actual writer rather than relying on its constructor documentation: client.rs:1953-1970 creates interval_at(now + period, period), prioritizes its tick, and sends `Frame::data(0, Vec::new())`. The splice intercepts only SetBrowserForwarding and ListSessions; that data frame reaches the dropped peer, whose failed write ends downstream and aborts the manager-facing writer (rest_harness.rs:614-665). Its pending Delete therefore loses its connection rather than waiting on sessions/sandbox.rs:145's 240-second reply deadline. Existing test annotation does not pause time. An incidental wait up to roughly a 30-second heartbeat remains; exact timing was not measured. Nextest's termination threshold is five 60-second periods (.config/nextest.toml:20), not a single 60-second period. Original suspected consequence preserved: four-minute waits or ordinary runner termination. Suggested bucket if established: other. Could-be-highest: false. Confidence: confirmed source refutation of that consequence. proposed_drop: enabled heartbeat and verified splice write-failure teardown refute the deadline/timeout claim. possible_cover: none. Turn-3 synthesis strengthens the source basis without changing disposition. No runtime execution or reproduction performed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 8,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "f2",
+          "state": "open",
+          "summary": "Environment heartbeat bounds the lost-answer fixture's disconnect",
+          "location": "crates/farhelm-helm/src/agent_requests.rs:17639",
+          "detail": "Reviewed commit: 222bf6253bcd168db04bcbb1df20180c88306998\n\nTLDR: Considered whether the lost-answer deletion test waits four minutes and causes routine validation timeouts. Environment heartbeats reach the closed scripted peer and end the remaining transport, so the suspected timeout is refuted.\n\nDetails: Answer::Hangs returns from spawn_seal_responder. rest_harness.rs:595-613 keeps the manager-facing connection open after peer EOF, but manager.rs:4484-4489 enables heartbeat for this Podman environment via `row.kind.environment_provider().is_some()`. Synthesis checked the actual writer rather than relying on its constructor documentation: client.rs:1953-1970 creates interval_at(now + period, period), prioritizes its tick, and sends `Frame::data(0, Vec::new())`. The splice intercepts only SetBrowserForwarding and ListSessions; that data frame reaches the dropped peer, whose failed write ends downstream and aborts the manager-facing writer (rest_harness.rs:614-665). Its pending Delete therefore loses its connection rather than waiting on sessions/sandbox.rs:145's 240-second reply deadline. Existing test annotation does not pause time. An incidental wait up to roughly a 30-second heartbeat remains; exact timing was not measured. Nextest's termination threshold is five 60-second periods (.config/nextest.toml:20), not a single 60-second period. Original suspected consequence preserved: four-minute waits or ordinary runner termination. Suggested bucket if established: other. Could-be-highest: false. Confidence: confirmed source refutation of that consequence. proposed_drop: enabled heartbeat and verified splice write-failure teardown refute the deadline/timeout claim. possible_cover: none. Turn-3 synthesis strengthens the source basis without changing disposition. No runtime execution or reproduction performed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g021/findings.jsonl",
+        "id": "f2",
+        "line": 8,
+        "disposition": "excluded",
+        "group": "seal-delete-hanging-peer-heartbeat-teardown",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-010 after inspecting it. Peer EOF alone intentionally leaves the splice open, but the environment client's heartbeat reaches the closed peer and tears down that remaining transport. The suspected full four-minute wait and ordinary nextest timeout do not follow. Refute only the four-minute/ordinary-timeout claim using the enabled heartbeat, failed splice write and actual runner threshold; do not claim zero delay. Checked source/results: [\"222bf6253bcd168db04bcbb1df20180c88306998: agent_requests.rs:17605-17648 returns from the scripted peer on Answer::Hangs. rest_harness.rs:595-665 keeps EOF upstream from closing the manager side, but forwards non-intercepted frames and aborts its manager-facing writer when downstream fails.\",\"Same revision: manager.rs:4484-4489 enables heartbeat for every environment provider. client.rs:1814-1836 selects a 30-second period; :1953-1970 constructs interval_at(now + period, period) and prioritizes its empty channel-zero data frame. The splice only intercepts SetBrowserForwarding and ListSessions, so this frame reaches the dropped peer.\",\"Same revision: .config/nextest.toml:20 terminates after five 60-second periods, with grace, not one. No paused clock or measured duration is claimed; an incidental wait up to roughly one heartbeat remains.\"] Current coverage/results: {\"SPEC.md\":\"Topology:362-364 specifies 30-second heartbeats for environment connections; no four-minute-fixture guarantee found.\",\"SPEC_impl.md\":\"Environment Delete and the seal:6137-6150 specifies unknown/unanswered outcomes and bounded reply handling; it does not establish this test uses the whole production deadline.\",\"TODO.md Planned\":\"Empty.\",\"plans/queue\":\"INDEX.md empty.\",\"BUGS.md\":\"No matching case.\",\"queue\":\"INDEX and lost-answer/deletion-timeout/heartbeat fixture searches found no exact item.\",\"TRIAGE_OUTCOMES.md\":\"No exact matching test decision found.\",\"FILTER.md\":\"No filter basis; source refutes the stated full-deadline consequence.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The lost-answer fixture waits the full 240-second production deletion deadline, causing ordinary runner termination or four-minute validation cost. A shorter heartbeat wait remains and has not been timed.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g021/f2",
+        "line": 8,
+        "disposition": "excluded",
+        "group": "seal-delete-hanging-peer-heartbeat-teardown",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-010 after inspecting it. Peer EOF alone intentionally leaves the splice open, but the environment client's heartbeat reaches the closed peer and tears down that remaining transport. The suspected full four-minute wait and ordinary nextest timeout do not follow. Refute only the four-minute/ordinary-timeout claim using the enabled heartbeat, failed splice write and actual runner threshold; do not claim zero delay. Checked source/results: [\"222bf6253bcd168db04bcbb1df20180c88306998: agent_requests.rs:17605-17648 returns from the scripted peer on Answer::Hangs. rest_harness.rs:595-665 keeps EOF upstream from closing the manager side, but forwards non-intercepted frames and aborts its manager-facing writer when downstream fails.\",\"Same revision: manager.rs:4484-4489 enables heartbeat for every environment provider. client.rs:1814-1836 selects a 30-second period; :1953-1970 constructs interval_at(now + period, period) and prioritizes its empty channel-zero data frame. The splice only intercepts SetBrowserForwarding and ListSessions, so this frame reaches the dropped peer.\",\"Same revision: .config/nextest.toml:20 terminates after five 60-second periods, with grace, not one. No paused clock or measured duration is claimed; an incidental wait up to roughly one heartbeat remains.\"] Current coverage/results: {\"SPEC.md\":\"Topology:362-364 specifies 30-second heartbeats for environment connections; no four-minute-fixture guarantee found.\",\"SPEC_impl.md\":\"Environment Delete and the seal:6137-6150 specifies unknown/unanswered outcomes and bounded reply handling; it does not establish this test uses the whole production deadline.\",\"TODO.md Planned\":\"Empty.\",\"plans/queue\":\"INDEX.md empty.\",\"BUGS.md\":\"No matching case.\",\"queue\":\"INDEX and lost-answer/deletion-timeout/heartbeat fixture searches found no exact item.\",\"TRIAGE_OUTCOMES.md\":\"No exact matching test decision found.\",\"FILTER.md\":\"No filter basis; source refutes the stated full-deadline consequence.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The lost-answer fixture waits the full 240-second production deletion deadline, causing ordinary runner termination or four-minute validation cost. A shorter heartbeat wait remains and has not been timed.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-010",
+          "key": "g021/f2",
+          "latest_line": 8,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "seal-delete-hanging-peer-heartbeat-teardown",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Peer EOF alone intentionally leaves the splice open, but the environment client's heartbeat reaches the closed peer and tears down that remaining transport. The suspected full four-minute wait and ordinary nextest timeout do not follow.",
+          "checks": [
+            "222bf6253bcd168db04bcbb1df20180c88306998: agent_requests.rs:17605-17648 returns from the scripted peer on Answer::Hangs. rest_harness.rs:595-665 keeps EOF upstream from closing the manager side, but forwards non-intercepted frames and aborts its manager-facing writer when downstream fails.",
+            "Same revision: manager.rs:4484-4489 enables heartbeat for every environment provider. client.rs:1814-1836 selects a 30-second period; :1953-1970 constructs interval_at(now + period, period) and prioritizes its empty channel-zero data frame. The splice only intercepts SetBrowserForwarding and ListSessions, so this frame reaches the dropped peer.",
+            "Same revision: .config/nextest.toml:20 terminates after five 60-second periods, with grace, not one. No paused clock or measured duration is claimed; an incidental wait up to roughly one heartbeat remains."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "Topology:362-364 specifies 30-second heartbeats for environment connections; no four-minute-fixture guarantee found.",
+            "SPEC_impl.md": "Environment Delete and the seal:6137-6150 specifies unknown/unanswered outcomes and bounded reply handling; it does not establish this test uses the whole production deadline.",
+            "TODO.md Planned": "Empty.",
+            "plans/queue": "INDEX.md empty.",
+            "BUGS.md": "No matching case.",
+            "queue": "INDEX and lost-answer/deletion-timeout/heartbeat fixture searches found no exact item.",
+            "TRIAGE_OUTCOMES.md": "No exact matching test decision found.",
+            "FILTER.md": "No filter basis; source refutes the stated full-deadline consequence."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "The lost-answer fixture waits the full 240-second production deletion deadline, causing ordinary runner termination or four-minute validation cost. A shorter heartbeat wait remains and has not been timed.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Refute only the four-minute/ordinary-timeout claim using the enabled heartbeat, failed splice write and actual runner threshold; do not claim zero delay."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "seal-delete-hanging-peer-heartbeat-teardown",
+        "destination": null
+      }
+    },
+    {
+      "key": "g021/f3",
+      "owner": "g021",
+      "id": "f3",
+      "domain": "agent-environment-operations",
+      "purpose": "agent-environment-operations: crates/farhelm-helm/src/agent_requests.rs, crates/farhelm/tests/e2e/agent_listing_real_stack.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "f3",
+            "state": "open",
+            "summary": "Fixed scripted listings do not race the deleted-cache assertion",
+            "location": "crates/farhelm-helm/src/agent_requests.rs:17803",
+            "detail": "Reviewed commit: 222bf6253bcd168db04bcbb1df20180c88306998\n\nTLDR: Considered whether the new non-final Delete test could flake when its scripted listing continues to include the removed helper session. Routine refresh does not run during the test, so this is not a supported defect.\n\nDetails: a_delete_with_other_sessions_left_keeps_the_environment gives owned_environment a fixed list containing helper and starter, then asserts the helper is absent from cached_sessions after Delete. The responder does not update that list. However owned_environment waits for initial refresh before the action (agent_requests.rs:14465-14472), and rest_harness.rs:65-78 intentionally sets the next refresh one hour later: exact text, `The refresh interval is an HOUR, which given that the first refresh happens immediately on connect means each connection refreshes exactly ONCE`. The successful responder retains its connection, and no refresh or reconnect is requested by this test. manager::forget_session also advances seed_epoch to reject a stale in-flight refresh (manager.rs:2534). Thus ordinary assertion timing cannot reinsert the scripted helper. Original possible consequence: a test-only intermittent cache assertion failure. Suggested bucket if established: other. Could-be-highest: false. Confidence: confirmed source refutation within the fixture's documented lifetime. proposed_drop: fixture cadence and initial-refresh barrier rule out the considered race. possible_cover: none. No tests or reproductions executed."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "f3",
+            "state": "open",
+            "summary": "Fixed scripted listings do not race the deleted-cache assertion",
+            "location": "crates/farhelm-helm/src/agent_requests.rs:17803",
+            "detail": "Reviewed commit: 222bf6253bcd168db04bcbb1df20180c88306998\n\nTLDR: Considered whether the non-final Delete test flakes by reinserting its deleted helper from a fixed scripted listing. The fixture completes its first refresh before Delete and has no source for another refresh during the assertion.\n\nDetails: a_delete_with_other_sessions_left_keeps_the_environment leaves helper and starter in its scripted list, then checks helper absent from cached_sessions. owned_environment awaits initial refresh before returning (agent_requests.rs:14465-14472). test_cadence sets the next poll one hour later (rest_harness.rs:65-78); exact contract: `The refresh interval is an HOUR, which given that the first refresh happens immediately on connect means each connection refreshes exactly ONCE`. The successful responder stays connected. Synthesis checked manager.rs:4795-4974: after publication the actor waits for client closure, the cadence timer, explicit refresh/nudge or protocol SessionsChanged hints. FleetEvents bumps do not trigger this wait. spawn_seal_responder sends only the requested deletion reply, not SessionsChanged, and this test requests neither a refresh nor reconnect. manager::forget_session also advances seed_epoch (manager.rs:2534), guarding an already in-flight stale snapshot. Original possible consequence preserved: intermittent test-only cache assertion failure. Suggested bucket if established: other. Could-be-highest: false. Confidence: confirmed source refutation within the fixture lifetime. proposed_drop: initial refresh barrier, hour-long cadence and absence of an alternate refresh wake rule out the considered race. possible_cover: none. Turn-3 synthesis checked the hint/feed interaction and leaves disposition unchanged. No runtime execution or reproduction performed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 9,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "f3",
+          "state": "open",
+          "summary": "Fixed scripted listings do not race the deleted-cache assertion",
+          "location": "crates/farhelm-helm/src/agent_requests.rs:17803",
+          "detail": "Reviewed commit: 222bf6253bcd168db04bcbb1df20180c88306998\n\nTLDR: Considered whether the non-final Delete test flakes by reinserting its deleted helper from a fixed scripted listing. The fixture completes its first refresh before Delete and has no source for another refresh during the assertion.\n\nDetails: a_delete_with_other_sessions_left_keeps_the_environment leaves helper and starter in its scripted list, then checks helper absent from cached_sessions. owned_environment awaits initial refresh before returning (agent_requests.rs:14465-14472). test_cadence sets the next poll one hour later (rest_harness.rs:65-78); exact contract: `The refresh interval is an HOUR, which given that the first refresh happens immediately on connect means each connection refreshes exactly ONCE`. The successful responder stays connected. Synthesis checked manager.rs:4795-4974: after publication the actor waits for client closure, the cadence timer, explicit refresh/nudge or protocol SessionsChanged hints. FleetEvents bumps do not trigger this wait. spawn_seal_responder sends only the requested deletion reply, not SessionsChanged, and this test requests neither a refresh nor reconnect. manager::forget_session also advances seed_epoch (manager.rs:2534), guarding an already in-flight stale snapshot. Original possible consequence preserved: intermittent test-only cache assertion failure. Suggested bucket if established: other. Could-be-highest: false. Confidence: confirmed source refutation within the fixture lifetime. proposed_drop: initial refresh barrier, hour-long cadence and absence of an alternate refresh wake rule out the considered race. possible_cover: none. Turn-3 synthesis checked the hint/feed interaction and leaves disposition unchanged. No runtime execution or reproduction performed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g021/findings.jsonl",
+        "id": "f3",
+        "line": 9,
+        "disposition": "excluded",
+        "group": "nonfinal-environment-delete-fixed-listing-refresh",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-010 after inspecting it. The test's initial refresh completes before Delete, and its successful peer sends no refresh hint or reconnect. Its fixed stale list has no ordinary opportunity to repopulate the deleted helper during the assertion. Source-refuted within the stated fixture lifetime; preserve its hour cadence, completed initial refresh and absence of an alternate refresh wake as essential premises. Checked source/results: [\"222bf6253bcd168db04bcbb1df20180c88306998: agent_requests.rs:14465-14472 awaits the initial owned-environment refresh. :17775-17820 deletes helper and checks the durable cache; the scripted success peer stays connected and sends no SessionsChanged.\",\"Same revision: rest_harness.rs:65-85 sets refresh/reprobe to one hour. manager.rs:4795-4974 waits for client closure, refresh cadence, explicit refresh/nudge or protocol hints after publication; FleetEvents bumps are not a refresh wake.\",\"Same revision: manager.rs:2534 advances seed_epoch when forgetting the session, guarding stale in-flight snapshots. No runtime flake or exact timing was observed.\"] Current coverage/results: {\"SPEC.md\":\"Environment deletion rules require retaining the environment when sessions remain; no product behavior proves a test refresh occurs.\",\"SPEC_impl.md\":\"Environment Delete and the seal:6143-6147 specifies ordinary local forgetting on Deleted. The fixture implements that observation with its first-refresh barrier.\",\"TODO.md Planned\":\"Empty.\",\"plans/queue\":\"INDEX.md empty.\",\"BUGS.md\":\"No match.\",\"queue\":\"INDEX and fixed-listing/cache-delete/refresh-race searches found no exact item.\",\"TRIAGE_OUTCOMES.md\":\"No exact matching fixture decision found.\",\"FILTER.md\":\"No filter basis; absence of a refresh source refutes the proposed race in this fixture lifetime.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Intermittent test-only failure because a fixed scripted list reinserts the deleted helper before the cache assertion. No shipped user-data consequence was alleged.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g021/f3",
+        "line": 9,
+        "disposition": "excluded",
+        "group": "nonfinal-environment-delete-fixed-listing-refresh",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-010 after inspecting it. The test's initial refresh completes before Delete, and its successful peer sends no refresh hint or reconnect. Its fixed stale list has no ordinary opportunity to repopulate the deleted helper during the assertion. Source-refuted within the stated fixture lifetime; preserve its hour cadence, completed initial refresh and absence of an alternate refresh wake as essential premises. Checked source/results: [\"222bf6253bcd168db04bcbb1df20180c88306998: agent_requests.rs:14465-14472 awaits the initial owned-environment refresh. :17775-17820 deletes helper and checks the durable cache; the scripted success peer stays connected and sends no SessionsChanged.\",\"Same revision: rest_harness.rs:65-85 sets refresh/reprobe to one hour. manager.rs:4795-4974 waits for client closure, refresh cadence, explicit refresh/nudge or protocol hints after publication; FleetEvents bumps are not a refresh wake.\",\"Same revision: manager.rs:2534 advances seed_epoch when forgetting the session, guarding stale in-flight snapshots. No runtime flake or exact timing was observed.\"] Current coverage/results: {\"SPEC.md\":\"Environment deletion rules require retaining the environment when sessions remain; no product behavior proves a test refresh occurs.\",\"SPEC_impl.md\":\"Environment Delete and the seal:6143-6147 specifies ordinary local forgetting on Deleted. The fixture implements that observation with its first-refresh barrier.\",\"TODO.md Planned\":\"Empty.\",\"plans/queue\":\"INDEX.md empty.\",\"BUGS.md\":\"No match.\",\"queue\":\"INDEX and fixed-listing/cache-delete/refresh-race searches found no exact item.\",\"TRIAGE_OUTCOMES.md\":\"No exact matching fixture decision found.\",\"FILTER.md\":\"No filter basis; absence of a refresh source refutes the proposed race in this fixture lifetime.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Intermittent test-only failure because a fixed scripted list reinserts the deleted helper before the cache assertion. No shipped user-data consequence was alleged.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-010",
+          "key": "g021/f3",
+          "latest_line": 9,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "nonfinal-environment-delete-fixed-listing-refresh",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The test's initial refresh completes before Delete, and its successful peer sends no refresh hint or reconnect. Its fixed stale list has no ordinary opportunity to repopulate the deleted helper during the assertion.",
+          "checks": [
+            "222bf6253bcd168db04bcbb1df20180c88306998: agent_requests.rs:14465-14472 awaits the initial owned-environment refresh. :17775-17820 deletes helper and checks the durable cache; the scripted success peer stays connected and sends no SessionsChanged.",
+            "Same revision: rest_harness.rs:65-85 sets refresh/reprobe to one hour. manager.rs:4795-4974 waits for client closure, refresh cadence, explicit refresh/nudge or protocol hints after publication; FleetEvents bumps are not a refresh wake.",
+            "Same revision: manager.rs:2534 advances seed_epoch when forgetting the session, guarding stale in-flight snapshots. No runtime flake or exact timing was observed."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "Environment deletion rules require retaining the environment when sessions remain; no product behavior proves a test refresh occurs.",
+            "SPEC_impl.md": "Environment Delete and the seal:6143-6147 specifies ordinary local forgetting on Deleted. The fixture implements that observation with its first-refresh barrier.",
+            "TODO.md Planned": "Empty.",
+            "plans/queue": "INDEX.md empty.",
+            "BUGS.md": "No match.",
+            "queue": "INDEX and fixed-listing/cache-delete/refresh-race searches found no exact item.",
+            "TRIAGE_OUTCOMES.md": "No exact matching fixture decision found.",
+            "FILTER.md": "No filter basis; absence of a refresh source refutes the proposed race in this fixture lifetime."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Intermittent test-only failure because a fixed scripted list reinserts the deleted helper before the cache assertion. No shipped user-data consequence was alleged.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source-refuted within the stated fixture lifetime; preserve its hour cadence, completed initial refresh and absence of an alternate refresh wake as essential premises."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "nonfinal-environment-delete-fixed-listing-refresh",
+        "destination": null
+      }
+    },
+    {
+      "key": "g021/f4",
+      "owner": "g021",
+      "id": "f4",
+      "domain": "agent-environment-operations",
+      "purpose": "agent-environment-operations: crates/farhelm-helm/src/agent_requests.rs, crates/farhelm/tests/e2e/agent_listing_real_stack.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "f4",
+            "state": "open",
+            "summary": "Reconnect assertion may accept the previous refresh",
+            "location": "crates/farhelm-helm/src/agent_requests.rs:18072",
+            "detail": "Reviewed commit: 222bf6253bcd168db04bcbb1df20180c88306998\n\nTLDR: The new cleanup-failure test says it verifies the error survives reconnecting to a sealed environment, but its wait may return for an earlier connection and leave that regression untested.\n\nDetails: a_listed_seal_is_finished_by_the_helm_and_a_failure_waits_for_retry calls h.manager.retry_now(owned).await then h.await_refreshed(owned).await before asserting the deletion failure and no client. manager.rs:3096-3126's live-actor nudge only updates a watch value, not the host state. Harness::await_refreshed accepts any Connected/RefreshHealth::Ok state (rest_harness.rs:923-935), and its separate await_refreshed_after explicitly binds completion to a newer incarnation (:936-975). Need inspect failure hold release and wait_for_state before concluding this test actually has a reachable stale completion. Suggested bucket: other (test evidence). Could-be-highest: false; underlying product risk is deletion failure/Retry visibility, no data-loss route claimed. Confidence: unresolved lead; no execution. proposed_drop: false. possible_cover: none. Next checks: raw versus override state used by wait_for_state, failed removal hold release and nudge scheduling."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "f4",
+            "state": "open",
+            "summary": "Destruction hold already excludes the original refresh",
+            "location": "crates/farhelm-helm/src/agent_requests.rs:18072",
+            "detail": "Reviewed commit: 222bf6253bcd168db04bcbb1df20180c88306998\n\nTLDR: Considered whether the cleanup-failure test can assert error persistence without ever reconnecting. It cannot reuse the initial pre-deletion refresh, because the failed destruction first replaces that state with Deleting and removes its client.\n\nDetails: The explicit retry_now then await_refreshed does not bind to the explicit retry's incarnation: manager.rs:3096-3126 merely sends a nudge, while wait_for_state (:2252-2271) accepts a currently matching raw actor state. That observation alone initially suggested an untested reconnect. The missing premise is refuted by hosts.rs:1513-1548: every destruction first awaits hold_connection(Deleting { failure: None }), then provider.destroy fails, then release_hold allows reconnection. hold_connection synchronously changes the raw state, takes the client, and changes incarnation (manager.rs:1654-1680): exact source `status.state = shown; withdrawn = status.client.take();`. release_hold leaves that held state until the actor publishes a new one (:1698-1716). Therefore a Connected/RefreshHealth::Ok observed after shown_state has seen the destruction failure is necessarily a post-failure reconnect, even if it completed before the explicit retry. That is enough for this test's actual contract that failure visibility and unroutability survive a reconnect; requiring another reconnect would not add the missing distinction originally suspected. Original suspected consequence: test passes without exercising preservation through reconnection. Suggested bucket if established: other. Could-be-highest: false. Confidence: confirmed source refutation. proposed_drop: prior destruction hold establishes the required post-failure connection transition. possible_cover: none. No runtime execution or reproduction performed."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "f4",
+            "state": "open",
+            "summary": "Destruction hold already excludes the original refresh",
+            "location": "crates/farhelm-helm/src/agent_requests.rs:18072",
+            "detail": "Reviewed commit: 222bf6253bcd168db04bcbb1df20180c88306998\n\nTLDR: Considered whether the cleanup-failure test asserts persistence without a reconnect. The original healthy state is withdrawn before destruction fails, so any subsequent healthy raw state already proves the required reconnect.\n\nDetails: retry_now itself only nudges the actor (manager.rs:3096-3126); await_refreshed accepts any Connected/RefreshHealth::Ok raw state (rest_harness.rs:923-935; manager.rs:2252-2271). But hosts.rs:1513-1548 first awaits hold_connection(Deleting { failure: None }), then provider.destroy fails, then release_hold permits redial. hold_connection changes raw state, takes the client and advances incarnation (manager.rs:1654-1680): exact source `status.state = shown; withdrawn = status.client.take();`. release_hold leaves the held state until a new actor publication (:1698-1716). A healthy raw state after the test sees the failure thus requires a post-failure reconnect, even if it precedes the explicit retry. Synthesis also checked repeated seal handling: manager.rs:2610-2620 uses `sealed.entry(host).or_insert(SealedHost::Pending)` and wakes only on a fresh record; sealed_pending (:2711-2719) excludes Failed. A reconnect's sealed listing therefore preserves the recorded failure and does not itself schedule another destruction. Test status assertions use the seal override and suppress the client, matching the contract. Original suspected consequence preserved: test passes without exercising failure preservation through reconnect. Suggested bucket if established: other. Could-be-highest: false. Confidence: confirmed source refutation. proposed_drop: destruction hold excludes the pre-failure refresh, and repeated-seal handling preserves the failure through the required reconnect. possible_cover: none. Turn-3 synthesis strengthens the cross-phase source basis without changing disposition. No runtime execution or reproduction performed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "f4",
+          "state": "open",
+          "summary": "Destruction hold already excludes the original refresh",
+          "location": "crates/farhelm-helm/src/agent_requests.rs:18072",
+          "detail": "Reviewed commit: 222bf6253bcd168db04bcbb1df20180c88306998\n\nTLDR: Considered whether the cleanup-failure test asserts persistence without a reconnect. The original healthy state is withdrawn before destruction fails, so any subsequent healthy raw state already proves the required reconnect.\n\nDetails: retry_now itself only nudges the actor (manager.rs:3096-3126); await_refreshed accepts any Connected/RefreshHealth::Ok raw state (rest_harness.rs:923-935; manager.rs:2252-2271). But hosts.rs:1513-1548 first awaits hold_connection(Deleting { failure: None }), then provider.destroy fails, then release_hold permits redial. hold_connection changes raw state, takes the client and advances incarnation (manager.rs:1654-1680): exact source `status.state = shown; withdrawn = status.client.take();`. release_hold leaves the held state until a new actor publication (:1698-1716). A healthy raw state after the test sees the failure thus requires a post-failure reconnect, even if it precedes the explicit retry. Synthesis also checked repeated seal handling: manager.rs:2610-2620 uses `sealed.entry(host).or_insert(SealedHost::Pending)` and wakes only on a fresh record; sealed_pending (:2711-2719) excludes Failed. A reconnect's sealed listing therefore preserves the recorded failure and does not itself schedule another destruction. Test status assertions use the seal override and suppress the client, matching the contract. Original suspected consequence preserved: test passes without exercising failure preservation through reconnect. Suggested bucket if established: other. Could-be-highest: false. Confidence: confirmed source refutation. proposed_drop: destruction hold excludes the pre-failure refresh, and repeated-seal handling preserves the failure through the required reconnect. possible_cover: none. Turn-3 synthesis strengthens the cross-phase source basis without changing disposition. No runtime execution or reproduction performed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g021/findings.jsonl",
+        "id": "f4",
+        "line": 10,
+        "disposition": "excluded",
+        "group": "sealed-deletion-reconnect-observation",
+        "reason": "Parent's primary source checks and fully read claims-011 agree: destruction holds synchronously withdraw old healthy raw state/client before failure is published, and release retains held state until a new connection. await_refreshed accepting a healthy state cannot merely credit the pre-destruction connection. Refutes only this test-oracle hypothesis, with no originally alleged security or work-loss consequence. Separate current reconnect coverage is not certified."
+      },
+      "accepted_parent_decision": {
+        "key": "g021/f4",
+        "line": 10,
+        "disposition": "excluded",
+        "group": "sealed-deletion-reconnect-observation",
+        "bucket": "other",
+        "recording": "omit narrowly source-refuted false-pass claim",
+        "needs_independent_drop_check": false,
+        "reason": "Parent's primary source checks and fully read claims-011 agree: destruction holds synchronously withdraw old healthy raw state/client before failure is published, and release retains held state until a new connection. await_refreshed accepting a healthy state cannot merely credit the pre-destruction connection. Refutes only this test-oracle hypothesis, with no originally alleged security or work-loss consequence. Separate current reconnect coverage is not certified."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-011",
+          "key": "g021/f4",
+          "latest_line": 10,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "test/sealed-deletion-reconnect-observation",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The initial suspected false pass is source-refuted. The destruction attempt withdraws the original healthy raw state before recording its failure. A subsequent healthy raw state therefore requires a new connection after that withdrawal, even if it becomes healthy before the explicit retry nudge. The latest record already withdraws the original claim on this basis.",
+          "checks": [
+            "At reviewed commit 222bf6253bcd168db04bcbb1df20180c88306998, agent_requests.rs:18050-18081 waits for a failed destruction before retry_now/await_refreshed, then checks the displayed failure and absent routable client.",
+            "At that commit, hosts.rs:1513-1544 awaits hold_connection(Deleting { failure: None }) before provider.destroy, and releases the hold on error. manager.rs:1655-1680 synchronously replaces raw state, takes its client, and advances incarnation; :1698-1713 leaves the held state published on release. sessions/sandbox.rs:296-304 records the failure only after that removal path returns.",
+            "rest_harness.rs:923-934 and manager.rs:2252-2265 accept a currently healthy raw state; manager.rs:3096-3126 only nudges a live actor. Those facts do not restore the pre-destruction healthy state. manager.rs:2610-2620 preserves an existing Failed seal record on relisting, and :2711-2718 excludes it from automatic finishing.",
+            "The full 222bf625..00de0b6c agent_requests.rs diff only removes unrelated terminal fixture fields. No runtime execution or reproduction was performed."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md Sandbox sessions (1446 onward) requires visible deletion failure and Retry; current SPEC_impl.md Environment Delete and the seal (6106-6168) explicitly preserves failure through connection changes. This supports the intended test contract rather than covering a test defect.",
+            "TODO.md Planned (25-26) is empty. Searches of plans/queue for seal, reconnect, await_refreshed and the test name found the original environment-agent-operations design, not a pending correction of this oracle. plans/REPORTS.md:28 marks that plan landed in #3334 through #3364.",
+            "BUGS.md was read in full; its sole SSH-output-holder bug is unrelated. Searches of current INDEX.md and queue files, and active TRIAGE_OUTCOMES.md, found no matching reconnect-oracle claim. The archive was not read.",
+            "FILTER.md was read in full; no filter is needed for this source refutation. No exact same-root alias among the four named records or matching existing queue items was found."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "None for the source refutation. No observed test execution is asserted.",
+          "original_stronger_consequence": "The cleanup-failure test could pass without exercising preservation of the failure and unroutability through reconnection, because await_refreshed might accept the old refresh. History lines 7 and 10 withdraw that suspicion after checking the destruction hold.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Propose dismissal only of the stale pre-destruction-refresh allegation. This is a test-evidence claim with no established or originally alleged security or user-work-loss route; the destruction hold supplies the missing connection transition. This consultation does not authorize a parent drop."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "sealed-deletion-reconnect-observation",
+        "destination": null
+      }
+    },
+    {
+      "key": "g021/f5",
+      "owner": "g021",
+      "id": "f5",
+      "domain": "agent-environment-operations",
+      "purpose": "agent-environment-operations: crates/farhelm-helm/src/agent_requests.rs, crates/farhelm/tests/e2e/agent_listing_real_stack.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "f5",
+            "state": "open",
+            "summary": "Non-final Delete test may not distinguish one cached deletion from losing every cached session",
+            "location": "crates/farhelm-helm/src/agent_requests.rs:17803",
+            "detail": "Reviewed commit: 222bf6253bcd168db04bcbb1df20180c88306998\n\nTLDR: The new test promises that deleting one helper session forgets only that session and keeps the other session, but its cache oracle appears to accept an empty cache too. This could leave that specific regression undetected even though the current implementation is correct.\n\nDetails: a_delete_with_other_sessions_left_keeps_the_environment scripts helper and starter, checks the server remaining count and retained host, then checks only !cached.contains(helper). Need re-read the complete test at the pinned revision and verify that no other assertion establishes starter remains after the action. Investigate the fixture's premise and exact production local-forgetting contract, and range attribution. Suggested bucket: other (test oracle). Could-be-highest: false; suspected impact is a false passing test, not an established shipped data-loss route. Confidence: unresolved lead. proposed_drop: false. possible_cover: none beyond supplied interface records, which report separate production issues. No runtime execution or reproduction. Exact open premise: whether another observation within this test fails when both cached sessions disappear; source checks can settle it."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f5",
+            "state": "open",
+            "summary": "Non-final Delete test accepts clearing every cached session",
+            "location": "crates/farhelm-helm/src/agent_requests.rs:17813",
+            "detail": "Reviewed commit: 222bf6253bcd168db04bcbb1df20180c88306998\n\nTLDR: The new test for deleting one session while keeping its environment can pass if the helm also forgets every other session there. It does not establish its stated promise to forget only the selected session. This is a test-oracle defect; no current production cache-loss behavior is alleged.\n\nDetails: a_delete_with_other_sessions_left_keeps_the_environment documents `forget only that session` at agent_requests.rs:17758-17760 and constructs helper plus starter at :17771-17775. Its supervisor fake returns Deleted(1), independently of the helm cache. After Delete, :17791-17799 checks the successful reply, reported remaining count and sole request sent; :17801-17803 checks only the host registry row. The only post-action cache assertion, :17805-17816, collects cached_sessions(owned) and checks that helper is absent. An empty Vec satisfies that assertion. Clearing all cached sessions for this host while leaving its host row, then returning the correct supervisor count, passes every assertion in this test. Neither the fake's remaining value nor registered() observes whether starter remains cached; registered at :17746-17752 reads list_hosts only. The loop then ends without another session-list observation. This distinguishes two concrete competing local-cleanup mechanisms, forgetting the selected session versus forgetting the whole host's session slice.\n\nContract: the test's own declared behavior at :17759 is `forget only that session`; SPEC_impl.md Environment Delete and the seal (:6636-6637) says `Deleted` runs the ordinary local forgetting and reports the supervisor's count. The product's Sandbox sessions contract keeps other sessions when a non-final Delete succeeds. The authoring checklist requires `Assert an observable that distinguishes the competing mechanisms.` Assert the expected remaining cache contents (starter, with helper absent), preferably with an initial two-session cache premise, so accidental host-wide forgetting fails this regression test. Current production correctness does not repair this distinct oracle weakness.\n\nAttribution: full pinned-range git log -G for the test name identifies 222bf6253bcd168db04bcbb1df20180c88306998 as its introduction; the assigned patch includes the entire new test. The claim is about this reviewed revision, with no unsupported endpoint-fix assertion. Suggested bucket: other (maintainer test validity). Could-be-highest: false; this establishes a false passing test, not a shipped security or loss-of-work route. Confidence: confirmed by source/data-flow analysis only. proposed_drop: false. possible_cover: none searched; supplied interface findings concern separate production or other-test defects and do not establish this test's oracle. Caveats: other tests might catch an equivalent regression; parent owns coverage decisions, and no such coverage was searched. No runtime test, reproduction or build was performed."
+          }
+        },
+        {
+          "line": 14,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f5",
+            "state": "open",
+            "summary": "Non-final Delete test accepts clearing every cached session",
+            "location": "crates/farhelm-helm/src/agent_requests.rs:17813",
+            "detail": "Reviewed commit: 222bf6253bcd168db04bcbb1df20180c88306998\n\nTLDR: The new test for deleting one session while keeping its environment can pass if the helm also forgets every other session there. It does not establish its stated promise to forget only the selected session. This is a test-oracle defect; no current production cache-loss behavior is alleged.\n\nDetails: a_delete_with_other_sessions_left_keeps_the_environment documents `forget only that session` at agent_requests.rs:17758-17760 and constructs helper plus starter at :17771-17775. Its supervisor fake returns Deleted(1) independently of the helm cache. After Delete, :17791-17799 checks the successful reply, reported remaining count and sole request; :17801-17803 checks only the host registry row. The only post-action cache assertion, :17805-17816, checks !cached.contains(helper), which an empty Vec satisfies. Clearing the host's entire session-cache slice while retaining its host row and correct supervisor count passes all assertions. registered() (:17746-17752) reads list_hosts only; neither it nor the fake count establishes starter remains. cached_sessions at store.rs:9531-9572 performs a plain host-scoped query and returns Ok(empty Vec) for an empty cache; it has no hidden nonempty/completeness check. The test ends without another session-list observation. This distinguishes concrete competing local cleanup mechanisms: selected-session forgetting versus whole-host cache forgetting.\n\nContract: the test's own declared behavior at :17759 is `forget only that session`; SPEC_impl.md Environment Delete and the seal (:6636-6637) says `Deleted` runs ordinary local forgetting and reports the supervisor's count. Sandbox sessions promises the other sessions remain on non-final deletion. The test-authoring checklist requires `Assert an observable that distinguishes the competing mechanisms.` Assert the expected remaining cache contents (starter, helper absent), preferably after establishing the initial two-session cache premise. Current production store::forget_session correctly includes both host_id and session_id in its DELETE (store.rs:9484-9490); that does not repair this independent oracle weakness.\n\nAttribution/range checks: full-range git log -G for the test name identifies 222bf6253bcd168db04bcbb1df20180c88306998 as its introduction. The only later in-range agent_requests.rs commit is f560058da19e02716e6f943883a9508b447aff4e, whose full patch removes unrelated fixture protocol fields only. The cache assertion and stated contract remain unchanged at 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db; the complete base-to-tip path diff confirms their addition. Suggested bucket: other (maintainer test validity). Could-be-highest: false; no shipped security or work-loss route alleged. Confidence: confirmed source/data-flow analysis. proposed_drop: false. possible_cover: none searched; supplied interface records concern separate production or other-test defects. Caveats: other tests may catch an equivalent regression; parent owns coverage decisions. All readily accessible premises settled. No runtime test, reproduction or build performed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 14,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "f5",
+          "state": "open",
+          "summary": "Non-final Delete test accepts clearing every cached session",
+          "location": "crates/farhelm-helm/src/agent_requests.rs:17813",
+          "detail": "Reviewed commit: 222bf6253bcd168db04bcbb1df20180c88306998\n\nTLDR: The new test for deleting one session while keeping its environment can pass if the helm also forgets every other session there. It does not establish its stated promise to forget only the selected session. This is a test-oracle defect; no current production cache-loss behavior is alleged.\n\nDetails: a_delete_with_other_sessions_left_keeps_the_environment documents `forget only that session` at agent_requests.rs:17758-17760 and constructs helper plus starter at :17771-17775. Its supervisor fake returns Deleted(1) independently of the helm cache. After Delete, :17791-17799 checks the successful reply, reported remaining count and sole request; :17801-17803 checks only the host registry row. The only post-action cache assertion, :17805-17816, checks !cached.contains(helper), which an empty Vec satisfies. Clearing the host's entire session-cache slice while retaining its host row and correct supervisor count passes all assertions. registered() (:17746-17752) reads list_hosts only; neither it nor the fake count establishes starter remains. cached_sessions at store.rs:9531-9572 performs a plain host-scoped query and returns Ok(empty Vec) for an empty cache; it has no hidden nonempty/completeness check. The test ends without another session-list observation. This distinguishes concrete competing local cleanup mechanisms: selected-session forgetting versus whole-host cache forgetting.\n\nContract: the test's own declared behavior at :17759 is `forget only that session`; SPEC_impl.md Environment Delete and the seal (:6636-6637) says `Deleted` runs ordinary local forgetting and reports the supervisor's count. Sandbox sessions promises the other sessions remain on non-final deletion. The test-authoring checklist requires `Assert an observable that distinguishes the competing mechanisms.` Assert the expected remaining cache contents (starter, helper absent), preferably after establishing the initial two-session cache premise. Current production store::forget_session correctly includes both host_id and session_id in its DELETE (store.rs:9484-9490); that does not repair this independent oracle weakness.\n\nAttribution/range checks: full-range git log -G for the test name identifies 222bf6253bcd168db04bcbb1df20180c88306998 as its introduction. The only later in-range agent_requests.rs commit is f560058da19e02716e6f943883a9508b447aff4e, whose full patch removes unrelated fixture protocol fields only. The cache assertion and stated contract remain unchanged at 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db; the complete base-to-tip path diff confirms their addition. Suggested bucket: other (maintainer test validity). Could-be-highest: false; no shipped security or work-loss route alleged. Confidence: confirmed source/data-flow analysis. proposed_drop: false. possible_cover: none searched; supplied interface records concern separate production or other-test defects. Caveats: other tests may catch an equivalent regression; parent owns coverage decisions. All readily accessible premises settled. No runtime test, reproduction or build performed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g021/findings.jsonl",
+        "id": "f5",
+        "line": 14,
+        "disposition": "verified",
+        "group": "nonfinal-environment-delete-cache-survivor-oracle",
+        "reason": "Parent primary source check and complete claims-011 source/current-cover checks: new non-final Delete test17755-17817 promises only chosen-session forgetting but only checks helper absent and host registered, never starter retained. Whole host session-cache clearing passes its assertions; correct production host+session SQL is not a test oracle. Introduced222bf625 and no in-range repair, exact existing cover or matching filter. No current product cache-loss allegation."
+      },
+      "accepted_parent_decision": {
+        "key": "g021/f5",
+        "line": 14,
+        "disposition": "verified",
+        "group": "nonfinal-environment-delete-cache-survivor-oracle",
+        "bucket": "other",
+        "recording": "new queue item",
+        "needs_independent_drop_check": false,
+        "reason": "Parent primary source check and complete claims-011 source/current-cover checks: new non-final Delete test17755-17817 promises only chosen-session forgetting but only checks helper absent and host registered, never starter retained. Whole host session-cache clearing passes its assertions; correct production host+session SQL is not a test oracle. Introduced222bf625 and no in-range repair, exact existing cover or matching filter. No current product cache-loss allegation."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-011",
+          "key": "g021/f5",
+          "latest_line": 14,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "test/nonfinal-environment-delete-cache-survivor-oracle",
+          "aliases": [],
+          "target_queue_file": "review_feedback_queue/nonfinal-delete-test-omits-surviving-cache.md",
+          "why": "The new test declares selected-session forgetting but only checks that the deleted session is absent. Clearing the whole host's session cache while retaining the host row and supervisor reply satisfies every post-action assertion. This is a bounded test-oracle defect, not evidence of current production cache loss.",
+          "checks": [
+            "At 222bf6253bcd168db04bcbb1df20180c88306998, agent_requests.rs:17755-17775 promises to forget only the selected session and supplies helper plus starter. :17790-17817 checks success, fake remaining=1, the selected request, host registration, and !cached.contains(helper). It never checks starter remains.",
+            "agent_requests.rs:17746-17752 reads list_hosts, so registered() cannot establish surviving cached sessions. The fake responder's Deleted(1) at :17616-17620 is independent of the helm cache. store.rs:9531-9578 returns a host-scoped query result that may be empty. An empty result satisfies the only cache assertion.",
+            "Current production forgetting is narrower: reviewed store.rs:9485-9489 deletes by both host_id and session_id. That correct implementation does not establish this test's oracle. owned_environment at :14448-14463 awaits a completed refresh, but no post-action assertion observes the surviving session.",
+            "The reviewed commit adds the entire user_environment_delete test module (diff hunk starting at old line 17551). The complete later agent_requests.rs diff through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db removes unrelated terminal fixture fields only. No mutation test or runtime reproduction was performed."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md Sandbox sessions:1525-1540 requires only the chosen session to be removed when others remain. Current SPEC_impl.md:6145 says Deleted runs ordinary local forgetting; reviewed SPEC_impl.md:6636-6637 says the same. These rules contradict the competing wrong cleanup mechanism; they do not accept an incomplete test oracle.",
+            "TODO.md Planned is empty. plans/queue/environment-agent-operations.md:450-603 contains the original seal design and non-final Delete acceptance tests, but plans/REPORTS.md:28 marks that plan landed; it does not schedule strengthening this specific cache-survivor assertion. Other plan matches concerned unrelated cache or deletion work.",
+            "BUGS.md has no such accepted bug. Full-text searches of INDEX.md, queue files and active TRIAGE_OUTCOMES.md for the test name, non-final Delete, cached sessions and deletion/cache combinations found no exact trigger/consequence/scope coverage. Generic test-oracle and unrelated deletion-fixture items are different roots. The archive was not read.",
+            "No FILTER.md boundary accepts a weak regression oracle. In particular, this is not a transient display, retriable product failure or imprecise diagnostic. No exact alias or useful extension to an existing queue item was found."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No missing premise for the stated local oracle weakness. Whether another test catches a whole-host cache-clearing mutation was not investigated and is not claimed. No shipped cache-loss behavior is alleged.",
+          "original_stronger_consequence": "The test can pass if deleting helper also forgets starter and every other cached session on the host. The history consistently limits this to a false-passing test; it never establishes production loss of user work.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain as other: source establishes an assertion that cannot distinguish selected-session forgetting from clearing the host's session-cache slice. There is no exact current cover and no matching filter."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "nonfinal-environment-delete-cache-survivor-oracle",
+        "destination": "trailing-nonfinal-environment-delete-cache-survivor-oracle.md"
+      }
+    },
+    {
+      "key": "g021/f6",
+      "owner": "g021",
+      "id": "f6",
+      "domain": "agent-environment-operations",
+      "purpose": "agent-environment-operations: crates/farhelm-helm/src/agent_requests.rs, crates/farhelm/tests/e2e/agent_listing_real_stack.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f6",
+            "state": "open",
+            "summary": "Deletion test comment wrongly forbids releasing the failed host's connection hold",
+            "location": "crates/farhelm-helm/src/agent_requests.rs:18083",
+            "detail": "Reviewed commit: 222bf6253bcd168db04bcbb1df20180c88306998\n\nTLDR: A new test tells maintainers that releasing a failed deletion's host hold would lose the error and Retry control, although the implementation intentionally releases that hold and preserves the error separately. Its explanation misstates the lifecycle invariant the test is meant to protect. No current runtime malfunction is claimed.\n\nDetails: In a_listed_seal_is_finished_by_the_helm_and_a_failure_waits_for_retry, the comment immediately before host_delete says `its own failure must not release the host: that would reconnect to the sealed Farhelm and lose the deletion Retry.` The same test immediately above explicitly reconnects and checks that the deletion failure and Retry stay shown. Production hosts::forget_host_locked releases the hold when provider destruction fails (hosts.rs:1537-1545), while sessions/sandbox.rs:270-277 explicitly explains that release/reconnect is intentional and the manager seal record keeps the failure visible and prevents routing. manager.rs:2610-2620 preserves existing Failed on a repeated seal, and sealed_state plus status projection override the actor state with Deleting and no client. The invariant is preservation of the seal record/display and suppression of usable clients through reconnection, not keeping the connection hold.\n\nContract: SPEC_impl.md Environment Delete and the seal (:6642-6646) requires sealed hosts to retain their failure and Retry `whatever its connection does meanwhile (held, released, reconnected, retired)`. This new comment teaches the opposite reason and could misdirect later lifecycle maintenance toward retaining a hold that the designed mechanism releases. Reword it around preserving the recorded deletion failure and routing suppression. Suggested bucket: other (internal documentation correctness). Could-be-highest: false; no established security or user-work-loss route from this comment. Confidence: confirmed source/contract discrepancy, no execution. proposed_drop: false. possible_cover: supplied g027/l4 separately reports the production omission of updated failure recording on whole-host Delete; that omission does not make release itself forbidden, and this record concerns the assigned test comment. Caveats: the test's executable assertion only requires a Deleting failure and remains compatible with intended reconnection; production correctness does not refute this distinct documentation defect. Attribution is the new comment in the assigned 222bf625 patch. Exact numbered comment anchor and remaining in-range edits will be checked next; the consequence and source discrepancy are already established. No runtime tests, builds or reproductions performed."
+          }
+        },
+        {
+          "line": 15,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f6",
+            "state": "open",
+            "summary": "Deletion test comment wrongly forbids releasing the failed host's connection hold",
+            "location": "crates/farhelm-helm/src/agent_requests.rs:18083",
+            "detail": "Reviewed commit: 222bf6253bcd168db04bcbb1df20180c88306998\n\nTLDR: A new test tells maintainers that releasing a failed deletion's host hold would lose the error and Retry control, although the implementation intentionally releases that hold and preserves the error separately. The explanation misstates the lifecycle invariant the test protects; no current runtime malfunction is claimed.\n\nDetails: a_listed_seal_is_finished_by_the_helm_and_a_failure_waits_for_retry at agent_requests.rs:18083-18085 says `its own failure must not release the host: that would reconnect to the sealed Farhelm and lose the deletion Retry.` The preceding block (:18068-18081) deliberately reconnects and asserts the failure remains shown with no routable client. Production hosts::forget_host_locked explicitly calls state.manager.release_hold(host, true) on a provider error (hosts.rs:1537-1544). sessions/sandbox.rs:274-277 states the actual lifecycle: `A failure releases the host's connection hold, so its actor reconnects to the sealed supervisor, but the failure is recorded in the manager's seal record`, which keeps the reason and no client. manager.rs:2610-2620 preserves existing Failed on repeated seal reports; sealed_state/status projection keeps the host visibly Deleting and suppresses its usable client independently of the actor connection. The new comment wrongly makes reconnection itself the cause of lost Retry. The invariant is preserving seal state/display and routing suppression through reconnection, not retaining the connection hold.\n\nContract: SPEC_impl.md:6643-6646 requires the recorded failure and no client `whatever its connection does meanwhile (held, released, reconnected, retired), so the failure and its Retry cannot be lost`. Reword the test comment around that invariant; its current causal explanation could misdirect lifecycle maintenance toward retaining a hold the intended mechanism releases. The executable assertion at agent_requests.rs:18091-18097 only requires Deleting with a failure, which is compatible with the intended release/reconnect. Production correctness does not refute this bounded documentation defect.\n\nAttribution/range: the entire comment is new in the assigned 222bf625 patch. The complete later path history has only f560058da19e02716e6f943883a9508b447aff4e removing unrelated protocol fixture fields; full base-to-tip diff retains this comment unchanged. Exact numbered anchor :18083-18085 checked. Suggested bucket: other (internal documentation correctness). Could-be-highest: false; no established security or user-work-loss route. Confidence: confirmed source/contract discrepancy. proposed_drop: false. possible_cover: supplied g027/l4 reports a separate production omission of updated seal-failure recording on whole-host Delete, not an error in releasing the hold; parent owns deduplication. Caveats: this record does not re-report that production issue or claim the test's current executable behavior is wrong. All readily checkable premises settled. No runtime tests, builds or reproductions performed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 15,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "f6",
+          "state": "open",
+          "summary": "Deletion test comment wrongly forbids releasing the failed host's connection hold",
+          "location": "crates/farhelm-helm/src/agent_requests.rs:18083",
+          "detail": "Reviewed commit: 222bf6253bcd168db04bcbb1df20180c88306998\n\nTLDR: A new test tells maintainers that releasing a failed deletion's host hold would lose the error and Retry control, although the implementation intentionally releases that hold and preserves the error separately. The explanation misstates the lifecycle invariant the test protects; no current runtime malfunction is claimed.\n\nDetails: a_listed_seal_is_finished_by_the_helm_and_a_failure_waits_for_retry at agent_requests.rs:18083-18085 says `its own failure must not release the host: that would reconnect to the sealed Farhelm and lose the deletion Retry.` The preceding block (:18068-18081) deliberately reconnects and asserts the failure remains shown with no routable client. Production hosts::forget_host_locked explicitly calls state.manager.release_hold(host, true) on a provider error (hosts.rs:1537-1544). sessions/sandbox.rs:274-277 states the actual lifecycle: `A failure releases the host's connection hold, so its actor reconnects to the sealed supervisor, but the failure is recorded in the manager's seal record`, which keeps the reason and no client. manager.rs:2610-2620 preserves existing Failed on repeated seal reports; sealed_state/status projection keeps the host visibly Deleting and suppresses its usable client independently of the actor connection. The new comment wrongly makes reconnection itself the cause of lost Retry. The invariant is preserving seal state/display and routing suppression through reconnection, not retaining the connection hold.\n\nContract: SPEC_impl.md:6643-6646 requires the recorded failure and no client `whatever its connection does meanwhile (held, released, reconnected, retired), so the failure and its Retry cannot be lost`. Reword the test comment around that invariant; its current causal explanation could misdirect lifecycle maintenance toward retaining a hold the intended mechanism releases. The executable assertion at agent_requests.rs:18091-18097 only requires Deleting with a failure, which is compatible with the intended release/reconnect. Production correctness does not refute this bounded documentation defect.\n\nAttribution/range: the entire comment is new in the assigned 222bf625 patch. The complete later path history has only f560058da19e02716e6f943883a9508b447aff4e removing unrelated protocol fixture fields; full base-to-tip diff retains this comment unchanged. Exact numbered anchor :18083-18085 checked. Suggested bucket: other (internal documentation correctness). Could-be-highest: false; no established security or user-work-loss route. Confidence: confirmed source/contract discrepancy. proposed_drop: false. possible_cover: supplied g027/l4 reports a separate production omission of updated seal-failure recording on whole-host Delete, not an error in releasing the hold; parent owns deduplication. Caveats: this record does not re-report that production issue or claim the test's current executable behavior is wrong. All readily checkable premises settled. No runtime tests, builds or reproductions performed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g021/findings.jsonl",
+        "id": "f6",
+        "line": 15,
+        "disposition": "verified",
+        "group": "sealed-delete-comment-hold-versus-seal-record",
+        "reason": "Parent primary checks and complete claims-011: new test comment18083-18085 claims reconnect on releasing the failed host loses Retry, while intended implementation hosts1537-1544 releases the hold and manager seal record preserves failure across reconnect; SPEC_impl6643-6646 expressly says held/released/reconnected/retired all preserve it. Test assertion is correct but explanation teaches wrong lifecycle invariant. No current BUGS/Planned/unlanded-plan/queue/active-ledger cover or full filter match. Documentation-only consequence, no destructive authority inferred."
+      },
+      "accepted_parent_decision": {
+        "key": "g021/f6",
+        "line": 15,
+        "disposition": "verified",
+        "group": "sealed-delete-comment-hold-versus-seal-record",
+        "bucket": "other",
+        "recording": "new queue item",
+        "needs_independent_drop_check": false,
+        "reason": "Parent primary checks and complete claims-011: new test comment18083-18085 claims reconnect on releasing the failed host loses Retry, while intended implementation hosts1537-1544 releases the hold and manager seal record preserves failure across reconnect; SPEC_impl6643-6646 expressly says held/released/reconnected/retired all preserve it. Test assertion is correct but explanation teaches wrong lifecycle invariant. No current BUGS/Planned/unlanded-plan/queue/active-ledger cover or full filter match. Documentation-only consequence, no destructive authority inferred."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-011",
+          "key": "g021/f6",
+          "latest_line": 15,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "comment/sealed-host-delete-hold-vs-seal-record",
+          "aliases": [],
+          "target_queue_file": "review_feedback_queue/sealed-delete-comment-misstates-hold-invariant.md",
+          "why": "The test comment says releasing the failed host would reconnect and lose Retry, while this implementation deliberately releases the connection hold and preserves the deletion failure in a separate seal record. Its causal explanation misstates the lifecycle invariant. The executable assertion remains compatible with the intended release and reconnect.",
+          "checks": [
+            "At 222bf6253bcd168db04bcbb1df20180c88306998, agent_requests.rs:18083-18085 says the host-level Delete's failure must not release the host because reconnecting would lose deletion Retry. The preceding :18068-18081 explicitly exercises reconnect while checking failure preservation and absent routing.",
+            "Reviewed hosts.rs:1537-1544 calls release_hold(host, true) when provider destruction fails. sessions/sandbox.rs:274-277 expressly documents release/reconnect with the failure retained in the manager seal record. manager.rs:2639-2679 stores Failed and projects it to Deleting; :2610-2620 preserves the record on another sealed listing.",
+            "Reviewed SPEC_impl.md:6643-6646 requires failure and no client whatever the connection does, explicitly including held, released, reconnected and retired. The test's :18091-18097 assertion only requires Deleting with a failure; it does not assert the connection hold remains.",
+            "The comment is added by 222bf625 and remains through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db; the full later path diff changes unrelated fixture fields only. No runtime malfunction or reproduction is asserted."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md Sandbox sessions requires the visible failure and Retry; current SPEC_impl.md Environment Delete and the seal:6148-6167 preserves them across connection changes. It does not accept the comment's claim that reconnect itself loses Retry.",
+            "TODO.md Planned is empty. The original environment-agent-operations plan's seal design at :450-603 is marked landed by plans/REPORTS.md:28 and contains no pending correction of this comment. Searches of other queue plans found no matching documentation correction.",
+            "BUGS.md has no matching accepted defect. INDEX.md, queue files and active TRIAGE_OUTCOMES.md searches for seal, hold, reconnect, this test name and deletion Retry found no exact coverage. The archive was not read.",
+            "FILTER.md does not cover a persistent wrong explanation in a source comment. The supplied history's g027/l4 reference concerns updating the failure recorded by production whole-host Delete, not this incorrect reason for retaining a hold; it is not an alias of this comment defect. That external record was not opened because it is outside this named batch."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "None for the source/comment discrepancy. Any later maintenance mistake caused by following the comment is speculative; no security, user-work loss or current runtime defect is established by this record.",
+          "original_stronger_consequence": "The misleading explanation could direct future maintenance toward retaining a connection hold that the intended lifecycle releases. Both history entries limit the claim to documentation correctness and preserve that the current executable assertion is compatible with reconnect.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain as other, separately from production failure-recording defects. Source comments in the newly added test are in range, and production correctness does not refute their incorrect explanation."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "sealed-delete-comment-hold-versus-seal-record",
+        "destination": "trailing-sealed-delete-comment-hold-versus-seal-record.md"
+      }
+    },
+    {
+      "key": "g021/f7",
+      "owner": "g021",
+      "id": "f7",
+      "domain": "agent-environment-operations",
+      "purpose": "agent-environment-operations: crates/farhelm-helm/src/agent_requests.rs, crates/farhelm/tests/e2e/agent_listing_real_stack.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 16,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "f7",
+            "state": "open",
+            "summary": "Check whether the new responder handles environment heartbeat frames",
+            "location": "crates/farhelm-helm/src/agent_requests.rs:17607",
+            "detail": "Reviewed commit: 222bf6253bcd168db04bcbb1df20180c88306998\n\nTLDR considered: a still-live scripted deletion responder might panic when an environment heartbeat arrives during a slow test, because it decodes every frame as a control request. This could invalidate its healthy-peer premise.\n\nDetails: spawn_seal_responder unconditionally calls parse_control(&frame).expect(decode request) in its loop. Manager environment connections enable an empty channel-zero data heartbeat every 30 seconds, already source-verified under f2. Need inspect FrameReader/parse_control and actual responder lifetimes/callers to determine whether a data heartbeat is filtered or reaches this decoder, and whether any owned slow boundary can encounter it before tests finish. Suggested bucket if established: other/test fixture correctness. Could-be-highest: false. Confidence: unresolved lead; no runtime observation. proposed_drop: false. possible_cover: none known; this is distinct from f2's ended-peer disconnect timing. Exact missing premises: decoder filtering and a live-responder lifetime that can cross a heartbeat. Source checks available; no tests or reproduction will be run."
+          }
+        },
+        {
+          "line": 17,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f7",
+            "state": "open",
+            "summary": "The deletion responder panics on valid environment heartbeats",
+            "location": "crates/farhelm-helm/src/agent_requests.rs:17608",
+            "detail": "Reviewed commit: 222bf6253bcd168db04bcbb1df20180c88306998\n\nTLDR: The new scripted environment supervisor treats an ordinary Farhelm heartbeat as malformed JSON and panics. A test whose fixture remains connected for thirty seconds can lose the supposedly healthy peer for a reason unrelated to the deletion behavior being tested. This is a test-fixture protocol defect; no production heartbeat failure or observed test flake is claimed.\n\nDetails: spawn_seal_responder unconditionally evaluates parse_control(&frame).expect(\"decode request\") before matching DeleteSessionOrSeal (agent_requests.rs around :17608). FrameReader::read_frame returns every decoded frame without filtering data/no-op frames (farhelm-proto/src/io.rs:166-171). parse_control directly invokes serde_json::from_slice(&frame.body) (:249-251), so an empty body is an error and the expect panics. The input is actually produced by this fixture: manager.rs:4484-4489 enables heartbeat for all environment hosts via row.kind.environment_provider().is_some(); client.rs:1836 selects 30 seconds, and :1953-1970 emits Frame::data(0, Vec::new()) on the independent writer timer. rest_harness.rs:614-657 intercepts only SetBrowserForwarding and ListSessions; the heartbeat is forwarded intact to the scripted peer. Thus a valid first heartbeat on a live responder deterministically reaches this panic.\n\nThe normal Deleted/Sealed/NotFound responder paths leave their loop live. New tests call the responder before owned_environment awaits its connection/refresh and retain it across asynchronous router/database work; no less-than-thirty-second lifetime is established. The standard runner permits up to five sixty-second periods, so a valid long-running test is not outside its execution contract. No timing/frequency claim is made: a quick normal test can finish before the heartbeat, and some later tests deliberately close/reconnect the peer. The fixture must tolerate its enabled transport's normal no-op rather than silently relying on a short lifetime. A panic is in a detached task and is not joined directly; subsequent effects depend on timing and later assertions.\n\nContract: SPEC_impl.md One route for transport and provisioning requires all environment stdio routes to emit the existing 30-second heartbeat, and client.rs describes empty channel-zero data as the existing no-op. Keep that no-op out of JSON control decoding (either in the new responder or the splice) while retaining strict decoding of actual control requests. Source confirms the malformed-decode route; no runtime execution, reproduction, test timeout or false-pass incidence was observed. Suggested bucket: other (maintainer fixture correctness). Could-be-highest: false; no user-owned-work/security route. Confidence: confirmed source/data-flow analysis of valid heartbeat input. proposed_drop: false. possible_cover: no supplied neighbour reports this new helper; older responders can have the same pattern, which does not make this newly added consumer correct. Attribution: spawn_seal_responder is entirely added by the assigned 222bf625 patch. Exact numbered decoder anchor and endpoint persistence will be checked before closing the pass. The original suspected consequence, a healthy test peer disappearing under a slow test, is retained with the timing caveat rather than claimed as an observed flake."
+          }
+        },
+        {
+          "line": 18,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f7",
+            "state": "open",
+            "summary": "The deletion responder panics on valid environment heartbeats",
+            "location": "crates/farhelm-helm/src/agent_requests.rs:17608",
+            "detail": "Reviewed commit: 222bf6253bcd168db04bcbb1df20180c88306998\n\nTLDR: The new scripted environment supervisor treats an ordinary Farhelm heartbeat as malformed JSON and panics. A test whose fixture remains connected for thirty seconds can lose its supposedly healthy peer for a reason unrelated to deletion. This is a test-fixture protocol defect, not a production heartbeat failure or an observed test flake.\n\nDetails: spawn_seal_responder at agent_requests.rs:17606-17608 reads every frame and unconditionally calls parse_control(&frame).expect(\"decode request\") before matching DeleteSessionOrSeal. FrameReader::read_frame returns each decoded frame without filtering (farhelm-proto/src/io.rs:166-171); Frame::decode accepts Data with an empty body (farhelm-proto/src/lib.rs:658-692). parse_control directly calls serde_json::from_slice on that body (io.rs:249-251), which fails on empty input and triggers the expect panic.\n\nThis frame is actually generated on the fixture connection: manager.rs:4484-4489 enables heartbeat for all environment host kinds, including the planted Podman/Tensorlake rows, independently of the scripted transport. client.rs:1836 supplies a 30-second period; :1953-1970 initializes interval_at(now + period, period), prioritizes its tick and sends Frame::data(0, Vec::new()). Frame::data preserves that empty body (proto/lib.rs:598-604). The splice at rest_harness.rs:614-657 consumes only SetBrowserForwarding and ListSessions; it forwards the empty data frame to the new responder. A valid first heartbeat reaching a live responder therefore deterministically panics.\n\nNormal Deleted/Sealed/NotFound answer paths leave the responder loop alive. It starts before owned_environment awaits connection and initial refresh and remains alive through asynchronous router/database work; no fixture-level less-than-thirty-second lifetime is established. The standard runner allows five sixty-second periods, so longer test execution is not excluded. Quick normal runs may finish before the heartbeat, and other cases deliberately close/reconnect the responder. A detached-task panic is not directly joined, so later visible failure depends on which assertion/request remains. Exact timing/frequency and test failure incidence were not observed or reproduced. The claim is the wrong treatment of valid automatically generated input, not an observed environment flake.\n\nContract: SPEC_impl.md One route for transport and provisioning requires environment routes to emit the existing 30-second heartbeat, and client.rs documents its empty channel-zero data as a no-op tolerated by peers. Filter this no-op before JSON decoding in the responder or splice while retaining strict decoding of actual control requests. Suggested bucket: other (maintainer fixture correctness). Could-be-highest: false; no security or user-work-loss route. Confidence: confirmed by pinned source/data-flow analysis; no execution. proposed_drop: false. possible_cover: none in the complete supplied neighbour records; older responders may share the pattern, but this is a distinct newly added helper. It is separate from f2's already-ended-peer disconnect timing.\n\nAttribution/persistence settled: the assigned 222bf625 patch adds spawn_seal_responder in full, including its decoder. Full-range -G history confirms that introduction; older decode-request matches belong to other helper additions. Complete path diff from 222bf625 through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db only removes unrelated terminal-kind fixture fields, leaving the new responder unchanged. Exact line :17608 checked with numbered pinned source. All readily checkable premises settled. No tests, runtime probes, builds or reproductions performed."
+          }
+        },
+        {
+          "line": 19,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f7",
+            "state": "open",
+            "summary": "Environment test responders panic on valid heartbeat frames",
+            "location": "crates/farhelm-helm/src/agent_requests.rs:17608",
+            "detail": "Primary reviewed commit: 222bf6253bcd168db04bcbb1df20180c88306998. Related caller introduction: 190d844e58c96cf197aa838d0b0eea8062f48435, supplied as exact g018/f6 event19 and independently checked in this synthesis.\n\nTLDR: Scripted environment supervisors treat an ordinary Farhelm heartbeat as malformed JSON and panic. If a connected fixture remains alive through its first thirty-second heartbeat, it can lose the peer needed for its deletion or copied-launch observation for a reason unrelated to the behavior under test. This preserves the original f7 healthy-peer-loss consequence and conditional timing; no production heartbeat failure, observed flake, runtime frequency or security/user-work-loss is alleged.\n\nDetails — original location and attribution: spawn_seal_responder is entirely added in 222bf625, with its unconditional parse_control(&frame).expect(\"decode request\") at agent_requests.rs:17606-17608. Its Deleted/Sealed/NotFound paths keep the loop alive. The assigned tests connect a planted environment before asynchronous route/database work. Full-range history and complete 222bf625-to-00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db path diff establish that later edits remove only unrelated protocol fixture fields, leaving this decoder unchanged.\n\nDetails — distinct related location: spawn_launch_recording_responder was introduced earlier by 190d844e. At that revision agent_requests.rs:15378-15384 unconditionally JSON-decodes every read frame before matching CreateSession. Its caller an_environment_clone_keeps_a_launch_todays_catalog_would_refuse starts it at :15447-15448, connects it as a Podman environment at :15453-15459, then uses the same connected fixture across handler/card/Deny work (:15464-15492) and the create half (:15497-15512). Parent supplied g018/f6 event19 establishes the complete introducing patch and unchanged endpoint helper at :15370-15390. This synthesis directly re-read the exact helper and caller at 190d844e; they are a second location requiring repair, not an alias for the seal helper or a new independently discovered framing cause. Preserve g018/f6 and g021/f7 ownership/provenance until the parent decides grouping.\n\nShared mechanism and contract: FrameReader::read_frame returns decoded frames without filtering (farhelm-proto/src/io.rs:166-171); parse_control directly JSON-decodes frame.body (:249-251). Frame::data and decode preserve a valid Data frame with channel zero and empty body (222bf625 proto/lib.rs:598-604,658-692). Manager environment connections enable heartbeats by host kind (222bf625 manager.rs:4484-4489; supplied g018 evidence at 190d844e :4275-4280). The independent client writer emits Frame::data(0, Vec::new()) every thirty seconds, first due at now+period (190d844e client.rs:1948-1964; 222bf625 :1953-1970). The shared splice consumes only forwarding/list controls, then forwards that empty Data frame unchanged (190d844e rest_harness.rs:610-646, directly checked; 222bf625 :614-657). Empty bytes are not JSON, so a valid heartbeat reaching either still-live responder deterministically triggers its expect panic. SPEC_impl.md One route for transport and provisioning requires environment heartbeats, and client.rs documents this empty channel-zero frame as a no-op. Normal quick tests may finish before it, and some seal tests intentionally disconnect; neither fixture establishes a global below-thirty-second lifetime, while the runner permits multiple sixty-second periods. Detached-task panic symptoms depend on the later phase; no test timeout or false-pass incidence is asserted.\n\nSynthesis recommendation: one queue item can carry both exact helper fixes because the required change and protocol boundary are the same: tolerate the valid empty channel-zero Data heartbeat before JSON-decoding actual controls. Preserve both locations, introduction commits and original conditional consequences in that item. Either update both operation-specific responders or handle this no-op centrally in the shared splice while keeping actual control decoding strict. This is a grouping recommendation, not a parent-approved alias, cover/drop, or lowering.\n\nShared-splice repair caveat from complete local history: f2's Answer::Hangs path deliberately exits its scripted peer; upstream peer EOF is NOT propagated by the current splice (190d844e rest_harness.rs:588-603; corresponding 222bf625 :595-613). Its next forwarded heartbeat currently fails the peer write and closes the manager-facing connection, which bounds that test's lost-answer wait. Blindly consuming heartbeats in the splice without preserving deliberate-disconnect signaling would remove that particular bound and make its Delete rely on the production 240-second deadline. A shared repair must retain an explicit disconnect mechanism for that negative fixture (or update it to signal connection loss) rather than inadvertently extending it. Updating the two live responder loops avoids that interaction. This preserves f2's original refuted four-minute/runner-timeout consequence and its heartbeat-dependent source basis; it does not reopen f2 as a current bug or claim a new executed regression.\n\nSuggested bucket: other (maintainer test-fixture correctness). Could-be-highest: false. Confidence: confirmed pinned source/data-flow analysis of the valid emitted-frame route; connected-beyond-thirty-second trigger and unobserved incidence remain explicit. proposed_drop: false, unchanged. possible_cover: exact supplied g018/f6 event19 is the same framing defect in a distinct newly added helper; recommend a combined item/shared remediation, with no parent disposition assumed. Prior claim that no supplied neighbour reported another helper is superseded only by this concrete late input. Existing f5/f6 and candidate drop bases are unchanged. All readily checkable named-input premises settled; no open lead. Synthesis only: no unrelated discovery, forbidden coverage search, nested agent, runtime test/build, reproduction, install or live action."
+          }
+        }
+      ],
+      "latest": {
+        "line": 19,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "f7",
+          "state": "open",
+          "summary": "Environment test responders panic on valid heartbeat frames",
+          "location": "crates/farhelm-helm/src/agent_requests.rs:17608",
+          "detail": "Primary reviewed commit: 222bf6253bcd168db04bcbb1df20180c88306998. Related caller introduction: 190d844e58c96cf197aa838d0b0eea8062f48435, supplied as exact g018/f6 event19 and independently checked in this synthesis.\n\nTLDR: Scripted environment supervisors treat an ordinary Farhelm heartbeat as malformed JSON and panic. If a connected fixture remains alive through its first thirty-second heartbeat, it can lose the peer needed for its deletion or copied-launch observation for a reason unrelated to the behavior under test. This preserves the original f7 healthy-peer-loss consequence and conditional timing; no production heartbeat failure, observed flake, runtime frequency or security/user-work-loss is alleged.\n\nDetails — original location and attribution: spawn_seal_responder is entirely added in 222bf625, with its unconditional parse_control(&frame).expect(\"decode request\") at agent_requests.rs:17606-17608. Its Deleted/Sealed/NotFound paths keep the loop alive. The assigned tests connect a planted environment before asynchronous route/database work. Full-range history and complete 222bf625-to-00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db path diff establish that later edits remove only unrelated protocol fixture fields, leaving this decoder unchanged.\n\nDetails — distinct related location: spawn_launch_recording_responder was introduced earlier by 190d844e. At that revision agent_requests.rs:15378-15384 unconditionally JSON-decodes every read frame before matching CreateSession. Its caller an_environment_clone_keeps_a_launch_todays_catalog_would_refuse starts it at :15447-15448, connects it as a Podman environment at :15453-15459, then uses the same connected fixture across handler/card/Deny work (:15464-15492) and the create half (:15497-15512). Parent supplied g018/f6 event19 establishes the complete introducing patch and unchanged endpoint helper at :15370-15390. This synthesis directly re-read the exact helper and caller at 190d844e; they are a second location requiring repair, not an alias for the seal helper or a new independently discovered framing cause. Preserve g018/f6 and g021/f7 ownership/provenance until the parent decides grouping.\n\nShared mechanism and contract: FrameReader::read_frame returns decoded frames without filtering (farhelm-proto/src/io.rs:166-171); parse_control directly JSON-decodes frame.body (:249-251). Frame::data and decode preserve a valid Data frame with channel zero and empty body (222bf625 proto/lib.rs:598-604,658-692). Manager environment connections enable heartbeats by host kind (222bf625 manager.rs:4484-4489; supplied g018 evidence at 190d844e :4275-4280). The independent client writer emits Frame::data(0, Vec::new()) every thirty seconds, first due at now+period (190d844e client.rs:1948-1964; 222bf625 :1953-1970). The shared splice consumes only forwarding/list controls, then forwards that empty Data frame unchanged (190d844e rest_harness.rs:610-646, directly checked; 222bf625 :614-657). Empty bytes are not JSON, so a valid heartbeat reaching either still-live responder deterministically triggers its expect panic. SPEC_impl.md One route for transport and provisioning requires environment heartbeats, and client.rs documents this empty channel-zero frame as a no-op. Normal quick tests may finish before it, and some seal tests intentionally disconnect; neither fixture establishes a global below-thirty-second lifetime, while the runner permits multiple sixty-second periods. Detached-task panic symptoms depend on the later phase; no test timeout or false-pass incidence is asserted.\n\nSynthesis recommendation: one queue item can carry both exact helper fixes because the required change and protocol boundary are the same: tolerate the valid empty channel-zero Data heartbeat before JSON-decoding actual controls. Preserve both locations, introduction commits and original conditional consequences in that item. Either update both operation-specific responders or handle this no-op centrally in the shared splice while keeping actual control decoding strict. This is a grouping recommendation, not a parent-approved alias, cover/drop, or lowering.\n\nShared-splice repair caveat from complete local history: f2's Answer::Hangs path deliberately exits its scripted peer; upstream peer EOF is NOT propagated by the current splice (190d844e rest_harness.rs:588-603; corresponding 222bf625 :595-613). Its next forwarded heartbeat currently fails the peer write and closes the manager-facing connection, which bounds that test's lost-answer wait. Blindly consuming heartbeats in the splice without preserving deliberate-disconnect signaling would remove that particular bound and make its Delete rely on the production 240-second deadline. A shared repair must retain an explicit disconnect mechanism for that negative fixture (or update it to signal connection loss) rather than inadvertently extending it. Updating the two live responder loops avoids that interaction. This preserves f2's original refuted four-minute/runner-timeout consequence and its heartbeat-dependent source basis; it does not reopen f2 as a current bug or claim a new executed regression.\n\nSuggested bucket: other (maintainer test-fixture correctness). Could-be-highest: false. Confidence: confirmed pinned source/data-flow analysis of the valid emitted-frame route; connected-beyond-thirty-second trigger and unobserved incidence remain explicit. proposed_drop: false, unchanged. possible_cover: exact supplied g018/f6 event19 is the same framing defect in a distinct newly added helper; recommend a combined item/shared remediation, with no parent disposition assumed. Prior claim that no supplied neighbour reported another helper is superseded only by this concrete late input. Existing f5/f6 and candidate drop bases are unchanged. All readily checkable named-input premises settled; no open lead. Synthesis only: no unrelated discovery, forbidden coverage search, nested agent, runtime test/build, reproduction, install or live action."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g021/findings.jsonl",
+        "id": "f7",
+        "line": 19,
+        "disposition": "verified",
+        "group": "environment-test-responders-heartbeat-control-decode",
+        "reason": "Parent read complete actual g021turn7event19, g018turn6events17-19 andturn7event20, supported audits and delta replies. Preserve prior claims011/current-coverage checks and source-confirmed seal responder222bf62517606-17608; add distinct190d844e launch-recording responder15378-15384/clone test as useful same-protocol-root scope. Parent directly checked helper, shared splice and heartbeat writer at190d. Both unconditionally JSON-decode valid30s emptyData frame and panic if live then; no observed flake/frequency/productfailure. Group one new item with both fixes and provenance. Shared-splice alternative must preserve deliberate negative-peer disconnect signaling; updating live loops avoids that unrelated fixture bound. No highest consequence or lowering, no exact existing cover established."
+      },
+      "accepted_parent_decision": {
+        "key": "g021/f7",
+        "line": 19,
+        "disposition": "verified",
+        "group": "environment-test-responders-heartbeat-control-decode",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "needs_independent_drop_check": false,
+        "reason": "Parent read complete actual g021turn7event19, g018turn6events17-19 andturn7event20, supported audits and delta replies. Preserve prior claims011/current-coverage checks and source-confirmed seal responder222bf62517606-17608; add distinct190d844e launch-recording responder15378-15384/clone test as useful same-protocol-root scope. Parent directly checked helper, shared splice and heartbeat writer at190d. Both unconditionally JSON-decode valid30s emptyData frame and panic if live then; no observed flake/frequency/productfailure. Group one new item with both fixes and provenance. Shared-splice alternative must preserve deliberate negative-peer disconnect signaling; updating live loops avoids that unrelated fixture bound. No highest consequence or lowering, no exact existing cover established."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-011",
+          "key": "g021/f7",
+          "latest_line": 18,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "test/seal-responder-heartbeat-control-decode",
+          "aliases": [],
+          "target_queue_file": "review_feedback_queue/seal-responder-decodes-heartbeat-as-json.md",
+          "why": "A valid environment heartbeat reaches the new responder's unconditional JSON decoder and panics on its empty body. The defect is established conditionally on the responder still being live when a heartbeat arrives. No observed test flake, timeout, production heartbeat fault or failure frequency is claimed.",
+          "checks": [
+            "At 222bf6253bcd168db04bcbb1df20180c88306998, agent_requests.rs:17606-17611 feeds every frame to parse_control(...).expect(\"decode request\"). The normal Deleted, Sealed and NotFound replies at :17616-17638 leave the loop live; Hangs deliberately exits.",
+            "Reviewed proto/io.rs:166-170 returns each decoded frame, and :249-250 parses its body as JSON without checking kind. proto/lib.rs:598-604 preserves an empty Data body and :658-691 accepts its encoded frame. Thus an empty heartbeat body is valid framing but invalid JSON for this expect.",
+            "Reviewed manager.rs:4484-4489 enables heartbeat for environment host kinds. client.rs:1836 sets 30 seconds and :1953-1969 emits Frame::data(0, Vec::new()) on the independent writer timer. rest_harness.rs:614-657 only intercepts SetBrowserForwarding and ListSessions and forwards this Data frame intact.",
+            "Reviewed owned_environment at agent_requests.rs:14383-14463 plants Tensorlake/Podman rows and awaits connection and refresh after the responder is started; callers retain it through asynchronous router/store work. No responder-level lifetime bound excludes the first heartbeat. This establishes the valid-input panic route, not that any particular test actually remained live that long.",
+            "The entire spawn_seal_responder helper is introduced by 222bf625. The complete later agent_requests.rs diff through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db only removes unrelated terminal fixture fields. No runtime tests, probes, builds or reproductions were performed."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:362-363 requires the ordinary environment heartbeat. Current SPEC_impl.md One route for transport and provisioning:5999-6001 and environment connection contract:6768-6775 require an empty channel-zero Data no-op every 30 seconds, independent of cache/database completion. These do not accept fixture rejection of that input.",
+            "TODO.md Planned is empty. Searches across plans/queue for the helper name, heartbeat/control/Data decoding and environment deletion found no unlanded correction. Watchdog heartbeat instructions in plans concern maintainer monitors, not framed fixture input; the original environment-agent-operations plan is marked landed at plans/REPORTS.md:28.",
+            "BUGS.md's SSH-output-holder bug is unrelated. Searches of INDEX.md, queue files and active TRIAGE_OUTCOMES.md found no matching heartbeat decoder or scripted environment responder issue. The only queue heartbeat match concerns tunnel-helper stdout lifetime, not this input. The archive was not read.",
+            "FILTER.md's rare/self-correcting rule does not fully match: this claim concerns a fixture task panic on normal transport input, and no evidence establishes the whole consequence as a safely retriable operation or an imprecise diagnostic. Rarity or a quick normal run alone does not filter it. No exact alias or useful extension to a current queue item was found."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "Observed slow-test occurrence, detached-task panic incidence, and the exact later assertion/request affected remain unmeasured. They are unnecessary for the narrower source-proven valid-input panic; they would be required to claim a measured flake or a particular test failure.",
+          "original_stronger_consequence": "If the scripted supervisor remains connected until a heartbeat arrives, it can disappear as a supposedly healthy test peer for a reason unrelated to deletion. The history preserves the thirty-second lifetime condition, quick-run caveat, deliberately closed/reconnected cases, and that the detached panic's later visible effect depends on timing. It never alleges production heartbeat failure or an observed flake.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain the source-proven fixture protocol defect as other, with the live-responder condition and unobserved failure incidence explicit. It is distinct from an already-ended peer's disconnect timing and from older helpers with similar decoding."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "environment-test-responders-heartbeat-control-decode",
+        "destination": "trailing-environment-test-responders-heartbeat-control-decode.md"
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review is blocked by invalid manifest ranges: the two files have 589 and 31 lines, but the manifest requires 590 and 32. The evidence reader rejects every read.\n\nPlease correct those endpoints or authorize the correction. Progress is recorded; no findings are logged, and both assigned patches remain unread."
+    },
+    {
+      "turn": 2,
+      "reply": "Initial pass complete. All 620 mandatory patch lines were read through the corrected evidence manifest.\n\nNo confirmed findings. Candidates f1–f4 were recorded and refuted through source analysis; no open leads or unread assigned scope remain. Progress is updated. No tests or reproductions ran."
+    },
+    {
+      "turn": 3,
+      "reply": "Synthesis complete. Revised f2, f3 and f4 with additional source checks; all remain refuted candidates. No new findings.\n\nUnresolved lead IDs: none. Progress updated."
+    },
+    {
+      "turn": 4,
+      "reply": "Discovery pass 1 found two new source-verified issues, recorded as f5 and f6: a weak cache-retention oracle and an incorrect deletion-lifecycle comment.\n\nChecked all seven tests, fixture/store semantics, contracts, interface input and full-range attribution.\n\nNew unverified IDs: none. Open leads: none. Progress updated. No runtime execution."
+    },
+    {
+      "turn": 5,
+      "reply": "Discovery pass 2 found one new source-verified issue: f7, the deletion responder panics on valid heartbeat frames.\n\nChecked framing, heartbeat generation, splice forwarding, fixture lifetimes, remaining assertions and range attribution.\n\nNew unverified IDs: none. Open leads: none. Progress updated; no runtime execution."
+    },
+    {
+      "turn": 6,
+      "reply": "Discovery pass 3 found nothing new.\n\nChecked refreshed interface records, error markers, guard dispatch, authentication/reference helpers, provider isolation and changed comment contracts.\n\nNew verified IDs: none. New unverified IDs: none. Open leads: none. Progress updated; no runtime execution."
+    },
+    {
+      "turn": 7,
+      "reply": "Revised f7 to recommend one queue item covering both responders, retaining their distinct locations and introduction commits. A shared-splice fix must preserve deliberate disconnect handling used by the negative test.\n\nUnresolved lead IDs: none."
+    },
+    {
+      "turn": 8,
+      "reply": "Discovery pass 4 found nothing new.\n\nChecked refreshed interface records, responder locking/correlation, bounded helper reads, projected-state polling, provider isolation and assigned comment changes.\n\nNew verified IDs: none. New unverified IDs: none. Open leads: none. Progress updated; no runtime execution."
+    }
+  ],
+  "progress": "# g021 progress\n\nStatus: initial source-review pass complete after coverage repair. Turn count: 2 (turn 1 blocked on malformed manifest; turn 2 completed initial review). Later synthesis/discovery turns have not run. Discovery-pass count: 0.\n\nScope: 222bf6253bcd168db04bcbb1df20180c88306998, crates/farhelm-helm/src/agent_requests.rs; 08399d092d20815ced6619c26df2391944ae2b4a, crates/farhelm/tests/e2e/agent_listing_real_stack.rs. Complete inventory commits field read in turn 1 without excluded coverage metadata.\n\nCoverage repair: parent corrected manifest endpoints; source bytes and hashes unchanged. All required patches delivered through corrected evidence manifest in four separate packets: 00691-000.patch 1..200, 201..400, 401..589; 01561-000.patch 1..31. Total: 620 lines. No unread assigned material. Prior failed evidence read certified no coverage and is not counted.\n\nReview: checked all seven new environment-deletion tests, responder and provider fixture changes, comment changes and surrounding pinned source. Traced protected route guard/refusal, session-only agent deletion, session forgetting, sealed finisher/Retry, provider destruction, manager hold/release and raw versus displayed state, scripted connection splice, environment heartbeat, test cadence, tracing macro runtime ownership. Reviewed e2e comment changes against the actual real-stack fixture, full session-reference contract and terminal-host architecture. Governing deletion and confinement sections read at the original revision in turn 1; 08399d09 Agent-spawned sessions and Agents and environments read in full in turn 2, with terminal-host contract context. GUI answer-binding contract read; no changed GUI handlers in assigned scope. Validation and test-evidence instructions read; oversized validation output repaired with bounded middle/tail reads.\n\nInterface conclusions: confined agent Delete remains ordinary session teardown and never seals; user Delete delegates finality to the environment supervisor; ordinary-host seal is diagnostic only; failed destruction first withdraws the raw client and sets Deleting, then releases its hold while manager seal state preserves failure visibility. Test responder exit alone does not close a splice, but enabled environment heartbeat reaches the closed peer and ends the connection. Async tests own runtimes that cancel background tasks at test end.\n\nDurable log delta this pass: f1 lead -> candidate (per-test runtime refutes task leak); f2 lead -> candidate (heartbeat refutes four-minute deadline/runner-timeout concern); f3 candidate (hour-long test cadence refutes cache-refresh race); f4 lead -> candidate (destruction hold excludes pre-failure refresh, so required reconnect still occurs). All details, original suspected consequences and proposed-drop source bases retained in findings.jsonl. Counter: 0 findings, 4 candidates, 0 open leads. New verified finding IDs: none. New unverified finding IDs: none.\n\nNo runtime tests, builds or reproductions requested or run; conclusions are source/contract analysis only. No reused execution evidence claimed. No checkout files changed; only private group artifacts written. No helper agents, live-install actions, processes or coverage-queue reads.\n\nNext action: await the parent's later synthesis/discovery prompt. Initial pass complete; no unresolved checks or unread assigned scope.\n\nTurn 3 started: later-turn synthesis, discovery-pass count remains 0. Audited mandatory delivery accepted by caller. Revisit cross-batch fixture interactions and f1..f4 refutations; no open leads at entry. No new source delivery required.\n\nTurn 3 completed: later-turn synthesis. Discovery-pass count: 0. Cross-batch checks confirmed the later assigned e2e patch changes comments only; it does not alter test runtime/fixture behavior. Rechecked manager refresh wake sources, client writer's actual heartbeat scheduling, splice EOF/write teardown, repeated-seal preservation, failure-only Retry admission and finisher pending filtering. Revisions appended under f2, f3 and f4 with these additional source checks; all remain source-refuted candidates. f1's owned-runtime refutation remains unchanged. No new verified or unverified findings. No unresolved lead IDs. No unread assigned material or newly required interface checks remain. No executions, reproductions or checkout mutations. Next action: await parent discovery or completion instruction.\n\nTurn 4 started: separate discovery pass 1 after verified initial delivery and later synthesis. No pending named questions. Read discovery-neighbours.json before new source search. Existing IDs f1..f4 remain candidates; no open leads at entry. Search stays within the assigned two patches, with source context only for validation.\n\nTurn 4 completed: discovery pass 1. discovery-neighbours.json read completely in bounded chunks (1..45, 46..85, 86..130, 131..175, 176..215, 216..255, 256..320); initial oversized 1..160 read was clipped and replaced by these complete reads. No named pending questions. Cross-input g027/l4 and g028/l3 concern distinct production failure recording/admission; retained as context, not adopted or treated as a refutation of test-oracle/documentation issues. Other interface records do not change assigned test scope.\n\nNew discovery: f5 (confirmed other/test oracle) — non-final Delete's cache assertion accepts empty cache, failing its explicit promise to forget only the helper; full test/control-flow and store query semantics checked. f6 (confirmed other/documentation) — new host-level Delete comment wrongly says release/reconnect loses Retry, contrary to both the preceding test block and the explicit seal-record contract. Both recorded immediately, then revised under the same IDs with exact anchors, contract checks, caveats and full-range attribution. Both were introduced at 222bf625 and persist through endpoint; only later agent_requests.rs change is f560's unrelated fixture-field removal. Full base-to-tip agent_listing_real_stack.rs diff is exactly the three assigned comment substitutions; no additional issue found there.\n\nAdditional checks: reread all seven new tests and responder/provider helper contracts, distinguish host-registration oracle from session-cache oracle, distinguish failed deletion's connection hold from manager display/routing state, verify store cached_sessions returns Ok(empty) with no hidden completeness oracle, and verify ordinary production cache deletion remains session-scoped. Source-only; no runtime or reproduction. No broader code review or prohibited coverage sources.\n\nNew verified IDs this pass: f5, f6. New unverified-after-investigation IDs: none. Open leads: none. Existing candidates f1..f4 unchanged. Total current records: 2 findings, 4 candidates, 0 open leads. No unread assigned scope. Next action: await parent instruction; substantive discovery requires a later separate follow-up pass, not another discovery pass within this turn.\n\nTurn 5 started: discovery pass 2, following pass 1's substantive discoveries. Refreshed discovery-neighbours.json (534 lines / 188694 bytes) read completely in bounded ranges 1..45, then 46..85 through 446..485, and 486..534. No named pending questions. New interface material concerns other assigned files/routes and does not add a new question to g021; g027/g028 production seal records remain context distinct from our test/doc findings. Existing complete f1..f6 history retained, no open leads at entry. Begin fresh checks of responder framing/lifetime, router helpers, provider counter isolation and remaining test outcome assertions, without re-reporting f5/f6.\n\nTurn 5 completed: discovery pass 2. New verified ID f7: the newly added responder unconditionally JSON-decodes every frame and panics on the ordinary empty data heartbeat emitted by this fixture's environment connection. Checked Frame::data, full decode path, FrameReader, parse_control, manager heartbeat enablement, writer timer, splice forwarding, responder lifetimes and runner duration contract. Original timing consequence preserved with explicit absence of observed flake/frequency; correctness of real supervisors does not refute this distinct fixture defect. Exact :17608 anchor and whole-range introduction/endpoint persistence checked; original ID revised from lead to confirmed finding and then completed source checks.\n\nFresh search also checked responder request correlation and bounded read helpers, host registration versus session assertions, guarded and NotFound branches, fixture-specific provider/counter allocation, displayed-state helper diagnostics/bounds, and the changed e2e identity/terminal comments against caller boundaries. No further new issue found. Interface file read completely before source search; no pending cross-group questions were supplied and no interface issue was adopted as a new local discovery. Existing f1..f6 dispositions unchanged.\n\nNew verified IDs this pass: f7. New unverified-after-investigation IDs: none. Open leads: none. Anything new found: yes, one test-fixture protocol defect. Totals: 3 findings, 4 candidates, 0 leads. No runtime tests, builds, reproductions, checkout mutations or live-install actions. No unread assigned scope. Next action: await parent instruction for the required later pass after this new discovery.\n\nTurn 6 started: discovery pass 3. Refreshed 525-line discovery-neighbours.json read fully in bounded chunks (1..45; 46..85 through 446..485; 486..525). No named pending questions. Interface changes do not add an assigned-scope premise; no neighbour record adopted as a new finding. All f1..f7 history preserved, no open leads at entry. New search lens: refusal/error-marker semantics, request helper boundaries, provider-counter isolation and literal request/reply contract, beyond known oracle/docs/heartbeat issues.\n\nTurn 6 completed: discovery pass 3, empty result. New checks traced the helper's unasked/error-marker observation to the helm-only typed EnvironmentUnasked response, compared that marker with the protocol constant and ordinary/guarded Delete refusal branches, verified full session references and real authenticated-router injection, checked the changed confined-delete explanation against dispatch, rechecked per-fleet provider/counter allocation, and checked the changed e2e bare-ID wording against its supervisor-local credential boundary. These yielded no new substantive concern beyond the existing f1..f7 record. No findings events appended in this pass, and no existing disposition or proposed-drop basis changed.\n\nNew verified IDs this pass: none. New unverified-after-investigation IDs: none. Remaining lead IDs: none. Anything new found: no. Discovery count: 3. No unread assigned material, no required cross-group premise left unresolved. Source/contract checks only; no runtime test, reproduction, build, live-install action, checkout change or prohibited coverage-source read. Existing mandatory delivery remains audited. Next action: await parent completion or further review instruction.\n\nTurn 7 reopened for synthesis only: full own findings.jsonl history (18 events) read in bounded chunks, plus exact g018/f6 event19 only. Named input adds a distinct launch-recording responder with the same heartbeat/JSON mismatch as f7. No discovery or runtime work in this turn. Check exact helper/caller and shared splice before revising f7 grouping/remediation context; preserve f2's separate ended-peer heartbeat-dependent disconnect behavior.\n\nTurn 7 completed: reopened synthesis only, discovery count remains 3. Read entire own 18-event history before revision and only exact named g018/f6 event19 from the other reviewer. Directly checked 190d844e launch-recording responder :15365-15415, its clone-test caller :15440-15515, splice :575-655 and client writer :1940-1975. They establish the same emitted-heartbeat/JSON mismatch at a distinct helper/location and earlier introduction commit.\n\nRevised f7 under original ID (new event 19), preserving original consequence, other bucket, confirmed source confidence, proposed_drop=false, conditional beyond-thirty-second connected lifetime and absence of observed flake/security/user-work-loss. Recommend one queue item carrying g021 seal-responder and g018 launch-recording-responder repairs, with distinct source locations, introduction commits and owner IDs retained; parent alias/drop not assumed. Checked shared-splice remediation interaction against f2 history: consuming the heartbeat centrally must preserve deliberate ended-peer disconnect signaling, since Hangs currently gets its bounded lost-answer disconnect from a forwarded heartbeat write failure. Updating both live responder loops avoids that dependency. No current f2 bug reintroduced and no accepted candidate basis changed.\n\nTurn delta: f7 revised only; no new finding IDs or new unverified-after-investigation records. Open leads: none. All readily checkable named-input premises settled. No unrelated discovery, coverage search, runtime test/build, reproduction, install, nested agent, live action or checkout mutation. Next: return synthesis for parent/g018 coordination, then await the separate post-audit discovery instruction.\n\nTurn 8 started: separate discovery pass 4 after reopened synthesis. Refreshed discovery-neighbours.json (552 lines / 221475 bytes) read fully in bounded chunks: 1..45, then 46..85 through 486..525, and 526..552. No named pending questions. Related g018/f6 is already synthesized into f7's remediation/grouping context; other refreshed records clarify different assigned contracts and add no local question. Complete own history retained, no open leads. Search beyond known records now focuses on new helper ownership/locking, request identity/response correlation and provider-stand-in isolation, plus the small e2e wording change.\n\nTurn 8 completed: discovery pass 4, empty result. Fresh source checks covered operation-specific responder request-ID echoing and its short-lived mutex guards, bounded HTTP-body reads and retained router results, shown_state's cloned projected state and bounded timeout/failure diagnostic, provider atomics and per-fleet ownership, plus all three assigned e2e comment substitutions against retained context. Existing audited patch coverage and complete history reused. No new concrete lead arose beyond known records; no findings events appended and no disposition, consequence, proposed-drop basis or grouping recommendation changed. Related g018 heartbeat caller remains the already synthesized f7 context, not counted again.\n\nNew verified IDs: none. New unverified-after-investigation IDs: none. Remaining lead IDs: none. Anything new found: no. Discovery-pass count: 4. No unread assigned material or named synthesis question remains. Source-only review; no runtime tests/builds, reproductions, live-install actions, checkout mutations, nested agents or prohibited coverage-source reads. Next action: return the empty discovery delta to the parent and await further instruction.\n"
+}

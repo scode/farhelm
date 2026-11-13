@@ -1,0 +1,908 @@
+{
+  "group": {
+    "id": "g056",
+    "domain": "environment-execution-routing",
+    "purpose": "environment-execution-routing: crates/farhelm-helm/src/transport.rs, crates/farhelm-helm/src/provisioning/backend.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g018",
+      "g019",
+      "g020",
+      "g021",
+      "g022",
+      "g023",
+      "g024",
+      "g025",
+      "g026",
+      "g027",
+      "g028",
+      "g029",
+      "g043",
+      "g044",
+      "g045",
+      "g046",
+      "g047",
+      "g048",
+      "g049",
+      "g050",
+      "g055",
+      "g057",
+      "g064",
+      "g065",
+      "g066",
+      "g067",
+      "g068",
+      "g069",
+      "g070",
+      "g085",
+      "g086",
+      "g087"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00120-000.patch",
+        "ranges": [
+          [
+            1,
+            585
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/transport.rs",
+        "commit": "1038bb1f4549f6896fa6e064fecf540f4548b4da",
+        "notes": "patch header; patch character offsets [0,25509)",
+        "lines": 585,
+        "bytes": 25511,
+        "start": 0,
+        "end": 25509,
+        "original": "[private-run]/prep/originals/00120.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00160-000.patch",
+        "ranges": [
+          [
+            1,
+            20
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/transport.rs",
+        "commit": "04ffdbb35773cef36e73eb798c005ddbeb9a9de6",
+        "notes": "patch header; patch character offsets [0,857)",
+        "lines": 20,
+        "bytes": 857,
+        "start": 0,
+        "end": 857,
+        "original": "[private-run]/prep/originals/00160.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00190-000.patch",
+        "ranges": [
+          [
+            1,
+            370
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/provisioning/backend.rs",
+        "commit": "56659839785691f76da3af5d8f51b511cff4ba8b",
+        "notes": "patch header; patch character offsets [0,15571)",
+        "lines": 370,
+        "bytes": 15571,
+        "start": 0,
+        "end": 15571,
+        "original": "[private-run]/prep/originals/00190.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00216-000.patch",
+        "ranges": [
+          [
+            1,
+            101
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/transport.rs",
+        "commit": "56659839785691f76da3af5d8f51b511cff4ba8b",
+        "notes": "patch header; patch character offsets [0,4055)",
+        "lines": 101,
+        "bytes": 4055,
+        "start": 0,
+        "end": 4055,
+        "original": "[private-run]/prep/originals/00216.patch"
+      }
+    ],
+    "lines": 1076,
+    "bytes": 45994
+  },
+  "records": [
+    {
+      "key": "g056/c1",
+      "owner": "g056",
+      "id": "c1",
+      "domain": "environment-execution-routing",
+      "purpose": "environment-execution-routing: crates/farhelm-helm/src/transport.rs, crates/farhelm-helm/src/provisioning/backend.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Container release leaves the place SSH masters intact",
+            "location": "crates/farhelm-helm/src/transport.rs:249",
+            "detail": "Reviewed commit: 1038bb1f4549f6896fa6e064fecf540f4548b4da. TLDR: considered whether suspending or deleting a container disconnects its container host and sibling containers. Source refutation: SystemTransport::release_shared_connections matches the freshly resolved HostAccess and returns immediately for RemoteRoute::PodmanExec, before SshAccess resolution or either ssh_control_exit_args call (transport.rs:249-266). Direct SSH routes alone reach the two-master loop (272-314). Contract: SPEC_impl.md, One route for transport and provisioning: 'Releasing a route’s shared connections must never close the container host’s masters on behalf of a nested environment.' The source satisfies this contract. Suggested bucket: high if established, since sibling viewers would lose connectivity; confidence: confirmed source refutation; proposed_drop: true, the nested-route early return prevents the suspected behavior; possible_cover: none, coverage sources not consulted. Could-be-highest: no established loss-of-work or security route; supervisor sessions outlive the connection. Caveat: this checks route ownership in this method, not all provider lifecycle cleanup. No execution performed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 1,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Container release leaves the place SSH masters intact",
+          "location": "crates/farhelm-helm/src/transport.rs:249",
+          "detail": "Reviewed commit: 1038bb1f4549f6896fa6e064fecf540f4548b4da. TLDR: considered whether suspending or deleting a container disconnects its container host and sibling containers. Source refutation: SystemTransport::release_shared_connections matches the freshly resolved HostAccess and returns immediately for RemoteRoute::PodmanExec, before SshAccess resolution or either ssh_control_exit_args call (transport.rs:249-266). Direct SSH routes alone reach the two-master loop (272-314). Contract: SPEC_impl.md, One route for transport and provisioning: 'Releasing a route’s shared connections must never close the container host’s masters on behalf of a nested environment.' The source satisfies this contract. Suggested bucket: high if established, since sibling viewers would lose connectivity; confidence: confirmed source refutation; proposed_drop: true, the nested-route early return prevents the suspected behavior; possible_cover: none, coverage sources not consulted. Could-be-highest: no established loss-of-work or security route; supervisor sessions outlive the connection. Caveat: this checks route ownership in this method, not all provider lifecycle cleanup. No execution performed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g056/findings.jsonl",
+        "id": "c1",
+        "line": 1,
+        "disposition": "excluded",
+        "group": "container-release-must-not-close-place-master",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-035 after inspecting it. The route release method returns for container exec before resolving SSH access or issuing either control-exit command. Nested-route early return refutes the named release behavior only. Checked source/results: [\"1038bb1f4549f6896fa6e064fecf540f4548b4da transport.rs:249-264 accepts only direct Ssh for release and returns on PodmanExec/Local; :272-314 is reachable only for direct SSH routes.\",\"1038bb1 SPEC_impl.md:6481-6482 and current SPEC_impl.md:6002-6003 forbid closing the container host masters for a nested environment. This implementation satisfies the narrow route-ownership contract; other lifecycle cleanup was not certified. No execution performed.\"] Current coverage/results: {\"SPEC.md\":\"Container suspend closes its own exec connection, not sibling supervisor processes.\",\"SPEC_impl.md\":\"Exact nested master-release prohibition read.\",\"TODO.md Planned\":\"Empty.\",\"plans/queue\":\"No unlanded entries.\",\"BUGS.md\":\"Different provisioning pipe-hang root.\",\"queue INDEX and files\":\"No exact nested-master release finding found.\",\"TRIAGE_OUTCOMES.md\":\"No exact active decision.\",\"FILTER.md\":\"No filter applied.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Container suspend/delete could disconnect the place and siblings: conditional high connectivity impact. Supervisor sessions outlive the connection; no lost-work or security route established. The original record already proposed source refutation.\"; \"The suspected control-exit call for a nested route does not occur in this method.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g056/c1",
+        "line": 1,
+        "disposition": "excluded",
+        "group": "container-release-must-not-close-place-master",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-035 after inspecting it. The route release method returns for container exec before resolving SSH access or issuing either control-exit command. Nested-route early return refutes the named release behavior only. Checked source/results: [\"1038bb1f4549f6896fa6e064fecf540f4548b4da transport.rs:249-264 accepts only direct Ssh for release and returns on PodmanExec/Local; :272-314 is reachable only for direct SSH routes.\",\"1038bb1 SPEC_impl.md:6481-6482 and current SPEC_impl.md:6002-6003 forbid closing the container host masters for a nested environment. This implementation satisfies the narrow route-ownership contract; other lifecycle cleanup was not certified. No execution performed.\"] Current coverage/results: {\"SPEC.md\":\"Container suspend closes its own exec connection, not sibling supervisor processes.\",\"SPEC_impl.md\":\"Exact nested master-release prohibition read.\",\"TODO.md Planned\":\"Empty.\",\"plans/queue\":\"No unlanded entries.\",\"BUGS.md\":\"Different provisioning pipe-hang root.\",\"queue INDEX and files\":\"No exact nested-master release finding found.\",\"TRIAGE_OUTCOMES.md\":\"No exact active decision.\",\"FILTER.md\":\"No filter applied.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Container suspend/delete could disconnect the place and siblings: conditional high connectivity impact. Supervisor sessions outlive the connection; no lost-work or security route established. The original record already proposed source refutation.\"; \"The suspected control-exit call for a nested route does not occur in this method.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-035",
+          "key": "g056/c1",
+          "latest_line": 1,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "container-release-must-not-close-place-master",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The route release method returns for container exec before resolving SSH access or issuing either control-exit command.",
+          "checks": [
+            "1038bb1f4549f6896fa6e064fecf540f4548b4da transport.rs:249-264 accepts only direct Ssh for release and returns on PodmanExec/Local; :272-314 is reachable only for direct SSH routes.",
+            "1038bb1 SPEC_impl.md:6481-6482 and current SPEC_impl.md:6002-6003 forbid closing the container host masters for a nested environment. This implementation satisfies the narrow route-ownership contract; other lifecycle cleanup was not certified. No execution performed."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "Container suspend closes its own exec connection, not sibling supervisor processes.",
+            "SPEC_impl.md": "Exact nested master-release prohibition read.",
+            "TODO.md Planned": "Empty.",
+            "plans/queue": "No unlanded entries.",
+            "BUGS.md": "Different provisioning pipe-hang root.",
+            "queue INDEX and files": "No exact nested-master release finding found.",
+            "TRIAGE_OUTCOMES.md": "No exact active decision.",
+            "FILTER.md": "No filter applied."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "The suspected control-exit call for a nested route does not occur in this method.",
+          "original_stronger_consequence": "Container suspend/delete could disconnect the place and siblings: conditional high connectivity impact. Supervisor sessions outlive the connection; no lost-work or security route established. The original record already proposed source refutation.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Nested-route early return refutes the named release behavior only."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "container-release-must-not-close-place-master",
+        "destination": null
+      }
+    },
+    {
+      "key": "g056/c2",
+      "owner": "g056",
+      "id": "c2",
+      "domain": "environment-execution-routing",
+      "purpose": "environment-execution-routing: crates/farhelm-helm/src/transport.rs, crates/farhelm-helm/src/provisioning/backend.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Unconditional environment idle limit is specified",
+            "location": "crates/farhelm-helm/src/transport.rs:191",
+            "detail": "Reviewed commit: 1038bb1f4549f6896fa6e064fecf540f4548b4da. TLDR: considered whether replacing the Tensorlake helper capability probe with an unconditional idle-limit option prevents an old sandbox helper from connecting. Source: transport.rs:191-201 now obtains stdio argv from HostAccess; access.rs:25-33 and 145-157 always append --stdin-idle-limit-secs 120 for Tensorlake and Podman routes. The parent ssh.rs:460-481 probed --help and omitted this option for older helpers. Contract acceptance: SPEC_impl.md, One route for transport and provisioning, at this commit explicitly says: 'All environment stdio routes pass `--stdin-idle-limit-secs 120` unconditionally and emit the existing 30-second heartbeat. The supported environment helper has that option.' Suggested bucket: high for incompatibility with an affected old helper; confidence: confirmed intentional contract change, no shipped unsupported helper route established; proposed_drop: true, exact specification acceptance above; possible_cover: none, coverage sources not consulted. Could-be-highest: no, established potential consequence is connection unavailability rather than lost work or credentials. Caveat: this is specification acceptance, not execution evidence that all deployed helpers implement the option. No execution performed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 2,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Unconditional environment idle limit is specified",
+          "location": "crates/farhelm-helm/src/transport.rs:191",
+          "detail": "Reviewed commit: 1038bb1f4549f6896fa6e064fecf540f4548b4da. TLDR: considered whether replacing the Tensorlake helper capability probe with an unconditional idle-limit option prevents an old sandbox helper from connecting. Source: transport.rs:191-201 now obtains stdio argv from HostAccess; access.rs:25-33 and 145-157 always append --stdin-idle-limit-secs 120 for Tensorlake and Podman routes. The parent ssh.rs:460-481 probed --help and omitted this option for older helpers. Contract acceptance: SPEC_impl.md, One route for transport and provisioning, at this commit explicitly says: 'All environment stdio routes pass `--stdin-idle-limit-secs 120` unconditionally and emit the existing 30-second heartbeat. The supported environment helper has that option.' Suggested bucket: high for incompatibility with an affected old helper; confidence: confirmed intentional contract change, no shipped unsupported helper route established; proposed_drop: true, exact specification acceptance above; possible_cover: none, coverage sources not consulted. Could-be-highest: no, established potential consequence is connection unavailability rather than lost work or credentials. Caveat: this is specification acceptance, not execution evidence that all deployed helpers implement the option. No execution performed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g056/findings.jsonl",
+        "id": "c2",
+        "line": 2,
+        "disposition": "duplicate",
+        "group": "environment-unconditional-stdin-option-compatibility",
+        "reason": "Parent read both complete claims-035 entries and accepts the exact same old-helper/no-option hypothesis as g055/l1. Reviewed1038bb1 transport.rs:190-201 and5665983 access.rs:30-47,234-247 invoke the environment option; reviewed/current SPEC_impl.md explicitly states it shipped with Tensorlake support and every supported environment helper has it. Canonicalg055/l1 already has the narrow specification-acceptance decision. Preserve hypothetical old-helper connection failure, deployment-evidence caveat and absence of executed helper validation. This says nothing about actual deployed binary inventories, remote orphan lifetime, missing provisioning watchdog invocation g055/l5 or deadline exit flushing. No highest effect was alleged."
+      },
+      "accepted_parent_decision": {
+        "key": "g056/c2",
+        "line": 2,
+        "disposition": "duplicate",
+        "group": "environment-unconditional-stdin-option-compatibility",
+        "bucket": "other",
+        "recording": "same-specification-accepted-helper-premise",
+        "needs_independent_drop_check": false,
+        "reason": "Parent read both complete claims-035 entries and accepts the exact same old-helper/no-option hypothesis as g055/l1. Reviewed1038bb1 transport.rs:190-201 and5665983 access.rs:30-47,234-247 invoke the environment option; reviewed/current SPEC_impl.md explicitly states it shipped with Tensorlake support and every supported environment helper has it. Canonicalg055/l1 already has the narrow specification-acceptance decision. Preserve hypothetical old-helper connection failure, deployment-evidence caveat and absence of executed helper validation. This says nothing about actual deployed binary inventories, remote orphan lifetime, missing provisioning watchdog invocation g055/l5 or deadline exit flushing. No highest effect was alleged."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-035",
+          "key": "g056/c2",
+          "latest_line": 2,
+          "recommendation": "duplicate",
+          "bucket": "other",
+          "underlying_key": "environment-unconditional-stdin-option-compatibility",
+          "aliases": [
+            "g055/l1"
+          ],
+          "target_queue_file": null,
+          "why": "Exact same old-helper option-compatibility hypothesis and specification acceptance as g055/l1; consolidate its caveat there.",
+          "checks": [
+            "1038bb1f4549f6896fa6e064fecf540f4548b4da transport.rs:190-201 uses stdio_argv; 56659839785691f76da3af5d8f51b511cff4ba8b access.rs:30-47,234-247 supplies the unconditional environment flag.",
+            "1038bb1 SPEC_impl.md:6478-6481 and :7127-7130 states supported helpers have the option and it shipped with Tensorlake support. No deployed-helper execution evidence was obtained."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "Environment/compatibility search found no narrower exception.",
+            "SPEC_impl.md": "Exact same accepted supported-helper contract as g055/l1, retained at current 5999-6003 and Tensorlake hosts.",
+            "TODO.md Planned": "Empty.",
+            "plans/queue": "No unlanded entries.",
+            "BUGS.md": "No exact coverage.",
+            "queue INDEX and files": "No exact existing compatibility item; deadline-exit flushing item is distinct.",
+            "TRIAGE_OUTCOMES.md": "No exact active decision.",
+            "FILTER.md": "No filter applied."
+          },
+          "exact_cover_quotes": [
+            "SPEC_impl.md:6000: The supported environment helper has that option."
+          ],
+          "missing_premise": "No supported helper lacking the option established; this does not prove all deployed helper binaries implement it.",
+          "original_stronger_consequence": "An old sandbox helper could reject the new unconditional option before hello, causing high connection unavailability; no user-work-loss or security consequence established. Reviewer proposed explicit specification acceptance.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Exact alias of g055/l1 and the same explicit specification acceptance; preserve its deployment-evidence caveat."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "environment-unconditional-stdin-option-compatibility",
+        "destination": "trailing-environment-unconditional-stdin-option-compatibility.md"
+      }
+    },
+    {
+      "key": "g056/f1",
+      "owner": "g056",
+      "id": "f1",
+      "domain": "environment-execution-routing",
+      "purpose": "environment-execution-routing: crates/farhelm-helm/src/transport.rs, crates/farhelm-helm/src/provisioning/backend.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "f1",
+            "state": "open",
+            "summary": "Container process failures may be marked past the exit-classification boundary",
+            "location": "crates/farhelm-helm/src/transport.rs:229",
+            "detail": "Reviewed commit under investigation: 04ffdbb35773cef36e73eb798c005ddbeb9a9de6, with transport machinery introduced in 1038bb1f4549f6896fa6e064fecf540f4548b4da. TLDR: a container connection refused by the container host's full SSH master may omit the required session-limit explanation. Source basis: transport.rs creates process diagnostics for all remote routes; manager.rs:4143-4147 at 1038 advances to WaitingForHello whenever row.kind.ssh_access().is_none(), while manager.rs:5256 permits numeric process classification only at ConnectingToHost. Podman appears to have no direct SSH access choice, but this premise and the manager behavior at the Podman-storage commit need confirmation. Suggested bucket: other pending investigation (diagnostic correctness); confidence: unverified lead, not a finding yet; proposed_drop: false; possible_cover: none, coverage sources not consulted. Could-be-highest: no established security or loss-of-work consequence. Missing premise: actual Podman ssh_access return and unchanged manager staging at the revisions that make Podman rows constructible. Next source checks: inspect HostKind methods and manager::dial at 04ff and 566, and the failure-classification call path. No execution performed."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f1",
+            "state": "open",
+            "summary": "Container dial staging disables its process-exit diagnosis",
+            "location": "crates/farhelm-helm/src/manager.rs:4145",
+            "detail": "Reviewed commit: 04ffdbb35773cef36e73eb798c005ddbeb9a9de6. Also confirmed present at 56659839785691f76da3af5d8f51b511cff4ba8b (manager.rs:4268 and 5381). TLDR: when SSH refuses a container connection because its container host has reached its session limit, Farhelm reports a generic wait-for-hello failure instead of explaining the container host's SSH session limit. Other pre-helper container process exits similarly miss their intended diagnosis. Source route: SystemTransport::connect introduced in 1038bb1f4549f6896fa6e064fecf540f4548b4da creates Some(SshDiagnostics) for every RemoteRoute, including PodmanExec, and records ProcessRoute::LocalPodman or NestedSsh (transport.rs:228-235, 387-404, 650-692). At 04ff, HostKind::ssh_access explicitly returns None for Podman (store.rs:886-890). manager::HostActor::dial still interprets None as proof that no process marker exists and immediately advances to WaitingForHello (manager.rs:4143-4147), before observing a marker. ssh_failure_detail permits process-exit classification only at ConnectingToHost (manager.rs:5256); both the nested session-limit branch (5262-5270) and local exec exit branch (5258-5260) are consequently unreachable for real container dials. The raw bounded stderr may still include the mux refusal, but the explanatory container-host/session-limit diagnosis is suppressed. Contract: SPEC_impl.md, One route for transport and provisioning, says 'When the fallback login fails, launch refusal or connection unavailability names the container host’s SSH session limit.' The source also documents that marker or successful-hello evidence, not transport kind alone, outranks exit evidence (manager.rs:5237-5242). Suggested fix: stage by the actual TransportConnection process diagnostics (or an exhaustive process-transport predicate), advancing immediately only for a socket transport; retain ConnectingToHost until the process marker for Podman exec. Suggested bucket: other (diagnostic correctness; source establishes no lost work or credential exposure). Confidence: confirmed by source and contracts, not execution. proposed_drop: false. possible_cover: none, coverage sources not consulted. Caveats: provisioning launch setup's separate nested_session_failure classification at 566 is unaffected, and unit-level classifier tests can bypass the erroneous actor staging by supplying ConnectingToHost directly. No runtime reproduction or test was run."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f1",
+            "state": "open",
+            "summary": "Container dial staging disables its process-exit diagnosis",
+            "location": "crates/farhelm-helm/src/manager.rs:4145",
+            "detail": "Reviewed commit: 04ffdbb35773cef36e73eb798c005ddbeb9a9de6. Also confirmed present at 56659839785691f76da3af5d8f51b511cff4ba8b (manager.rs:4268 and 5381). TLDR: when SSH refuses a container connection because its container host has reached its session limit, Farhelm reports a generic wait-for-hello failure instead of explaining the container host's SSH session limit. Other pre-helper container process exits similarly miss their intended diagnosis. Source route: SystemTransport::connect introduced in 1038bb1f4549f6896fa6e064fecf540f4548b4da creates Some(SshDiagnostics) for every RemoteRoute, including PodmanExec, and records ProcessRoute::LocalPodman or NestedSsh (transport.rs:228-235, 387-404, 650-692). At 04ff, HostKind::ssh_access explicitly returns None for Podman (store.rs:886-890). manager::HostActor::dial still interprets None as proof that no process marker exists and immediately advances to WaitingForHello (manager.rs:4143-4147), before observing a marker. ssh_failure_detail permits process-exit classification only at ConnectingToHost (manager.rs:5256); both the nested session-limit branch (5262-5270) and local exec exit branch (5258-5260) are consequently unreachable for real container dials. The raw bounded stderr may still include the mux refusal, but the explanatory container-host/session-limit diagnosis is suppressed. Contract: SPEC_impl.md, One route for transport and provisioning, says 'When the fallback login fails, launch refusal or connection unavailability names the container host's SSH session limit.' The source also documents that marker or successful-hello evidence, not transport kind alone, outranks exit evidence (manager.rs:5237-5242). Suggested fix: stage by the actual TransportConnection process diagnostics (or an exhaustive process-transport predicate), advancing immediately only for a socket transport; retain ConnectingToHost until the process marker for Podman exec. Suggested bucket: other (diagnostic correctness; source establishes no lost work or credential exposure). Confidence: confirmed by source and contracts, not execution. proposed_drop: false. possible_cover: none, coverage sources not consulted. Caveats: provisioning launch setup's separate nested_session_failure classification at 566 is unaffected, and unit-level classifier tests can bypass the erroneous actor staging by supplying ConnectingToHost directly. No runtime reproduction or test was run. Additional source checks: manager::attempt_failure passes progress.stage unchanged into ssh_failure_detail at 04ff (manager.rs:5378-5395). At review endpoint 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, the premature stage advance remains at manager.rs:4477 and the ConnectingToHost classification gate remains at 5621. The full One route for transport and provisioning section was also checked at 04ff and retains the cited session-limit contract."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f1",
+            "state": "open",
+            "summary": "Container dial staging disables its process-exit diagnosis",
+            "location": "crates/farhelm-helm/src/manager.rs:4268",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. Original record used the earlier staging/storage revision 04ffdbb35773cef36e73eb798c005ddbeb9a9de6; production reachability is established at 566, as corrected below. Also confirmed present at 56659839785691f76da3af5d8f51b511cff4ba8b (manager.rs:4268 and 5381). TLDR: when SSH refuses a container connection because its container host has reached its session limit, Farhelm reports a generic wait-for-hello failure instead of explaining the container host's SSH session limit. Other pre-helper container process exits similarly miss their intended diagnosis. Source route: SystemTransport::connect introduced in 1038bb1f4549f6896fa6e064fecf540f4548b4da creates Some(SshDiagnostics) for every RemoteRoute, including PodmanExec, and records ProcessRoute::LocalPodman or NestedSsh (transport.rs:228-235, 387-404, 650-692). At 04ff, HostKind::ssh_access explicitly returns None for Podman (store.rs:886-890). manager::HostActor::dial still interprets None as proof that no process marker exists and immediately advances to WaitingForHello (manager.rs:4143-4147), before observing a marker. ssh_failure_detail permits process-exit classification only at ConnectingToHost (manager.rs:5256); both the nested session-limit branch (5262-5270) and local exec exit branch (5258-5260) are consequently unreachable for real container dials. The raw bounded stderr may still include the mux refusal, but the explanatory container-host/session-limit diagnosis is suppressed. Contract: SPEC_impl.md, One route for transport and provisioning, says 'When the fallback login fails, launch refusal or connection unavailability names the container host's SSH session limit.' The source also documents that marker or successful-hello evidence, not transport kind alone, outranks exit evidence (manager.rs:5237-5242). Suggested fix: stage by the actual TransportConnection process diagnostics (or an exhaustive process-transport predicate), advancing immediately only for a socket transport; retain ConnectingToHost until the process marker for Podman exec. Suggested bucket: other (diagnostic correctness; source establishes no lost work or credential exposure). Confidence: confirmed by source and contracts, not execution. proposed_drop: false. possible_cover: none, coverage sources not consulted. Caveats: provisioning launch setup's separate nested_session_failure classification at 566 is unaffected, and unit-level classifier tests can bypass the erroneous actor staging by supplying ConnectingToHost directly. No runtime reproduction or test was run. Additional source checks: manager::attempt_failure passes progress.stage unchanged into ssh_failure_detail at 04ff (manager.rs:5378-5395). At review endpoint 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, the premature stage advance remains at manager.rs:4477 and the ConnectingToHost classification gate remains at 5621. The full One route for transport and provisioning section was also checked at 04ff and retains the cited session-limit contract. Synthesis revision, turn 2: the source mechanism exists at 04ff, but that revision registers only Tensorlake (lib.rs:2440-2453); its missing Podman provider returns StatusUnanswered (environment/mod.rs:207-209), and RetryLater refuses before dial (manager.rs:3337-3342). Thus the earlier implication of an ordinary production Podman classifier route at 04ff was too broad. At 566, lib.rs:2465-2481 installs the real Podman provider and the store/places-backed SystemTransport; an admitted container observed Running reaches dial (manager.rs:4175-4223; environment/podman.rs:1237-1257). The reported consequence and other bucket are preserved. This is a diagnostic defect during an independently failing connection, not a cause of the connection failure itself. Current-turn source checks also confirmed that advance_attempt really assigns progress.stage before publication, including inactive reprobes (04ff manager.rs:3965-3974), hello success advances to SettingUp, and only a pending hello with an observed marker should advance to WaitingForHello. No runtime observation."
+          }
+        },
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f1",
+            "state": "open",
+            "summary": "Container dial staging disables its process-exit diagnosis",
+            "location": "crates/farhelm-helm/src/manager.rs:4268",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. Original record used the earlier staging/storage revision 04ffdbb35773cef36e73eb798c005ddbeb9a9de6; production reachability is established at 566, as corrected below. Also confirmed present at 56659839785691f76da3af5d8f51b511cff4ba8b (manager.rs:4268 and 5381). TLDR: when SSH refuses a container connection because its container host has reached its session limit, Farhelm reports a generic wait-for-hello failure instead of explaining the container host's SSH session limit. Other pre-helper container process exits similarly miss their intended diagnosis. Source route: SystemTransport::connect introduced in 1038bb1f4549f6896fa6e064fecf540f4548b4da creates Some(SshDiagnostics) for every RemoteRoute, including PodmanExec, and records ProcessRoute::LocalPodman or NestedSsh (transport.rs:228-235, 387-404, 650-692). At 04ff, HostKind::ssh_access explicitly returns None for Podman (store.rs:886-890). manager::HostActor::dial still interprets None as proof that no process marker exists and immediately advances to WaitingForHello (manager.rs:4143-4147), before observing a marker. ssh_failure_detail permits process-exit classification only at ConnectingToHost (manager.rs:5256); both the nested session-limit branch (5262-5270) and local exec exit branch (5258-5260) are consequently unreachable for real container dials. The raw bounded stderr may still include the mux refusal, but the explanatory container-host/session-limit diagnosis is suppressed. Contract: SPEC_impl.md, One route for transport and provisioning, says 'When the fallback login fails, launch refusal or connection unavailability names the container host's SSH session limit.' The source also documents that marker or successful-hello evidence, not transport kind alone, outranks exit evidence (manager.rs:5237-5242). Suggested fix: stage by the actual TransportConnection process diagnostics (or an exhaustive process-transport predicate), advancing immediately only for a socket transport; retain ConnectingToHost until the process marker for Podman exec. Suggested bucket: other (diagnostic correctness; source establishes no lost work or credential exposure). Confidence: confirmed by source and contracts, not execution. proposed_drop: false. possible_cover: none, coverage sources not consulted. Caveats: provisioning launch setup's separate nested_session_failure classification at 566 is unaffected, and unit-level classifier tests can bypass the erroneous actor staging by supplying ConnectingToHost directly. No runtime reproduction or test was run. Additional source checks: manager::attempt_failure passes progress.stage unchanged into ssh_failure_detail at 04ff (manager.rs:5378-5395). At review endpoint 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, the premature stage advance remains at manager.rs:4477 and the ConnectingToHost classification gate remains at 5621. The full One route for transport and provisioning section was also checked at 04ff and retains the cited session-limit contract. Synthesis revision, turn 2: the source mechanism exists at 04ff, but that revision registers only Tensorlake (lib.rs:2440-2453); its missing Podman provider returns StatusUnanswered (environment/mod.rs:207-209), and RetryLater refuses before dial (manager.rs:3337-3342). Thus the earlier implication of an ordinary production Podman classifier route at 04ff was too broad. At 566, lib.rs:2465-2481 installs the real Podman provider and the store/places-backed SystemTransport; an admitted container observed Running reaches dial (manager.rs:4175-4223; environment/podman.rs:1237-1257). The reported consequence and other bucket are preserved. This is a diagnostic defect during an independently failing connection, not a cause of the connection failure itself. Current-turn source checks also confirmed that advance_attempt really assigns progress.stage before publication, including inactive reprobes (04ff manager.rs:3965-3974), hello success advances to SettingUp, and only a pending hello with an observed marker should advance to WaitingForHello. No runtime observation. Synthesis evidence completion: at 566 both local Podman and remote-base Podman take HostAccess::Remote, spawn a piped child and return process_connection, so Some(SshDiagnostics) reaches the actor even though HostKind::Podman.ssh_access is None (transport.rs:180-241; store.rs:896-901). A clean pre-hello stdout close maps to ClosedBeforeHello (farhelm-proto/src/io.rs:585-602); a write failure can be BrokenPipe. manager::dial calls handshake_termination, settles the owned process, and passes progress.stage unchanged to attempt_failure (4268-4360). Hence the failed child does reach the classifier; the failure is its false WaitingForHello boundary, not absence of diagnostics. If a current-attempt connected marker was actually observed, ssh_failure_detail itself upgrades ConnectingToHost to WaitingForHello and correctly suppresses numeric diagnosis; a completed hello advances to SettingUp, and protocol/version-skew evidence remains authoritative. These legitimate precedence cases are outside f1. Prior-attempt marker knowledge only changes generic ConnectingToHost wording and does not restore or remove classification. Without current marker/hello evidence, local Podman should retain its container-execution exit diagnosis (including code 255 without calling it SSH); nested SSH should retain the place-host/session-limit diagnosis. In the buggy path the output still appends bounded escaped stderr and the actual numeric status (manager.rs:5440-5486); no claim is made that all diagnostic evidence is absent. Source checks this turn reconfirm endpoint 00de manager.rs:4477 and 5621-5640 retain both the early advance and gated branches. No runtime reproduction was performed."
+          }
+        },
+        {
+          "line": 14,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f1",
+            "state": "open",
+            "summary": "Container dial staging disables its process-exit diagnosis",
+            "location": "crates/farhelm-helm/src/manager.rs:4268",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. Original record used the earlier staging/storage revision 04ffdbb35773cef36e73eb798c005ddbeb9a9de6; production reachability is established at 566, as corrected below. Also confirmed present at 56659839785691f76da3af5d8f51b511cff4ba8b (manager.rs:4268 and 5381). TLDR: when SSH refuses a container connection because its container host has reached its session limit, Farhelm reports a generic wait-for-hello failure instead of explaining the container host's SSH session limit. Other pre-helper container process exits similarly miss their intended diagnosis. Source route: SystemTransport::connect introduced in 1038bb1f4549f6896fa6e064fecf540f4548b4da creates Some(SshDiagnostics) for every RemoteRoute, including PodmanExec, and records ProcessRoute::LocalPodman or NestedSsh (transport.rs:228-235, 387-404, 650-692). At 04ff, HostKind::ssh_access explicitly returns None for Podman (store.rs:886-890). manager::HostActor::dial still interprets None as proof that no process marker exists and immediately advances to WaitingForHello (manager.rs:4143-4147), before observing a marker. ssh_failure_detail permits process-exit classification only at ConnectingToHost (manager.rs:5256); both the nested session-limit branch (5262-5270) and local exec exit branch (5258-5260) are consequently unreachable for real container dials. The raw bounded stderr may still include the mux refusal, but the explanatory container-host/session-limit diagnosis is suppressed. Contract: SPEC_impl.md, One route for transport and provisioning, says 'When the fallback login fails, launch refusal or connection unavailability names the container host's SSH session limit.' The source also documents that marker or successful-hello evidence, not transport kind alone, outranks exit evidence (manager.rs:5237-5242). Suggested fix: stage by the actual TransportConnection process diagnostics (or an exhaustive process-transport predicate), advancing immediately only for a socket transport; retain ConnectingToHost until the process marker for Podman exec. Suggested bucket: other (diagnostic correctness; source establishes no lost work or credential exposure). Confidence: confirmed by source and contracts, not execution. proposed_drop: false. possible_cover: none, coverage sources not consulted. Caveats: provisioning launch setup's separate nested_session_failure classification at 566 is unaffected, and unit-level classifier tests can bypass the erroneous actor staging by supplying ConnectingToHost directly. No runtime reproduction or test was run. Additional source checks: manager::attempt_failure passes progress.stage unchanged into ssh_failure_detail at 04ff (manager.rs:5378-5395). At review endpoint 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, the premature stage advance remains at manager.rs:4477 and the ConnectingToHost classification gate remains at 5621. The full One route for transport and provisioning section was also checked at 04ff and retains the cited session-limit contract. Synthesis revision, turn 2: the source mechanism exists at 04ff, but that revision registers only Tensorlake (lib.rs:2440-2453); its missing Podman provider returns StatusUnanswered (environment/mod.rs:207-209), and RetryLater refuses before dial (manager.rs:3337-3342). Thus the earlier implication of an ordinary production Podman classifier route at 04ff was too broad. At 566, lib.rs:2465-2481 installs the real Podman provider and the store/places-backed SystemTransport; an admitted container observed Running reaches dial (manager.rs:4175-4223; environment/podman.rs:1237-1257). The reported consequence and other bucket are preserved. This is a diagnostic defect during an independently failing connection, not a cause of the connection failure itself. Current-turn source checks also confirmed that advance_attempt really assigns progress.stage before publication, including inactive reprobes (04ff manager.rs:3965-3974), hello success advances to SettingUp, and only a pending hello with an observed marker should advance to WaitingForHello. No runtime observation. Synthesis evidence completion: at 566 both local Podman and remote-base Podman take HostAccess::Remote, spawn a piped child and return process_connection, so Some(SshDiagnostics) reaches the actor even though HostKind::Podman.ssh_access is None (transport.rs:180-241; store.rs:896-901). A clean pre-hello stdout close maps to ClosedBeforeHello (farhelm-proto/src/io.rs:585-602); a write failure can be BrokenPipe. manager::dial calls handshake_termination, settles the owned process, and passes progress.stage unchanged to attempt_failure (4268-4360). Hence the failed child does reach the classifier; the failure is its false WaitingForHello boundary, not absence of diagnostics. If a current-attempt connected marker was actually observed, ssh_failure_detail itself upgrades ConnectingToHost to WaitingForHello and correctly suppresses numeric diagnosis; a completed hello advances to SettingUp, and protocol/version-skew evidence remains authoritative. These legitimate precedence cases are outside f1. Prior-attempt marker knowledge only changes generic ConnectingToHost wording and does not restore or remove classification. Without current marker/hello evidence, local Podman should retain its container-execution exit diagnosis (including code 255 without calling it SSH); nested SSH should retain the place-host/session-limit diagnosis. In the buggy path the output still appends bounded escaped stderr and the actual numeric status (manager.rs:5440-5486); no claim is made that all diagnostic evidence is absent. Source checks this turn reconfirm endpoint 00de manager.rs:4477 and 5621-5640 retain both the early advance and gated branches. No runtime reproduction was performed. Caller/capacity premise checked in synthesis: a master already full during the preceding provider status command may cause an earlier status refusal, so f1 specifically requires the independently failing process dial after a successful Running observation and successful route resolution. Shipped actors run in separate Tokio tasks (566 manager.rs:2023-2031); route resolution returns a BaseRoute and ReadyPlace value rather than an SSH-slot lease (podman_probe.rs:338-362), and Podman exec command lowering chooses the place Supervisor master without reserving capacity across the earlier status observation (access.rs:301-336). Sibling actors can consume the remaining channel while this actor awaits its store/route lookup, after status succeeded. The claimed route therefore does not require a failed Podman status to bypass RetryLater. Local Podman has no SSH capacity premise; any ordinary pre-helper exec exit reaches the same false stage. Parent-supplied g055/c3 quoting refutation does not change this actor-stage contract. All readily checkable source premises now resolved; f1 remains source-confirmed at 566 and endpoint, other, proposed_drop=false, not a general connectivity or security finding."
+          }
+        }
+      ],
+      "latest": {
+        "line": 14,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "f1",
+          "state": "open",
+          "summary": "Container dial staging disables its process-exit diagnosis",
+          "location": "crates/farhelm-helm/src/manager.rs:4268",
+          "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. Original record used the earlier staging/storage revision 04ffdbb35773cef36e73eb798c005ddbeb9a9de6; production reachability is established at 566, as corrected below. Also confirmed present at 56659839785691f76da3af5d8f51b511cff4ba8b (manager.rs:4268 and 5381). TLDR: when SSH refuses a container connection because its container host has reached its session limit, Farhelm reports a generic wait-for-hello failure instead of explaining the container host's SSH session limit. Other pre-helper container process exits similarly miss their intended diagnosis. Source route: SystemTransport::connect introduced in 1038bb1f4549f6896fa6e064fecf540f4548b4da creates Some(SshDiagnostics) for every RemoteRoute, including PodmanExec, and records ProcessRoute::LocalPodman or NestedSsh (transport.rs:228-235, 387-404, 650-692). At 04ff, HostKind::ssh_access explicitly returns None for Podman (store.rs:886-890). manager::HostActor::dial still interprets None as proof that no process marker exists and immediately advances to WaitingForHello (manager.rs:4143-4147), before observing a marker. ssh_failure_detail permits process-exit classification only at ConnectingToHost (manager.rs:5256); both the nested session-limit branch (5262-5270) and local exec exit branch (5258-5260) are consequently unreachable for real container dials. The raw bounded stderr may still include the mux refusal, but the explanatory container-host/session-limit diagnosis is suppressed. Contract: SPEC_impl.md, One route for transport and provisioning, says 'When the fallback login fails, launch refusal or connection unavailability names the container host's SSH session limit.' The source also documents that marker or successful-hello evidence, not transport kind alone, outranks exit evidence (manager.rs:5237-5242). Suggested fix: stage by the actual TransportConnection process diagnostics (or an exhaustive process-transport predicate), advancing immediately only for a socket transport; retain ConnectingToHost until the process marker for Podman exec. Suggested bucket: other (diagnostic correctness; source establishes no lost work or credential exposure). Confidence: confirmed by source and contracts, not execution. proposed_drop: false. possible_cover: none, coverage sources not consulted. Caveats: provisioning launch setup's separate nested_session_failure classification at 566 is unaffected, and unit-level classifier tests can bypass the erroneous actor staging by supplying ConnectingToHost directly. No runtime reproduction or test was run. Additional source checks: manager::attempt_failure passes progress.stage unchanged into ssh_failure_detail at 04ff (manager.rs:5378-5395). At review endpoint 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, the premature stage advance remains at manager.rs:4477 and the ConnectingToHost classification gate remains at 5621. The full One route for transport and provisioning section was also checked at 04ff and retains the cited session-limit contract. Synthesis revision, turn 2: the source mechanism exists at 04ff, but that revision registers only Tensorlake (lib.rs:2440-2453); its missing Podman provider returns StatusUnanswered (environment/mod.rs:207-209), and RetryLater refuses before dial (manager.rs:3337-3342). Thus the earlier implication of an ordinary production Podman classifier route at 04ff was too broad. At 566, lib.rs:2465-2481 installs the real Podman provider and the store/places-backed SystemTransport; an admitted container observed Running reaches dial (manager.rs:4175-4223; environment/podman.rs:1237-1257). The reported consequence and other bucket are preserved. This is a diagnostic defect during an independently failing connection, not a cause of the connection failure itself. Current-turn source checks also confirmed that advance_attempt really assigns progress.stage before publication, including inactive reprobes (04ff manager.rs:3965-3974), hello success advances to SettingUp, and only a pending hello with an observed marker should advance to WaitingForHello. No runtime observation. Synthesis evidence completion: at 566 both local Podman and remote-base Podman take HostAccess::Remote, spawn a piped child and return process_connection, so Some(SshDiagnostics) reaches the actor even though HostKind::Podman.ssh_access is None (transport.rs:180-241; store.rs:896-901). A clean pre-hello stdout close maps to ClosedBeforeHello (farhelm-proto/src/io.rs:585-602); a write failure can be BrokenPipe. manager::dial calls handshake_termination, settles the owned process, and passes progress.stage unchanged to attempt_failure (4268-4360). Hence the failed child does reach the classifier; the failure is its false WaitingForHello boundary, not absence of diagnostics. If a current-attempt connected marker was actually observed, ssh_failure_detail itself upgrades ConnectingToHost to WaitingForHello and correctly suppresses numeric diagnosis; a completed hello advances to SettingUp, and protocol/version-skew evidence remains authoritative. These legitimate precedence cases are outside f1. Prior-attempt marker knowledge only changes generic ConnectingToHost wording and does not restore or remove classification. Without current marker/hello evidence, local Podman should retain its container-execution exit diagnosis (including code 255 without calling it SSH); nested SSH should retain the place-host/session-limit diagnosis. In the buggy path the output still appends bounded escaped stderr and the actual numeric status (manager.rs:5440-5486); no claim is made that all diagnostic evidence is absent. Source checks this turn reconfirm endpoint 00de manager.rs:4477 and 5621-5640 retain both the early advance and gated branches. No runtime reproduction was performed. Caller/capacity premise checked in synthesis: a master already full during the preceding provider status command may cause an earlier status refusal, so f1 specifically requires the independently failing process dial after a successful Running observation and successful route resolution. Shipped actors run in separate Tokio tasks (566 manager.rs:2023-2031); route resolution returns a BaseRoute and ReadyPlace value rather than an SSH-slot lease (podman_probe.rs:338-362), and Podman exec command lowering chooses the place Supervisor master without reserving capacity across the earlier status observation (access.rs:301-336). Sibling actors can consume the remaining channel while this actor awaits its store/route lookup, after status succeeded. The claimed route therefore does not require a failed Podman status to bypass RetryLater. Local Podman has no SSH capacity premise; any ordinary pre-helper exec exit reaches the same false stage. Parent-supplied g055/c3 quoting refutation does not change this actor-stage contract. All readily checkable source premises now resolved; f1 remains source-confirmed at 566 and endpoint, other, proposed_drop=false, not a general connectivity or security finding."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g056/findings.jsonl",
+        "id": "f1",
+        "line": 14,
+        "disposition": "verified",
+        "group": "podman-dial-kind-advances-before-process-marker",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-035 after inspecting it. Container dials have process diagnostics but are advanced to WaitingForHello from the host-kind predicate, disabling their pre-helper exit classifier. This removes intended explanation from an independently failing dial; it does not cause connectivity failure or erase all evidence. Record verified diagnostic-stage defect in other; preserve reachability correction, capacity timing caveat, marker/hello precedence and retained raw evidence. Do not filter the whole record using only one rare subset. Checked source/results: [\"56659839785691f76da3af5d8f51b511cff4ba8b lib.rs:2465-2488 installs the real provider/store-backed transport; manager.rs:4175-4223 admits provisioned environments observed Running and reaches dial. Earlier 04ff production reachability was correctly withdrawn.\",\"5665983 store.rs:896-901 returns None for Podman ssh_access. manager.rs:4251-4289 retains process diagnostics but advances at :4268-4269 before the marker. :4335-4345 settles the process and forwards the progress to attempt_failure.\",\"5665983 manager.rs:5372-5402 gates LocalPodman and NestedSsh diagnoses on ConnectingToHost; :5443-5482 still preserves bounded stderr/refusal evidence and numeric status. attempt_failure:5501-5521 passes progress.stage unchanged. Current marker, successful hello, protocol and version-skew precedence remain outside the finding.\",\"1038bb1f4549f6896fa6e064fecf540f4548b4da transport.rs:190-233 creates process connections for every RemoteRoute. 5665983 access.rs:302-327 selects the place supervisor master and podman_probe.rs:338-362 returns route/probe values without reserving an SSH session across status and dial.\",\"Endpoint 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db manager.rs:4477-4478 and :5621-5642 retains the defect. No reproduction or runtime observation.\"] Current coverage/results: {\"SPEC.md\":\"Container sessions uses the ordinary supervisor connection and errors contract; no acceptance of this false stage found.\",\"SPEC_impl.md\":\"One route for transport and provisioning:5995-6008 requires process diagnostics for local/remote Podman and explicit container-host session-limit explanation. Helm transport:2825-2936 distinguishes marker/hello evidence from exit status; it does not authorize kind-only advancement.\",\"TODO.md Planned\":\"Empty.\",\"plans/queue\":\"No unlanded index entries. Residual Podman plan's session-limit requirement is already landed, not covering planned repair.\",\"BUGS.md\":\"Escaped SSH-helper transfer hang is unrelated.\",\"queue INDEX and files\":\"Targeted WaitingForHello/process-exit/session-limit/master/route searches found no exact existing item.\",\"TRIAGE_OUTCOMES.md\":\"No exact active decision found.\",\"FILTER.md\":\"Rare imprecise-diagnostic filter could cover a narrowly timed capacity-race subset alone. The finding also covers ordinary local/remote pre-helper container process failures with no established rarity premise, so its entire boundary does not match. Retain.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Missing session-limit explanation and other pre-helper exit diagnoses, other. Earlier attribution to production Podman at 04ff was narrowed to 566, where the provider ships. Raw escaped stderr/numeric status survive, provisioning's separate classifier is unaffected, and this is not a general connectivity or security finding.\"; \"Actual incidence is unmeasured. The nested capacity scenario specifically needs successful Running status and route resolution followed by an independently failed dial; a master full already at status may refuse earlier. Concurrent slot use can produce the later failure, and local Podman has no SSH-capacity premise. No stronger security or lost-work consequence established.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g056/f1",
+        "line": 14,
+        "disposition": "verified",
+        "group": "podman-dial-kind-advances-before-process-marker",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-035 after inspecting it. Container dials have process diagnostics but are advanced to WaitingForHello from the host-kind predicate, disabling their pre-helper exit classifier. This removes intended explanation from an independently failing dial; it does not cause connectivity failure or erase all evidence. Record verified diagnostic-stage defect in other; preserve reachability correction, capacity timing caveat, marker/hello precedence and retained raw evidence. Do not filter the whole record using only one rare subset. Checked source/results: [\"56659839785691f76da3af5d8f51b511cff4ba8b lib.rs:2465-2488 installs the real provider/store-backed transport; manager.rs:4175-4223 admits provisioned environments observed Running and reaches dial. Earlier 04ff production reachability was correctly withdrawn.\",\"5665983 store.rs:896-901 returns None for Podman ssh_access. manager.rs:4251-4289 retains process diagnostics but advances at :4268-4269 before the marker. :4335-4345 settles the process and forwards the progress to attempt_failure.\",\"5665983 manager.rs:5372-5402 gates LocalPodman and NestedSsh diagnoses on ConnectingToHost; :5443-5482 still preserves bounded stderr/refusal evidence and numeric status. attempt_failure:5501-5521 passes progress.stage unchanged. Current marker, successful hello, protocol and version-skew precedence remain outside the finding.\",\"1038bb1f4549f6896fa6e064fecf540f4548b4da transport.rs:190-233 creates process connections for every RemoteRoute. 5665983 access.rs:302-327 selects the place supervisor master and podman_probe.rs:338-362 returns route/probe values without reserving an SSH session across status and dial.\",\"Endpoint 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db manager.rs:4477-4478 and :5621-5642 retains the defect. No reproduction or runtime observation.\"] Current coverage/results: {\"SPEC.md\":\"Container sessions uses the ordinary supervisor connection and errors contract; no acceptance of this false stage found.\",\"SPEC_impl.md\":\"One route for transport and provisioning:5995-6008 requires process diagnostics for local/remote Podman and explicit container-host session-limit explanation. Helm transport:2825-2936 distinguishes marker/hello evidence from exit status; it does not authorize kind-only advancement.\",\"TODO.md Planned\":\"Empty.\",\"plans/queue\":\"No unlanded index entries. Residual Podman plan's session-limit requirement is already landed, not covering planned repair.\",\"BUGS.md\":\"Escaped SSH-helper transfer hang is unrelated.\",\"queue INDEX and files\":\"Targeted WaitingForHello/process-exit/session-limit/master/route searches found no exact existing item.\",\"TRIAGE_OUTCOMES.md\":\"No exact active decision found.\",\"FILTER.md\":\"Rare imprecise-diagnostic filter could cover a narrowly timed capacity-race subset alone. The finding also covers ordinary local/remote pre-helper container process failures with no established rarity premise, so its entire boundary does not match. Retain.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Missing session-limit explanation and other pre-helper exit diagnoses, other. Earlier attribution to production Podman at 04ff was narrowed to 566, where the provider ships. Raw escaped stderr/numeric status survive, provisioning's separate classifier is unaffected, and this is not a general connectivity or security finding.\"; \"Actual incidence is unmeasured. The nested capacity scenario specifically needs successful Running status and route resolution followed by an independently failed dial; a master full already at status may refuse earlier. Concurrent slot use can produce the later failure, and local Podman has no SSH-capacity premise. No stronger security or lost-work consequence established.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-035",
+          "key": "g056/f1",
+          "latest_line": 14,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "podman-dial-kind-advances-before-process-marker",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Container dials have process diagnostics but are advanced to WaitingForHello from the host-kind predicate, disabling their pre-helper exit classifier. This removes intended explanation from an independently failing dial; it does not cause connectivity failure or erase all evidence.",
+          "checks": [
+            "56659839785691f76da3af5d8f51b511cff4ba8b lib.rs:2465-2488 installs the real provider/store-backed transport; manager.rs:4175-4223 admits provisioned environments observed Running and reaches dial. Earlier 04ff production reachability was correctly withdrawn.",
+            "5665983 store.rs:896-901 returns None for Podman ssh_access. manager.rs:4251-4289 retains process diagnostics but advances at :4268-4269 before the marker. :4335-4345 settles the process and forwards the progress to attempt_failure.",
+            "5665983 manager.rs:5372-5402 gates LocalPodman and NestedSsh diagnoses on ConnectingToHost; :5443-5482 still preserves bounded stderr/refusal evidence and numeric status. attempt_failure:5501-5521 passes progress.stage unchanged. Current marker, successful hello, protocol and version-skew precedence remain outside the finding.",
+            "1038bb1f4549f6896fa6e064fecf540f4548b4da transport.rs:190-233 creates process connections for every RemoteRoute. 5665983 access.rs:302-327 selects the place supervisor master and podman_probe.rs:338-362 returns route/probe values without reserving an SSH session across status and dial.",
+            "Endpoint 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db manager.rs:4477-4478 and :5621-5642 retains the defect. No reproduction or runtime observation."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "Container sessions uses the ordinary supervisor connection and errors contract; no acceptance of this false stage found.",
+            "SPEC_impl.md": "One route for transport and provisioning:5995-6008 requires process diagnostics for local/remote Podman and explicit container-host session-limit explanation. Helm transport:2825-2936 distinguishes marker/hello evidence from exit status; it does not authorize kind-only advancement.",
+            "TODO.md Planned": "Empty.",
+            "plans/queue": "No unlanded index entries. Residual Podman plan's session-limit requirement is already landed, not covering planned repair.",
+            "BUGS.md": "Escaped SSH-helper transfer hang is unrelated.",
+            "queue INDEX and files": "Targeted WaitingForHello/process-exit/session-limit/master/route searches found no exact existing item.",
+            "TRIAGE_OUTCOMES.md": "No exact active decision found.",
+            "FILTER.md": "Rare imprecise-diagnostic filter could cover a narrowly timed capacity-race subset alone. The finding also covers ordinary local/remote pre-helper container process failures with no established rarity premise, so its entire boundary does not match. Retain."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "Actual incidence is unmeasured. The nested capacity scenario specifically needs successful Running status and route resolution followed by an independently failed dial; a master full already at status may refuse earlier. Concurrent slot use can produce the later failure, and local Podman has no SSH-capacity premise. No stronger security or lost-work consequence established.",
+          "original_stronger_consequence": "Missing session-limit explanation and other pre-helper exit diagnoses, other. Earlier attribution to production Podman at 04ff was narrowed to 566, where the provider ships. Raw escaped stderr/numeric status survive, provisioning's separate classifier is unaffected, and this is not a general connectivity or security finding.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Record verified diagnostic-stage defect in other; preserve reachability correction, capacity timing caveat, marker/hello precedence and retained raw evidence. Do not filter the whole record using only one rare subset."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "podman-dial-kind-advances-before-process-marker",
+        "destination": "trailing-podman-dial-kind-advances-before-process-marker.md"
+      }
+    },
+    {
+      "key": "g056/c3",
+      "owner": "g056",
+      "id": "c3",
+      "domain": "environment-execution-routing",
+      "purpose": "environment-execution-routing: crates/farhelm-helm/src/transport.rs, crates/farhelm-helm/src/provisioning/backend.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Typed session-limit exception preserves credential redaction",
+            "location": "crates/farhelm-helm/src/provisioning/backend.rs:307",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: considered whether the new session-limit exception lets a failed credential read or write expose arbitrary remote diagnostics containing tokens. Source refutation: BackendFailure::session_limit constructs context solely from SessionLimitRefusal and keeps raw peer diagnostics in a separate stderr field (backend.rs:297-304); redacted clears stderr before returning a typed failure, while redacted_reason returns only context (307-324). SessionLimitRefusal's private inner String is constructed by at(destination) from the bounded locally configured place destination (transport.rs:435-440), and nested_session_failure uses peer text only as a boolean mux-refusal selector, never as the public diagnosis (448-463). Ordinary BackendFailure::new clears the trusted marker. A source search found no assignment mutating BackendFailure.context and no external BackendFailure struct literal; combining cleanup failures reconstructs with new and therefore loses the marker (backend.rs:1484-1493). Credential-delivery callers use redacted_reason at their warning boundaries; sensitive host-home and settings readers use redacted. Contract: SPEC_impl.md, Named credential catalog requires per-host fixed failure reasons; the exception retains a local fixed diagnosis with only a bounded configured host spelling. Suggested bucket: highest if arbitrary credential-bearing peer stderr could escape; confidence: confirmed source refutation. proposed_drop: true, no peer-controlled diagnostic bytes cross either redaction method. possible_cover: none, coverage sources not consulted. Could-be-highest: yes, this was a credential-disclosure check; source disproves the route. Caveats: a configured SSH destination remains visible as intended and is not treated as a credential. No execution performed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 5,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Typed session-limit exception preserves credential redaction",
+          "location": "crates/farhelm-helm/src/provisioning/backend.rs:307",
+          "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: considered whether the new session-limit exception lets a failed credential read or write expose arbitrary remote diagnostics containing tokens. Source refutation: BackendFailure::session_limit constructs context solely from SessionLimitRefusal and keeps raw peer diagnostics in a separate stderr field (backend.rs:297-304); redacted clears stderr before returning a typed failure, while redacted_reason returns only context (307-324). SessionLimitRefusal's private inner String is constructed by at(destination) from the bounded locally configured place destination (transport.rs:435-440), and nested_session_failure uses peer text only as a boolean mux-refusal selector, never as the public diagnosis (448-463). Ordinary BackendFailure::new clears the trusted marker. A source search found no assignment mutating BackendFailure.context and no external BackendFailure struct literal; combining cleanup failures reconstructs with new and therefore loses the marker (backend.rs:1484-1493). Credential-delivery callers use redacted_reason at their warning boundaries; sensitive host-home and settings readers use redacted. Contract: SPEC_impl.md, Named credential catalog requires per-host fixed failure reasons; the exception retains a local fixed diagnosis with only a bounded configured host spelling. Suggested bucket: highest if arbitrary credential-bearing peer stderr could escape; confidence: confirmed source refutation. proposed_drop: true, no peer-controlled diagnostic bytes cross either redaction method. possible_cover: none, coverage sources not consulted. Could-be-highest: yes, this was a credential-disclosure check; source disproves the route. Caveats: a configured SSH destination remains visible as intended and is not treated as a credential. No execution performed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g056/findings.jsonl",
+        "id": "c3",
+        "line": 5,
+        "disposition": "under-investigation",
+        "group": "g056-c3",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-036",
+          "key": "g056/c3",
+          "latest_line": 5,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "backend-session-limit-redaction-peer-diagnostic-exposure",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The typed exception preserves locally constructed context, not remote diagnostic text. This refutes the named credential-disclosure route, subject to the independent drop check.",
+          "checks": [
+            "At 56659839785691f76da3af5d8f51b511cff4ba8b, provisioning/backend.rs:287-324: new clears safe_refusal; session_limit builds context from the typed reason; redacted clears stderr; redacted_reason selects context only for that type.",
+            "At the same revision, transport.rs:423-460: SessionLimitRefusal has a private string; at constructs it from a 128-character configured-destination excerpt. Peer stderr only selects the refusal branch, with nested SSH route and exit 255 required.",
+            "Pinned git grep found no external BackendFailure struct literal or context assignment. backend.rs:1484-1489 reconstructs combined failures through new, removing the exception rather than granting it to combined stderr.",
+            "credential_delivery.rs:600-608,642-652 uses redacted_reason at warning boundaries. These are source conclusions; no runtime disclosure test was run."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:4901-4930 keeps remote-host text untrusted and explicitly preserves existing redaction requirements. SPEC_impl.md, Named credential catalog, requires fixed per-host failure reasons; One route for transport and provisioning requires a useful SSH-capacity diagnosis. Neither accepts disclosure.",
+            "TODO.md Planned is empty; plans/queue/INDEX.md contains no unlanded plans. The matching podman-environments plan is already landed (plans/REPORTS.md:21), not future coverage.",
+            "BUGS.md's escaped local SSH-helper transfer hang is a different trigger and consequence. Searches of INDEX.md, matching queue text and active TRIAGE_OUTCOMES.md found no exact typed-redaction exposure item. No archive read.",
+            "FILTER.md does not permit security consequences; the proposed disposition rests on source refutation, not a filter."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No source path has been established that changes a typed failure's context to arbitrary peer text while keeping its trusted marker. Configured destination display is intentional and is not itself a credential-disclosure premise.",
+          "original_stronger_consequence": "A failed credential read/write could expose arbitrary token-bearing remote diagnostics; original possible bucket highest and proposed_drop=true are preserved for independent judgment.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Source refutation limited to the named typed-redaction route; it is not a global assertion that every diagnostic in Farhelm is credential-safe."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-036.json",
+          "key": "g056/c3",
+          "proposal": "claim-checks/claims-036/result.json",
+          "parent_proposal": "source-refuted-typed-capacity-diagnosis-peer-secret-exposure",
+          "final_independent_gate": "required-before-highest-security-drop",
+          "reason": "Parent read full036. Private typed refusal is constructed from a bounded configured destination; nested-SSH exit255 peer bytes only select its fixed diagnosis. Ordinary constructors clear the marker, combined errors reconstruct through the ordinary constructor, and redacted typed failures clear stderr. No context assignment or external struct literal retains trusted status with arbitrary peer text. Refute the named credential warning route only, not every diagnostic sink; preserve secret-bearing read/write failure concern for the fresh check."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "backend-session-limit-redaction-peer-diagnostic-exposure",
+        "destination": null
+      }
+    },
+    {
+      "key": "g056/f2",
+      "owner": "g056",
+      "id": "f2",
+      "domain": "environment-execution-routing",
+      "purpose": "environment-execution-routing: crates/farhelm-helm/src/transport.rs, crates/farhelm-helm/src/provisioning/backend.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "f2",
+            "state": "open",
+            "summary": "Cleanup may erase the typed refusal before credential warning redaction",
+            "location": "crates/farhelm-helm/src/provisioning/backend.rs:1333",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: credential or proxy installation may still lose the container host's session-limit explanation when its required cleanup command fails under the same SSH capacity condition. Source basis: run_shell and remote_put classify mux refusal plus SSH exit 255 into a trusted BackendFailure. The atomic install cleanup branch reconstructs BackendFailure::new when removal of the temporary also fails, which clears safe_refusal; later redacted_reason returns the fixed generic fallback. Suspected route: credential-delivery install_bytes -> install_bytes_checked -> install_source -> upload session refusal -> remove_owned_file session refusal -> new combined failure -> warning redaction. Suggested bucket: other (diagnostic correctness); confidence: unresolved lead pending confirming exact dispatched methods and line numbers. proposed_drop: false; possible_cover: none. Could-be-highest: no established security or loss-of-work consequence; the marker is discarded, so this issue does not disclose credentials. Next: verify actual install_bytes_checked implementation and credential/proxy callers, then determine whether the cleanup branch preserves a typed failure elsewhere. No execution performed."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f2",
+            "state": "open",
+            "summary": "Failed install cleanup discards the safe session-limit diagnosis",
+            "location": "crates/farhelm-helm/src/provisioning/backend.rs:1334",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: when installing a credential or the container's proxy settings fails because the container host's SSH session limit is exhausted, the cleanup attempt can erase that explanation and leave only 'could not install' in the user-visible warning. Source route: ProvisioningBackend::install_bytes delegates to install_bytes_checked (backend.rs:464-473); SystemBackend::install_bytes_checked calls install_source (2889-2918). Its remote branch uploads through remote_put, then runs the finishing command. Both remote_put and run_shell now classify a nested mux refusal with exit 255 as BackendFailure::session_limit (1571-1575, 940-949), whose safe_refusal is intended to survive sensitive-error redaction (297-324). On either failure install_source always tries remove_owned_file. That uses another require_shell remote command (1119-1142). If the same full SSH master and failed noninteractive fallback refuse that command too, install_source constructs BackendFailure::new from primary and cleanup strings (1332-1339), resetting safe_refusal to None (287-292). Credential-delivery callers subsequently call redacted_reason, e.g. credential_delivery.rs:605-608 and 649-652, so both locally constructed session-limit diagnoses are discarded in favor of the generic credential-install warning. Proxy inheritance has the same route (environment/podman.rs:612-617). Contract: SPEC_impl.md, One route for transport and provisioning, says 'When the fallback login fails, launch refusal or connection unavailability names the container host’s SSH session limit.' The new redacted_reason contract explicitly promises to preserve a locally typed session-limit diagnosis for credential and proxy warnings (backend.rs:315-318), but the intervening cleanup defeats it. Suggested fix: preserve the trusted primary session-limit identity while combining cleanup failures, without trusting combined peer stderr; keep the redaction behavior. Add coverage exercising an actual install_bytes failure and a failed cleanup, rather than only require_shell/upload/probe/home/settings reads. Suggested bucket: other (diagnostic correctness). Confidence: confirmed by source and contracts; no execution performed. proposed_drop: false. possible_cover: none, coverage sources not consulted. Caveats: if cleanup succeeds the primary typed failure survives; directory setup may also fail first and correctly report the session limit. This finding concerns a failure arising after that earlier step. Could-be-highest: no established security or loss-of-work impact; the behavior over-redacts rather than disclosing credentials."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f2",
+            "state": "open",
+            "summary": "Failed install cleanup discards the safe session-limit diagnosis",
+            "location": "crates/farhelm-helm/src/provisioning/backend.rs:1334",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: when installing a credential or the container's proxy settings fails because the container host's SSH session limit is exhausted, the cleanup attempt can erase that explanation and leave only 'could not install' in the user-visible warning. Source route: ProvisioningBackend::install_bytes delegates to install_bytes_checked (backend.rs:464-473); SystemBackend::install_bytes_checked calls install_source (2889-2918). Its remote branch uploads through remote_put, then runs the finishing command. Both remote_put and run_shell now classify a nested mux refusal with exit 255 as BackendFailure::session_limit (1571-1575, 940-949), whose safe_refusal is intended to survive sensitive-error redaction (297-324). On either failure install_source always tries remove_owned_file. That uses another require_shell remote command (1119-1142). If the same full SSH master and failed noninteractive fallback refuse that command too, install_source constructs BackendFailure::new from primary and cleanup strings (1332-1339), resetting safe_refusal to None (287-292). Credential-delivery callers subsequently call redacted_reason, e.g. credential_delivery.rs:605-608 and 649-652, so both locally constructed session-limit diagnoses are discarded in favor of the generic credential-install warning. Proxy inheritance has the same route (environment/podman.rs:612-617). Contract: SPEC_impl.md, One route for transport and provisioning, says 'When the fallback login fails, launch refusal or connection unavailability names the container host's SSH session limit.' The new redacted_reason contract explicitly promises to preserve a locally typed session-limit diagnosis for credential and proxy warnings (backend.rs:315-318), but the intervening cleanup defeats it. Suggested fix: preserve the trusted primary session-limit identity while combining cleanup failures, without trusting combined peer stderr; keep the redaction behavior. Add coverage exercising an actual install_bytes failure and a failed cleanup, rather than only require_shell/upload/probe/home/settings reads. Suggested bucket: other (diagnostic correctness). Confidence: confirmed by source and contracts; no execution performed. proposed_drop: false. possible_cover: none, coverage sources not consulted. Caveats: if cleanup succeeds the primary typed failure survives; directory setup may also fail first and correctly report the session limit. This finding concerns a failure arising after that earlier step. Could-be-highest: no established security or loss-of-work impact; the behavior over-redacts rather than disclosing credentials. Additional endpoint source check: at 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, install_source still reconstructs the combined cleanup error through BackendFailure::new (backend.rs:1327-1334), and redacted_reason still selects only by safe_refusal (307-313). Source review of capture_child confirms that run_shell receives an ordinary completed exit and captured stderr before the new classification (1979-2020); no execution was needed for this route."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f2",
+            "state": "open",
+            "summary": "Failed install cleanup discards the safe session-limit diagnosis",
+            "location": "crates/farhelm-helm/src/provisioning/backend.rs:1334",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: when installing a credential or the container's proxy settings fails because the container host's SSH session limit is exhausted, the cleanup attempt can erase that explanation and leave only 'could not install' in the user-visible warning. Source route: ProvisioningBackend::install_bytes delegates to install_bytes_checked (backend.rs:464-473); SystemBackend::install_bytes_checked calls install_source (2889-2918). Its remote branch uploads through remote_put, then runs the finishing command. Both remote_put and run_shell now classify a nested mux refusal with exit 255 as BackendFailure::session_limit (1571-1575, 940-949), whose safe_refusal is intended to survive sensitive-error redaction (297-324). On either failure install_source always tries remove_owned_file. That uses another require_shell remote command (1119-1142). If the same full SSH master and failed noninteractive fallback refuse that command too, install_source constructs BackendFailure::new from primary and cleanup strings (1332-1339), resetting safe_refusal to None (287-292). Credential-delivery callers subsequently call redacted_reason, e.g. credential_delivery.rs:605-608 and 649-652, so both locally constructed session-limit diagnoses are discarded in favor of the generic credential-install warning. Proxy inheritance has the same route (environment/podman.rs:612-617). Contract: SPEC_impl.md, One route for transport and provisioning, says 'When the fallback login fails, launch refusal or connection unavailability names the container host's SSH session limit.' The new redacted_reason contract explicitly promises to preserve a locally typed session-limit diagnosis for credential and proxy warnings (backend.rs:315-318), but the intervening cleanup defeats it. Suggested fix: preserve the trusted primary session-limit identity while combining cleanup failures, without trusting combined peer stderr; keep the redaction behavior. Add coverage exercising an actual install_bytes failure and a failed cleanup, rather than only require_shell/upload/probe/home/settings reads. Suggested bucket: other (diagnostic correctness). Confidence: confirmed by source and contracts; no execution performed. proposed_drop: false. possible_cover: none, coverage sources not consulted. Caveats: if cleanup succeeds the primary typed failure survives; directory setup may also fail first and correctly report the session limit. This finding concerns a failure arising after that earlier step. Could-be-highest: no established security or loss-of-work impact; the behavior over-redacts rather than disclosing credentials. Additional endpoint source check: at 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, install_source still reconstructs the combined cleanup error through BackendFailure::new (backend.rs:1327-1334), and redacted_reason still selects only by safe_refusal (307-313). Source review of capture_child confirms that run_shell receives an ordinary completed exit and captured stderr before the new classification (1979-2020); no execution was needed for this route. Synthesis revision, turn 2: narrowed the trigger to an accepted installation that reaches its actual write phase. install_source first sweeps old temporaries, reads destination metadata when expected is None, may repair/skip identical content, and removes this run temporary before entering the guarded install block (backend.rs:1166-1188). A typed refusal from those earlier calls returns directly and can retain the intended safe warning; this finding does not claim otherwise. A credential value replacement with different content, or a creation-time proxy file needing installation, proceeds to remote_put. That upload can be the first failing phase, or upload can succeed and the separate finishing checksum/guard/chmod/rename shell can be the first failing phase. Either failure is inside the guarded block and triggers a fresh remove_owned_file request. If capacity is consumed after the successful preflight and remains full for cleanup, both requests can fail with the typed refusal; the reconstruction at 1331-1336 loses it. Real credential callers include the Codex login and GitHub token install paths (credential_delivery.rs:580-608 and 630-652). The real proxy call runs only on first setup before admission, after user-manager readiness, config discovery and directory setup; already admitted containers do not reinstall proxies on create recovery (environment/podman.rs:1186-1233; proxies:560-617). Thus this does not require proxy edits to an admitted container or a static session-limit failure that would necessarily have stopped earlier. The required remedy is preservation of the local typed refusal identity or rebuilding context from that type; preserving raw or combined peer stderr in a credential/proxy warning is not safe and is not suggested. This over-redaction concern coexists with the parent-supplied g043/c1 and g044/c2 source conclusions refuting sensitive-diagnostic exposure. Original consequence, other bucket, confidence and proposed_drop=false remain unchanged; no runtime execution."
+          }
+        },
+        {
+          "line": 15,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f2",
+            "state": "open",
+            "summary": "Failed install cleanup discards the safe session-limit diagnosis",
+            "location": "crates/farhelm-helm/src/provisioning/backend.rs:1334",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: when installing a credential or the container's proxy settings fails because the container host's SSH session limit is exhausted, the cleanup attempt can erase that explanation and leave only 'could not install' in the user-visible warning. Source route: ProvisioningBackend::install_bytes delegates to install_bytes_checked (backend.rs:464-473); SystemBackend::install_bytes_checked calls install_source (2889-2918). Its remote branch uploads through remote_put, then runs the finishing command. Both remote_put and run_shell now classify a nested mux refusal with exit 255 as BackendFailure::session_limit (1571-1575, 940-949), whose safe_refusal is intended to survive sensitive-error redaction (297-324). On either failure install_source always tries remove_owned_file. That uses another require_shell remote command (1119-1142). If the same full SSH master and failed noninteractive fallback refuse that command too, install_source constructs BackendFailure::new from primary and cleanup strings (1332-1339), resetting safe_refusal to None (287-292). Credential-delivery callers subsequently call redacted_reason, e.g. credential_delivery.rs:605-608 and 649-652, so both locally constructed session-limit diagnoses are discarded in favor of the generic credential-install warning. Proxy inheritance has the same route (environment/podman.rs:612-617). Contract: SPEC_impl.md, One route for transport and provisioning, says 'When the fallback login fails, launch refusal or connection unavailability names the container host's SSH session limit.' The new redacted_reason contract explicitly promises to preserve a locally typed session-limit diagnosis for credential and proxy warnings (backend.rs:315-318), but the intervening cleanup defeats it. Suggested fix: preserve the trusted primary session-limit identity while combining cleanup failures, without trusting combined peer stderr; keep the redaction behavior. Add coverage exercising an actual install_bytes failure and a failed cleanup, rather than only require_shell/upload/probe/home/settings reads. Suggested bucket: other (diagnostic correctness). Confidence: confirmed by source and contracts; no execution performed. proposed_drop: false. possible_cover: none, coverage sources not consulted. Caveats: if cleanup succeeds the primary typed failure survives; directory setup may also fail first and correctly report the session limit. This finding concerns a failure arising after that earlier step. Could-be-highest: no established security or loss-of-work impact; the behavior over-redacts rather than disclosing credentials. Additional endpoint source check: at 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, install_source still reconstructs the combined cleanup error through BackendFailure::new (backend.rs:1327-1334), and redacted_reason still selects only by safe_refusal (307-313). Source review of capture_child confirms that run_shell receives an ordinary completed exit and captured stderr before the new classification (1979-2020); no execution was needed for this route. Synthesis revision, turn 2: narrowed the trigger to an accepted installation that reaches its actual write phase. install_source first sweeps old temporaries, reads destination metadata when expected is None, may repair/skip identical content, and removes this run temporary before entering the guarded install block (backend.rs:1166-1188). A typed refusal from those earlier calls returns directly and can retain the intended safe warning; this finding does not claim otherwise. A credential value replacement with different content, or a creation-time proxy file needing installation, proceeds to remote_put. That upload can be the first failing phase, or upload can succeed and the separate finishing checksum/guard/chmod/rename shell can be the first failing phase. Either failure is inside the guarded block and triggers a fresh remove_owned_file request. If capacity is consumed after the successful preflight and remains full for cleanup, both requests can fail with the typed refusal; the reconstruction at 1331-1336 loses it. Real credential callers include the Codex login and GitHub token install paths (credential_delivery.rs:580-608 and 630-652). The real proxy call runs only on first setup before admission, after user-manager readiness, config discovery and directory setup; already admitted containers do not reinstall proxies on create recovery (environment/podman.rs:1186-1233; proxies:560-617). Thus this does not require proxy edits to an admitted container or a static session-limit failure that would necessarily have stopped earlier. The required remedy is preservation of the local typed refusal identity or rebuilding context from that type; preserving raw or combined peer stderr in a credential/proxy warning is not safe and is not suggested. This over-redaction concern coexists with the parent-supplied g043/c1 and g044/c2 source conclusions refuting sensitive-diagnostic exposure. Original consequence, other bucket, confidence and proposed_drop=false remain unchanged; no runtime execution. Additional synthesis checks: the successful install preflight does not reserve a later SSH channel. Sibling connection actors execute in separate Tokio tasks (566 manager.rs:2023-2031); every nested upload, finishing and cleanup command independently selects the same Supervisor master (access.rs:301-336), and the cached place-runtime return carries no channel lease (podman_probe.rs:338-362). Source therefore permits capacity to become exhausted between successful directory/metadata/predelete calls and upload or finishing, and remain exhausted for the cleanup request. The exact frequency and OpenSSH scheduling were not measured or reproduced; the conclusion is the deterministic handling of that accepted transport-failure sequence, whose mux-refusal/fallback premise is an explicit specification contract. At endpoint 00de this turn reconfirmed new clears safe_refusal and redacted_reason chooses the fallback (backend.rs:275-313), while install_source reconstructs the failed cleanup through new (1327-1333). No raw-peer-diagnostic exception is needed to fix it. No new unresolved source premise or lead remains."
+          }
+        }
+      ],
+      "latest": {
+        "line": 15,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "f2",
+          "state": "open",
+          "summary": "Failed install cleanup discards the safe session-limit diagnosis",
+          "location": "crates/farhelm-helm/src/provisioning/backend.rs:1334",
+          "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: when installing a credential or the container's proxy settings fails because the container host's SSH session limit is exhausted, the cleanup attempt can erase that explanation and leave only 'could not install' in the user-visible warning. Source route: ProvisioningBackend::install_bytes delegates to install_bytes_checked (backend.rs:464-473); SystemBackend::install_bytes_checked calls install_source (2889-2918). Its remote branch uploads through remote_put, then runs the finishing command. Both remote_put and run_shell now classify a nested mux refusal with exit 255 as BackendFailure::session_limit (1571-1575, 940-949), whose safe_refusal is intended to survive sensitive-error redaction (297-324). On either failure install_source always tries remove_owned_file. That uses another require_shell remote command (1119-1142). If the same full SSH master and failed noninteractive fallback refuse that command too, install_source constructs BackendFailure::new from primary and cleanup strings (1332-1339), resetting safe_refusal to None (287-292). Credential-delivery callers subsequently call redacted_reason, e.g. credential_delivery.rs:605-608 and 649-652, so both locally constructed session-limit diagnoses are discarded in favor of the generic credential-install warning. Proxy inheritance has the same route (environment/podman.rs:612-617). Contract: SPEC_impl.md, One route for transport and provisioning, says 'When the fallback login fails, launch refusal or connection unavailability names the container host's SSH session limit.' The new redacted_reason contract explicitly promises to preserve a locally typed session-limit diagnosis for credential and proxy warnings (backend.rs:315-318), but the intervening cleanup defeats it. Suggested fix: preserve the trusted primary session-limit identity while combining cleanup failures, without trusting combined peer stderr; keep the redaction behavior. Add coverage exercising an actual install_bytes failure and a failed cleanup, rather than only require_shell/upload/probe/home/settings reads. Suggested bucket: other (diagnostic correctness). Confidence: confirmed by source and contracts; no execution performed. proposed_drop: false. possible_cover: none, coverage sources not consulted. Caveats: if cleanup succeeds the primary typed failure survives; directory setup may also fail first and correctly report the session limit. This finding concerns a failure arising after that earlier step. Could-be-highest: no established security or loss-of-work impact; the behavior over-redacts rather than disclosing credentials. Additional endpoint source check: at 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, install_source still reconstructs the combined cleanup error through BackendFailure::new (backend.rs:1327-1334), and redacted_reason still selects only by safe_refusal (307-313). Source review of capture_child confirms that run_shell receives an ordinary completed exit and captured stderr before the new classification (1979-2020); no execution was needed for this route. Synthesis revision, turn 2: narrowed the trigger to an accepted installation that reaches its actual write phase. install_source first sweeps old temporaries, reads destination metadata when expected is None, may repair/skip identical content, and removes this run temporary before entering the guarded install block (backend.rs:1166-1188). A typed refusal from those earlier calls returns directly and can retain the intended safe warning; this finding does not claim otherwise. A credential value replacement with different content, or a creation-time proxy file needing installation, proceeds to remote_put. That upload can be the first failing phase, or upload can succeed and the separate finishing checksum/guard/chmod/rename shell can be the first failing phase. Either failure is inside the guarded block and triggers a fresh remove_owned_file request. If capacity is consumed after the successful preflight and remains full for cleanup, both requests can fail with the typed refusal; the reconstruction at 1331-1336 loses it. Real credential callers include the Codex login and GitHub token install paths (credential_delivery.rs:580-608 and 630-652). The real proxy call runs only on first setup before admission, after user-manager readiness, config discovery and directory setup; already admitted containers do not reinstall proxies on create recovery (environment/podman.rs:1186-1233; proxies:560-617). Thus this does not require proxy edits to an admitted container or a static session-limit failure that would necessarily have stopped earlier. The required remedy is preservation of the local typed refusal identity or rebuilding context from that type; preserving raw or combined peer stderr in a credential/proxy warning is not safe and is not suggested. This over-redaction concern coexists with the parent-supplied g043/c1 and g044/c2 source conclusions refuting sensitive-diagnostic exposure. Original consequence, other bucket, confidence and proposed_drop=false remain unchanged; no runtime execution. Additional synthesis checks: the successful install preflight does not reserve a later SSH channel. Sibling connection actors execute in separate Tokio tasks (566 manager.rs:2023-2031); every nested upload, finishing and cleanup command independently selects the same Supervisor master (access.rs:301-336), and the cached place-runtime return carries no channel lease (podman_probe.rs:338-362). Source therefore permits capacity to become exhausted between successful directory/metadata/predelete calls and upload or finishing, and remain exhausted for the cleanup request. The exact frequency and OpenSSH scheduling were not measured or reproduced; the conclusion is the deterministic handling of that accepted transport-failure sequence, whose mux-refusal/fallback premise is an explicit specification contract. At endpoint 00de this turn reconfirmed new clears safe_refusal and redacted_reason chooses the fallback (backend.rs:275-313), while install_source reconstructs the failed cleanup through new (1327-1333). No raw-peer-diagnostic exception is needed to fix it. No new unresolved source premise or lead remains."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g056/findings.jsonl",
+        "id": "f2",
+        "line": 15,
+        "disposition": "verified",
+        "group": "atomic-install-failed-cleanup-clears-safe-session-limit-refusal",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-036 after inspecting it. A failed cleanup deterministically discards the trusted session-limit identity, so credential/proxy warning redaction loses the required useful diagnosis. The accepted failure sequence is conditional source analysis, not an observed failure or measured frequency. Retain the narrowly established warning defect. Preserve the original requirement to keep remote stderr redacted and rebuild only from a trusted local refusal identity. Checked source/results: [\"At 56659839785691f76da3af5d8f51b511cff4ba8b, provisioning/backend.rs:464-473 and 2889-2918 dispatch install_bytes through install_source. The remote guarded block uploads at 1264-1267 and finishes at 1302-1328.\",\"backend.rs:1166-1187 performs temporary sweep, metadata/possible identical-content skip, and initial temporary removal before that block. A refusal there returns directly; the finding requires reaching upload or finishing after successful earlier commands.\",\"backend.rs:940-947 and 1571-1575 classify nested SSH refusal into a typed failure. At 1331-1338 another remove_owned_file request follows failure; its failure rebuilds through new, which sets safe_refusal=None at 287-292. redacted_reason:319-324 therefore returns the generic fallback.\",\"Real warning boundaries: credential_delivery.rs:580-608,630-652 for Codex login/GitHub token, and environment/podman.rs:612-617 for proxy settings. podman.rs:1185-1233 confines the proxy install to pre-admission setup; admitted-container recovery does not reinstall it.\",\"access.rs:302-324 sends independent nested commands over the place's Supervisor master. Successful earlier commands do not reserve later command capacity. Capacity becoming exhausted before upload/finishing and remaining exhausted for cleanup is compatible with the source; scheduling/frequency were not measured.\",\"At inclusive review tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, backend.rs:275-313 and 1327-1334 retain the same marker loss and generic fallback. No raw-peer-diagnostic exception is needed to repair this.\"] Current coverage/results: [\"Current SPEC_impl.md:5983-6008, One route for transport and provisioning, requires the SSH-session-limit diagnosis. Named credential catalog:5915-5919 requires fixed per-host reasons, which does not accept losing a safe local diagnosis. SPEC.md's redaction/security rules remain compatible with retaining that local diagnosis.\",\"TODO.md Planned is empty. plans/queue/INDEX.md has no unlanded plans; podman-environments is already landed per REPORTS.md:21. Its session-limit requirement is the implemented contract, not an outstanding repair plan.\",\"BUGS.md concerns an unbounded transfer read with escaped local helpers, not completed failed commands followed by warning over-redaction. INDEX.md and matching queue searches found no same-root item; active TRIAGE_OUTCOMES.md has no session-limit cleanup-redaction decision. No archive read.\",\"FILTER.md, Rare, self-correcting glitches and imprecise diagnostics, covers the diagnostic consequence only if the trigger is rare. Capacity changing between separate SSH commands is established, but this source-only record does not establish a rare sub-second or otherwise narrow window. Retain rather than infer the entire filter boundary from lack of reproduction.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"All history events keep diagnostic correctness in other. No disclosure or loss of work was alleged; the code over-redacts. Earlier broad wording was narrowed to failures arising after successful preflight, preserving the successful-cleanup and earlier-refusal caveats.\"; \"No missing premise for the conditional marker-loss result. Real-world frequency and the actual OpenSSH scheduling sequence remain unmeasured; that limits a rarity-based filter proposal, not the source conclusion.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g056/f2",
+        "line": 15,
+        "disposition": "verified",
+        "group": "atomic-install-failed-cleanup-clears-safe-session-limit-refusal",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-036 after inspecting it. A failed cleanup deterministically discards the trusted session-limit identity, so credential/proxy warning redaction loses the required useful diagnosis. The accepted failure sequence is conditional source analysis, not an observed failure or measured frequency. Retain the narrowly established warning defect. Preserve the original requirement to keep remote stderr redacted and rebuild only from a trusted local refusal identity. Checked source/results: [\"At 56659839785691f76da3af5d8f51b511cff4ba8b, provisioning/backend.rs:464-473 and 2889-2918 dispatch install_bytes through install_source. The remote guarded block uploads at 1264-1267 and finishes at 1302-1328.\",\"backend.rs:1166-1187 performs temporary sweep, metadata/possible identical-content skip, and initial temporary removal before that block. A refusal there returns directly; the finding requires reaching upload or finishing after successful earlier commands.\",\"backend.rs:940-947 and 1571-1575 classify nested SSH refusal into a typed failure. At 1331-1338 another remove_owned_file request follows failure; its failure rebuilds through new, which sets safe_refusal=None at 287-292. redacted_reason:319-324 therefore returns the generic fallback.\",\"Real warning boundaries: credential_delivery.rs:580-608,630-652 for Codex login/GitHub token, and environment/podman.rs:612-617 for proxy settings. podman.rs:1185-1233 confines the proxy install to pre-admission setup; admitted-container recovery does not reinstall it.\",\"access.rs:302-324 sends independent nested commands over the place's Supervisor master. Successful earlier commands do not reserve later command capacity. Capacity becoming exhausted before upload/finishing and remaining exhausted for cleanup is compatible with the source; scheduling/frequency were not measured.\",\"At inclusive review tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, backend.rs:275-313 and 1327-1334 retain the same marker loss and generic fallback. No raw-peer-diagnostic exception is needed to repair this.\"] Current coverage/results: [\"Current SPEC_impl.md:5983-6008, One route for transport and provisioning, requires the SSH-session-limit diagnosis. Named credential catalog:5915-5919 requires fixed per-host reasons, which does not accept losing a safe local diagnosis. SPEC.md's redaction/security rules remain compatible with retaining that local diagnosis.\",\"TODO.md Planned is empty. plans/queue/INDEX.md has no unlanded plans; podman-environments is already landed per REPORTS.md:21. Its session-limit requirement is the implemented contract, not an outstanding repair plan.\",\"BUGS.md concerns an unbounded transfer read with escaped local helpers, not completed failed commands followed by warning over-redaction. INDEX.md and matching queue searches found no same-root item; active TRIAGE_OUTCOMES.md has no session-limit cleanup-redaction decision. No archive read.\",\"FILTER.md, Rare, self-correcting glitches and imprecise diagnostics, covers the diagnostic consequence only if the trigger is rare. Capacity changing between separate SSH commands is established, but this source-only record does not establish a rare sub-second or otherwise narrow window. Retain rather than infer the entire filter boundary from lack of reproduction.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"All history events keep diagnostic correctness in other. No disclosure or loss of work was alleged; the code over-redacts. Earlier broad wording was narrowed to failures arising after successful preflight, preserving the successful-cleanup and earlier-refusal caveats.\"; \"No missing premise for the conditional marker-loss result. Real-world frequency and the actual OpenSSH scheduling sequence remain unmeasured; that limits a rarity-based filter proposal, not the source conclusion.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-036",
+          "key": "g056/f2",
+          "latest_line": 15,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "atomic-install-failed-cleanup-clears-safe-session-limit-refusal",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "A failed cleanup deterministically discards the trusted session-limit identity, so credential/proxy warning redaction loses the required useful diagnosis. The accepted failure sequence is conditional source analysis, not an observed failure or measured frequency.",
+          "checks": [
+            "At 56659839785691f76da3af5d8f51b511cff4ba8b, provisioning/backend.rs:464-473 and 2889-2918 dispatch install_bytes through install_source. The remote guarded block uploads at 1264-1267 and finishes at 1302-1328.",
+            "backend.rs:1166-1187 performs temporary sweep, metadata/possible identical-content skip, and initial temporary removal before that block. A refusal there returns directly; the finding requires reaching upload or finishing after successful earlier commands.",
+            "backend.rs:940-947 and 1571-1575 classify nested SSH refusal into a typed failure. At 1331-1338 another remove_owned_file request follows failure; its failure rebuilds through new, which sets safe_refusal=None at 287-292. redacted_reason:319-324 therefore returns the generic fallback.",
+            "Real warning boundaries: credential_delivery.rs:580-608,630-652 for Codex login/GitHub token, and environment/podman.rs:612-617 for proxy settings. podman.rs:1185-1233 confines the proxy install to pre-admission setup; admitted-container recovery does not reinstall it.",
+            "access.rs:302-324 sends independent nested commands over the place's Supervisor master. Successful earlier commands do not reserve later command capacity. Capacity becoming exhausted before upload/finishing and remaining exhausted for cleanup is compatible with the source; scheduling/frequency were not measured.",
+            "At inclusive review tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, backend.rs:275-313 and 1327-1334 retain the same marker loss and generic fallback. No raw-peer-diagnostic exception is needed to repair this."
+          ],
+          "coverage_checked": [
+            "Current SPEC_impl.md:5983-6008, One route for transport and provisioning, requires the SSH-session-limit diagnosis. Named credential catalog:5915-5919 requires fixed per-host reasons, which does not accept losing a safe local diagnosis. SPEC.md's redaction/security rules remain compatible with retaining that local diagnosis.",
+            "TODO.md Planned is empty. plans/queue/INDEX.md has no unlanded plans; podman-environments is already landed per REPORTS.md:21. Its session-limit requirement is the implemented contract, not an outstanding repair plan.",
+            "BUGS.md concerns an unbounded transfer read with escaped local helpers, not completed failed commands followed by warning over-redaction. INDEX.md and matching queue searches found no same-root item; active TRIAGE_OUTCOMES.md has no session-limit cleanup-redaction decision. No archive read.",
+            "FILTER.md, Rare, self-correcting glitches and imprecise diagnostics, covers the diagnostic consequence only if the trigger is rare. Capacity changing between separate SSH commands is established, but this source-only record does not establish a rare sub-second or otherwise narrow window. Retain rather than infer the entire filter boundary from lack of reproduction."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No missing premise for the conditional marker-loss result. Real-world frequency and the actual OpenSSH scheduling sequence remain unmeasured; that limits a rarity-based filter proposal, not the source conclusion.",
+          "original_stronger_consequence": "All history events keep diagnostic correctness in other. No disclosure or loss of work was alleged; the code over-redacts. Earlier broad wording was narrowed to failures arising after successful preflight, preserving the successful-cleanup and earlier-refusal caveats.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain the narrowly established warning defect. Preserve the original requirement to keep remote stderr redacted and rebuild only from a trusted local refusal identity."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "atomic-install-failed-cleanup-clears-safe-session-limit-refusal",
+        "destination": "trailing-atomic-install-failed-cleanup-clears-safe-session-limit-refusal.md"
+      }
+    },
+    {
+      "key": "g056/c4",
+      "owner": "g056",
+      "id": "c4",
+      "domain": "environment-execution-routing",
+      "purpose": "environment-execution-routing: crates/farhelm-helm/src/transport.rs, crates/farhelm-helm/src/provisioning/backend.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Shared route retains SSH argument quoting",
+            "location": "crates/farhelm-helm/src/transport.rs:191",
+            "detail": "Reviewed commit: 1038bb1f4549f6896fa6e064fecf540f4548b4da; context also checked at 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: considered whether replacing ssh_stdio_args with the common route constructor lets configured Farhelm/state paths or container login coordinates become shell commands. Source refutation: transport.rs:191-203 passes a Vec<String> through RemoteCommand::Argv, rather than constructing a script from the program spelling. access.rs:113-131 retains the argv/script distinction; ssh_command_args and quote_argv quote every argv word with the existing shell_quote function before OpenSSH's parsing shell (access.rs:251-286). Nested Podman builds literal argv for user, home and container and separately quotes the innermost argv into its explicit sh -c script (access.rs:194-216). The outer SSH wrapper quotes that entire argv again for the additional login-shell layer. At 566 the current absolute Podman path and CLEAN_PLACE_EXEC wrapper remain literal quoted argv, not interpolated script values (access.rs:204-242 and 302-344). Compared parent ssh.rs:446-481: ordinary SSH previously quoted Farhelm/state individually before joining; the new lowering preserves those boundaries. Contract: SPEC_impl.md, One route for transport and provisioning requires quoting once per parsing shell and forbids pasting Podman argv into the configured Farhelm program; reviewed source satisfies this. Suggested bucket: highest if command injection were established; confidence: confirmed source refutation; proposed_drop: true, all dynamic words retain their argument boundaries across each shell layer; possible_cover: none. Could-be-highest: yes, this was a shell-injection check. Caveat: the operator-selected remote program still executes with its ordinary authority; this review does not treat that explicit choice as an injection vulnerability. No execution performed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c4",
+          "state": "open",
+          "summary": "Shared route retains SSH argument quoting",
+          "location": "crates/farhelm-helm/src/transport.rs:191",
+          "detail": "Reviewed commit: 1038bb1f4549f6896fa6e064fecf540f4548b4da; context also checked at 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: considered whether replacing ssh_stdio_args with the common route constructor lets configured Farhelm/state paths or container login coordinates become shell commands. Source refutation: transport.rs:191-203 passes a Vec<String> through RemoteCommand::Argv, rather than constructing a script from the program spelling. access.rs:113-131 retains the argv/script distinction; ssh_command_args and quote_argv quote every argv word with the existing shell_quote function before OpenSSH's parsing shell (access.rs:251-286). Nested Podman builds literal argv for user, home and container and separately quotes the innermost argv into its explicit sh -c script (access.rs:194-216). The outer SSH wrapper quotes that entire argv again for the additional login-shell layer. At 566 the current absolute Podman path and CLEAN_PLACE_EXEC wrapper remain literal quoted argv, not interpolated script values (access.rs:204-242 and 302-344). Compared parent ssh.rs:446-481: ordinary SSH previously quoted Farhelm/state individually before joining; the new lowering preserves those boundaries. Contract: SPEC_impl.md, One route for transport and provisioning requires quoting once per parsing shell and forbids pasting Podman argv into the configured Farhelm program; reviewed source satisfies this. Suggested bucket: highest if command injection were established; confidence: confirmed source refutation; proposed_drop: true, all dynamic words retain their argument boundaries across each shell layer; possible_cover: none. Could-be-highest: yes, this was a shell-injection check. Caveat: the operator-selected remote program still executes with its ordinary authority; this review does not treat that explicit choice as an injection vulnerability. No execution performed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g056/findings.jsonl",
+        "id": "c4",
+        "line": 10,
+        "disposition": "under-investigation",
+        "group": "g056-c4",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-036",
+          "key": "g056/c4",
+          "latest_line": 10,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "remote-route-argv-shell-injection",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Configured executable/state paths and container login coordinates remain argv words across each parsing shell. The named constructor migration does not establish command injection.",
+          "checks": [
+            "At 1038bb1f4549f6896fa6e064fecf540f4548b4da, transport.rs:191-203 sends stdio_argv as RemoteCommand::Argv. access.rs:113-125 preserves argv versus script; 257-287 quotes each argv word before SSH's parsing shell.",
+            "At that revision, access.rs:200-220 supplies container/user/home as separate argv entries and payload.script() quotes the innermost argv. access.rs:230-239 quotes the entire outer Podman invocation separately for SSH.",
+            "At 56659839785691f76da3af5d8f51b511cff4ba8b, access.rs:203-231 uses an absolute Podman path and literal argv; 307-324 wraps the constant CLEAN_PLACE_EXEC script and its arguments through the same outer quoting boundary. farhelm-proto/src/text.rs:82-99 always single-quotes words and escapes embedded quotes.",
+            "No runtime shell experiment was run. Explicit selection of an operator-controlled remote program remains ordinary execution authority, not an injection claim."
+          ],
+          "coverage_checked": [
+            "Current SPEC_impl.md:5983-6008 requires one quote per parsing shell and forbids embedding Podman argv in the Farhelm program spelling; checked source follows it. SPEC.md:4901-4930 retains the remote-host execution/secret boundary.",
+            "TODO.md Planned and plans/queue/INDEX.md are empty; podman-environments is landed, not an unlanded fix. BUGS.md has no argv-injection acceptance.",
+            "INDEX.md and matching queue searches found quoting defects in unrelated maintainer tooling, not this route constructor. Active TRIAGE_OUTCOMES.md has no matching remote-route injection decision. No archive read.",
+            "No FILTER.md rule can omit an established security boundary failure; disposition is source refutation only."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No dynamic word entering unquoted shell syntax in the named route was shown.",
+          "original_stronger_consequence": "Configured paths or container login coordinates could become shell commands; possible highest for command injection, with original proposed_drop=true. Preserve the operator-selected-program caveat.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Refute the specific argv-to-shell injection hypothesis at the reviewed revisions; do not generalize to every shell script or future route implementation."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-036.json",
+          "key": "g056/c4",
+          "proposal": "claim-checks/claims-036/result.json",
+          "parent_proposal": "source-refuted-named-route-argv-shell-injection",
+          "final_independent_gate": "required-before-highest-security-drop",
+          "reason": "Full036 transport supplies Argv, not an interpolated script; each inner word and the whole outer Podman argv are quoted at their distinct parsing shells. Container/user/home stay values and Podman path is absolute; constant clean-exec wrapper forwards positional arguments. Operator selection of a remote program remains ordinary authority, not injection. Narrow constructor-migration refutation, no claim about every future script/route; preserve command execution possibility for the fresh gate."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "remote-route-argv-shell-injection",
+        "destination": null
+      }
+    },
+    {
+      "key": "g056/c5",
+      "owner": "g056",
+      "id": "c5",
+      "domain": "environment-execution-routing",
+      "purpose": "environment-execution-routing: crates/farhelm-helm/src/transport.rs, crates/farhelm-helm/src/provisioning/backend.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 16,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c5",
+            "state": "open",
+            "summary": "Process transport keeps cancellation ownership without a drainer cycle",
+            "location": "crates/farhelm-helm/src/transport.rs:655",
+            "detail": "Reviewed commit: 1038bb1f4549f6896fa6e064fecf540f4548b4da. Discovery pass 1. TLDR: considered whether generalizing SSH connections to Podman child processes leaves a transport child or its stderr drainer alive through a hidden ownership cycle after the connection is cancelled. Source refutation: process_connection (transport.rs:655-692) gives the reader and SshDiagnostics the ProcessLifetime anchors. relay_process_stderr receives only SshObservation, whose fields are bounded state, watch sender and Notify, without a child or lifetime anchor (438-455). Dropping the final lifetime aborts the stderr task and drops the kill_on_drop child (325-335), even if another process holds the stderr pipe. The writer does not create a reverse Arc edge. Compared the complete transport diff from exclusive-range base 6e423e30068b62c6cfa276c6d720ee35bb70387a to this revision: this ownership algorithm is retained with renamed lifetime/channel helpers; the route metadata is assigned synchronously before spawning the drainer. This checks attribution across the range, not just against the selected commit parent. Contract: SPEC_impl.md One route for transport and provisioning assigns byte-stream/stderr/child ownership to the connection, and separately requires the environment helper watchdog because closing a Podman exec client need not end its inner helper. No claim is made that killing the client synchronously kills every remote descendant; the 120-second helper bound is the explicit contract already recorded in c2. Suggested bucket: other for a transport child/drainer leak if established. Could-be-highest: no established user-work loss or security route; the suspected resources are the connection helper and drainer. Confidence: confirmed source refutation, no execution. proposed_drop: true, no lifetime cycle or new cancellation gap found in the assigned transport change. possible_cover: none searched. Original considered consequence is orphan transport resources after cancellation; no runtime occurrence alleged."
+          }
+        }
+      ],
+      "latest": {
+        "line": 16,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c5",
+          "state": "open",
+          "summary": "Process transport keeps cancellation ownership without a drainer cycle",
+          "location": "crates/farhelm-helm/src/transport.rs:655",
+          "detail": "Reviewed commit: 1038bb1f4549f6896fa6e064fecf540f4548b4da. Discovery pass 1. TLDR: considered whether generalizing SSH connections to Podman child processes leaves a transport child or its stderr drainer alive through a hidden ownership cycle after the connection is cancelled. Source refutation: process_connection (transport.rs:655-692) gives the reader and SshDiagnostics the ProcessLifetime anchors. relay_process_stderr receives only SshObservation, whose fields are bounded state, watch sender and Notify, without a child or lifetime anchor (438-455). Dropping the final lifetime aborts the stderr task and drops the kill_on_drop child (325-335), even if another process holds the stderr pipe. The writer does not create a reverse Arc edge. Compared the complete transport diff from exclusive-range base 6e423e30068b62c6cfa276c6d720ee35bb70387a to this revision: this ownership algorithm is retained with renamed lifetime/channel helpers; the route metadata is assigned synchronously before spawning the drainer. This checks attribution across the range, not just against the selected commit parent. Contract: SPEC_impl.md One route for transport and provisioning assigns byte-stream/stderr/child ownership to the connection, and separately requires the environment helper watchdog because closing a Podman exec client need not end its inner helper. No claim is made that killing the client synchronously kills every remote descendant; the 120-second helper bound is the explicit contract already recorded in c2. Suggested bucket: other for a transport child/drainer leak if established. Could-be-highest: no established user-work loss or security route; the suspected resources are the connection helper and drainer. Confidence: confirmed source refutation, no execution. proposed_drop: true, no lifetime cycle or new cancellation gap found in the assigned transport change. possible_cover: none searched. Original considered consequence is orphan transport resources after cancellation; no runtime occurrence alleged."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g056/findings.jsonl",
+        "id": "c5",
+        "line": 16,
+        "disposition": "excluded",
+        "group": "transport-process-observation-lifetime-cycle",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-036 after inspecting it. The stderr drainer owns observation state only. It has no reverse lifetime/child edge that can keep the transport child or drainer alive after the final connection owner drops. Narrow source refutation of transport lifetime-cycle/cancellation leak, preserving the distinction from provisioning capture cancellation and remote helper lifetime. Checked source/results: [\"At 1038bb1f4549f6896fa6e064fecf540f4548b4da, transport.rs:221-227 gives the child kill_on_drop; ProcessLifetime:323-336 owns that child and the drainer abort handle. Its Drop aborts the drainer.\",\"transport.rs:441-455 makes SshObservation only bounded state, watch sender and Notify. process_connection:655-692 passes that observation to the drainer and gives lifetime anchors to the reader and diagnostics; the stdin writer supplies no reverse edge.\",\"The base-to-reviewed-revision transport diff's lifetime/destructor and process_connection hunks retain this ownership shape under renamed types. This is not a claim that killing a Podman client synchronously ends all remote descendants.\",\"No runtime cancellation or descendant-lifetime observation was made.\"] Current coverage/results: [\"Current SPEC_impl.md:5983-6008 assigns child/stderr ownership to the connection and expressly uses a 120-second stdin watchdog for the in-container helper because client termination is insufficient. SPEC.md's host/session lifecycle text supplies no broader immediate descendant-kill promise for this transport helper.\",\"TODO.md Planned and plans/queue/INDEX.md are empty. BUGS.md's transfer capture hang is a separate primitive. The landed podman-environments plan is not future coverage.\",\"Read existing queue item cancelled-ssh-capture-can-retain-local-readers.md in full: it concerns provisioning capture_child dropping detached JoinHandles and ProxyJump helpers, not process_connection's owned abort handle. It is neither an alias nor exact coverage. INDEX.md and active TRIAGE_OUTCOMES.md searches found no same-root lifetime-cycle item. No archive read.\",\"No filter is needed to refute a nonexistent reverse ownership edge.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Orphan transport child/stderr-drainer resources after cancellation, originally other with no established security or user-work-loss route; proposed_drop=true. The remote-descendant caveat remains.\"; \"The named hidden ownership cycle is absent. Broader remote descendant lifetime is separately bounded by the specified helper watchdog, not proved by kill_on_drop.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g056/c5",
+        "line": 16,
+        "disposition": "excluded",
+        "group": "transport-process-observation-lifetime-cycle",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-036 after inspecting it. The stderr drainer owns observation state only. It has no reverse lifetime/child edge that can keep the transport child or drainer alive after the final connection owner drops. Narrow source refutation of transport lifetime-cycle/cancellation leak, preserving the distinction from provisioning capture cancellation and remote helper lifetime. Checked source/results: [\"At 1038bb1f4549f6896fa6e064fecf540f4548b4da, transport.rs:221-227 gives the child kill_on_drop; ProcessLifetime:323-336 owns that child and the drainer abort handle. Its Drop aborts the drainer.\",\"transport.rs:441-455 makes SshObservation only bounded state, watch sender and Notify. process_connection:655-692 passes that observation to the drainer and gives lifetime anchors to the reader and diagnostics; the stdin writer supplies no reverse edge.\",\"The base-to-reviewed-revision transport diff's lifetime/destructor and process_connection hunks retain this ownership shape under renamed types. This is not a claim that killing a Podman client synchronously ends all remote descendants.\",\"No runtime cancellation or descendant-lifetime observation was made.\"] Current coverage/results: [\"Current SPEC_impl.md:5983-6008 assigns child/stderr ownership to the connection and expressly uses a 120-second stdin watchdog for the in-container helper because client termination is insufficient. SPEC.md's host/session lifecycle text supplies no broader immediate descendant-kill promise for this transport helper.\",\"TODO.md Planned and plans/queue/INDEX.md are empty. BUGS.md's transfer capture hang is a separate primitive. The landed podman-environments plan is not future coverage.\",\"Read existing queue item cancelled-ssh-capture-can-retain-local-readers.md in full: it concerns provisioning capture_child dropping detached JoinHandles and ProxyJump helpers, not process_connection's owned abort handle. It is neither an alias nor exact coverage. INDEX.md and active TRIAGE_OUTCOMES.md searches found no same-root lifetime-cycle item. No archive read.\",\"No filter is needed to refute a nonexistent reverse ownership edge.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Orphan transport child/stderr-drainer resources after cancellation, originally other with no established security or user-work-loss route; proposed_drop=true. The remote-descendant caveat remains.\"; \"The named hidden ownership cycle is absent. Broader remote descendant lifetime is separately bounded by the specified helper watchdog, not proved by kill_on_drop.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-036",
+          "key": "g056/c5",
+          "latest_line": 16,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "transport-process-observation-lifetime-cycle",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The stderr drainer owns observation state only. It has no reverse lifetime/child edge that can keep the transport child or drainer alive after the final connection owner drops.",
+          "checks": [
+            "At 1038bb1f4549f6896fa6e064fecf540f4548b4da, transport.rs:221-227 gives the child kill_on_drop; ProcessLifetime:323-336 owns that child and the drainer abort handle. Its Drop aborts the drainer.",
+            "transport.rs:441-455 makes SshObservation only bounded state, watch sender and Notify. process_connection:655-692 passes that observation to the drainer and gives lifetime anchors to the reader and diagnostics; the stdin writer supplies no reverse edge.",
+            "The base-to-reviewed-revision transport diff's lifetime/destructor and process_connection hunks retain this ownership shape under renamed types. This is not a claim that killing a Podman client synchronously ends all remote descendants.",
+            "No runtime cancellation or descendant-lifetime observation was made."
+          ],
+          "coverage_checked": [
+            "Current SPEC_impl.md:5983-6008 assigns child/stderr ownership to the connection and expressly uses a 120-second stdin watchdog for the in-container helper because client termination is insufficient. SPEC.md's host/session lifecycle text supplies no broader immediate descendant-kill promise for this transport helper.",
+            "TODO.md Planned and plans/queue/INDEX.md are empty. BUGS.md's transfer capture hang is a separate primitive. The landed podman-environments plan is not future coverage.",
+            "Read existing queue item cancelled-ssh-capture-can-retain-local-readers.md in full: it concerns provisioning capture_child dropping detached JoinHandles and ProxyJump helpers, not process_connection's owned abort handle. It is neither an alias nor exact coverage. INDEX.md and active TRIAGE_OUTCOMES.md searches found no same-root lifetime-cycle item. No archive read.",
+            "No filter is needed to refute a nonexistent reverse ownership edge."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "The named hidden ownership cycle is absent. Broader remote descendant lifetime is separately bounded by the specified helper watchdog, not proved by kill_on_drop.",
+          "original_stronger_consequence": "Orphan transport child/stderr-drainer resources after cancellation, originally other with no established security or user-work-loss route; proposed_drop=true. The remote-descendant caveat remains.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Narrow source refutation of transport lifetime-cycle/cancellation leak, preserving the distinction from provisioning capture cancellation and remote helper lifetime."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "transport-process-observation-lifetime-cycle",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete. Recorded two source-confirmed findings, both `other`:\n\n- **f1:** Container connection staging suppresses process-exit and SSH session-limit diagnosis.\n- **f2:** Failed installation cleanup erases the session-limit explanation before warning redaction.\n\nReviewed all 1,076 assigned patch lines. No unread scope or unresolved leads. No runtime tests or reproductions performed.\n\nComplete record: [findings.jsonl]([private-run]/g056/findings.jsonl)."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised existing IDs in the log:\n\n- **f1:** Corrected production reachability to `566`; confirmed marker/hello precedence, classifier reachability, and endpoint persistence. Impact remains missing guidance during an already failing connection.\n- **f2:** Narrowed the trigger to upload or finishing-command failure after successful preflight, followed by failed cleanup. Confirmed that preserving the local typed diagnosis requires no raw peer output.\n\nNo new findings. Unresolved lead IDs: **none**. Source analysis only; no runtime reproduction."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass complete. **No new reportable issue found.**\n\nChecked process ownership, bounded diagnostics, route refresh, probe outcome precedence, and the new test assertions and documentation. Recorded source-refuted candidate **c5**.\n\n- New verified IDs: none\n- New unverified IDs: none\n- Open leads: none\n\nProgress updated. No runtime execution."
+    }
+  ],
+  "progress": "Group g056: environment-execution-routing.\nTurn 1 complete: initial source review. Discovery passes: 0 (no later synthesis/discovery turn performed).\n\nCoverage: read the complete inventory commits field and all 1,076 assigned patch lines through seven certified evidence packets: 00120 1-200/201-400/401-585; 00160 1-20; 00190 1-200/201-370; 00216 1-101. No assigned patch material omitted or unread. Reviewed each selected commit at its recorded revision, not only the endpoint.\n\nContracts and interfaces checked: pinned SPEC topology/connectivity; SPEC_impl disposable-environment rows, provider dispatch and complete execution-route section (including at 04ff); complete named credential catalog and provisioning sections at 566; SPEC security and complete Container sessions section at 566; Answers bind to what was drawn (no GUI handlers in scope). Read environment module responsibility map and test checklist. Followed transport -> shared access lowering -> actor staging/exit classifier, and provisioning run_shell/upload/probe -> typed refusal -> credential/proxy warning redaction. Checked actual install/cleanup callers and endpoint persistence. Interface assumption resolved: Podman has process diagnostics despite ssh_access returning None. Shared-master release is correctly isolated. Trusted refusal context does not carry arbitrary peer stderr.\n\nNew verified finding IDs this pass: f1 (container actor staging bypasses exit diagnosis), f2 (failed install cleanup clears safe refusal before redaction). Both suggested other; no established security/loss-of-work consequence. Both source-confirmed and still present at endpoint 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. No new unverified findings; no open leads remain (f1/f2 initial lead events revised to findings under same IDs).\n\nCandidate/drop records: c1 shared-master isolation, c2 unconditional environment helper idle limit accepted explicitly by specification, c3 credential redaction exception, c4 shell quoting. c3/c4 mark could-be-highest for the caller's independent drop audit. Findings log is the full durable record; no separate report authored.\n\nValidation: source and contract analysis only. No builds, runtime tests, reproductions, checkout mutations, or coverage-source reads. One initial record command rejected state=closed; retried state=open successfully before further source review. Seven evidence reads succeeded.\n\nNext action: return to caller for the later synthesis/discovery prompt. Unread assigned scope: none. Findings log and progress retained as requested.\n\nTurn 2 started: later-turn synthesis. Rechecking f1 actor stage changes and evidence precedence, f2 actual accepted installation phases and cleanup/redaction. No discovery pass requested. Prior candidate consequences and proposed-drop status preserved; parent has accepted no drop.\n\nTurn 2 complete: later-turn synthesis. Turn count 2; discovery-pass count remains 0. Added five append-only revisions under f1/f2; no new IDs, no withdrawn findings, no candidate drops accepted or consequences changed.\n\nf1: corrected production attribution to reviewed commit 56659839785691f76da3af5d8f51b511cff4ba8b. At 04ff, Podman storage/staging exists but production installs no Podman provider, so RetryLater blocks before dial. At 566, real provider registration and admitted Running status allow the concrete transport/classifier route. Checked that stage writes occur for inactive reprobes too, clean close/BrokenPipe reaches settlement and classifier, local Podman and nested SSH both retain process diagnostics, and only actual current marker/hello evidence should outrank numeric exits. Bounded stderr/status remain present; the finding concerns wrong stage/guidance rather than causing connectivity failure. Endpoint persistence reconfirmed at 00de manager.rs:4477/5621. Earlier-status capacity failures may stop sooner; sibling actor tasks can consume capacity after successful status/route preflight because no SSH-slot lease spans those operations. No unresolved source premise remains.\n\nf2: narrowed the first failing phases to upload or its separate finishing checksum/guard/chmod/rename command after accepted preflight. Earlier directory/sweep/metadata/predelete failure and identical-content skip do not take the combined-failure path. Confirmed real Codex/GitHub installation callers and first-setup-only proxy installation before admission; no post-admission proxy refresh is assumed. Source permits capacity changes between those separate commands, then failed cleanup removes safe_refusal. Reconfirmed endpoint new/redacted_reason/install_source handling. Safe fix retains or reconstructs only locally typed diagnosis, never raw combined peer stderr. Parent-supplied raw sensitive output refutations in g043/c1 and g044/c2 coexist with over-redaction; g055/c3 quoting refutation does not settle process staging.\n\nBoth existing findings remain source-confirmed, suggested other, proposed_drop=false. No new verified or unverified finding IDs this synthesis turn. Unresolved lead IDs: none. Original candidate consequences remain in the durable log and no drop is treated as accepted.\n\nNo runtime tests, reproductions, builds or checkout mutations. No unread assigned patch scope. Next action: return synthesis delta to parent and await any subsequent discovery prompt; no additional pass folded into this turn.\n\nTurn 3 started: separate discovery pass 1, beyond existing findings. Reading discovery-neighbours.json before fresh assigned-scope source search. No named pending cross-group questions. Original candidate/withdrawal history and f1/f2 remain intact; no parent drops or lowerings accepted.\n\nTurn 3 complete: discovery pass 1. Turn count 3; discovery-pass count 1. Result: no new reportable issue found. No revisions to known f1/f2 or prior candidate consequences/drop bases. New candidate ID c5 records the checked/refuted process-lifetime-cycle concern; proposed drop remains only a proposal, not parent acceptance.\n\nNeighbour context: read all 134,884 bytes of discovery-neighbours.json in twelve 12,000-byte bounded chunks (final chunk 2,884 bytes), plus an initial overlapping line read. Synthesized before assigned-scope source search. Named pending questions were empty. No neighbour finding was adopted as a local discovery; no prohibited queue or coverage metadata was searched. Distinct ownership, proxy-generator, browser-fixture, uninstall and placement concerns remain with their supplied owners.\n\nUseful fresh checks/results beyond f1/f2:\n- Traced transport ProcessLifetime/ProcessChannel/SshObservation/relay_process_stderr ownership and drop behavior at 1038. Drainer retains observation only, final anchors abort drainage and drop the kill-on-drop child, and route assignment precedes task spawn. Compared transport from the exclusive range base 6e423 to 1038 rather than assuming an algorithm predates the range merely because it predates one selected commit. c5 holds the complete source refutation and explicit helper-watchdog caveat.\n- Rechecked retained refusal/capped-line representation and the fixed 4096-byte drainer input, 512-byte line cap and 200-line warning budget. Observation continues after log suppression; first-refusal retention is one capped line, not an unbounded history. No new retention or ownership problem established.\n- Re-read the new backend private-environment-file test and its actual install path assertions: byte equality, 0600 mode, absent temporary, different replacement bytes, injected pre-rename failure, previous-file preservation and failed-temporary cleanup. Its docstring promises byte/mode/atomic-replacement behavior, not real environment.d generator semantics. The supplied g065 empty-proxy persistence finding is distinct and is not refuted by this test's narrower assertions.\n- Rechecked MuxRefusalLauncher and ssh_stand_in's documented shared/unshared pipe model against the new normal-command/upload/probe/home/settings assertions. The fixture checks LogLevel and sharing options and feeds both exit 255 and 125 with refusal text; assertions distinguish classified diagnosis, actual remote-command failure and fixed sensitive-output redaction. No process environment mutation is introduced. No new oracle or documentation defect established within the test's stated scope; it is not taken as whole-install or GUI evidence.\n- Re-read the probe's completed hello, skew, transport-close, positive-absence and session-limit branches. Completed presence/skew precedes the new classifier; positive absence requires the distinct reserved status and existing stdout/command-start guards. The classifier is evaluated only on the failed pre-hello branch. No new presence/absence regression established.\n- Checked SystemTransport construction and current store/places resolution, plus instance-local SSH program injection. The added cache is per transport or the explicitly shared production instance, and the fixture seam does not alter PATH/process environment. No new route-cache or global-test-state defect established.\n\nNew verified finding IDs this discovery pass: none. New unverified-after-investigation finding IDs: none. New candidate IDs: c5 only. Open lead IDs: none. Explicit new-discovery result: nothing new reportable found. Source-only checks; no runtime tests, reproductions, builds, live-install actions or checkout mutations. Assigned source coverage remains complete; no omitted or unread assigned patch material. Next action: return discovery result to parent.\n"
+}

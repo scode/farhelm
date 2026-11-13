@@ -1,0 +1,38 @@
+# Migrated seal CHECK assertion accepts a duplicate-key failure
+
+Reviewed commit: 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db
+
+## TLDR
+
+Source-confirmed review record: the schema test can pass even if an upgraded installation loses the seal-value constraint it claims to verify.
+
+## Details
+
+Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes after the pinned tip.
+
+Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket does not approve any proposed lowering.
+
+Contributing records: `g149/l2`.
+
+### g149/l2
+
+Confidence: Source-confirmed by an existing parent decision; not runtime reproduced.
+
+Latest reviewer record, event 14 (finding, open):
+
+Reviewed commit: 47f33bbdbd5ff4a6e437e97a800f9083be43096e; synthesis checked persistence through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: the schema test can pass even if an upgraded installation loses the seal-value constraint it claims to verify. Details: migrated_and_fresh_schemas_agree plants an empty v1 database at original store.rs:7888. Migration 10-to-11 unconditionally INSERTs metadata id 0, including for zero sessions (original 2114-2121). At original 7939 the new assertion INSERTs id 0 with sealed 2 and accepts any error. If the migrated seal CHECK were omitted, the duplicate INTEGER PRIMARY KEY still rejects the row. columns_of cannot see CHECKs; meta_ddl.contains("CHECK") also accepts the separate id CHECK. The fresh branch's empty metadata table exercises its CHECK, which does not prove the distinct ALTER TABLE migration's CHECK. At pinned tip the same fixtures, generic expect_err and bad INSERT remain at store.rs:7893-7896 and 7942-7945; no later repair was found. This is a competing-error test gap, not a claim that the actual bad INSERT's first reported error on today's correct schema must be PRIMARY KEY. SQLite may check the CHECK first today; removing that CHECK still leaves another failure satisfying the assertion. Suggested fix: establish id 0 with a valid seal, UPDATE sealed to 2, and assert the relevant CHECK constraint error; or remove id 0 before the bad INSERT and assert the valid-row premise. Suggested bucket: other, migration-test coverage. could-be-highest: no; current production DDL includes the correct CHECK and no runtime loss/security defect is claimed. Confidence: confirmed source/fixture analysis; no execution or mutation experiment. proposed_drop: false. possible_cover: none. The later store history was inspected for relevant repairs and the actual test was read at the pinned tip; an oversized general diff was clipped, so unrelated comment changes in that contextual diff are not claimed as newly reviewed. Final readily-checkable premise checks at pinned tip: migration still unconditionally inserts id 0 at store.rs:2133-2140. SessionStore::open at :3250-3264 performs apply_schema and reservation retention only; retention :6494-6514 changes create_reservations and does not create metadata in a fresh store. Searches found no DROP TABLE supervisor_meta or DELETE FROM supervisor_meta. The narrowed post-introduction diff has no hunk in this constraint test or metadata initialization path; only the unchanged relevant code is relied on, not the earlier clipped broad diff.
+
+Returned proposal (claims-096, event 14): **retain-verified**, suggested bucket **other**.
+
+The migrated-schema assertion can remain green without the seal CHECK because its id=0 INSERT still violates the pre-existing primary key. This is a test oracle defect; current production constraints are correct.
+
+Original stronger consequence: The new migration test may miss a missing seal-value constraint on upgraded installations. This remains the same narrow test consequence.
+
+Unresolved premise or limitation: No production invalid-seal acceptance, corruption, security failure or user-work loss is claimed; no mutation experiment was run.
+
+Proposed basis: Retain as other. Exercise an UPDATE of a known valid metadata row, or remove the row before the invalid INSERT, and distinguish the relevant CHECK failure.
+
+Existing parent disposition (event 14): verified. Parent explicitly accepted named retain-verified proposal from claims-096 after inspecting it. The migrated-schema assertion can remain green without the seal CHECK because its id=0 INSERT still violates the pre-existing primary key. This is a test oracle defect; current production constraints are correct. Retain as other. Exercise an UPDATE of a known valid metadata row, or remove the row before the invalid INSERT, and distinguish the relevant CHECK failure. Checked source/results: ["47f33bbdbd5ff4a6e437e97a800f9083be43096e:crates/farhelm-supervisor/src/store.rs:7888,7937-7940 adds the invalid-seal INSERT to both migrated/fresh branches and accepts any error.","00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:crates/farhelm-supervisor/src/store.rs:2133-2140 unconditionally initializes metadata id=0 even with no sessions; 7893-7896 plants and migrates the empty v1 fixture; 7942-7945 retains the generic expect_err.","Tip store.rs:3250-3264 opens via schema application and reservation retention; 6494-6514 modifies reservations only. A fresh metadata table need not contain id=0. columns_of cannot inspect CHECKs and meta_ddl.contains(\"CHECK\") accepts the separate id CHECK.","SQLite's first error on today's correct schema need not be PRIMARY KEY. The counterfactual missing seal CHECK still leaves a competing failure, which is sufficient to establish the test gap without execution."] Current coverage/results: [{"source":"SPEC.md and SPEC_impl.md","result":"Environment seal storage is required by SPEC_impl.md:6127-6135; neither specification accepts a test that cannot detect loss of its migrated CHECK. No matching coverage item was found."},{"source":"TODO.md:25-26","result":"Planned bucket is empty. The phase-3 removal idea at 225-232 is in Mid term, not Planned, and does not cover these findings."},{"source":"plans/queue","result":"Searched named behavior and symbols. No matching unlanded corrective plan. Relevant tmux-end-old-terminals, tmux-drop-from-docs and environment-agent-operations plans are already landed per plans/REPORTS.md:28-32, despite retained queue files."},{"source":"BUGS.md","result":"Read fully; sole accepted ssh-output-pipe hang is unrelated."},{"source":"review_feedback_queue/INDEX.md and matching files","result":"Searched actual mechanisms, symbols and consequences. No exact existing item or useful same-root extension found. tab-reap-deadline-excludes-listing-request.md was read; its test polling helper is distinct from production startup cleanup."},{"source":"TRIAGE_OUTCOMES.md","result":"Searched actual mechanisms and consequences; no matching active decision. Archive not read."},{"source":"review_feedback_queue/FILTER.md","result":"Read fully. No whole-boundary filter match used."}] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: "The new migration test may miss a missing seal-value constraint on upgraded installations. This remains the same narrow test consequence."; "No production invalid-seal acceptance, corruption, security failure or user-work loss is claimed; no mutation experiment was run.".
+
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g149 record](records/review-through-00de0b6c/groups/g149.json). Record ID: `l2`.
+

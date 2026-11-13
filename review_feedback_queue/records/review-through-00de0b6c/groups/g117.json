@@ -1,0 +1,942 @@
+{
+  "group": {
+    "id": "g117",
+    "domain": "supervisor-terminal-streaming",
+    "purpose": "supervisor-terminal-streaming: crates/farhelm-supervisor/src/service/downloads.rs, crates/farhelm-supervisor/src/service/terminals.rs, crates/farhelm-supervisor/src/service/uploads.rs, crates/farhelm-supervisor/src/service/capture.rs, crates/farhelm-supervisor/src/grid_input.rs, crates/farhelm-supervisor/src/grid_input/tests.rs, crates/farhelm-supervisor/src/service/grid_stream.rs, crates/farhelm-supervisor/src/service/grid_stream/tests.rs, crates/farhelm-supervisor/src/grid_output.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g001",
+      "g005",
+      "g006",
+      "g007",
+      "g008",
+      "g009",
+      "g010",
+      "g011",
+      "g074",
+      "g075",
+      "g076",
+      "g079",
+      "g080",
+      "g081",
+      "g082",
+      "g083",
+      "g084",
+      "g102",
+      "g103",
+      "g104",
+      "g105",
+      "g106",
+      "g107",
+      "g108",
+      "g109",
+      "g110",
+      "g111",
+      "g112",
+      "g113",
+      "g114",
+      "g115",
+      "g116",
+      "g118",
+      "g119",
+      "g120",
+      "g121",
+      "g124",
+      "g159",
+      "g160",
+      "g161",
+      "g162",
+      "g163",
+      "g164",
+      "g165",
+      "g166",
+      "g167",
+      "g168",
+      "g169",
+      "g170",
+      "g171",
+      "g172",
+      "g173",
+      "g013"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00298-000.patch",
+        "ranges": [
+          [
+            1,
+            252
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/downloads.rs",
+        "commit": "04d85f0c98a9b635709d00b056719a0baa7fd3fc",
+        "notes": "patch header; patch character offsets [0,11341)",
+        "lines": 252,
+        "bytes": 11341,
+        "start": 0,
+        "end": 11341,
+        "original": "[private-run]/prep/originals/00298.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00302-000.patch",
+        "ranges": [
+          [
+            1,
+            20
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/terminals.rs",
+        "commit": "04d85f0c98a9b635709d00b056719a0baa7fd3fc",
+        "notes": "patch header; patch character offsets [0,978)",
+        "lines": 20,
+        "bytes": 978,
+        "start": 0,
+        "end": 978,
+        "original": "[private-run]/prep/originals/00302.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00304-000.patch",
+        "ranges": [
+          [
+            1,
+            39
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/uploads.rs",
+        "commit": "04d85f0c98a9b635709d00b056719a0baa7fd3fc",
+        "notes": "patch header; patch character offsets [0,1583)",
+        "lines": 39,
+        "bytes": 1583,
+        "start": 0,
+        "end": 1583,
+        "original": "[private-run]/prep/originals/00304.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00774-000.patch",
+        "ranges": [
+          [
+            1,
+            39
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/terminals.rs",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,1988)",
+        "lines": 39,
+        "bytes": 1988,
+        "start": 0,
+        "end": 1988,
+        "original": "[private-run]/prep/originals/00774.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00865-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/capture.rs",
+        "commit": "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4",
+        "notes": "patch header; patch character offsets [0,716)",
+        "lines": 13,
+        "bytes": 716,
+        "start": 0,
+        "end": 716,
+        "original": "[private-run]/prep/originals/00865.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00871-000.patch",
+        "ranges": [
+          [
+            1,
+            102
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/terminals.rs",
+        "commit": "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4",
+        "notes": "patch header; patch character offsets [0,4709)",
+        "lines": 102,
+        "bytes": 4711,
+        "start": 0,
+        "end": 4709,
+        "original": "[private-run]/prep/originals/00871.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00908-000.patch",
+        "ranges": [
+          [
+            1,
+            26
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/grid_input.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,1646)",
+        "lines": 26,
+        "bytes": 1646,
+        "start": 0,
+        "end": 1646,
+        "original": "[private-run]/prep/originals/00908.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00909-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/grid_input/tests.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,755)",
+        "lines": 13,
+        "bytes": 755,
+        "start": 0,
+        "end": 755,
+        "original": "[private-run]/prep/originals/00909.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00921-000.patch",
+        "ranges": [
+          [
+            1,
+            86
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/capture.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,5165)",
+        "lines": 86,
+        "bytes": 5165,
+        "start": 0,
+        "end": 5165,
+        "original": "[private-run]/prep/originals/00921.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00931-000.patch",
+        "ranges": [
+          [
+            1,
+            102
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/grid_stream.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,5137)",
+        "lines": 102,
+        "bytes": 5137,
+        "start": 0,
+        "end": 5137,
+        "original": "[private-run]/prep/originals/00931.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00932-000.patch",
+        "ranges": [
+          [
+            1,
+            14
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/grid_stream/tests.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,938)",
+        "lines": 14,
+        "bytes": 938,
+        "start": 0,
+        "end": 938,
+        "original": "[private-run]/prep/originals/00932.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00946-000.patch",
+        "ranges": [
+          [
+            1,
+            15
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/uploads.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,882)",
+        "lines": 15,
+        "bytes": 884,
+        "start": 0,
+        "end": 882,
+        "original": "[private-run]/prep/originals/00946.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01042-000.patch",
+        "ranges": [
+          [
+            1,
+            154
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/grid_input.rs",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,9314)",
+        "lines": 154,
+        "bytes": 9314,
+        "start": 0,
+        "end": 9314,
+        "original": "[private-run]/prep/originals/01042.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01043-000.patch",
+        "ranges": [
+          [
+            1,
+            24
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/grid_input/tests.rs",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,1515)",
+        "lines": 24,
+        "bytes": 1515,
+        "start": 0,
+        "end": 1515,
+        "original": "[private-run]/prep/originals/01043.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01044-000.patch",
+        "ranges": [
+          [
+            1,
+            24
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/grid_output.rs",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,1524)",
+        "lines": 24,
+        "bytes": 1524,
+        "start": 0,
+        "end": 1524,
+        "original": "[private-run]/prep/originals/01044.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01046-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/capture.rs",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,818)",
+        "lines": 13,
+        "bytes": 818,
+        "start": 0,
+        "end": 818,
+        "original": "[private-run]/prep/originals/01046.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01533-000.patch",
+        "ranges": [
+          [
+            1,
+            53
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/grid_input.rs",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,3220)",
+        "lines": 53,
+        "bytes": 3220,
+        "start": 0,
+        "end": 3220,
+        "original": "[private-run]/prep/originals/01533.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01534-000.patch",
+        "ranges": [
+          [
+            1,
+            85
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/grid_input/tests.rs",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,4573)",
+        "lines": 85,
+        "bytes": 4573,
+        "start": 0,
+        "end": 4573,
+        "original": "[private-run]/prep/originals/01534.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01540-000.patch",
+        "ranges": [
+          [
+            1,
+            14
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/capture.rs",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,919)",
+        "lines": 14,
+        "bytes": 919,
+        "start": 0,
+        "end": 919,
+        "original": "[private-run]/prep/originals/01540.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01546-000.patch",
+        "ranges": [
+          [
+            1,
+            27
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/grid_stream.rs",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,1611)",
+        "lines": 27,
+        "bytes": 1611,
+        "start": 0,
+        "end": 1611,
+        "original": "[private-run]/prep/originals/01546.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01547-000.patch",
+        "ranges": [
+          [
+            1,
+            24
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/grid_stream/tests.rs",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,1496)",
+        "lines": 24,
+        "bytes": 1496,
+        "start": 0,
+        "end": 1496,
+        "original": "[private-run]/prep/originals/01547.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01596-000.patch",
+        "ranges": [
+          [
+            1,
+            31
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/grid_input.rs",
+        "commit": "4b489b4f2eeade14f119b186ecb16eeaaf027021",
+        "notes": "patch header; patch character offsets [0,1831)",
+        "lines": 31,
+        "bytes": 1831,
+        "start": 0,
+        "end": 1831,
+        "original": "[private-run]/prep/originals/01596.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01597-000.patch",
+        "ranges": [
+          [
+            1,
+            17
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/grid_input/tests.rs",
+        "commit": "4b489b4f2eeade14f119b186ecb16eeaaf027021",
+        "notes": "patch header; patch character offsets [0,1186)",
+        "lines": 17,
+        "bytes": 1186,
+        "start": 0,
+        "end": 1186,
+        "original": "[private-run]/prep/originals/01597.patch"
+      }
+    ],
+    "lines": 1187,
+    "bytes": 63849
+  },
+  "records": [
+    {
+      "key": "g117/l1",
+      "owner": "g117",
+      "id": "l1",
+      "domain": "supervisor-terminal-streaming",
+      "purpose": "supervisor-terminal-streaming: crates/farhelm-supervisor/src/service/downloads.rs, crates/farhelm-supervisor/src/service/terminals.rs, crates/farhelm-supervisor/src/service/uploads.rs, crates/farhelm-supervisor/src/service/capture.rs, crates/farhelm-supervisor/src/grid_input.rs, crates/farhelm-supervisor/src/grid_input/tests.rs, crates/farhelm-supervisor/src/service/grid_stream.rs, crates/farhelm-supervisor/src/service/grid_stream/tests.rs, crates/farhelm-supervisor/src/grid_output.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Verify retired container download authority after confinement removal",
+            "location": "crates/farhelm-supervisor/src/service/downloads.rs:64",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: removing checkout confinement could expose host files if former container launches still pass the new active-launch guard. Source basis: assigned download patch replaces container-specific inspect_checkout/openat2 with require_active_launch and ordinary account-wide inspect. Suggested bucket: highest if a container-to-host file access route remains; could-be-highest: yes. Confidence: unresolved lead, not a finding. proposed_drop: false. possible_cover: none. Next checks: pinned launch representation, require_active_launch implementation, removal contract in SPEC.md/SPEC_impl.md, and request routing. No execution performed; source premises not yet established."
+          }
+        },
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Retired container confinement removal is guarded and specified",
+            "location": "crates/farhelm-supervisor/src/service/downloads.rs:64",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: investigated whether removing checkout confinement lets retired container sessions read outside host files. No such route is established: inspect_download loads the stored launch then require_active_launch refuses before resolve_path or inspect. Source: service/core.rs:3731-3739 rejects container::is_retired; container.rs:18-22 identifies any agent selection with container.is_some(), preserving the previous branch's predicate. terminals.rs:911 applies the same guard before terminal resolution; uploads.rs:943 applies it before staging. Suggested bucket if route existed: highest/security; could-be-highest: yes, original suspected host-file disclosure retained here. Confidence: confirmed source refutation for assigned file-access change. proposed_drop: source predicate is equivalent to removed container branch and refusal precedes filesystem access; additionally SPEC_impl.md:4093-4095 explicitly states: 'Container environments use these ordinary file rules against their in-container supervisor. The earlier checkout-confinement browser adapter and supervisor checks belong to the retired supervisor-outside model and are removed with its terminal access.' SPEC_impl.md:8647-8650 says: 'A retired session supports Delete only. Refuse all other lifecycle, terminal and exec paths, including plain Replace.' possible_cover: none. No execution performed. This closes the initial authority lead; it does not claim every unrelated service entrypoint was reviewed."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "File requests retain retired-launch refusal and in-container authority",
+            "location": "crates/farhelm-supervisor/src/service/downloads.rs:64",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: removing old checkout confinement does not establish the suspected path from a retired container session to outside-host files. Later-turn synthesis traced admission and routing as well as the local guard. Details: connection.rs:613-616 routes session-authenticated controls through handle_restricted_control, whose catch-all at handlers.rs:3611-3621 refuses operations outside its allowlist; file stat/download are not allowed there. Full-authority StatFile and BeginDownload dispatch at connection.rs:690-704 to downloads::stat/start. Both independently call inspect_download (downloads.rs:190 and :220); :60-65 reads the stored session launch and rejects retired launches via core.rs:3731-3739/container.rs:18-22 before path expansion, canonicalization or open. Upload admission also rejects retired sessions before creating a transfer route (handlers.rs:2625-2654), and stage_claimed rechecks under the lifecycle claim before creating filesystem state (uploads.rs:920-947). Ordinary container environment hosts instead resolve through access.rs:397-427 to RemoteRoute::PodmanExec using the registered container's confirmed identity and login user. access.rs:196-234 lowers the payload to podman exec -i with that identity after --, and transport.rs:198-238 executes the supervisor stdio command through that route. Therefore the ordinary supervisor's account-wide file read runs inside its container namespace; the physical container host supervisor is not used as a file relay. Contract: SPEC_impl.md:4093-4095 says 'Container environments use these ordinary file rules against their in-container supervisor. The earlier checkout-confinement browser adapter and supervisor checks belong to the retired supervisor-outside model and are removed with its terminal access.' SPEC_impl.md:8647-8650 requires Delete-only retirement and refusal of other terminal/exec paths. Suggested bucket if the original suspected outside-host disclosure route existed: highest/security; could-be-highest: yes, original suspected consequence retained. Confidence: confirmed source refutation of this assigned file-confinement concern, no execution performed. proposed_drop: equivalent retired-launch predicate plus pre-filesystem refusal, restricted request admission, and explicit in-container transport preserve the authority boundary. possible_cover: caller reports g079/g096/g097 independently agree on legacy launch/attachment refusal; no coverage search performed. Caveats: this does not settle the separate g074 constructed-peer/TCP/cache concern or claim every service request is safe; it assumes the ordinary Podman namespace and authenticated helm connection described by the product contract. No readily checkable premise remains open for this file-specific candidate."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "File guards survive later removal and preserve in-container authority",
+            "location": "crates/farhelm-supervisor/src/service/downloads.rs:64",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc; later-batch interactions checked through endpoint 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: removing checkout confinement does not establish the suspected retired-container-to-outside-host file disclosure. Source at 04d85f0c: connection.rs:613-616 dispatches session-authenticated controls to handle_restricted_control; its catch-all rejects file requests (handlers.rs:3611-3621). Full-authority StatFile/BeginDownload dispatch at connection.rs:690-704 to downloads::stat/start, both of which independently call inspect_download (:190/:220); downloads.rs:60-65 loads the stored launch and rejects retirement before path expansion or filesystem access. core.rs:3731-3739 uses container.rs:18-22, whose agent_selection().container predicate is equivalent to the deleted container branch; session_launch.rs:315-320 confirms agent_selection only returns the Agent variant. Upload admission rejects retired launches before allocating a route (handlers.rs:2625-2654), then uploads.rs:920-947 rechecks while holding the lifecycle claim before filesystem staging. New container environment hosts use access.rs:397-427's registered PodmanExec route with confirmed container identity; access.rs:196-234 constructs podman exec -i, --user, environment, -- and that identity; transport.rs:198-238 executes the supervisor stdio command through this route. Ordinary account-wide reads thus occur inside the container supervisor namespace, with no host-supervisor file relay. At endpoint the unchanged guard is still present in downloads.rs:64, uploads.rs:941 and terminals.rs:231 before resolving agent or tab; connection.rs:594 still separates restricted control admission, :670-684 still routes full-authority file requests, and handlers.rs:2467-2491 retains upload retirement admission. Contract: SPEC_impl.md:4093-4095 says 'Container environments use these ordinary file rules against their in-container supervisor. The earlier checkout-confinement browser adapter and supervisor checks belong to the retired supervisor-outside model and are removed with its terminal access.' SPEC_impl.md:8647-8650 requires Delete-only retirement and refusal of other terminal/exec paths. Suggested bucket if original host-file disclosure route existed: highest/security; could-be-highest: yes, original consequence retained. Confidence: confirmed source refutation of the file-specific concern; no execution performed. proposed_drop: equivalent launch predicate, refusal before filesystem operations, restricted request admission, and in-container transport preserve the authority boundary for the assigned change and subsequent simplification. possible_cover: caller reports g079/g096/g097 agree on retained legacy launch/attachment refusal; no coverage/filter sources searched. Caveats: this does not settle g074's separate constructed-peer/TCP/cache concern or all possible service entrypoints. Ordinary Podman namespace behavior and authenticated helm transport are the applicable product premises; no readily checkable premise remains open for this file-specific candidate. Parent owns final drop disposition."
+          }
+        }
+      ],
+      "latest": {
+        "line": 11,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l1",
+          "state": "open",
+          "summary": "File guards survive later removal and preserve in-container authority",
+          "location": "crates/farhelm-supervisor/src/service/downloads.rs:64",
+          "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc; later-batch interactions checked through endpoint 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: removing checkout confinement does not establish the suspected retired-container-to-outside-host file disclosure. Source at 04d85f0c: connection.rs:613-616 dispatches session-authenticated controls to handle_restricted_control; its catch-all rejects file requests (handlers.rs:3611-3621). Full-authority StatFile/BeginDownload dispatch at connection.rs:690-704 to downloads::stat/start, both of which independently call inspect_download (:190/:220); downloads.rs:60-65 loads the stored launch and rejects retirement before path expansion or filesystem access. core.rs:3731-3739 uses container.rs:18-22, whose agent_selection().container predicate is equivalent to the deleted container branch; session_launch.rs:315-320 confirms agent_selection only returns the Agent variant. Upload admission rejects retired launches before allocating a route (handlers.rs:2625-2654), then uploads.rs:920-947 rechecks while holding the lifecycle claim before filesystem staging. New container environment hosts use access.rs:397-427's registered PodmanExec route with confirmed container identity; access.rs:196-234 constructs podman exec -i, --user, environment, -- and that identity; transport.rs:198-238 executes the supervisor stdio command through this route. Ordinary account-wide reads thus occur inside the container supervisor namespace, with no host-supervisor file relay. At endpoint the unchanged guard is still present in downloads.rs:64, uploads.rs:941 and terminals.rs:231 before resolving agent or tab; connection.rs:594 still separates restricted control admission, :670-684 still routes full-authority file requests, and handlers.rs:2467-2491 retains upload retirement admission. Contract: SPEC_impl.md:4093-4095 says 'Container environments use these ordinary file rules against their in-container supervisor. The earlier checkout-confinement browser adapter and supervisor checks belong to the retired supervisor-outside model and are removed with its terminal access.' SPEC_impl.md:8647-8650 requires Delete-only retirement and refusal of other terminal/exec paths. Suggested bucket if original host-file disclosure route existed: highest/security; could-be-highest: yes, original consequence retained. Confidence: confirmed source refutation of the file-specific concern; no execution performed. proposed_drop: equivalent launch predicate, refusal before filesystem operations, restricted request admission, and in-container transport preserve the authority boundary for the assigned change and subsequent simplification. possible_cover: caller reports g079/g096/g097 agree on retained legacy launch/attachment refusal; no coverage/filter sources searched. Caveats: this does not settle g074's separate constructed-peer/TCP/cache concern or all possible service entrypoints. Ordinary Podman namespace behavior and authenticated helm transport are the applicable product premises; no readily checkable premise remains open for this file-specific candidate. Parent owns final drop disposition."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g117/findings.jsonl",
+        "id": "l1",
+        "line": 11,
+        "disposition": "under-investigation",
+        "group": "g117-l1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-076",
+          "key": "g117/l1",
+          "latest_line": 11,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "retired-container-file-authority-after-confinement-removal",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The file-specific disclosure hypothesis is source-refuted. Retirement is checked before path resolution or opening; new container hosts use an in-container supervisor. This says nothing about the separately mentioned constructed-peer/TCP/cache concern.",
+          "checks": [
+            "04d85f0c98a9b635709d00b056719a0baa7fd3fc:service/downloads.rs:54-66,182-190,204-217 (under crates/farhelm-supervisor/src/) independently checks the stored launch on both stat and download; service/core.rs:3731-3739 and container.rs:18-22 reject stored agent selections with container.is_some().",
+            "04d85f0c:service/connection.rs:613-614 separates restricted controls, while :690-700 dispatches full-authority file requests; service/handlers.rs:3607-3615 rejects the restricted catch-all. service/uploads.rs:920-943 rechecks retirement under the lifecycle claim before making directories.",
+            "04d85f0c:crates/farhelm-helm/src/access.rs:397-427 uses the registered Podman binding and confirmed container identity; :207-230 constructs podman exec with --user and -- followed by that identity. This is source routing evidence, conditional on the ordinary Podman and authenticated-transport premises, not a runtime isolation observation.",
+            "00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:service/downloads.rs:54-66 retains the same pre-filesystem refusal."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:4892-4900 and SPEC_impl.md:8312-8326 explicitly retire supervisor-outside sessions; SPEC_impl.md:3611-3613 explicitly removes their file confinement. These support the intended boundary, not an exception permitting disclosure.",
+            "TODO.md Planned is empty (:25-26). Searched plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md for retired-container file/confinement triggers; no exact outstanding defect cover. The Podman plan's retirement language is not separate coverage of an access bypass.",
+            "FILTER.md read in full; no filter permits a security boundary failure."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No remaining source premise for the narrow proposed disclosure: the necessary retired launch passing admission is contradicted. Broader peer/namespace threats were not assigned or checked.",
+          "original_stronger_consequence": "Removing confinement might let a retired container session disclose outside-host files (highest/security). The later source refutation preserves and withdraws only this file-specific hypothesis.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Source refutation by equivalent retired-launch predicate and pre-filesystem rejection, corroborated by container-host routing. Parent still needs the independent security-drop consultation."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retired-container-file-authority-after-confinement-removal",
+        "destination": null
+      }
+    },
+    {
+      "key": "g117/c2",
+      "owner": "g117",
+      "id": "c2",
+      "domain": "supervisor-terminal-streaming",
+      "purpose": "supervisor-terminal-streaming: crates/farhelm-supervisor/src/service/downloads.rs, crates/farhelm-supervisor/src/service/terminals.rs, crates/farhelm-supervisor/src/service/uploads.rs, crates/farhelm-supervisor/src/service/capture.rs, crates/farhelm-supervisor/src/grid_input.rs, crates/farhelm-supervisor/src/grid_input/tests.rs, crates/farhelm-supervisor/src/service/grid_stream.rs, crates/farhelm-supervisor/src/service/grid_stream/tests.rs, crates/farhelm-supervisor/src/grid_output.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Grid sender cleanup watch removal retains teardown synchronization",
+            "location": "crates/farhelm-supervisor/src/service/grid_stream.rs:935",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: checked whether removing the output cleanup watch can leave output running or deadlock a terminal detach. The replacement still signals and joins the exact task. Source: grid_stream.rs:935-963 races stream.run against shutdown.changed and reports synchronously through connection::report_forwarder_end; terminals.rs:431-438 stores the JoinHandle and shutdown sender, and :478-483 awaits completion. connection.rs:1272-1327 reports lock-taking verdicts through separate arbiter tasks; :1400-1520 identity-checks task IDs before removal and joins outside the reporting task. No external output process remains. Suggested bucket: high if detach could stall; could-be-highest: no established loss-of-work or security route. Confidence: confirmed source refutation. proposed_drop: join remains the cleanup completion oracle, and separate verdict tasks avoid waiting on the attachments mutex from the task teardown joins. possible_cover: none. No execution performed. Review scoped to changed cleanup/watch removal, not all pre-existing grid-stream behavior."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Grid cleanup synchronization survives subsequent terminal removal",
+            "location": "crates/farhelm-supervisor/src/service/grid_stream.rs:935",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333; endpoint interaction checked at 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: removing the output cleanup watch does not establish output left running or deadlocked detach. Source: grid_stream.rs:935-963 races stream.run against shutdown.changed and reports synchronously through connection::report_forwarder_end. terminals.rs:431-438 holds its JoinHandle/shutdown sender, and :478-483 awaits completion. connection.rs:1272-1327 reports lock-taking verdicts through separate arbiter tasks; :1400-1520 checks task ID before removal, preventing a stale completion from removing a replacement. Construction in handlers.rs:1933-1972 creates both watch ends before spawning and stores the task under the attachment lock. The output task holds no external terminal process, and cancellation drops its GridStream future. Endpoint grid_stream.rs:916-963 and terminals.rs:431-483 retain the same signal-and-join contract, with connection teardown still calling join_forwarder. Later removal of the terminal enum changes representation to HostTerminal; it does not remove the retirement guard or change ownership of the output task into ownership of the agent process. Suggested bucket if detach were broken: high/material UX; could-be-highest: no established security or loss-of-work route. Confidence: confirmed source refutation; no execution performed. proposed_drop: joining remains the cleanup completion oracle, and verdict arbiters remain separate tasks so they cannot deadlock teardown waiting for the output task under the attachments mutex. possible_cover: none searched. Original suspected consequence (streaming leak or deadlocked detach) retained; source checks establish neither for the assigned cleanup removal. No readily checkable premise remains open."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c2",
+            "state": "open",
+            "summary": "Output join remains sound; check distinct input cancellation boundary",
+            "location": "crates/farhelm-supervisor/src/service/grid_stream.rs:935",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Original considered consequence retained: removing output cleanup watch could leak output or deadlock detach. The prior source refutation remains: signal-and-join completes the output task and lock-taking verdict arbiters are separate tasks. Caller-supplied discovery input g124/l1 identifies a distinct concern: detach_naturally partially moves old.forwarder, releases attachments before dropping old.input, and may admit a replacement before cancellation is signalled to the old pump. This does not refute the output-join analysis and must not be dismissed by it. Suggested bucket for original output concern: high/material UX if established; could-be-highest for distinct input concern: yes, stale queued terminal commands could cross exclusive control. Confidence for distinct boundary: caller-supplied source route, local verification pending. proposed_drop: prior source-refuted output concern only; no drop of the separate pump concern proposed. possible_cover: exact caller-supplied g124/l1 in discovery-neighbours.json, with accepted API size 1001 as its live-runtime StreamFailed trigger and bundled GUI size cap 1000 caveat. Next: inspect HostAttach drop, Pump cancellation, natural-detach lifetime and whole-range parent attribution. No execution or reproduction. This is interface synthesis, not a new independent discovery."
+          }
+        },
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Output-join refutation does not cover natural-detach input lifetime",
+            "location": "crates/farhelm-supervisor/src/service/grid_stream.rs:935",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Original TLDR/consequence retained: checked whether removing output cleanup watch leaks output or deadlocks detach. Prior source refutation stands: grid_stream.rs:935-963 races shutdown, terminals.rs:431-438/:478-483 retains signal and JoinHandle, and connection.rs:1272-1327 schedules lock-taking verdict arbiters separately. Suggested bucket for that original concern: high if established; confidence: confirmed source refutation. proposed_drop: only that output-join concern; no accepted parent drop and no proposal to drop distinct input-lifetime harm. Discovery interface check locally confirms caller's separate g124/l1 boundary: connection.rs:1510-1519 removes old, partially moves old.forwarder into join, unlocks attachments, and leaves old.input to block-end destruction. Parent connection.rs:2172-2191 explicitly dropped backend before unlocking. HostAttach::drop at grid_stream.rs:1169-1175 sends cancellation; Pump::run at :1201-1241 checks that receiver but otherwise can hand queued input to the runtime. Thus output joining does not establish input cancellation before replacement admission. This change is in range: the exclusive base already has the pump/cancellation mechanism, and 1ed482dd removes the explicit pre-unlock backend drop. Original potential consequence for this distinct supplied finding: stale viewer input may execute after replacement takes control (could-be-highest: yes). The caller's accepted-API size-1001/live-runtime failure route and bundled-GUI cap-1000 caveat remain supplied evidence, not locally re-established here. possible_cover: exact existing g124/l1, already provided before this discovery search; preserve as interface evidence without claiming a new independent finding or silently dropping it. No execution/reproduction. No unresolved local source premise for the ownership-order distinction; further trigger/priority disposition remains with g124 and parent. The prior phrase 'no readily checkable premise remains' is limited to the output-join hypothesis, not all attachment behavior."
+          }
+        }
+      ],
+      "latest": {
+        "line": 13,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Output-join refutation does not cover natural-detach input lifetime",
+          "location": "crates/farhelm-supervisor/src/service/grid_stream.rs:935",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Original TLDR/consequence retained: checked whether removing output cleanup watch leaks output or deadlocks detach. Prior source refutation stands: grid_stream.rs:935-963 races shutdown, terminals.rs:431-438/:478-483 retains signal and JoinHandle, and connection.rs:1272-1327 schedules lock-taking verdict arbiters separately. Suggested bucket for that original concern: high if established; confidence: confirmed source refutation. proposed_drop: only that output-join concern; no accepted parent drop and no proposal to drop distinct input-lifetime harm. Discovery interface check locally confirms caller's separate g124/l1 boundary: connection.rs:1510-1519 removes old, partially moves old.forwarder into join, unlocks attachments, and leaves old.input to block-end destruction. Parent connection.rs:2172-2191 explicitly dropped backend before unlocking. HostAttach::drop at grid_stream.rs:1169-1175 sends cancellation; Pump::run at :1201-1241 checks that receiver but otherwise can hand queued input to the runtime. Thus output joining does not establish input cancellation before replacement admission. This change is in range: the exclusive base already has the pump/cancellation mechanism, and 1ed482dd removes the explicit pre-unlock backend drop. Original potential consequence for this distinct supplied finding: stale viewer input may execute after replacement takes control (could-be-highest: yes). The caller's accepted-API size-1001/live-runtime failure route and bundled-GUI cap-1000 caveat remain supplied evidence, not locally re-established here. possible_cover: exact existing g124/l1, already provided before this discovery search; preserve as interface evidence without claiming a new independent finding or silently dropping it. No execution/reproduction. No unresolved local source premise for the ownership-order distinction; further trigger/priority disposition remains with g124 and parent. The prior phrase 'no readily checkable premise remains' is limited to the output-join hypothesis, not all attachment behavior."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g117/findings.jsonl",
+        "id": "c2",
+        "line": 13,
+        "disposition": "under-investigation",
+        "group": "g117-c2",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-076",
+          "key": "g117/c2",
+          "latest_line": 13,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "grid-output-cleanup-watch-removal",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The original output-task leak/deadlock hypothesis is refuted. Its later input-lifetime addendum is a distinct supported boundary and must reach g124/l1's recording decision; the refutation does not dispose of it.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333:service/grid_stream.rs:917-963 cancels the complete stream future and reports synchronously; service/terminals.rs:431-438,465-483 retains its shutdown sender and joins the exact task. service/connection.rs:1272-1327 delegates natural/stall verdicts rather than taking the attachment lock inside the joined output task.",
+            "1ed482dd:service/connection.rs:1502-1517 removes old under the lock but partially moves only old.forwarder, unlocks at :1515, and drops remaining old.input at task-block end. Its immediate parent :2172-2189 explicitly drops backend before unlocking. HostAttach::drop at grid_stream.rs:1169-1175 is the input cancellation signal. This validates the distinct delayed-cancellation evidence.",
+            "Diff 1ed482dd..00de0b6c for service/terminals.rs and service/grid_stream.rs changes only the latter's module wording; output synchronization remains. No runtime test or scheduler interleaving was observed."
+          ],
+          "coverage_checked": [
+            "SPEC.md Terminal experience:3011-3028 and SPEC_impl.md Grid streams:2551-2589 read: one owner and independent output; ended input is dropped before replacement input. No permission for delayed cancellation.",
+            "TODO Planned empty. Searched plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md for output cleanup/deadlock and natural-detach input cancellation; no exact queue coverage of the input-lifetime consequence.",
+            "Read initial-oversized-grid-cannot-attach.md in full: it covers accepted API sizes above 1000 failing Hello, not old input surviving ownership loss. It is related trigger evidence, not complete coverage. FILTER's already-polled handoff exception does not cover cancellation not yet signalled."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "None for original output-join refutation. The supplied size-1001 trigger and harmful mixed-command sequence belong to g124/l1 and were not fully re-established here; bundled GUI cap 1000 remains a material caveat.",
+          "original_stronger_consequence": "Original: output left running or detach deadlocked (high if real). Later addendum: old queued input may execute after replacement takes control, potentially destructive (could be highest); that addendum is not withdrawn.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Refute only the output-join hypothesis; preserve distinct input-lifetime evidence for parent reconciliation with g124/l1. Do not use this result as a broad attachment-safety drop.",
+          "new_interface_evidence": "Confirmed the supplied g124/l1 lifetime regression: 1ed482dd removes the parent's explicit backend drop before unlock. The oversized-attach queue item does not record that input consequence."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "grid-output-cleanup-watch-removal",
+        "destination": null
+      }
+    },
+    {
+      "key": "g117/c3",
+      "owner": "g117",
+      "id": "c3",
+      "domain": "supervisor-terminal-streaming",
+      "purpose": "supervisor-terminal-streaming: crates/farhelm-supervisor/src/service/downloads.rs, crates/farhelm-supervisor/src/service/terminals.rs, crates/farhelm-supervisor/src/service/uploads.rs, crates/farhelm-supervisor/src/service/capture.rs, crates/farhelm-supervisor/src/grid_input.rs, crates/farhelm-supervisor/src/grid_input/tests.rs, crates/farhelm-supervisor/src/service/grid_stream.rs, crates/farhelm-supervisor/src/service/grid_stream/tests.rs, crates/farhelm-supervisor/src/grid_output.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Missing-terminal helper retains historical restart-gap explanation",
+            "location": "crates/farhelm-supervisor/src/service/terminals.rs:828",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR: the helper's existing doc comment still describes old terminal absence as an ordinary supervisor restart gap, although the changed user-facing string now explains that an update ended the old terminal. Source: terminals.rs:828-845 versus :862-875. SPEC.md:3003-3016 explicitly ends old terminals at this release's first supervisor startup and retains known exit outcomes. Suggested bucket: other/documentation; could-be-highest: no. Confidence: confirmed stale explanatory context, no incorrect operational behavior established. proposed_drop: do not elevate this residual historical explanation as a substantive security/correctness finding; the actual message and changed test pin the specified migration behavior, and the stale comment alone adds no established user-facing harm. possible_cover: none. No execution performed. This is not an acceptance of the stale prose as accurate; it preserves the reason for not reporting this minor documentation inconsistency."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c3",
+            "state": "open",
+            "summary": "Missing-terminal docs describe the pre-migration lifecycle",
+            "location": "crates/farhelm-supervisor/src/service/terminals.rs:828",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR: the maintenance documentation teaches that an old terminal is missing because it was already absent when a supervisor restarted. This release deliberately ends all old terminals and discards their screen, even when an ended agent's terminal was still present; readers following the helper's explanation get the wrong lifecycle model. Details: terminals.rs:828-845 describes every non-interrupted case as a 'restart gap' where 'its tmux session was already gone' and says the sentence 'names the restart and nothing about the agent'. The changed implementation at :862-875 instead says an update ended the old terminal and offers a new one. SPEC.md:3003-3016 explicitly requires ending all old terminals at first startup, retaining already-ended agents' outcomes but removing their screens; SPEC_impl.md:2979-2983 requires reload to take every old-kind row as terminal-less without probing its recorded pane. The comment should describe deliberate retirement for tmux rows and reserve runtime absence/unavailability for terminal-host rows, while preserving the rule not to infer when an agent exited from Interrupted. Suggested bucket: other/documentation correctness. Confidence: confirmed by source and contracts; no incorrect runtime behavior or direct user-facing malfunction established. could-be-highest: no. proposed_drop: false; prior exclusion based solely on absent user-facing harm is withdrawn because documentation correctness is in scope. possible_cover: none. No execution performed. Original consequence retained: stale explanatory context can mislead future readers; the shipped refusal wording and changed test themselves follow the intended migration behavior."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c3",
+            "state": "open",
+            "summary": "Missing-terminal docs describe the pre-migration lifecycle",
+            "location": "crates/farhelm-supervisor/src/service/terminals.rs:817",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR: maintenance documentation attributes old-terminal absence to a failed survival across supervisor restart, rather than this release's deliberate terminal retirement, and describes Interrupted as boot-classifier evidence even though migration also assigns it. Details: terminals.rs:817-833 says an entry loses its terminal when reloaded without a surviving tmux session; its two cases call Interrupted boot-id classification and every other case a 'restart gap', saying the terminal 'was already gone' and the refusal 'names the restart and nothing about the agent'. This changes interpretation: a maintainer could infer that terminal presence is still probed and that Interrupted identifies a reboot. Actual source core.rs:6965-6969 unconditionally maps TerminalKind::Tmux to None without looking up its address; :7097-7114 assigns Transition::TerminalEnded to old rows last launching, running or stopping even without a reboot, while ended rows retain outcomes. The changed refusal at terminals.rs:862-875 correctly names an update ending an old terminal and offers a new one. SPEC.md:3003-3016 explicitly requires first-start retirement and loss of old screens; SPEC_impl.md:2979-2983 requires unconditional terminal absence on reload. Revise the helper docs and nearby resolution comment to describe retirement for old-kind rows and the boot-or-retirement meaning of Interrupted, while retaining the rule not to infer when the agent actually exited. Suggested bucket: other/documentation correctness. Confidence: confirmed source and contract analysis, not execution; no incorrect runtime behavior or direct user-facing malfunction established. could-be-highest: no. proposed_drop: false; the prior proposed exclusion solely for absent user-facing harm is withdrawn. possible_cover: none. Original consequence retained: stale explanatory context misleads future readers; the shipped refusal and changed tests follow intended migration behavior. Follow-up synthesis checked actual reload behavior, so this conclusion does not depend only on the specification's wording."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c3",
+            "state": "open",
+            "summary": "Missing-terminal docs misdescribe lifecycle at the migration commit",
+            "location": "crates/farhelm-supervisor/src/service/terminals.rs:817",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR: the migration commit's maintenance documentation describes failed terminal survival and boot-only Interrupted classification, although migration deliberately discards old terminals and also interrupts their live rows. Source and contract basis retained: terminals.rs:817-833 versus core.rs:6965-6969 and :7097-7114; SPEC.md:3003-3016 and SPEC_impl.md:2979-2983. Readers could wrongly infer that old terminal presence is still probed and that Interrupted implies a reboot. Suggested bucket: other/documentation correctness. Confidence: confirmed by source, not execution. could-be-highest: no. proposed_drop: false for the historical reviewed commit; prior absent-user-harm exclusion remains withdrawn. possible_cover: none searched. Material synthesis caveat: endpoint 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db terminals.rs:150-184 already corrects this documentation. It explicitly lists Interrupted as reboot or old-terminal-ending update, old-kind rows as retired at startup, and runtime unavailability separately for host rows. Thus this is an intermediate documentation defect, not a currently established endpoint issue. The exact correcting commit will be checked next. Original consequence preserved: misleading lifecycle explanation for future readers at dbfc6975; no incorrect runtime behavior or direct user-facing malfunction shown."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c3",
+            "state": "open",
+            "summary": "Migration commit has stale lifecycle docs, corrected by later removal",
+            "location": "crates/farhelm-supervisor/src/service/terminals.rs:817",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR: this intermediate commit teaches that old-terminal absence reflects a terminal that failed to survive restart, and that Interrupted identifies boot classification, despite intentional retirement producing both absence and Interrupted. Details: terminals.rs:817-833 versus core.rs:6965-6969 (old rows unconditionally resolve to no terminal) and :7097-7114 (migration interrupts rows last launching, running or stopping). SPEC.md:3003-3016 and SPEC_impl.md:2979-2983 require this deliberate retirement. The wrong explanation can change a maintainer's interpretation of terminal presence probing and the causes of Interrupted. Suggested bucket: other/documentation correctness. Confidence: confirmed source/contract analysis; no execution performed. could-be-highest: no. proposed_drop: false for the reviewed historical commit, with parent retaining disposition; the initial absent-user-harm exclusion is withdrawn. possible_cover: direct source history proves correction in 1ed482dde220452e424973faf38a5e1318986333, the next selected commit: git log -S 'An entry marked' identifies that commit, and its terminals.rs diff replaces the obsolete helper documentation with explicit boot-or-update Interrupted causes, terminal-host unavailability, and old-kind startup retirement; it also replaces the nearby restart-gap resolver comment. Endpoint 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:terminals.rs:150-184 retains the corrected explanation. No coverage/filter sources searched. Material caveat: no remaining endpoint defect established, and no runtime malfunction established at either revision; this is the concrete intermediate documentation misinformation required by historical review. Original consequence and correction are both preserved so the parent can decide final disposition."
+          }
+        }
+      ],
+      "latest": {
+        "line": 9,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "c3",
+          "state": "open",
+          "summary": "Migration commit has stale lifecycle docs, corrected by later removal",
+          "location": "crates/farhelm-supervisor/src/service/terminals.rs:817",
+          "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR: this intermediate commit teaches that old-terminal absence reflects a terminal that failed to survive restart, and that Interrupted identifies boot classification, despite intentional retirement producing both absence and Interrupted. Details: terminals.rs:817-833 versus core.rs:6965-6969 (old rows unconditionally resolve to no terminal) and :7097-7114 (migration interrupts rows last launching, running or stopping). SPEC.md:3003-3016 and SPEC_impl.md:2979-2983 require this deliberate retirement. The wrong explanation can change a maintainer's interpretation of terminal presence probing and the causes of Interrupted. Suggested bucket: other/documentation correctness. Confidence: confirmed source/contract analysis; no execution performed. could-be-highest: no. proposed_drop: false for the reviewed historical commit, with parent retaining disposition; the initial absent-user-harm exclusion is withdrawn. possible_cover: direct source history proves correction in 1ed482dde220452e424973faf38a5e1318986333, the next selected commit: git log -S 'An entry marked' identifies that commit, and its terminals.rs diff replaces the obsolete helper documentation with explicit boot-or-update Interrupted causes, terminal-host unavailability, and old-kind startup retirement; it also replaces the nearby restart-gap resolver comment. Endpoint 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:terminals.rs:150-184 retains the corrected explanation. No coverage/filter sources searched. Material caveat: no remaining endpoint defect established, and no runtime malfunction established at either revision; this is the concrete intermediate documentation misinformation required by historical review. Original consequence and correction are both preserved so the parent can decide final disposition."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g117/findings.jsonl",
+        "id": "c3",
+        "line": 9,
+        "disposition": "rejected",
+        "group": "migration-missing-terminal-lifecycle-docs",
+        "reason": "Parent read full claims076. dbfc6975's new old-terminal retirement leaves service/terminals806-850 teaching only failed-survival/boot interruption despite same-boot deliberate retirement. Real historical maintenance-documentation defect;1ed482 corrects151-182 and path remains corrected through00de. Preserve withdrawn no-user-harm dismissal, actual defect and exact repair; no residual queue item, not refuted or out-of-range."
+      },
+      "accepted_parent_decision": {
+        "key": "g117/c3",
+        "line": 9,
+        "disposition": "rejected",
+        "group": "migration-missing-terminal-lifecycle-docs",
+        "bucket": "other",
+        "recording": "repaired-in-range",
+        "needs_independent_drop_check": false,
+        "reason": "Parent read full claims076. dbfc6975's new old-terminal retirement leaves service/terminals806-850 teaching only failed-survival/boot interruption despite same-boot deliberate retirement. Real historical maintenance-documentation defect;1ed482 corrects151-182 and path remains corrected through00de. Preserve withdrawn no-user-harm dismissal, actual defect and exact repair; no residual queue item, not refuted or out-of-range."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-076",
+          "key": "g117/c3",
+          "latest_line": 9,
+          "recommendation": "needs-parent",
+          "bucket": "other",
+          "underlying_key": "migration-missing-terminal-lifecycle-docs",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The intermediate documentation defect is verified, and its correction within the review range is verified. It is neither source-refuted at the reviewed commit nor a remaining endpoint defect. Parent must choose the already-corrected historical disposition; do not revive the withdrawn absent-user-harm rationale.",
+          "checks": [
+            "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:service/terminals.rs:806-850 attributes terminal absence to failed survival and Interrupted to the boot classifier, although :864-875 already words update retirement correctly.",
+            "dbfc6975:service/core.rs:6965-6969 unconditionally maps Tmux rows to no terminal; :7097-7114 interrupts live old rows without requiring reboot. The stale explanation is therefore contradicted by implementation, not only contract.",
+            "1ed482dde220452e424973faf38a5e1318986333:service/terminals.rs:151-182 corrects the docstring to boot-or-update Interrupted, host unavailability and deliberate old-kind retirement. Diff to 00de0b6c shows terminals.rs unchanged, preserving the correction."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:2998-3010 and SPEC_impl.md:2780-2823 describe deliberate retirement and retained ended outcomes, agreeing with corrected source.",
+            "TODO Planned empty; BUGS.md and active TRIAGE_OUTCOMES searches yield no exact cover. INDEX.md has no matching lifecycle-doc item. tmux-drop-from-docs.md:68-74,88-103 concerns stale comments generally, but does not add an outstanding fix for this already-corrected helper.",
+            "FILTER rare-diagnostic clause does not justify removing a concrete maintenance-documentation error merely because it has no runtime malfunction."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No endpoint defect remains. The available disposition vocabulary has no 'fixed within range'; needs-parent preserves that distinction.",
+          "original_stronger_consequence": "Maintainers could infer old terminal presence is still probed and Interrupted means reboot. No security, work loss or incorrect runtime behavior was established. Initial proposed exclusion solely for no user-facing harm was withdrawn.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Verified historical defect, corrected by 1ed482dd before the endpoint; retain both facts in the parent's completion record."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "migration-missing-terminal-lifecycle-docs",
+        "destination": "trailing-migration-missing-terminal-lifecycle-docs.md"
+      }
+    },
+    {
+      "key": "g117/c4",
+      "owner": "g117",
+      "id": "c4",
+      "domain": "supervisor-terminal-streaming",
+      "purpose": "supervisor-terminal-streaming: crates/farhelm-supervisor/src/service/downloads.rs, crates/farhelm-supervisor/src/service/terminals.rs, crates/farhelm-supervisor/src/service/uploads.rs, crates/farhelm-supervisor/src/service/capture.rs, crates/farhelm-supervisor/src/grid_input.rs, crates/farhelm-supervisor/src/grid_input/tests.rs, crates/farhelm-supervisor/src/service/grid_stream.rs, crates/farhelm-supervisor/src/service/grid_stream/tests.rs, crates/farhelm-supervisor/src/grid_output.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 14,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Blank Restart seed does not prove later excerpt provenance",
+            "location": "crates/farhelm-supervisor/src/service/capture.rs:167",
+            "detail": "Reviewed interface revision: f96dd4363d97dc7e07dea5b8947c96be6bf912e8; local assigned capture/comment revisions remain 1ed482dde220452e424973faf38a5e1318986333, f560058da19e02716e6f943883a9508b447aff4e and 08399d092d20815ced6619c26df2391944ae2b4a. TLDR: initial history-only seeding with a blank screen cannot refute an old-run excerpt after the terminal grows. This is the already supplied g013/f2 interface finding, not an independent discovery from the assigned capture patches. Local source check: vendor/alacritty_terminal/src/grid/resize.rs:25-28 calls grow_lines for increased height; :46-71 consumes history into the visible area. launch_artifacts.rs:44-59 claims blank-screen seeding prevents prior-run quotes, while :68-74 reads the final visible screen and :96-102 selects nonblank lines. handlers.rs:1881-1887 resizes on attach and :2042-2054 forwards owned resize without a launch-spec-consumption prerequisite. These checks support the caller's history-promotion counterexample; no blanket initial-seed/final-screen refutation is retained here. Original suspected consequence: misleading durable startup error quoting the previous run, suggested bucket other; could-be-highest: no established security or work-loss route. Confidence: confirmed source support for history promotion and excerpt selection; g013 supplies the full publication/login-shell failure path and owns its finding. proposed_drop: no drop of g013/f2; no separate local report because this exact cause was supplied before discovery, and the assigned service/capture.rs patches change first-submitted-input documentation/test fixtures rather than excerpt provenance. This scope reason is not a claim that the production issue predates the full range or is harmless. possible_cover: exact caller-supplied g013/f2. No original local excerpt-related withdrawal or seed-provenance finding existed to retract; c3's unrelated old-terminal diagnostic-documentation finding and its later correction remain intact. No execution/reproduction. No unresolved local check for this narrow interface reconciliation."
+          }
+        }
+      ],
+      "latest": {
+        "line": 14,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c4",
+          "state": "open",
+          "summary": "Blank Restart seed does not prove later excerpt provenance",
+          "location": "crates/farhelm-supervisor/src/service/capture.rs:167",
+          "detail": "Reviewed interface revision: f96dd4363d97dc7e07dea5b8947c96be6bf912e8; local assigned capture/comment revisions remain 1ed482dde220452e424973faf38a5e1318986333, f560058da19e02716e6f943883a9508b447aff4e and 08399d092d20815ced6619c26df2391944ae2b4a. TLDR: initial history-only seeding with a blank screen cannot refute an old-run excerpt after the terminal grows. This is the already supplied g013/f2 interface finding, not an independent discovery from the assigned capture patches. Local source check: vendor/alacritty_terminal/src/grid/resize.rs:25-28 calls grow_lines for increased height; :46-71 consumes history into the visible area. launch_artifacts.rs:44-59 claims blank-screen seeding prevents prior-run quotes, while :68-74 reads the final visible screen and :96-102 selects nonblank lines. handlers.rs:1881-1887 resizes on attach and :2042-2054 forwards owned resize without a launch-spec-consumption prerequisite. These checks support the caller's history-promotion counterexample; no blanket initial-seed/final-screen refutation is retained here. Original suspected consequence: misleading durable startup error quoting the previous run, suggested bucket other; could-be-highest: no established security or work-loss route. Confidence: confirmed source support for history promotion and excerpt selection; g013 supplies the full publication/login-shell failure path and owns its finding. proposed_drop: no drop of g013/f2; no separate local report because this exact cause was supplied before discovery, and the assigned service/capture.rs patches change first-submitted-input documentation/test fixtures rather than excerpt provenance. This scope reason is not a claim that the production issue predates the full range or is harmless. possible_cover: exact caller-supplied g013/f2. No original local excerpt-related withdrawal or seed-provenance finding existed to retract; c3's unrelated old-terminal diagnostic-documentation finding and its later correction remain intact. No execution/reproduction. No unresolved local check for this narrow interface reconciliation."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g117/findings.jsonl",
+        "id": "c4",
+        "line": 14,
+        "disposition": "duplicate",
+        "group": "launch-excerpt-inherited-history-provenance",
+        "reason": "Parent read full claims076 and reconciles g013/f2 canonical source/contract proof and g100/c1. This owner contributes exact f96dd436 history-growth, owned-resize and nonblank excerpt evidence defeating universal blank-seed provenance; full runtime route is older than range, while1ed482 newly authors false SPEC_impl proof. Keep all references as corroboration of retained documentation defect, not an independent duplicate or new runtime regression. No highest consequence/runtime observation; unclear diagnostic filter does not cover new false proof."
+      },
+      "accepted_parent_decision": {
+        "key": "g117/c4",
+        "line": 14,
+        "disposition": "duplicate",
+        "group": "launch-excerpt-inherited-history-provenance",
+        "bucket": "other",
+        "recording": "retain-new-documentation-old-runtime-context",
+        "needs_independent_drop_check": false,
+        "reason": "Parent read full claims076 and reconciles g013/f2 canonical source/contract proof and g100/c1. This owner contributes exact f96dd436 history-growth, owned-resize and nonblank excerpt evidence defeating universal blank-seed provenance; full runtime route is older than range, while1ed482 newly authors false SPEC_impl proof. Keep all references as corroboration of retained documentation defect, not an independent duplicate or new runtime regression. No highest consequence/runtime observation; unclear diagnostic filter does not cover new false proof."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-076",
+          "key": "g117/c4",
+          "latest_line": 14,
+          "recommendation": "needs-parent",
+          "bucket": "other",
+          "underlying_key": "restart-history-promoted-into-launch-error-excerpt",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The narrow interface evidence is verified: a blank initial screen does not guarantee excerpt provenance after growth. The parent-supplied g013/f2 owns the complete publication path; its history was not supplied in this batch, so an exact alias or whole-finding disposition cannot be certified here.",
+          "checks": [
+            "f96dd4363d97dc7e07dea5b8947c96be6bf912e8:vendor/alacritty_terminal/src/grid/resize.rs:25-28,46-71 grows the visible area using retained history.",
+            "f96dd436:service/launch_artifacts.rs:44-58 asserts blank seeding prevents previous-run quotations; :63-75 reads the final visible screen; :96-102 selects nonblank lines with no run provenance. service/handlers.rs:1881-1887 and :2042-2054 permit attach/owned resize without a launch-spec-consumption prerequisite.",
+            "This is source support for the given counterexample, not observation of a durable wrong error. No independent defect discovery or claim that the issue predates the whole range."
+          ],
+          "coverage_checked": [
+            "SPEC.md:2888-2905 permits excerpts only when safely attributable. SPEC_impl.md:2658-2668 repeats the incorrect blanket blank-screen rationale, so this is not product acceptance of prior-run quotations.",
+            "TODO Planned empty. Searched plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md for launch excerpt/previous-run/blank-screen provenance: no exact existing cover. The tmux plan's instruction to move excerpt helpers is unrelated to provenance.",
+            "FILTER rare-diagnostic application is uncertain because the full trigger/publication path is owned by g013/f2 and absent here. Do not infer a filter drop from the consequence alone."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "Parent must match g013/f2's full record, including restart seeding and a never-started classification that actually publishes the promoted text. No runtime reproduction was performed.",
+          "original_stronger_consequence": "A durable startup error can misleadingly quote the previous run. No established security or work-loss consequence. No local blanket seed-provenance refutation is retained.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Carry verified history-promotion/excerpt-selection evidence into g013/f2; do not create a second local finding merely for supplied interface synthesis."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "launch-excerpt-inherited-history-provenance",
+        "destination": "trailing-launch-excerpt-inherited-history-provenance.md"
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete: all 23 assigned patches read and analyzed at their recorded commits.\n\nNo reportable findings or unresolved leads. Candidates `l1`, `c2`, and `c3` are recorded in `findings.jsonl`; coverage and next steps are in `progress.md`.\n\nSource analysis only; no tests or reproductions run."
+    },
+    {
+      "turn": 2,
+      "reply": "- `c3`: promoted to a confirmed historical documentation finding; verified that `1ed482dd` corrects it.\n- `l1`: expanded admission/routing checks; file-specific refutation holds through endpoint. TCP/cache concern remains separate.\n- `c2`: confirmed cleanup synchronization survives later changes.\n\nAll revisions logged. Unresolved lead IDs: none."
+    },
+    {
+      "turn": 3,
+      "reply": "Checked input/caller ordering, retained test oracles, download handling, message bounds, and both named interfaces. Qualified `c2`; recorded the supplied excerpt-provenance check as `c4`.\n\n- New verified findings: none.\n- New unverified findings: none.\n- Open leads: none.\n- New independent issues found: none.\n\nSource-only; no tests or reproductions run."
+    }
+  ],
+  "progress": "Group g117: supervisor-terminal-streaming.\nState: initial review complete, turn 1. Discovery-pass count: 0. No later synthesis/discovery pass performed in this turn.\n\nCoverage: read the complete brief and inventory commits field only. All 23 assigned patch files, 1,187 lines total, were delivered through evidence read; the 252-line download patch used two packets. No assigned patch material is unread or omitted. Reviewed each selected commit's patch at its recorded revision, including comment-only changes and deleted tests. No excluded coverage sources read. No checkout files changed. No runtime tests, builds, bug reproductions or reproduction programs run.\n\nContracts and interfaces checked: pinned container-session and retired-container contracts (04d85f0c), terminal-migration product and implementation contracts (647f0227 and dbfc6975), terminal experience, Status, GUI answer binding, and grid transport/input contract (dbfc6975 and 1ed482dd). Source callers checked include active-launch retirement detection, upload admission under its lifecycle claim, terminal resolution, GridSender construction, output verdict arbiters and task joining, host creation/restart selection, diagnostic test fixtures, input encoding/sanitization, grid client key filters, and writer queue/message bounds. Context came from recorded revisions, not working-tree source.\n\nInterface assumptions/results: retired outside-supervisor containers are identified from stored launch selection before download or terminal resolution; ordinary container environments use in-container supervisor filesystem authority. Grid output tasks hold no external process and remain signal-and-joined; verdict arbiters run as separate tasks and check reporting task identity. The changed input/comment patches do not change runtime encoding. No GUI confirmation handlers are changed by this group.\n\nDurable records: l1 was appended immediately as a security lead and revised to a candidate after source refutation and specification checks; c2 records the refuted grid cleanup concern; c3 records the minor stale restart-gap comment and the reason for not reporting it. No reportable findings. No open leads. New verified finding IDs this pass: none. New unverified finding IDs this pass: none. Candidate IDs added/revised: l1, c2, c3. One evidence record attempt rejected state closed; the same event was immediately recorded with supported state open, without source reads between those calls.\n\nNext action: return to caller for a later synthesis turn if requested. Parent owns queue coverage and any required independent drop review.\n\nTurn 2: later-turn synthesis complete. Turn count 2; discovery-pass count remains 0. No separate discovery pass performed. No unread assigned scope. Source-only; no tests, builds or reproductions run.\n\nChanges this turn: l1 revised with request admission, upload admission/recheck, ordinary container route lowering, agent-selection predicate equivalence, and endpoint guard retention. Restricted session-authenticated peers cannot stat/download through these paths; full-authority file requests independently inspect the stored launch. Podman environment transport runs the ordinary supervisor inside the container. The file-specific conclusion does not settle the separate g074 constructed-peer/TCP/cache concern. c2 revised after checking endpoint output-task ownership, shutdown and joining; its refutation survives later terminal representation removal.\n\nc3 promoted to a confirmed other/documentation finding under its original ID: at dbfc6975 the helper docs incorrectly describe terminal survival probing and boot-only Interrupted classification despite deliberate old-terminal retirement. Actual reload source confirms the mismatch. Further synthesis found and recorded that the next selected commit, 1ed482dde220452e424973faf38a5e1318986333, corrects both the helper docs and nearby resolver explanation. Endpoint 00de0b6c retains the correction. This is a historical intermediate documentation defect, not an established remaining endpoint defect. The initial exclusion solely for lack of direct user-facing harm is withdrawn. Parent owns final disposition and coverage; no parent drop presumed accepted.\n\nVerified finding IDs promoted this turn: c3 (intermediate, corrected later). Unverified findings: none. Revisions appended under original IDs: c3, l1, c2. Open lead IDs: none. All readily checkable premises pursued in this synthesis were settled from source. Next: return the delta to caller; any later discovery pass requires its later prompt.\n\nTurn 3: separate discovery pass 1 complete. Turn count 3; discovery-pass count 1. Result: no new independent issue beyond known findings and supplied interface records. No runtime tests, builds, reproductions or live-install actions.\n\nBefore discovery: read discovery-neighbours.json completely, lines 1-727, in bounded context chunks. Reconciled both named inputs before the new search. c2 retains the original output-join refutation but now explicitly excludes the separate confirmed natural-detach input lifetime issue supplied as g124/l1. Source checks compared parent explicit drop(backend) before unlock against 1ed482dd's partial move of old.forwarder and block-end input destruction, then checked HostAttach::drop and Pump cancellation. Exclusive-base source already contains the pump; the changed drop order is in range. No drop of g124's concern or its possible-highest consequence is proposed.\n\nc4 is a new candidate record for interface reconciliation only, not a new independent finding: it records why initial blank-screen seeding cannot refute caller-supplied g013/f2 after normal height growth. Locally checked grow_lines, final-screen/nonblank excerpt selection and ordinary attach/resize admission at f96dd436. The full source-supported login-shell failure/publication sequence remains g013's supplied finding. No earlier local excerpt-refutation ID existed; c3's unrelated obsolete lifecycle docs and later correction are preserved.\n\nIndependent discovery checks: compared exclusive-base-to-tip changed runtime contributions for assigned download/upload, capture, grid input/output and stream files; checked first-submitted-input caller ordering, agent-versus-tab distinction, accepted-input return value and paste submission classification; reviewed changed capture fixture responsibility, retained download regular-file/symlink/readability/credit assertions and restricted-file allowlist test; checked key-table/test interpretation and SGR/UTF8 ordering assertions against changed comments; checked message target and row/link fallback against bounded queue wording; reviewed changed stream pause-test premise/assertion and terminal construction documentation. No additional source-supported deviation or substantive unsettled lead was found. Correct production code was not treated as replacement for test-oracle evidence.\n\nRecords this turn: c2 revised (lead event followed by scoped candidate resolution); c4 appended for known-interface context. New verified finding IDs: none. New unverified-after-investigation finding IDs: none. Open lead IDs: none. No new independent discovery found. All assigned patch scope remains read; no prohibited coverage sources searched. Parent owns disposition, filters and coverage. Next action: return this turn's checks/results and empty independent discovery result.\n"
+}

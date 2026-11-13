@@ -1,0 +1,640 @@
+{
+  "group": {
+    "id": "g190",
+    "domain": "retired-xterm-vendor",
+    "purpose": "retired-xterm-vendor: crates/farhelm-ui/assets/vendor/xterm.js; phases webpack module 8906: Property 8906 | webpack module 3955: Property 3955 | webpack module 1433: Property 1433 | webpack module 945: Property 945",
+    "interfaces": [
+      "g009",
+      "g010",
+      "g011",
+      "g061",
+      "g062",
+      "g063",
+      "g079",
+      "g080",
+      "g081",
+      "g082",
+      "g083",
+      "g084",
+      "g135",
+      "g136",
+      "g186",
+      "g187",
+      "g188",
+      "g189",
+      "g191",
+      "g192",
+      "g193",
+      "g194",
+      "g195",
+      "g196",
+      "g197"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/01085-003.patch",
+        "ranges": [
+          [
+            1,
+            1
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/assets/vendor/xterm.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "webpack module 8906: Property 8906; patch character offsets [34789,53295)",
+        "lines": 1,
+        "bytes": 18506,
+        "start": 34789,
+        "end": 53295,
+        "original": "[private-run]/prep/originals/01085.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01085-005.patch",
+        "ranges": [
+          [
+            1,
+            1
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/assets/vendor/xterm.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "webpack module 3955: Property 3955; patch character offsets [71128,83707)",
+        "lines": 1,
+        "bytes": 12579,
+        "start": 71128,
+        "end": 83707,
+        "original": "[private-run]/prep/originals/01085.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01085-006.patch",
+        "ranges": [
+          [
+            1,
+            1
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/assets/vendor/xterm.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "webpack module 1433: Property 1433; patch character offsets [83707,99642)",
+        "lines": 1,
+        "bytes": 15938,
+        "start": 83707,
+        "end": 99642,
+        "original": "[private-run]/prep/originals/01085.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01085-007.patch",
+        "ranges": [
+          [
+            1,
+            1
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/assets/vendor/xterm.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "webpack module 945: Property 945; patch character offsets [99642,114893)",
+        "lines": 1,
+        "bytes": 15251,
+        "start": 99642,
+        "end": 114893,
+        "original": "[private-run]/prep/originals/01085.patch"
+      }
+    ],
+    "lines": 4,
+    "bytes": 62274
+  },
+  "records": [
+    {
+      "key": "g190/c1",
+      "owner": "g190",
+      "id": "c1",
+      "domain": "retired-xterm-vendor",
+      "purpose": "retired-xterm-vendor: crates/farhelm-ui/assets/vendor/xterm.js; phases webpack module 8906: Property 8906 | webpack module 3955: Property 3955 | webpack module 1433: Property 1433 | webpack module 945: Property 945",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Deleted linkifier's stale-link click protection is retained",
+            "location": "crates/farhelm-ui/assets/vendor/xterm.js:1",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: Considered whether removing the old linkifier lets a terminal redraw redirect a pending click to a different URL or file. Source analysis refutes this deletion concern. Details: assigned webpack module 8906 retained a press-time link and compared its text/range on release. The replacement grid-terminal.js:1290-1321 captures row identities; :1346-1381 fences asynchronous provider results by lookup token, row identities and current pointer line; :1407-1420 captures hover evidence; :1688-1693 activates only the same press-time object when hoverCurrent() and range coverage still hold. SPEC_impl.md:1069-1097 requires answers and held input to bind to what was drawn; SPEC.md:3083-3107 requires drag suppression and disclosed terminal-link targets. Suggested bucket: highest if stale targets could authorize unintended file opening/security effects; could-be-highest: yes, but that route is refuted by the replacement identity checks. Confidence: confirmed by source, no execution performed. proposed_drop: source refutation, not a specification-only exception. possible_cover: none; coverage sources were not searched. Caveat: this records the stale-click deletion concern, not a full audit of downstream file/tunnel services."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Deleted linkifier's stale-link click protection is retained",
+            "location": "crates/farhelm-ui/assets/vendor/xterm.js:1",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: Considered whether removing the old linkifier lets a terminal redraw redirect a pending click to a different URL or file. Source analysis refutes this deletion concern. Details: assigned webpack module 8906 retained a press-time link and compared text/range on release. grid-terminal.js:1290-1321 captures row identities; :1346-1381 fences asynchronous provider results by lookup token, row identities and current pointer line; :1407-1420 captures hover evidence; :1688-1693 activates only the same press-time object when hoverCurrent() and range coverage still hold. Synthesis additionally traced the caller: terminal.js:940-1117 constructs per-terminal links; OSC and path activation closures capture found.uri/target.path/path from the hovered link, rather than choosing a new destination from live output. They require the grid's admitted click and no selection; web activation checks the currently visible disclosure, and the FileLinks constructor receives isClick and terminal-local view callbacks. The provider orders OSC, printed URLs, then paths and retains each resulting link object. SPEC_impl.md:1069-1097 requires binding to what was drawn; SPEC.md:3083-3107 requires drag suppression and disclosed terminal-link targets. Suggested bucket: highest if stale targets could authorize unintended file opening/security effects; could-be-highest: yes, but that route is refuted by the replacement identity and captured-target checks. Confidence: confirmed by source; no execution performed. proposed_drop: source refutation, not a specification-only exception. possible_cover: none; coverage sources were not searched. Caveat: downstream transfer/tunnel implementation is outside this vendor-deletion assignment. Revision reason: later-turn synthesis checked that the linkifier's safe object identity is not undone by its caller selecting a different live target."
+          }
+        }
+      ],
+      "latest": {
+        "line": 5,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Deleted linkifier's stale-link click protection is retained",
+          "location": "crates/farhelm-ui/assets/vendor/xterm.js:1",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: Considered whether removing the old linkifier lets a terminal redraw redirect a pending click to a different URL or file. Source analysis refutes this deletion concern. Details: assigned webpack module 8906 retained a press-time link and compared text/range on release. grid-terminal.js:1290-1321 captures row identities; :1346-1381 fences asynchronous provider results by lookup token, row identities and current pointer line; :1407-1420 captures hover evidence; :1688-1693 activates only the same press-time object when hoverCurrent() and range coverage still hold. Synthesis additionally traced the caller: terminal.js:940-1117 constructs per-terminal links; OSC and path activation closures capture found.uri/target.path/path from the hovered link, rather than choosing a new destination from live output. They require the grid's admitted click and no selection; web activation checks the currently visible disclosure, and the FileLinks constructor receives isClick and terminal-local view callbacks. The provider orders OSC, printed URLs, then paths and retains each resulting link object. SPEC_impl.md:1069-1097 requires binding to what was drawn; SPEC.md:3083-3107 requires drag suppression and disclosed terminal-link targets. Suggested bucket: highest if stale targets could authorize unintended file opening/security effects; could-be-highest: yes, but that route is refuted by the replacement identity and captured-target checks. Confidence: confirmed by source; no execution performed. proposed_drop: source refutation, not a specification-only exception. possible_cover: none; coverage sources were not searched. Caveat: downstream transfer/tunnel implementation is outside this vendor-deletion assignment. Revision reason: later-turn synthesis checked that the linkifier's safe object identity is not undone by its caller selecting a different live target."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g190/findings.jsonl",
+        "id": "c1",
+        "line": 5,
+        "disposition": "under-investigation",
+        "group": "g190-c1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-119",
+          "key": "g190/c1",
+          "latest_line": 5,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "vendor-removal-missing-held-link-target-binding-hypothesis",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The replacement binds activation to the press-time link object and captured row evidence, and its caller closes over the discovered URI/path. This source-refutes the named deletion concern that a redraw changes a held click's destination. Because the original proposed consequence involved security, this remains a proposal for the parent's independent drop check.",
+          "checks": [
+            "Tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db assets/grid-terminal.js:1280-1321 captures row identities and rejects changed covered rows; :1346-1381 fences asynchronous lookup by token/row/pointer evidence; :1407-1420 records hover evidence.",
+            "Same revision :1683-1695 requires the release to retain the identical press-time object, current hover evidence and range coverage before activate. assets/terminal.js:940-1117 captures found.uri, target.path or path in each activation closure, rather than selecting a destination from new live output; web opening also checks current disclosure and the admitted click.",
+            "No runtime observation or downstream file/tunnel-service audit was performed. Existing false-cancellation/hover-loss defects do not establish wrong-target opening."
+          ],
+          "coverage_checked": [
+            "SPEC.md Terminal experience link/drag/disclosure rules and SPEC_impl.md The grid client were read. They require safe binding; no exception was used as cover.",
+            "TODO.md Planned empty; BUGS.md unrelated; plans/queue retirement/retained-link behavior does not accept wrong-target clicks.",
+            "INDEX.md read in full. container-redraw-discards-hover.md and neighbor-status-redraw-cancels-stable-url-click.md read in full: they concern rejected/lost clicks and retry behavior, not a different destination being opened. Active TRIAGE_OUTCOMES.md search found no exact disposition. FILTER.md not used; a security consequence would be outside ordinary glitch filters."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No missing source premise for the narrow retained-owner checks. This is not proof that every downstream file/tunnel operation is safe or that no separate link defect exists.",
+          "original_stronger_consequence": "A redraw could redirect a pending click to a different URL/file, potentially authorizing unintended file opening/security effects; reviewer suggested highest if established. Both history events propose source refutation, preserving that stronger hypothetical consequence and downstream caveat.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Propose rejection only of the missing held-click protection caused by vendor deletion. Submit the original security consequence, these source checks and this narrow basis to a fresh independent drop checker."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "vendor-removal-missing-held-link-target-binding-hypothesis",
+        "destination": null
+      }
+    },
+    {
+      "key": "g190/c2",
+      "owner": "g190",
+      "id": "c2",
+      "domain": "retired-xterm-vendor",
+      "purpose": "retired-xterm-vendor: crates/farhelm-ui/assets/vendor/xterm.js; phases webpack module 8906: Property 8906 | webpack module 3955: Property 3955 | webpack module 1433: Property 1433 | webpack module 945: Property 945",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Deleted font and renderer services retain replacement metric lifecycle",
+            "location": "crates/farhelm-ui/assets/vendor/xterm.js:1",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: Considered whether deleting the DOM renderer, width cache and pixel-ratio services leaves terminal text misaligned or stale after zoom or display changes. The replacement explicitly owns that lifecycle. Details: assigned modules 3955, 1433 and 945 contain the old DOM renderer, width cache, character-size measurement, browser pixel-ratio monitor and render scheduler. grid-terminal.js:420-506 measures the bundled font, derives cell geometry, clears measured-glyph/reference caches and redraws/refits after remeasurement; :1946-1958 rearms its pixel-ratio watcher; :2017-2024 routes text-size changes through remeasure(); :609-614 coalesces paints; :615-783 lays out rows and boxes nonflowing glyphs to their declared cell widths; :2110-2139 disposes owned scheduling and watchers. SPEC_impl.md:1847-1867 defines the replacement fit and drawing contracts; its exact relevant text is: 'Drawing still rounds cells at the supervisor-committed size, never at the proposal reference.' It also specifies 'painted at most once per animation frame however many messages arrive'. The source implements these contracts; no requirement to preserve the retired cache implementation itself was found. Suggested bucket: high/material UX if such a regression existed. could-be-highest: no established security or loss-of-work consequence. Confidence: confirmed by source; no runtime execution. proposed_drop: source refutation. possible_cover: none; excluded coverage sources were not read. Caveat: the check covers ownership and invalidation of the removed services, not every visual glyph/font combination."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Deleted font and renderer services retain replacement metric lifecycle",
+            "location": "crates/farhelm-ui/assets/vendor/xterm.js:1",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: Considered whether deleting the DOM renderer, width cache and pixel-ratio services leaves terminal text misaligned or stale after zoom or display changes. The replacement explicitly owns that lifecycle. Details: assigned modules 3955, 1433 and 945 contain the old DOM renderer, width cache, character-size measurement, browser pixel-ratio monitor and render scheduler. grid-terminal.js:420-506 measures the font, derives cell geometry, clears glyph/reference caches and redraws/refits; :1946-1958 rearms the pixel-ratio watcher; :2017-2024 routes size changes through remeasure(); :609-614 coalesces paints; :615-783 lays out rows and boxes nonflowing glyphs; :2110-2139 disposes owned scheduling/watchers. Synthesis checked the caller premise: terminal.js:431-435 requests both bundled font weights, :454-460 sets fontSettled only when both loads returned faces, and :3201-3224 requires that flag and all grid helpers before mounting. The mount passes the bundled family at :4313-4316. Pane/window resizing calls grid.fit through :4606-4636. Thus deleting the old renderer does not leave a fallback-font measurement that needs its width-cache service to recover. SPEC_impl.md:1516-1519 requires both bundled weights before mount, and :1847-1867 defines replacement fit and drawing contracts, including 'Drawing still rounds cells at the supervisor-committed size, never at the proposal reference.' Suggested bucket: high/material UX if the metric lifecycle were broken. could-be-highest: no established security or loss-of-work consequence. Confidence: confirmed by source; no runtime execution. proposed_drop: source refutation. possible_cover: none; excluded coverage sources not read. Caveat: this checks service ownership, invalidation and caller font readiness, not every glyph/font combination. Revision reason: later-turn synthesis resolved the caller assumption that fonts are ready before the grid measures them."
+          }
+        }
+      ],
+      "latest": {
+        "line": 6,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Deleted font and renderer services retain replacement metric lifecycle",
+          "location": "crates/farhelm-ui/assets/vendor/xterm.js:1",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: Considered whether deleting the DOM renderer, width cache and pixel-ratio services leaves terminal text misaligned or stale after zoom or display changes. The replacement explicitly owns that lifecycle. Details: assigned modules 3955, 1433 and 945 contain the old DOM renderer, width cache, character-size measurement, browser pixel-ratio monitor and render scheduler. grid-terminal.js:420-506 measures the font, derives cell geometry, clears glyph/reference caches and redraws/refits; :1946-1958 rearms the pixel-ratio watcher; :2017-2024 routes size changes through remeasure(); :609-614 coalesces paints; :615-783 lays out rows and boxes nonflowing glyphs; :2110-2139 disposes owned scheduling/watchers. Synthesis checked the caller premise: terminal.js:431-435 requests both bundled font weights, :454-460 sets fontSettled only when both loads returned faces, and :3201-3224 requires that flag and all grid helpers before mounting. The mount passes the bundled family at :4313-4316. Pane/window resizing calls grid.fit through :4606-4636. Thus deleting the old renderer does not leave a fallback-font measurement that needs its width-cache service to recover. SPEC_impl.md:1516-1519 requires both bundled weights before mount, and :1847-1867 defines replacement fit and drawing contracts, including 'Drawing still rounds cells at the supervisor-committed size, never at the proposal reference.' Suggested bucket: high/material UX if the metric lifecycle were broken. could-be-highest: no established security or loss-of-work consequence. Confidence: confirmed by source; no runtime execution. proposed_drop: source refutation. possible_cover: none; excluded coverage sources not read. Caveat: this checks service ownership, invalidation and caller font readiness, not every glyph/font combination. Revision reason: later-turn synthesis resolved the caller assumption that fonts are ready before the grid measures them."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g190/findings.jsonl",
+        "id": "c2",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "vendor-removal-missing-font-metric-lifecycle-hypothesis",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-119 after inspecting it. The retained grid owns font measurement, cache invalidation, refit/redraw, pixel-ratio watching and disposal, and the caller waits for both bundled weights before mounting. No missing-lifecycle regression follows from removing the old services. Source refutation of loss of the deleted services' ownership/invalidation responsibilities; do not use this to reject independent test coverage defects. Checked source/results: [\"Tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db assets/grid-terminal.js:420-506 measures characters and cells, clears advance/reference caches in remeasure, redraws and fits; :609-614 coalesces painting; :1940-1958 rearms the ratio watcher; :2010-2024 changes text size through remeasure; :2110-2139 disposes timers/watchers.\",\"Same revision assets/terminal.js:431-460 loads both font weights and sets fontSettled only after both return faces; :3201-3224 gates mount on it; :4313-4318 supplies the bundled family; :4606-4636 refits for window/pane changes. This is a source lifecycle check, not validation of every glyph/font combination.\"] Current coverage/results: [\"Current SPEC_impl.md Terminal widget and The grid client: both bundled weights before mount, supervisor-committed drawing size, deterministic fit and once-per-animation-frame painting. SPEC.md Terminal experience text-size/fidelity contract was read.\",\"TODO.md Planned empty; BUGS.md unrelated. plans/queue retirement/docs goals preserve fit and attribution, not missing metrics. INDEX.md/matching searches found font-readiness test defects, not a missing production owner; those test-oracle findings remain distinct. Active TRIAGE_OUTCOMES.md has a held-font-test decision, which is not production coverage. FILTER.md not used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Misaligned or stale terminal text after zoom/display changes, high/material UX if established. No security or loss-of-user-work consequence was claimed. Later synthesis added the font-ready caller premise rather than lowering an established harmful route.\"; \"None for the narrow missing-owner hypothesis. Rendering every glyph, font/zoom combination and browser engine remains unobserved.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g190/c2",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "vendor-removal-missing-font-metric-lifecycle-hypothesis",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-119 after inspecting it. The retained grid owns font measurement, cache invalidation, refit/redraw, pixel-ratio watching and disposal, and the caller waits for both bundled weights before mounting. No missing-lifecycle regression follows from removing the old services. Source refutation of loss of the deleted services' ownership/invalidation responsibilities; do not use this to reject independent test coverage defects. Checked source/results: [\"Tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db assets/grid-terminal.js:420-506 measures characters and cells, clears advance/reference caches in remeasure, redraws and fits; :609-614 coalesces painting; :1940-1958 rearms the ratio watcher; :2010-2024 changes text size through remeasure; :2110-2139 disposes timers/watchers.\",\"Same revision assets/terminal.js:431-460 loads both font weights and sets fontSettled only after both return faces; :3201-3224 gates mount on it; :4313-4318 supplies the bundled family; :4606-4636 refits for window/pane changes. This is a source lifecycle check, not validation of every glyph/font combination.\"] Current coverage/results: [\"Current SPEC_impl.md Terminal widget and The grid client: both bundled weights before mount, supervisor-committed drawing size, deterministic fit and once-per-animation-frame painting. SPEC.md Terminal experience text-size/fidelity contract was read.\",\"TODO.md Planned empty; BUGS.md unrelated. plans/queue retirement/docs goals preserve fit and attribution, not missing metrics. INDEX.md/matching searches found font-readiness test defects, not a missing production owner; those test-oracle findings remain distinct. Active TRIAGE_OUTCOMES.md has a held-font-test decision, which is not production coverage. FILTER.md not used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Misaligned or stale terminal text after zoom/display changes, high/material UX if established. No security or loss-of-user-work consequence was claimed. Later synthesis added the font-ready caller premise rather than lowering an established harmful route.\"; \"None for the narrow missing-owner hypothesis. Rendering every glyph, font/zoom combination and browser engine remains unobserved.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-119",
+          "key": "g190/c2",
+          "latest_line": 6,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "vendor-removal-missing-font-metric-lifecycle-hypothesis",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The retained grid owns font measurement, cache invalidation, refit/redraw, pixel-ratio watching and disposal, and the caller waits for both bundled weights before mounting. No missing-lifecycle regression follows from removing the old services.",
+          "checks": [
+            "Tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db assets/grid-terminal.js:420-506 measures characters and cells, clears advance/reference caches in remeasure, redraws and fits; :609-614 coalesces painting; :1940-1958 rearms the ratio watcher; :2010-2024 changes text size through remeasure; :2110-2139 disposes timers/watchers.",
+            "Same revision assets/terminal.js:431-460 loads both font weights and sets fontSettled only after both return faces; :3201-3224 gates mount on it; :4313-4318 supplies the bundled family; :4606-4636 refits for window/pane changes. This is a source lifecycle check, not validation of every glyph/font combination."
+          ],
+          "coverage_checked": [
+            "Current SPEC_impl.md Terminal widget and The grid client: both bundled weights before mount, supervisor-committed drawing size, deterministic fit and once-per-animation-frame painting. SPEC.md Terminal experience text-size/fidelity contract was read.",
+            "TODO.md Planned empty; BUGS.md unrelated. plans/queue retirement/docs goals preserve fit and attribution, not missing metrics. INDEX.md/matching searches found font-readiness test defects, not a missing production owner; those test-oracle findings remain distinct. Active TRIAGE_OUTCOMES.md has a held-font-test decision, which is not production coverage. FILTER.md not used."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "None for the narrow missing-owner hypothesis. Rendering every glyph, font/zoom combination and browser engine remains unobserved.",
+          "original_stronger_consequence": "Misaligned or stale terminal text after zoom/display changes, high/material UX if established. No security or loss-of-user-work consequence was claimed. Later synthesis added the font-ready caller premise rather than lowering an established harmful route.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation of loss of the deleted services' ownership/invalidation responsibilities; do not use this to reject independent test coverage defects."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "vendor-removal-missing-font-metric-lifecycle-hypothesis",
+        "destination": null
+      }
+    },
+    {
+      "key": "g190/c3",
+      "owner": "g190",
+      "id": "c3",
+      "domain": "retired-xterm-vendor",
+      "purpose": "retired-xterm-vendor: crates/farhelm-ui/assets/vendor/xterm.js; phases webpack module 8906: Property 8906 | webpack module 3955: Property 3955 | webpack module 1433: Property 1433 | webpack module 945: Property 945",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Retired renderer's overline support is not a new removal regression",
+            "location": "crates/farhelm-ui/assets/vendor/xterm.js:1",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: The retired row factory recognizes overlined text, while the existing grid style mapper has no overline flag. This does not establish a regression introduced by this assigned deletion. Details: assigned module 1433 handles isOverline(); grid-style.js:42-57 defines the replacement flags and :145-217 resolves/decorates styles without overline. The complete patch for grid-style.js in the reviewed commit changes comments only. The parent revision's terminal.js:5954-5985 already constructs the same grid for terminal hosts, and no registerCharacterJoiner call exists in the parent revision's owned UI assets (git grep returned no matches outside vendor). SPEC_impl.md:1506-1514 makes the supervisor emulator and grid the terminal-host path, and SPEC.md:2999-3015 explicitly retires the old tmux terminals independently of this vendor deletion. Existing grid attribute limitations and optional unused character-joiner facilities are not independent defects of deleting the old renderer. Suggested bucket: other for the unestablished deletion concern; could-be-highest: no established security or work-loss route. Confidence: confirmed attribution analysis, no execution performed. proposed_drop: pre-existing replacement behavior and no changed surviving route; not a specification-only dismissal of a highest consequence. possible_cover: none; coverage sources not read. Caveat: this does not decide whether adding overline support to the grid would be desirable under the full-fidelity goal; investigating that independent existing behavior is outside this deletion assignment."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Retired renderer's overline support is not a new removal regression",
+            "location": "crates/farhelm-ui/assets/vendor/xterm.js:1",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: The retired row factory recognizes overlined text, while the existing grid style mapper has no overline flag. This does not establish a regression introduced by deleting that vendor code. Details: assigned module 1433 handles isOverline(); grid-style.js:42-57 and :145-217 have no overline flag/declaration. Its complete patch in this commit changes comments only. Parent-revision terminal.js:5954-6000 already constructs the grid for terminal hosts; no registerCharacterJoiner call exists in owned parent UI assets outside vendor. Synthesis resolved the cross-commit premise from implementation rather than relying only on the new specification: at f560058da19e02716e6f943883a9508b447aff4e^, service/core.rs:6142-6151 already ends the old private server before reloading sessions, and :6675-6680 explicitly maps every TerminalKind::Tmux row to no terminal without looking up its recorded address. The parent therefore already had no surviving served old-terminal route whose overline or optional character-joiner behavior depends on this bundle. SPEC_impl.md:1506-1514 describes the grid terminal-host path; SPEC.md:2999-3015 describes the independently retired old terminals. Suggested bucket: other for the unestablished deletion concern. could-be-highest: no established security or work-loss route. Confidence: confirmed source attribution; no execution. proposed_drop: pre-existing replacement behavior and source-confirmed absence of a changed surviving route, not a specification-only dismissal. possible_cover: none; coverage sources not read. Caveat: this does not decide whether adding overline support to the existing grid would be desirable under the full-fidelity goal; that independent behavior is outside this deletion assignment. Revision reason: later-turn synthesis verified that old-terminal retirement already precedes the assigned deletion, including the parent reload branch that refuses to serve old terminals even if their server failed to end."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c3",
+            "state": "open",
+            "summary": "Overline removal needs whole-range active-path attribution",
+            "location": "crates/farhelm-ui/assets/vendor/xterm.js:1",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e; range exclusive 6e423e30068b62c6cfa276c6d720ee35bb70387a through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: Removing the old terminal path may remove visible overline formatting that an actively served terminal at the range base supported. Original local conclusion remains: module 1433 has isOverline(), grid-style.js lacks overline and its assigned patch is comments only; the parent of f560 already retires old terminals before lookup, and no optional character-joiner caller was found. That supports the original proposed_drop basis only for introduction in f560 itself. Caller-supplied g189/l1:10 and parent/full-range-attribution correctly require checking whether old terminals emitted and served SGR53 at the exclusive base and whether an in-range default switch/retirement removed it. No parent exclusion/drop has been accepted. Suggested bucket: other for the original unestablished deletion concern, subject to established user-facing consequence; could-be-highest: no known security/work-loss route for overline formatting. Confidence: unresolved source-attribution lead, not a complete finding. Checks still required: base xterm configuration/styles, tmux capture/replay/live pass-through and active selection, base/full-range fidelity contract, bounded relevant commit history. proposed_drop: original pre-existing-replacement/no surviving route basis preserved as a proposal but insufficient for a whole-range drop pending these checks. possible_cover: exact alias g189/l1 supplied by caller; no novelty credit for reconciliation. No execution/reproduction. Missing premise: whether overline survived the old actively served path at the base. Source and history can settle it and will be checked now. Existing neighbour findings concerning primary-selection guidance, old-page JSON reinterpretation and failed-mount test fidelity are distinct and are not refuted by c1/c2/c4's narrow ownership checks."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c3",
+            "state": "open",
+            "summary": "Whole-range overline capability loss has a source-supported old live path",
+            "location": "crates/farhelm-ui/assets/vendor/xterm.js:1",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e; whole pinned range exclusive 6e423e30068b62c6cfa276c6d720ee35bb70387a through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: The range-base served old terminal can display an overline, while the surviving grid cannot represent one. Whole-range attribution is not refuted by the grid omission predating f560. New source results: at the exclusive base, terminal.js:4679-4693 chooses xterm for a known tmux terminal, :5363-5366 hands byte chunks to term.write, the xterm SGR handler sets bg bit 1073741824 for parameter 53 and clears it for 55, assigned row factory 1433 emits xterm-overline for that bit, and xterm.css:186-194 draws it. The base tmux.rs:2943-2950 explicitly says live percent-output bypasses tmux's stored grid. QueryStripper's complete query table and feed implementation (tmux/query_strip.rs:44-114) remove only literal terminal queries, not SGR53; connection.rs:1789-1800 forwards OutputEvent::Bytes. Thus whether capture-pane preserves overline is immaterial to the established live-output capability; replay fidelity is not claimed. Base SPEC.md:2817-2823 promises the live TUI/full fidelity; :2966-2993 serves existing old terminals beside new ones. Relevant history includes dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 ending old terminals, 1ed482dde220452e424973faf38a5e1318986333 removing the driver, then f560 deleting the renderer. Original source-local exclusion remains valid only for f560: its parent already maps tmux rows to no terminal and the grid-style patch changes comments only. Original proposed_drop basis preserved, but no whole-range drop accepted. Remaining readily checkable premises: exact in-range retirement change and pinned-tip fidelity/style state, and distinguish a changed retired-path capability from an independent base grid defect. Suggested bucket: other for overline formatting unless material usage is established; could-be-highest: no known security/work-loss route. Confidence: source-supported lead, not runtime-observed. possible_cover: exact g189/l1 alias supplied by caller; no novelty credit. No tests/reproductions. The caller's existing other interface findings remain distinct; ownership checks do not refute their test-oracle/documentation/compatibility concerns."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c3",
+            "state": "open",
+            "summary": "Grid-only terminal retirement loses previously served overline formatting",
+            "location": "crates/farhelm-ui/assets/vendor/xterm.js:1",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e; attribution checked over exclusive 6e423e30068b62c6cfa276c6d720ee35bb70387a through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: Text a terminal program marked with an overline could be drawn that way in a served old terminal at the range base; after old terminals and xterm are removed, the only renderer has no way to draw that decoration. Details: at the exclusive base, assets/terminal.js:4679-4693 constructs xterm for known tmux terminals; :5363-5366 writes received live bytes to it. The base bundle's SGR handler sets bg bit 1073741824 for parameter 53 and clears it for 55; its AttributeData.isOverline reads the bit, assigned row factory module 1433 emits xterm-overline, and vendor/xterm.css:186-194 supplies the decoration. This is an active source route, not merely unused upstream code: base tmux.rs:2943-2950 documents live percent-output as byte-clean and bypassing tmux's saved grid; the complete QueryStripper table/feed in tmux/query_strip.rs:44-114 removes only fixed query strings, never SGR53; service/connection.rs:1789-1800 forwards byte events. Replay preservation by capture-pane is not claimed or needed for this live capability. Base SPEC.md:2817-2823 promises the actual TUI/full fidelity ('If it works over plain SSH it must work here'), while :2966-2993 serves existing old terminals alongside new ones. In-range dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 changes supervisor startup from adopting that server to ending it and suppressing all old lookups; 1ed482dde220452e424973faf38a5e1318986333 removes its driver; f560 deletes the old renderer. At the pinned tip SPEC.md:2855-2861 retains the full-fidelity statement, but assets/grid-style.js:43-57 lacks an overline flag and :170-217 only generates underline and line-through. Relevant bounded history contains no overline implementation added to this path. The new grid's missing attribute already existed at the base, but the whole range removes the still-served alternative that displayed it. Suggested bucket: other, formatting capability loss; frequency/material usage is unmeasured. Could-be-highest: no established security or loss-of-work route. Confidence: confirmed source capability/representation/retirement route; no runtime observation or reproduction. proposed_drop: false for whole-range capability loss. Original proposed-drop basis is preserved and narrowed: the grid-style patch in f560 is comments only and f560's parent already retires old terminals, so f560 itself does not introduce that grid omission. That is insufficient to show the omission predates the entire range's removal of the old served route. Explicit acceptance of ending old terminals does not by itself specify accepting reduced styling for subsequent runs. possible_cover: caller-supplied exact g189/l1:10 alias; reconciliation only, no novel discovery credit. Caveats: the source proves live output formatting, not old replay fidelity, a particular agent's use of SGR53, or visible behavior observed in execution. This records a narrow retained styling gap, not an objection to intentional old-process termination. Fix direction: carry overline through the emulator/grid style representation and CSS, or explicitly settle the fidelity contract for that omitted styling. Revision reason: caller-required whole-range attribution invalidated the original broad pre-existing/no-surviving-route exclusion, while preserving its assigned-commit-local result. No parent drop/lowering is asserted."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "c3",
+          "state": "open",
+          "summary": "Grid-only terminal retirement loses previously served overline formatting",
+          "location": "crates/farhelm-ui/assets/vendor/xterm.js:1",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e; attribution checked over exclusive 6e423e30068b62c6cfa276c6d720ee35bb70387a through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: Text a terminal program marked with an overline could be drawn that way in a served old terminal at the range base; after old terminals and xterm are removed, the only renderer has no way to draw that decoration. Details: at the exclusive base, assets/terminal.js:4679-4693 constructs xterm for known tmux terminals; :5363-5366 writes received live bytes to it. The base bundle's SGR handler sets bg bit 1073741824 for parameter 53 and clears it for 55; its AttributeData.isOverline reads the bit, assigned row factory module 1433 emits xterm-overline, and vendor/xterm.css:186-194 supplies the decoration. This is an active source route, not merely unused upstream code: base tmux.rs:2943-2950 documents live percent-output as byte-clean and bypassing tmux's saved grid; the complete QueryStripper table/feed in tmux/query_strip.rs:44-114 removes only fixed query strings, never SGR53; service/connection.rs:1789-1800 forwards byte events. Replay preservation by capture-pane is not claimed or needed for this live capability. Base SPEC.md:2817-2823 promises the actual TUI/full fidelity ('If it works over plain SSH it must work here'), while :2966-2993 serves existing old terminals alongside new ones. In-range dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 changes supervisor startup from adopting that server to ending it and suppressing all old lookups; 1ed482dde220452e424973faf38a5e1318986333 removes its driver; f560 deletes the old renderer. At the pinned tip SPEC.md:2855-2861 retains the full-fidelity statement, but assets/grid-style.js:43-57 lacks an overline flag and :170-217 only generates underline and line-through. Relevant bounded history contains no overline implementation added to this path. The new grid's missing attribute already existed at the base, but the whole range removes the still-served alternative that displayed it. Suggested bucket: other, formatting capability loss; frequency/material usage is unmeasured. Could-be-highest: no established security or loss-of-work route. Confidence: confirmed source capability/representation/retirement route; no runtime observation or reproduction. proposed_drop: false for whole-range capability loss. Original proposed-drop basis is preserved and narrowed: the grid-style patch in f560 is comments only and f560's parent already retires old terminals, so f560 itself does not introduce that grid omission. That is insufficient to show the omission predates the entire range's removal of the old served route. Explicit acceptance of ending old terminals does not by itself specify accepting reduced styling for subsequent runs. possible_cover: caller-supplied exact g189/l1:10 alias; reconciliation only, no novel discovery credit. Caveats: the source proves live output formatting, not old replay fidelity, a particular agent's use of SGR53, or visible behavior observed in execution. This records a narrow retained styling gap, not an objection to intentional old-process termination. Fix direction: carry overline through the emulator/grid style representation and CSS, or explicitly settle the fidelity contract for that omitted styling. Revision reason: caller-required whole-range attribution invalidated the original broad pre-existing/no-surviving-route exclusion, while preserving its assigned-commit-local result. No parent drop/lowering is asserted."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g190/findings.jsonl",
+        "id": "c3",
+        "line": 10,
+        "disposition": "duplicate",
+        "group": "terminal-grid-lacks-sgr53-overline-after-old-route-retirement",
+        "reason": "Full119 same source/capability route as retained189l1event17: base live old-terminal path can pass SGR53/55 to capable xterm; in-range retirement removes remaining served capable route, tipparser/grid lacks overline. Preserve localf560 attribution narrow, hostlimitationprebase, acceptedoldsessionretirementcompetingcontext, no particularagent/frequency/runtimeobservation or workloss. One conditional fidelity item, no second parserintroduction."
+      },
+      "accepted_parent_decision": {
+        "key": "g190/c3",
+        "line": 10,
+        "disposition": "duplicate",
+        "group": "terminal-grid-lacks-sgr53-overline-after-old-route-retirement",
+        "bucket": "other",
+        "recording": "new-with-canonical",
+        "needs_independent_drop_check": false,
+        "reason": "Full119 same source/capability route as retained189l1event17: base live old-terminal path can pass SGR53/55 to capable xterm; in-range retirement removes remaining served capable route, tipparser/grid lacks overline. Preserve localf560 attribution narrow, hostlimitationprebase, acceptedoldsessionretirementcompetingcontext, no particularagent/frequency/runtimeobservation or workloss. One conditional fidelity item, no second parserintroduction."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-119",
+          "key": "g190/c3",
+          "latest_line": 10,
+          "recommendation": "duplicate",
+          "bucket": "other",
+          "underlying_key": "terminal-grid-lacks-sgr53-overline-after-old-route-retirement",
+          "aliases": [
+            "g189/l1"
+          ],
+          "target_queue_file": null,
+          "why": "This is the exact same SGR53 live-output capability loss as g189/l1: same retired capable route, missing parser/grid representation and consequence. Retain its evidence in the canonical record rather than dropping the substance. Original assigned-commit-only proposed drops at lines 3/7 were reopened at line 8 and superseded by the whole-range finding.",
+          "checks": [
+            "Checked the same explicit base live xterm/query-strip/forwarding sources, dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 retirement implementation and tip vte/grid-style sources listed for g189/l1. They establish the conditional live formatting route and loss of its remaining served implementation.",
+            "The local f560 attribution remains narrow: old terminals already retired in its parent; parser/style absence predates that deletion. It does not put the whole-range route outside review. No execution was performed."
+          ],
+          "coverage_checked": [
+            "SPEC.md Terminal experience fidelity and old-terminal retirement, SPEC_impl.md grid/emulator sections: no explicit acceptance of overline omission.",
+            "TODO.md Planned empty; BUGS.md unrelated. plans/queue retirement/docs acceptance/settled decisions do not repair or explicitly accept missing SGR53 styling. INDEX.md/matching queue and active TRIAGE_OUTCOMES.md searches found no exact existing overline record. FILTER.md has no full match for a consistent missing decoration. Canonical g189/l1 in this named batch is exact duplicate coverage by consolidation, not an existing queue-file cover."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "Runtime behavior, replay fidelity, a particular agent's use of SGR53 and material frequency were not established. None is needed for the conditional source capability loss retained under g189/l1.",
+          "original_stronger_consequence": "Overline formatting only, other priority; no established security or loss-of-user-work route. Preserve the original proposed-drop history as assigned-commit attribution, and its later withdrawal as a whole-range basis.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Consolidate into g189/l1 with both histories and sources. Do not treat the initial proposed drop as the current disposition."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "terminal-grid-lacks-sgr53-overline-after-old-route-retirement",
+        "destination": "trailing-terminal-grid-lacks-sgr53-overline-after-old-route-retirement.md"
+      }
+    },
+    {
+      "key": "g190/c4",
+      "owner": "g190",
+      "id": "c4",
+      "domain": "retired-xterm-vendor",
+      "purpose": "retired-xterm-vendor: crates/farhelm-ui/assets/vendor/xterm.js; phases webpack module 8906: Property 8906 | webpack module 3955: Property 3955 | webpack module 1433: Property 1433 | webpack module 945: Property 945",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Selection, scroll anchoring and synchronized redraw have explicit replacement owners",
+            "location": "crates/farhelm-ui/assets/vendor/xterm.js:1",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: Considered whether deleting the old viewport/selection models and renderer scheduler loses selection or leaves an agent redraw permanently held. The replacement owns these behaviors in the grid and supervisor. Details: the assigned packet beginning module 8906 also removes Viewport; packet 1433 removes selection-render/selection models; packet 945 removes RenderService and its synchronized-output timeout. grid-terminal.js:510-599 anchors the view to absolute lines and hides history on the alternate screen; :928-947 clears invalidated selections and trims their surviving start; :1035-1195 owns selection endpoints, copied text and overlays; grid-buffer.js:133-155 reconstructs selected soft-wrapped text. Every completed gesture reaches onCopy at grid-terminal.js:1675-1683. For synchronized output, farhelm-terminal-emulator/src/emulator.rs:151-160 feeds through the buffering parser and :170-207 exposes and flushes its deadline. farhelm-supervisor/src/hosts/terminal.rs:3081-3102 waits on that deadline independently of program output; :3145-3157 flushes and publishes. SPEC_impl.md:2697-2707 explicitly assigns this to the supervisor, with a 150 ms safety deadline, not the deleted browser scheduler's one-second fallback. SPEC.md:3060-3082 defines local selection copying; the grid retains the local-selection path. Suggested bucket: high/material UX if either replacement owner were missing. could-be-highest: no established security or loss-of-work route in this concern. Confidence: confirmed from source, not execution. proposed_drop: source refutation of missing-owner concern. possible_cover: none; coverage sources not searched. Caveat: this is a deletion-contract check, not an independent audit of all stream recovery or clipboard-service behavior."
+          }
+        }
+      ],
+      "latest": {
+        "line": 4,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c4",
+          "state": "open",
+          "summary": "Selection, scroll anchoring and synchronized redraw have explicit replacement owners",
+          "location": "crates/farhelm-ui/assets/vendor/xterm.js:1",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: Considered whether deleting the old viewport/selection models and renderer scheduler loses selection or leaves an agent redraw permanently held. The replacement owns these behaviors in the grid and supervisor. Details: the assigned packet beginning module 8906 also removes Viewport; packet 1433 removes selection-render/selection models; packet 945 removes RenderService and its synchronized-output timeout. grid-terminal.js:510-599 anchors the view to absolute lines and hides history on the alternate screen; :928-947 clears invalidated selections and trims their surviving start; :1035-1195 owns selection endpoints, copied text and overlays; grid-buffer.js:133-155 reconstructs selected soft-wrapped text. Every completed gesture reaches onCopy at grid-terminal.js:1675-1683. For synchronized output, farhelm-terminal-emulator/src/emulator.rs:151-160 feeds through the buffering parser and :170-207 exposes and flushes its deadline. farhelm-supervisor/src/hosts/terminal.rs:3081-3102 waits on that deadline independently of program output; :3145-3157 flushes and publishes. SPEC_impl.md:2697-2707 explicitly assigns this to the supervisor, with a 150 ms safety deadline, not the deleted browser scheduler's one-second fallback. SPEC.md:3060-3082 defines local selection copying; the grid retains the local-selection path. Suggested bucket: high/material UX if either replacement owner were missing. could-be-highest: no established security or loss-of-work route in this concern. Confidence: confirmed from source, not execution. proposed_drop: source refutation of missing-owner concern. possible_cover: none; coverage sources not searched. Caveat: this is a deletion-contract check, not an independent audit of all stream recovery or clipboard-service behavior."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g190/findings.jsonl",
+        "id": "c4",
+        "line": 4,
+        "disposition": "excluded",
+        "group": "vendor-removal-missing-selection-scroll-sync-owners-hypothesis",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-119 after inspecting it. The grid retains selection and scroll anchoring, and the emulator/runtime independently drive synchronized-output deadlines. The narrow missing-owner deletion concern is refuted; this does not assert that every selection lifecycle is correct. Source refutation of missing ownership only; preserve independent selection/copy test and behavior findings. Checked source/results: [\"Tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db assets/grid-terminal.js:510-599 anchors history by absolute lines and excludes it on alternate screen; :928-947 clears/trims selections on damage; :1035-1110 owns selection endpoints/text; :1664-1681 routes completed selection through the copy policy.\",\"Same revision emulator/src/emulator.rs:151-207 feeds/flushes buffered updates and exposes sync_deadline. supervisor/src/hosts/terminal.rs:3081-3102 selects on its own deadline; :3145-3157 flushes and publishes even without new output. The retired browser timeout therefore has a retained supervisor owner.\",\"No runtime execution, full stream-recovery audit or clipboard-service audit was performed.\"] Current coverage/results: [\"SPEC.md Terminal experience local-selection/copy rules read; SPEC_impl.md The supervisor's terminal emulator explicitly assigns the runtime the 150ms safety deadline and its independent wake.\",\"TODO.md Planned empty; BUGS.md unrelated; plans/queue retains selection defaults but supplies no new missing-owner finding. INDEX.md/matching queue search and invalidated-selection-drag-keeps-old-anchors.md full read show an existing distinct lifecycle bug: gesture anchors can survive clearSelection. The presence of replacement selection ownership does not refute that queued defect or provide an extension to it. Active TRIAGE_OUTCOMES.md search found no exact missing-owner decision. FILTER.md not used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Loss of selection or a redraw held permanently after removal of old viewport/selection/render services, high/material UX if established. No security or user-work-loss route was claimed; clipboard contents alone do not establish loss of user-owned work under the queue rules.\"; \"None for rejecting absence of replacement owners. Correctness of all selection/reset, clipboard and stream-recovery paths is outside this narrow claim.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g190/c4",
+        "line": 4,
+        "disposition": "excluded",
+        "group": "vendor-removal-missing-selection-scroll-sync-owners-hypothesis",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-119 after inspecting it. The grid retains selection and scroll anchoring, and the emulator/runtime independently drive synchronized-output deadlines. The narrow missing-owner deletion concern is refuted; this does not assert that every selection lifecycle is correct. Source refutation of missing ownership only; preserve independent selection/copy test and behavior findings. Checked source/results: [\"Tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db assets/grid-terminal.js:510-599 anchors history by absolute lines and excludes it on alternate screen; :928-947 clears/trims selections on damage; :1035-1110 owns selection endpoints/text; :1664-1681 routes completed selection through the copy policy.\",\"Same revision emulator/src/emulator.rs:151-207 feeds/flushes buffered updates and exposes sync_deadline. supervisor/src/hosts/terminal.rs:3081-3102 selects on its own deadline; :3145-3157 flushes and publishes even without new output. The retired browser timeout therefore has a retained supervisor owner.\",\"No runtime execution, full stream-recovery audit or clipboard-service audit was performed.\"] Current coverage/results: [\"SPEC.md Terminal experience local-selection/copy rules read; SPEC_impl.md The supervisor's terminal emulator explicitly assigns the runtime the 150ms safety deadline and its independent wake.\",\"TODO.md Planned empty; BUGS.md unrelated; plans/queue retains selection defaults but supplies no new missing-owner finding. INDEX.md/matching queue search and invalidated-selection-drag-keeps-old-anchors.md full read show an existing distinct lifecycle bug: gesture anchors can survive clearSelection. The presence of replacement selection ownership does not refute that queued defect or provide an extension to it. Active TRIAGE_OUTCOMES.md search found no exact missing-owner decision. FILTER.md not used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Loss of selection or a redraw held permanently after removal of old viewport/selection/render services, high/material UX if established. No security or user-work-loss route was claimed; clipboard contents alone do not establish loss of user-owned work under the queue rules.\"; \"None for rejecting absence of replacement owners. Correctness of all selection/reset, clipboard and stream-recovery paths is outside this narrow claim.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-119",
+          "key": "g190/c4",
+          "latest_line": 4,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "vendor-removal-missing-selection-scroll-sync-owners-hypothesis",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The grid retains selection and scroll anchoring, and the emulator/runtime independently drive synchronized-output deadlines. The narrow missing-owner deletion concern is refuted; this does not assert that every selection lifecycle is correct.",
+          "checks": [
+            "Tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db assets/grid-terminal.js:510-599 anchors history by absolute lines and excludes it on alternate screen; :928-947 clears/trims selections on damage; :1035-1110 owns selection endpoints/text; :1664-1681 routes completed selection through the copy policy.",
+            "Same revision emulator/src/emulator.rs:151-207 feeds/flushes buffered updates and exposes sync_deadline. supervisor/src/hosts/terminal.rs:3081-3102 selects on its own deadline; :3145-3157 flushes and publishes even without new output. The retired browser timeout therefore has a retained supervisor owner.",
+            "No runtime execution, full stream-recovery audit or clipboard-service audit was performed."
+          ],
+          "coverage_checked": [
+            "SPEC.md Terminal experience local-selection/copy rules read; SPEC_impl.md The supervisor's terminal emulator explicitly assigns the runtime the 150ms safety deadline and its independent wake.",
+            "TODO.md Planned empty; BUGS.md unrelated; plans/queue retains selection defaults but supplies no new missing-owner finding. INDEX.md/matching queue search and invalidated-selection-drag-keeps-old-anchors.md full read show an existing distinct lifecycle bug: gesture anchors can survive clearSelection. The presence of replacement selection ownership does not refute that queued defect or provide an extension to it. Active TRIAGE_OUTCOMES.md search found no exact missing-owner decision. FILTER.md not used."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "None for rejecting absence of replacement owners. Correctness of all selection/reset, clipboard and stream-recovery paths is outside this narrow claim.",
+          "original_stronger_consequence": "Loss of selection or a redraw held permanently after removal of old viewport/selection/render services, high/material UX if established. No security or user-work-loss route was claimed; clipboard contents alone do not establish loss of user-owned work under the queue rules.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation of missing ownership only; preserve independent selection/copy test and behavior findings."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "vendor-removal-missing-selection-scroll-sync-owners-hypothesis",
+        "destination": null
+      }
+    },
+    {
+      "key": "g190/c5",
+      "owner": "g190",
+      "id": "c5",
+      "domain": "retired-xterm-vendor",
+      "purpose": "retired-xterm-vendor: crates/farhelm-ui/assets/vendor/xterm.js; phases webpack module 8906: Property 8906 | webpack module 3955: Property 3955 | webpack module 1433: Property 1433 | webpack module 945: Property 945",
+      "history": [
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c5",
+            "state": "open",
+            "summary": "Removing the vendor bundle does not remove the retained ports' notices",
+            "location": "crates/farhelm-ui/assets/vendor/xterm.js:1",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: Discovery checked whether deleting the original xterm bundle and its companion notice leaves the replacement's retained xterm/VS Code ports without their own bundled notice. Source refutes this removal concern. Details: the complete THIRD_PARTY_NOTICES.md patch removes the unmodified-bundle section but retains Code ported from xterm.js and its reference to assets/grid-ported-code-LICENSES.txt. That notice's patch changes only its introductory wording and keeps its standalone provenance. The UI asset declarations retain GRID_PORTED_CODE_LICENSES with #[used] and a stable asset path; it is independent of the removed VENDOR_XTERM/XTERM_LICENSES declarations. The source comments expressly state that the release binary embeds the same bundle, retaining the notice for the supervisor ports. This is a source/packaging declaration check, not a legal opinion or an executed release-archive inspection. Suggested bucket: other for the refuted retained-notice concern; could-be-highest: no established security or user-work-loss consequence. Confidence: confirmed from the assigned removal's dependent notice/asset patch, no execution. proposed_drop: source refutation; no specification-only exception. possible_cover: none known from supplied interface records; no prohibited coverage sources searched. Material caveat: source declarations do not substitute for an actual produced-bundle audit, which was not requested; no concrete evidence of a bundler omission was found. New discovery pass 1 candidate only, not a new verified/unverified finding."
+          }
+        }
+      ],
+      "latest": {
+        "line": 11,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c5",
+          "state": "open",
+          "summary": "Removing the vendor bundle does not remove the retained ports' notices",
+          "location": "crates/farhelm-ui/assets/vendor/xterm.js:1",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: Discovery checked whether deleting the original xterm bundle and its companion notice leaves the replacement's retained xterm/VS Code ports without their own bundled notice. Source refutes this removal concern. Details: the complete THIRD_PARTY_NOTICES.md patch removes the unmodified-bundle section but retains Code ported from xterm.js and its reference to assets/grid-ported-code-LICENSES.txt. That notice's patch changes only its introductory wording and keeps its standalone provenance. The UI asset declarations retain GRID_PORTED_CODE_LICENSES with #[used] and a stable asset path; it is independent of the removed VENDOR_XTERM/XTERM_LICENSES declarations. The source comments expressly state that the release binary embeds the same bundle, retaining the notice for the supervisor ports. This is a source/packaging declaration check, not a legal opinion or an executed release-archive inspection. Suggested bucket: other for the refuted retained-notice concern; could-be-highest: no established security or user-work-loss consequence. Confidence: confirmed from the assigned removal's dependent notice/asset patch, no execution. proposed_drop: source refutation; no specification-only exception. possible_cover: none known from supplied interface records; no prohibited coverage sources searched. Material caveat: source declarations do not substitute for an actual produced-bundle audit, which was not requested; no concrete evidence of a bundler omission was found. New discovery pass 1 candidate only, not a new verified/unverified finding."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g190/findings.jsonl",
+        "id": "c5",
+        "line": 11,
+        "disposition": "excluded",
+        "group": "vendor-removal-missing-retained-port-notice-hypothesis",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-119 after inspecting it. The removed unmodified vendor bundle's notice is separate from the retained ports' notice. The latter remains in the notice index and the asset declarations, so the named removal concern is source-refuted. Source/packaging-declaration refutation limited to the actual removal patch; do not claim an executed release-artifact audit. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e THIRD_PARTY_NOTICES.md patch removes xterm.js and its add-ons but retains Code ported from xterm.js and the standalone grid-ported-code-LICENSES.txt reference; the license-file patch changes introductory wording, not the retained notice body.\",\"Tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db ui/src/lib.rs:1465-1482 retains #[used] GRID_PORTED_CODE_LICENSES at a stable unhashed asset path and explains that release Farhelm embeds this same bundle for the Rust ports. No release archive was built or inspected.\"] Current coverage/results: [\"SPEC_impl.md Terminal widget explicitly requires attribution beside the ports and in THIRD_PARTY_NOTICES.md. SPEC.md Terminal experience supplies no contrary exception.\",\"TODO.md Planned empty; BUGS.md unrelated. plans/queue/tmux-end-old-terminals.md acceptance criterion 4 and tmux-drop-from-docs.md What stays explicitly preserve the retained ports' notices. This agrees with the checked source; no omission is accepted.\",\"INDEX.md/matching queue and active TRIAGE_OUTCOMES.md searches found no exact retained-port-notice omission. FILTER.md not used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Retained xterm/VS Code ports might lose their bundled license notices. Other priority, with no established security or user-work-loss consequence; the record was a discovery candidate proposing source refutation, not a verified omission.\"; \"None for rejecting deletion of the retained declaration/notice. A produced-bundle audit was not performed; source declarations alone do not certify every packaging artifact. This is not a legal opinion.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g190/c5",
+        "line": 11,
+        "disposition": "excluded",
+        "group": "vendor-removal-missing-retained-port-notice-hypothesis",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-119 after inspecting it. The removed unmodified vendor bundle's notice is separate from the retained ports' notice. The latter remains in the notice index and the asset declarations, so the named removal concern is source-refuted. Source/packaging-declaration refutation limited to the actual removal patch; do not claim an executed release-artifact audit. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e THIRD_PARTY_NOTICES.md patch removes xterm.js and its add-ons but retains Code ported from xterm.js and the standalone grid-ported-code-LICENSES.txt reference; the license-file patch changes introductory wording, not the retained notice body.\",\"Tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db ui/src/lib.rs:1465-1482 retains #[used] GRID_PORTED_CODE_LICENSES at a stable unhashed asset path and explains that release Farhelm embeds this same bundle for the Rust ports. No release archive was built or inspected.\"] Current coverage/results: [\"SPEC_impl.md Terminal widget explicitly requires attribution beside the ports and in THIRD_PARTY_NOTICES.md. SPEC.md Terminal experience supplies no contrary exception.\",\"TODO.md Planned empty; BUGS.md unrelated. plans/queue/tmux-end-old-terminals.md acceptance criterion 4 and tmux-drop-from-docs.md What stays explicitly preserve the retained ports' notices. This agrees with the checked source; no omission is accepted.\",\"INDEX.md/matching queue and active TRIAGE_OUTCOMES.md searches found no exact retained-port-notice omission. FILTER.md not used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Retained xterm/VS Code ports might lose their bundled license notices. Other priority, with no established security or user-work-loss consequence; the record was a discovery candidate proposing source refutation, not a verified omission.\"; \"None for rejecting deletion of the retained declaration/notice. A produced-bundle audit was not performed; source declarations alone do not certify every packaging artifact. This is not a legal opinion.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-119",
+          "key": "g190/c5",
+          "latest_line": 11,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "vendor-removal-missing-retained-port-notice-hypothesis",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The removed unmodified vendor bundle's notice is separate from the retained ports' notice. The latter remains in the notice index and the asset declarations, so the named removal concern is source-refuted.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e THIRD_PARTY_NOTICES.md patch removes xterm.js and its add-ons but retains Code ported from xterm.js and the standalone grid-ported-code-LICENSES.txt reference; the license-file patch changes introductory wording, not the retained notice body.",
+            "Tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db ui/src/lib.rs:1465-1482 retains #[used] GRID_PORTED_CODE_LICENSES at a stable unhashed asset path and explains that release Farhelm embeds this same bundle for the Rust ports. No release archive was built or inspected."
+          ],
+          "coverage_checked": [
+            "SPEC_impl.md Terminal widget explicitly requires attribution beside the ports and in THIRD_PARTY_NOTICES.md. SPEC.md Terminal experience supplies no contrary exception.",
+            "TODO.md Planned empty; BUGS.md unrelated. plans/queue/tmux-end-old-terminals.md acceptance criterion 4 and tmux-drop-from-docs.md What stays explicitly preserve the retained ports' notices. This agrees with the checked source; no omission is accepted.",
+            "INDEX.md/matching queue and active TRIAGE_OUTCOMES.md searches found no exact retained-port-notice omission. FILTER.md not used."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "None for rejecting deletion of the retained declaration/notice. A produced-bundle audit was not performed; source declarations alone do not certify every packaging artifact. This is not a legal opinion.",
+          "original_stronger_consequence": "Retained xterm/VS Code ports might lose their bundled license notices. Other priority, with no established security or user-work-loss consequence; the record was a discovery candidate proposing source refutation, not a verified omission.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source/packaging-declaration refutation limited to the actual removal patch; do not claim an executed release-artifact audit."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "vendor-removal-missing-retained-port-notice-hypothesis",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete. All four assigned packets and the full commit list were read.\n\nNo reportable findings; candidates c1–c4 and their exclusion reasons are recorded in findings.jsonl. No open leads or unread assigned scope. progress.md is updated. Source analysis only; no reproductions or tests run."
+    },
+    {
+      "turn": 2,
+      "reply": "Synthesis complete. Revised c1–c3 with source checks confirming captured link targets, font readiness before mount, and old-terminal retirement before the deletion. No new findings. Unresolved lead IDs: none."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 complete.\n\n- Checked base live-output handling, retirement history, tip contracts, asset wiring and retained notices.\n- Revised c3 to a source-confirmed alias of supplied g189/l1; added excluded candidate c5.\n- New independent verified IDs: none.\n- New unverified IDs: none.\n- Open leads: none.\n\nNo new independent issue found. Source analysis only; no execution."
+    }
+  ],
+  "progress": "# g190 initial review\n\nTurn 1 complete: initial source review. Discovery passes: 0. Later synthesis has not been performed.\n\nScope: deleted xterm.js modules 8906, 3955, 1433 and 945 in f560058da19e02716e6f943883a9508b447aff4e. All four mandatory packets were delivered with the evidence read command and analyzed. No unread assigned material remains. The complete inventory commits field was read; excluded coverage metadata and queue coverage sources were not read.\n\nReviewed pinned contracts: SPEC.md Terminal experience; SPEC_impl.md Terminal widget: the grid island, The grid client, Answers bind to what was drawn, and The supervisor's terminal emulator. Contract packets are in a separate context manifest; only these targeted sections are governing context, not an assignment to review both entire specification files.\n\nInterface assumptions and checks: deleting the vendor bundle removes the old tmux rendering path. The grid already served terminal hosts in the parent revision. The surviving terminal path mounts the grid directly, passes selection/clipboard callbacks to the existing queue, uses the grid's fitted size, and observes pane/window resizing. No surviving new Terminal/window.Terminal/VENDOR_XTERM references were found in UI source/assets. Link lookup/release retain row/object identity checks. Font metrics, pixel-ratio changes, selection/scroll anchors and paint scheduling have grid owners; synchronized-update buffering and its deadline have supervisor/emulator owners.\n\nDurable events this pass: c1, c2, c3 and c4 are candidates refuted or excluded by source attribution. New verified findings: none. New unverified findings: none. Open leads: none. No candidate is dropped solely through a highest-impact specification exception. No tests, builds, runtime experiments or reproductions were run; conclusions are source-based. No checkout files were changed.\n\nNext action: return to the caller for the later synthesis turn. The findings log is the complete record; no separate report was written.\n\n## Turn 2: later-turn synthesis complete\n\nDiscovery passes: 0. Revisited interactions between deleted services, replacement components and their callers. No assigned material remains unread. No tests, builds or reproductions were run; all conclusions remain source-based.\n\nRevised c1 after tracing captured link destinations through terminal.js and checking the downstream click/disclosure guards. Revised c2 after verifying that both bundled font weights must settle before mounting and that pane/window changes refit the grid. Revised c3 after checking the parent supervisor implementation: old tmux terminals are ended before reload and their rows are never looked up as attachable terminals. This resolves the earlier attribution premise without depending only on the changed specification. c4 remains unchanged after revisiting how selection, link drag suppression and supervisor-owned synchronized updates divide their responsibilities.\n\nNew verified findings: none. New unverified findings: none. Revised IDs: c1, c2, c3. Unresolved lead IDs: none. Next action: return synthesis delta to the caller; further discovery only on a later request.\n\n## Turn 3: interface reconciliation and discovery pass 1 complete\n\nRead discovery-neighbours.json in bounded chunks through its end before the new search. Reconciled the named overline question before discovery. The supplied old-page JSON-input, primary-selection guidance and failed-mount test-oracle records are distinct from the narrow ownership checks in c1/c2/c4; those candidates do not exclude them.\n\nWhole-range attribution: reopened c3 under its original ID, checked the exclusive-base old surface selection, SGR53 bit/renderer/CSS support, raw percent-output decoding and the complete fixed query-strip table. Old live output preserves that sequence without depending on capture-pane reconstruction. Checked the in-range retirement diff in dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 and the pinned-tip full-fidelity contract/style mapper. c3 now retains the source-confirmed overline capability gap as a finding, explicitly aliased to caller-supplied g189/l1. Its old assigned-commit-local exclusion is preserved but does not justify a whole-range drop. No novelty credit claimed for this reconciliation; no parent drop/lowering accepted. No unresolved source premise remains for the narrow live-decoration capability route. Replay parity and actual agent use were not claimed.\n\nSeparate discovery search: checked remaining removed-service dependency/asset wiring, independent port-notice retention, all grid script declarations/injection and pinned-tip source references to removed xterm asset/service names. The notices remain independently declared and shipped in source; added candidate c5 with this source refutation, then confirmed the exact retained declaration at UI lib.rs:1481-1495. Existing grid structural CSS covers row boxes, bidi isolation, cursor, measurement, selection/link layers and scrollbar without the removed stylesheet. No surviving removed-service runtime reference was found in UI source/assets. No new independent defect was found.\n\nDiscovery passes: 1. New verified finding IDs: none. New unverified-after-investigation IDs: none. Revised source-confirmed known-alias ID: c3. New excluded candidate: c5. Remaining lead IDs: none. No unread assigned scope. All checks were source/history analysis; no runtime tests, reproductions, live-install actions or checkout changes. Next action: return this turn's delta to the caller.\n"
+}

@@ -1,0 +1,1322 @@
+{
+  "group": {
+    "id": "g044",
+    "domain": "host-provisioning-lifecycle",
+    "purpose": "host-provisioning-lifecycle: crates/farhelm-helm/src/provisioning/e2e.rs, crates/farhelm-helm/src/provisioning/plan.rs, crates/farhelm-helm/src/provisioning/service.rs, crates/farhelm-helm/src/provisioning/session_launch_failure_tests.rs, crates/farhelm-helm/src/provisioning/snapshot_preparer.rs, crates/farhelm-helm/src/provisioning/tensorlake_add_tests.rs, crates/farhelm-helm/src/provisioning/tensorlake_backend.rs, crates/farhelm-helm/src/provisioning/tests/macos_real_tests.rs, crates/farhelm-helm/src/provisioning/macos.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g005",
+      "g006",
+      "g009",
+      "g010",
+      "g011",
+      "g012",
+      "g022",
+      "g023",
+      "g024",
+      "g025",
+      "g026",
+      "g027",
+      "g028",
+      "g029",
+      "g043",
+      "g045",
+      "g046",
+      "g047",
+      "g048",
+      "g055",
+      "g056",
+      "g057"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00193-000.patch",
+        "ranges": [
+          [
+            1,
+            21
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/provisioning/e2e.rs",
+        "commit": "56659839785691f76da3af5d8f51b511cff4ba8b",
+        "notes": "patch header; patch character offsets [0,1267)",
+        "lines": 21,
+        "bytes": 1267,
+        "start": 0,
+        "end": 1267,
+        "original": "[private-run]/prep/originals/00193.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00194-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/provisioning/plan.rs",
+        "commit": "56659839785691f76da3af5d8f51b511cff4ba8b",
+        "notes": "patch header; patch character offsets [0,712)",
+        "lines": 13,
+        "bytes": 712,
+        "start": 0,
+        "end": 712,
+        "original": "[private-run]/prep/originals/00194.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00195-000.patch",
+        "ranges": [
+          [
+            1,
+            222
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/provisioning/service.rs",
+        "commit": "56659839785691f76da3af5d8f51b511cff4ba8b",
+        "notes": "patch header; patch character offsets [0,10994)",
+        "lines": 222,
+        "bytes": 10994,
+        "start": 0,
+        "end": 10994,
+        "original": "[private-run]/prep/originals/00195.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00196-000.patch",
+        "ranges": [
+          [
+            1,
+            773
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/provisioning/session_launch_failure_tests.rs",
+        "commit": "56659839785691f76da3af5d8f51b511cff4ba8b",
+        "notes": "patch header; patch character offsets [0,30359)",
+        "lines": 773,
+        "bytes": 30359,
+        "start": 0,
+        "end": 30359,
+        "original": "[private-run]/prep/originals/00196.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00197-000.patch",
+        "ranges": [
+          [
+            1,
+            77
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/provisioning/snapshot_preparer.rs",
+        "commit": "56659839785691f76da3af5d8f51b511cff4ba8b",
+        "notes": "patch header; patch character offsets [0,3800)",
+        "lines": 77,
+        "bytes": 3800,
+        "start": 0,
+        "end": 3800,
+        "original": "[private-run]/prep/originals/00197.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00199-000.patch",
+        "ranges": [
+          [
+            1,
+            119
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/provisioning/tensorlake_add_tests.rs",
+        "commit": "56659839785691f76da3af5d8f51b511cff4ba8b",
+        "notes": "patch header; patch character offsets [0,4972)",
+        "lines": 119,
+        "bytes": 4972,
+        "start": 0,
+        "end": 4972,
+        "original": "[private-run]/prep/originals/00199.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00200-000.patch",
+        "ranges": [
+          [
+            1,
+            94
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/provisioning/tensorlake_backend.rs",
+        "commit": "56659839785691f76da3af5d8f51b511cff4ba8b",
+        "notes": "patch header; patch character offsets [0,4480)",
+        "lines": 94,
+        "bytes": 4480,
+        "start": 0,
+        "end": 4480,
+        "original": "[private-run]/prep/originals/00200.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00697-000.patch",
+        "ranges": [
+          [
+            1,
+            48
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/provisioning/tensorlake_add_tests.rs",
+        "commit": "222bf6253bcd168db04bcbb1df20180c88306998",
+        "notes": "patch header; patch character offsets [0,2038)",
+        "lines": 48,
+        "bytes": 2038,
+        "start": 0,
+        "end": 2038,
+        "original": "[private-run]/prep/originals/00697.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01035-000.patch",
+        "ranges": [
+          [
+            1,
+            36
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/provisioning/tests/macos_real_tests.rs",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,1449)",
+        "lines": 36,
+        "bytes": 1449,
+        "start": 0,
+        "end": 1449,
+        "original": "[private-run]/prep/originals/01035.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01232-000.patch",
+        "ranges": [
+          [
+            1,
+            78
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/provisioning/plan.rs",
+        "commit": "17a3fe858c5511a24b7403af15dd41c93bf69fd7",
+        "notes": "patch header; patch character offsets [0,3751)",
+        "lines": 78,
+        "bytes": 3759,
+        "start": 0,
+        "end": 3751,
+        "original": "[private-run]/prep/originals/01232.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01271-000.patch",
+        "ranges": [
+          [
+            1,
+            12
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/provisioning/macos.rs",
+        "commit": "500548b9253b07a26fd03119679184b69544e31d",
+        "notes": "patch header; patch character offsets [0,646)",
+        "lines": 12,
+        "bytes": 646,
+        "start": 0,
+        "end": 646,
+        "original": "[private-run]/prep/originals/01271.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01276-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/provisioning/session_launch_failure_tests.rs",
+        "commit": "500548b9253b07a26fd03119679184b69544e31d",
+        "notes": "patch header; patch character offsets [0,736)",
+        "lines": 13,
+        "bytes": 736,
+        "start": 0,
+        "end": 736,
+        "original": "[private-run]/prep/originals/01276.patch"
+      }
+    ],
+    "lines": 1506,
+    "bytes": 65212
+  },
+  "records": [
+    {
+      "key": "g044/l1",
+      "owner": "g044",
+      "id": "l1",
+      "domain": "host-provisioning-lifecycle",
+      "purpose": "host-provisioning-lifecycle: crates/farhelm-helm/src/provisioning/e2e.rs, crates/farhelm-helm/src/provisioning/plan.rs, crates/farhelm-helm/src/provisioning/service.rs, crates/farhelm-helm/src/provisioning/session_launch_failure_tests.rs, crates/farhelm-helm/src/provisioning/snapshot_preparer.rs, crates/farhelm-helm/src/provisioning/tensorlake_add_tests.rs, crates/farhelm-helm/src/provisioning/tensorlake_backend.rs, crates/farhelm-helm/src/provisioning/tests/macos_real_tests.rs, crates/farhelm-helm/src/provisioning/macos.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Check prepared-snapshot access validation after executor split",
+            "location": "crates/farhelm-helm/src/provisioning/snapshot_preparer.rs:71",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: preparation could use the wrong SSH access policy if the new Tensorlake adapter does not retain the old validation. Source basis: the assigned snapshot_preparer.rs patch removes equality checking of TensorlakeSshAccess against the selected helm state directory and accepts a RemoteRoute plus home instead. Contract: SPEC_impl.md, Tensorlake prepared snapshots, requires the selected one-shot provisioning backend and per-host access policy. Check pending: inspect the new TensorlakeSnapshotPreparer adapter and production construction, then trace the route to the selected backend. Exact missing premise: whether access validation moved intact to the adapter. Suggested bucket: other until a route with user/security impact is established; could-be-highest if wrong credentials or host can actually be selected. Confidence: unverified, investigation in progress. proposed_drop: false. possible_cover: none. No behavior executed."
+          }
+        },
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Prepared-snapshot access validation moved intact to adapter",
+            "location": "crates/farhelm-helm/src/provisioning/snapshot_preparer.rs:71",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR considered: preparation could use the wrong SSH access policy if the new Tensorlake adapter did not retain validation. Original potential consequence: wrong credentials or host, potentially highest/security if reachable. Source refutation: tensorlake/prepared.rs:23-56 captures TensorlakeSshAccess::for_state_dir, requires exact equality at 45-48 before preparing, constructs the Tensorlake route at 49 and passes that same route and observed home to the installer. provisioning/service.rs:432-434 selects one-shot preparation; 450-474 supplies that identical backend to adapter and shared installer. The moved check retains the selected access contract in SPEC_impl.md, Tensorlake prepared snapshots. Suggested bucket: none (refuted); could-be-highest: considered yes, but no wrong-access route exists in this change. Confidence: confirmed by source, no execution. proposed_drop: source refutation; the removed access check is present at the new provider boundary. possible_cover: none. No missing premise or open check remains for this lead."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Prepared-snapshot access validation moved intact to adapter",
+            "location": "crates/farhelm-helm/src/provisioning/snapshot_preparer.rs:71",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR considered: preparation could use the wrong SSH access policy if the new Tensorlake adapter did not retain validation. Original potential consequence: wrong credentials or host, potentially highest/security if reachable. Source refutation is limited to the moved access-validation premise: tensorlake/prepared.rs:23-56 captures TensorlakeSshAccess::for_state_dir, requires exact equality at 45-48 before preparing, constructs the Tensorlake route at 49 and passes that same route and observed home to the installer. provisioning/service.rs:432-434 selects one-shot preparation; 450-474 supplies that identical backend to adapter and shared installer. This preserves the selected-access contract in SPEC_impl.md, Tensorlake prepared snapshots. It proves neither absence of an inherited private tmux binary nor that a caller releases its outer recipe mutex before waiting for SSH; those are independent filesystem/publication and caller-lifetime premises. Synthesis revision: explicitly bounded the refutation after the parent supplied g045/l2 and g045/l1, preserving the original potential harm. Suggested bucket: none for this refuted access-check concern. Could-be-highest: considered yes; no newly missing access equality check was found. Confidence: confirmed by source, no execution. proposed_drop: source refutation of the removed-access-check concern only; parent has not accepted this proposed drop. possible_cover: none. Separate filesystem and outer-lock findings remain owned by g045 and are not refuted here."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Prepared-snapshot access validation moved intact to adapter",
+            "location": "crates/farhelm-helm/src/provisioning/snapshot_preparer.rs:71",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR considered: preparation could use the wrong SSH access policy if the new Tensorlake adapter did not retain validation. Original potential consequence: wrong credentials or host, potentially highest/security if reachable. Source refutation is limited to the moved access-validation premise: tensorlake/prepared.rs:23-56 captures TensorlakeSshAccess::for_state_dir, requires exact equality at 45-48 before preparing, constructs the Tensorlake route at 49 and passes that same route and observed home to the installer. provisioning/service.rs:432-434 selects one-shot preparation; 450-474 supplies that identical backend to adapter and shared installer. This preserves the selected-access contract in SPEC_impl.md, Tensorlake prepared snapshots. Synthesis checks: the ordinary prepared Add caller in provisioning/tensorlake_add.rs:1352-1385 retains its own source_guard until create_host_sandbox returns. create_host_sandbox at 1599-1616 passes None for create_recorded's guard and Some(self.backend) for readiness. tensorlake/hosts.rs:471-497 therefore drops only None at Running, then waits on backend SSH while the outer caller still owns exclusion. In contrast, the provider session route places the actual guard into PreparedSandbox at hosts.rs:227-236, moves it through create at 247-266, and create_recorded drops that real guard at 484 before waiting for SSH. These are exact caller-lifetime distinctions corroborating parent-supplied g045/l1, not a new local finding. This access candidate proves neither absence of an inherited private tmux binary nor correct lifetime of another caller's outer mutex. Original potential harm is preserved; the refutation is bounded to the moved equality check. Suggested bucket: none for this access-check concern. Could-be-highest: considered yes; no newly missing access equality check was found. Confidence: confirmed by source, no execution. proposed_drop: source refutation of the removed-access-check concern only; parent has not accepted this proposed drop. possible_cover: parent-supplied g045/l1 owns outer exclusion through readiness; g045/l2 owns inherited private-binary removal. Neither is refuted here."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l1",
+          "state": "open",
+          "summary": "Prepared-snapshot access validation moved intact to adapter",
+          "location": "crates/farhelm-helm/src/provisioning/snapshot_preparer.rs:71",
+          "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR considered: preparation could use the wrong SSH access policy if the new Tensorlake adapter did not retain validation. Original potential consequence: wrong credentials or host, potentially highest/security if reachable. Source refutation is limited to the moved access-validation premise: tensorlake/prepared.rs:23-56 captures TensorlakeSshAccess::for_state_dir, requires exact equality at 45-48 before preparing, constructs the Tensorlake route at 49 and passes that same route and observed home to the installer. provisioning/service.rs:432-434 selects one-shot preparation; 450-474 supplies that identical backend to adapter and shared installer. This preserves the selected-access contract in SPEC_impl.md, Tensorlake prepared snapshots. Synthesis checks: the ordinary prepared Add caller in provisioning/tensorlake_add.rs:1352-1385 retains its own source_guard until create_host_sandbox returns. create_host_sandbox at 1599-1616 passes None for create_recorded's guard and Some(self.backend) for readiness. tensorlake/hosts.rs:471-497 therefore drops only None at Running, then waits on backend SSH while the outer caller still owns exclusion. In contrast, the provider session route places the actual guard into PreparedSandbox at hosts.rs:227-236, moves it through create at 247-266, and create_recorded drops that real guard at 484 before waiting for SSH. These are exact caller-lifetime distinctions corroborating parent-supplied g045/l1, not a new local finding. This access candidate proves neither absence of an inherited private tmux binary nor correct lifetime of another caller's outer mutex. Original potential harm is preserved; the refutation is bounded to the moved equality check. Suggested bucket: none for this access-check concern. Could-be-highest: considered yes; no newly missing access equality check was found. Confidence: confirmed by source, no execution. proposed_drop: source refutation of the removed-access-check concern only; parent has not accepted this proposed drop. possible_cover: parent-supplied g045/l1 owns outer exclusion through readiness; g045/l2 owns inherited private-binary removal. Neither is refuted here."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g044/findings.jsonl",
+        "id": "l1",
+        "line": 10,
+        "disposition": "under-investigation",
+        "group": "g044-l1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-027",
+          "key": "g044/l1",
+          "latest_line": 10,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "tensorlake-preparer-moved-access-equality",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The removed common-installer access check moved intact to the Tensorlake adapter, with the selected one-shot backend shared by adapter and installer. This says nothing about inherited private binaries or the lifetime of an outer recipe lock. The supplied g045/l1 and g045/l2 concerns are separate and remain untouched.",
+          "checks": [
+            "56659839785691f76da3af5d8f51b511cff4ba8b tensorlake/prepared.rs:23-56 captures access for the selected state directory, compares equality at :45-48 before preparation, forms the Tensorlake route and passes that route plus observed home to the common installer.",
+            "Same revision provisioning/service.rs:432-474 selects a one-shot preparation backend and supplies that same backend through both paths.",
+            "Same revision tensorlake_add.rs:1352-1385 retains ordinary Add's outer source_guard across create_host_sandbox. :1599-1616 passes None as create_recorded's guard plus a readiness backend; tensorlake/hosts.rs:471-497 drops that None at Running then waits for SSH. This corroborates the supplied caller-lifetime distinction rather than refuting it. Source inspection only."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:568-586 and SPEC_impl.md:6560-6583 require selected preparer policy and distinguish installation/attachment from source exclusion. No specification accepts a removed access guard; the source preserves it.",
+            "TODO.md Planned/unlanded plan index empty; BUGS.md unrelated. Queue INDEX and active TRIAGE_OUTCOMES searches for preparation access validation, selected SSH policy and wrong credentials found no exact coverage.",
+            "No FILTER.md boundary covers the hypothetical wrong-host/credential consequence."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No missing equality-check or assembly premise remains. This conclusion supplies neither inherited-binary absence nor correct ordinary Add outer-lock release.",
+          "original_stronger_consequence": "Removing access validation could select the wrong host or credentials; potentially highest/security. Earlier other-only wording did not dispose of this potential consequence.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Source refutation limited to the moved selected-access equality check.",
+          "new_interface_evidence": "g045/l1: at 5665983 tensorlake_add.rs:1352-1385 owns the real outer guard while :1599-1616 passes None to create_recorded; hosts.rs:484-497 drops only the passed guard before SSH readiness. The ordinary Add caller therefore retains its outer exclusion during readiness. No further search or runtime check performed."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-027.json",
+          "key": "g044/l1",
+          "proposal": "claim-checks/claims-027/result.json",
+          "parent_proposal": "source-refuted-moved-Tensorlake-preparer-access-equality",
+          "final_independent_gate": "required-before-highest-wrong-access-drop",
+          "reason": "Full027 equalityguardmovedintactadapterbeforepreparewithsameselectedone-shotbackend/commoninstaller. Narrowrefutationnotinheritedbinaryabsenceorouterrecipelocklifetime; suppliedactualAddrealouterguardversusNonepassedcreate_recordedcorroboratesretained025f4/045l1postRunningSSHwaitexclusiondelay. Interfaceevidencealreadyhandledprimaryparents, notnewdiscovery. Originalwronghost/credentialselectionpotentialretainedfreshgate."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "tensorlake-preparer-moved-access-equality",
+        "destination": null
+      }
+    },
+    {
+      "key": "g044/c2",
+      "owner": "g044",
+      "id": "c2",
+      "domain": "host-provisioning-lifecycle",
+      "purpose": "host-provisioning-lifecycle: crates/farhelm-helm/src/provisioning/e2e.rs, crates/farhelm-helm/src/provisioning/plan.rs, crates/farhelm-helm/src/provisioning/service.rs, crates/farhelm-helm/src/provisioning/session_launch_failure_tests.rs, crates/farhelm-helm/src/provisioning/snapshot_preparer.rs, crates/farhelm-helm/src/provisioning/tensorlake_add_tests.rs, crates/farhelm-helm/src/provisioning/tensorlake_backend.rs, crates/farhelm-helm/src/provisioning/tests/macos_real_tests.rs, crates/farhelm-helm/src/provisioning/macos.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Sensitive-read transport diagnosis retains redaction",
+            "location": "crates/farhelm-helm/src/provisioning/tensorlake_backend.rs:151",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR considered: replacing fixed read failures with retained backend errors might disclose credential-file bytes or peer stderr. Source refutation: provisioning/backend.rs:269-272 keeps a private typed safe_refusal; ordinary BackendFailure::new at 287-293 cannot set it. redacted at 305-314 clears stderr for the typed diagnosis and returns the fixed fallback otherwise. The changed read sites in provisioning/tensorlake_backend.rs:148-151, 165-169 and 175-178 all call this helper; command-status and malformed-size failures retain fixed failures at 155-162 and 170-183. Suggested bucket: none (refuted). Could-be-highest: yes, the original hypothetical credential disclosure would be security-impacting, but these changed sites do not retain peer content. Confidence: confirmed by source, no execution. proposed_drop: source refutation, not a specification exception. possible_cover: none."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Sensitive-read transport diagnosis retains redaction",
+            "location": "crates/farhelm-helm/src/provisioning/tensorlake_backend.rs:151",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR considered: replacing fixed read failures with retained backend errors might disclose credential-file bytes or peer stderr. Source refutation: provisioning/backend.rs:269-272 keeps a private typed safe_refusal; ordinary BackendFailure::new at 287-293 cannot set it. redacted at 305-314 clears stderr for the typed diagnosis and returns the fixed fallback otherwise. The changed read sites in provisioning/tensorlake_backend.rs:148-151, 165-169 and 175-178 all call this helper; command-status and malformed-size failures retain fixed failures at 155-162 and 170-183. Synthesis caller check: backend.rs:939-948 constructs the retained failure only from nested_session_failure's typed result. transport.rs:448-460 requires a PodmanExec route through SSH, exit 255 and a mux-refusal classification; SessionLimitRefusal::at at 437-441 builds fixed diagnostic wording from the route's destination, bounded to 128 characters at 423-427. No credential capture or peer diagnostic is interpolated into its retained context. Original potential credential-disclosure harm is preserved; the new check confirms the provenance of the exception rather than trusting its type alone. Suggested bucket: none (refuted). Could-be-highest: yes, the original hypothetical credential disclosure would be security-impacting, but the changed sites do not retain peer content. Confidence: confirmed by source, no execution. proposed_drop: source refutation, not a specification exception; parent has not accepted this proposed drop. possible_cover: none."
+          }
+        }
+      ],
+      "latest": {
+        "line": 11,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Sensitive-read transport diagnosis retains redaction",
+          "location": "crates/farhelm-helm/src/provisioning/tensorlake_backend.rs:151",
+          "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR considered: replacing fixed read failures with retained backend errors might disclose credential-file bytes or peer stderr. Source refutation: provisioning/backend.rs:269-272 keeps a private typed safe_refusal; ordinary BackendFailure::new at 287-293 cannot set it. redacted at 305-314 clears stderr for the typed diagnosis and returns the fixed fallback otherwise. The changed read sites in provisioning/tensorlake_backend.rs:148-151, 165-169 and 175-178 all call this helper; command-status and malformed-size failures retain fixed failures at 155-162 and 170-183. Synthesis caller check: backend.rs:939-948 constructs the retained failure only from nested_session_failure's typed result. transport.rs:448-460 requires a PodmanExec route through SSH, exit 255 and a mux-refusal classification; SessionLimitRefusal::at at 437-441 builds fixed diagnostic wording from the route's destination, bounded to 128 characters at 423-427. No credential capture or peer diagnostic is interpolated into its retained context. Original potential credential-disclosure harm is preserved; the new check confirms the provenance of the exception rather than trusting its type alone. Suggested bucket: none (refuted). Could-be-highest: yes, the original hypothetical credential disclosure would be security-impacting, but the changed sites do not retain peer content. Confidence: confirmed by source, no execution. proposed_drop: source refutation, not a specification exception; parent has not accepted this proposed drop. possible_cover: none."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g044/findings.jsonl",
+        "id": "c2",
+        "line": 11,
+        "disposition": "under-investigation",
+        "group": "g044-c2",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-027",
+          "key": "g044/c2",
+          "latest_line": 11,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "backend-typed-refusal-redaction-not-peer-text",
+          "aliases": [
+            "g043/c1"
+          ],
+          "target_queue_file": null,
+          "why": "Sensitive reads retain only a locally constructed typed diagnosis; ordinary failures become the fixed fallback and typed failures have stderr cleared. The exception's producer was checked, not merely trusted because it is typed. This refutes only these changed reads and their checked exception provenance.",
+          "checks": [
+            "56659839785691f76da3af5d8f51b511cff4ba8b provisioning/tensorlake_backend.rs:148-183 invokes redacted for all three changed run_shell error paths; nonzero command status, invalid size and size changes retain fixed failures.",
+            "Same revision provisioning/backend.rs:269-325 keeps safe_refusal private; new does not set it; redacted clears stderr only for that typed diagnosis and otherwise returns the fixed caller fallback.",
+            "Same revision backend.rs:939-948 constructs the exception from transport::nested_session_failure. transport.rs:423-460 requires SSH-nested Podman, exit 255 and refusal classification, then constructs fixed prose with only a 128-character route-destination excerpt. Credential-file bytes and peer diagnosis text are not interpolated. Source inspection only."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:4912-4930 requires remote-host/redaction boundaries; SPEC_impl.md:6331-6350 governs sensitive credential merging. No credential-byte disclosure exception found.",
+            "TODO.md Planned/unlanded plan index empty; BUGS.md unrelated. Searched queue INDEX/active TRIAGE_OUTCOMES for sensitive reads, redaction, diagnostic propagation and credential exposure. Read sandbox-status-diagnosis-bypasses-cleaning.md: its successful API-status path is a separate defect, not exact coverage here.",
+            "No FILTER.md boundary covers potential secret disclosure."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No missing exception-provenance premise remains for the checked changed reads. No general audit of all diagnostic sinks is claimed.",
+          "original_stronger_consequence": "Retained backend errors could expose credential-file bytes or peer stderr; highest/security if established.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Source refutation through fixed fallback/redacted typed failure and checked local exception provenance. Shared redaction root with g043/c1, retaining this distinct sensitive-read sink."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-027.json",
+          "key": "g044/c2",
+          "proposal": "claim-checks/claims-027/result.json",
+          "parent_proposal": "source-refuted-sensitive-read-raw-diagnosis-retention",
+          "final_independent_gate": "required-before-highest-secret-drop",
+          "reason": "Full027 threechangedrun_shellsensitivereadsredacted:ordinaryfixedfallback;typedprivatefieldclearsstderr, actualproducercheckedfixedexit255SSHnestedPodmanprose+boundedrouteonlynotcredential/peertext. Same043c1redactionrootwithindependentsinkrefs, originalcredentialfilebyte/stderrdisclosurepreservedfreshgate. Notalltypederrorsintrinsicallysafe/norallothersinkschecked."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "backend-typed-refusal-redaction-not-peer-text",
+        "destination": null
+      }
+    },
+    {
+      "key": "g044/c3",
+      "owner": "g044",
+      "id": "c3",
+      "domain": "host-provisioning-lifecycle",
+      "purpose": "host-provisioning-lifecycle: crates/farhelm-helm/src/provisioning/e2e.rs, crates/farhelm-helm/src/provisioning/plan.rs, crates/farhelm-helm/src/provisioning/service.rs, crates/farhelm-helm/src/provisioning/session_launch_failure_tests.rs, crates/farhelm-helm/src/provisioning/snapshot_preparer.rs, crates/farhelm-helm/src/provisioning/tensorlake_add_tests.rs, crates/farhelm-helm/src/provisioning/tensorlake_backend.rs, crates/farhelm-helm/src/provisioning/tests/macos_real_tests.rs, crates/farhelm-helm/src/provisioning/macos.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Removing the unit's tmux pin matches the retired runtime contract",
+            "location": "crates/farhelm-helm/src/provisioning/plan.rs:1237",
+            "detail": "Reviewed commit: 17a3fe858c5511a24b7403af15dd41c93bf69fd7. TLDR considered: removing the exact approved tmux executable from the supervisor unit could reintroduce the below-floor private-binary shadowing problem documented in the removed comment. The replacement contract removes that use: SPEC_impl.md, Terminal substrate: private tmux server, says exactly: The running supervisor runs no tmux at all, and its driver of the old terminals is gone; it also says the unit names no tmux and puts no tmux directory on PATH. Its retained startup compatibility step explicitly works whether or not any tmux program exists and uses a plain socket connect plus pinned process signals. The assigned plan.rs patch changes supervisor_unit to the shared farhelm/state-only renderer, while preserving the separately specified Linux provisioning payload check. Suggested bucket: none. Could-be-highest: no established loss-of-work or security route from removing an unused runtime pin; the considered consequence was selecting an unapproved terminal driver, which the replacement does not run. Confidence: confirmed by source and contract; no execution. proposed_drop: exact specification acceptance and replacement contract above. possible_cover: none."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Removing the unit's tmux pin matches the retired runtime contract",
+            "location": "crates/farhelm-helm/src/provisioning/plan.rs:1237",
+            "detail": "Reviewed commit: 17a3fe858c5511a24b7403af15dd41c93bf69fd7. TLDR considered: removing the exact approved tmux executable from the supervisor unit could reintroduce the below-floor private-binary shadowing problem documented in the removed comment. The replacement contract removes that supervisor use: SPEC_impl.md, Terminal substrate: private tmux server, says exactly: The running supervisor runs no tmux at all, and its driver of the old terminals is gone; it also says the unit names no tmux and puts no tmux directory on PATH. Its retained startup compatibility step explicitly works whether or not any tmux program exists and uses a plain socket connect plus pinned process signals. The assigned plan.rs patch changes supervisor_unit to the shared farhelm/state-only renderer while preserving the separately specified Linux provisioning payload check. Synthesis revision: this concerns Farhelm's own runtime selection only. It makes no claim that an inherited lib/tmux cannot be selected by a user's command or startup script. New evidence for the separately owned g045/l2 at 500548b9253b07a26fd03119679184b69544e31d: snapshot_preparer.rs:48-55 passes only target, unit name and state directory to finish_snapshot_install before publishing facts at 56-60; tensorlake_backend.rs:207-300 builds its final guard solely from unit, state, cgroup root and machine-id. Its final absence predicates at 292 check data/supervisor.db and data, not the private lib directory. Thus the publication guard does not fill the inherited-binary absence premise missing from the skip at snapshot_preparer.rs:109-119. This is source corroboration for g045/l2, not a new or duplicate local finding. Original possible shadowing consequence is preserved but separated into supervisor selection (refuted here) and explicit user/agent command resolution (owned by g045/l2). Suggested bucket: none for removing the unused supervisor pin. Could-be-highest: no established loss-of-work or security route for this pin removal; do not infer safety of unrelated inherited binaries. Confidence: confirmed by source/contract; no execution. proposed_drop: exact specification acceptance of supervisor pin removal only; parent has not accepted the proposed drop. possible_cover: g045/l2, supplied by parent, addresses the separate preparation removal skip; its finding is not refuted here."
+          }
+        }
+      ],
+      "latest": {
+        "line": 9,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Removing the unit's tmux pin matches the retired runtime contract",
+          "location": "crates/farhelm-helm/src/provisioning/plan.rs:1237",
+          "detail": "Reviewed commit: 17a3fe858c5511a24b7403af15dd41c93bf69fd7. TLDR considered: removing the exact approved tmux executable from the supervisor unit could reintroduce the below-floor private-binary shadowing problem documented in the removed comment. The replacement contract removes that supervisor use: SPEC_impl.md, Terminal substrate: private tmux server, says exactly: The running supervisor runs no tmux at all, and its driver of the old terminals is gone; it also says the unit names no tmux and puts no tmux directory on PATH. Its retained startup compatibility step explicitly works whether or not any tmux program exists and uses a plain socket connect plus pinned process signals. The assigned plan.rs patch changes supervisor_unit to the shared farhelm/state-only renderer while preserving the separately specified Linux provisioning payload check. Synthesis revision: this concerns Farhelm's own runtime selection only. It makes no claim that an inherited lib/tmux cannot be selected by a user's command or startup script. New evidence for the separately owned g045/l2 at 500548b9253b07a26fd03119679184b69544e31d: snapshot_preparer.rs:48-55 passes only target, unit name and state directory to finish_snapshot_install before publishing facts at 56-60; tensorlake_backend.rs:207-300 builds its final guard solely from unit, state, cgroup root and machine-id. Its final absence predicates at 292 check data/supervisor.db and data, not the private lib directory. Thus the publication guard does not fill the inherited-binary absence premise missing from the skip at snapshot_preparer.rs:109-119. This is source corroboration for g045/l2, not a new or duplicate local finding. Original possible shadowing consequence is preserved but separated into supervisor selection (refuted here) and explicit user/agent command resolution (owned by g045/l2). Suggested bucket: none for removing the unused supervisor pin. Could-be-highest: no established loss-of-work or security route for this pin removal; do not infer safety of unrelated inherited binaries. Confidence: confirmed by source/contract; no execution. proposed_drop: exact specification acceptance of supervisor pin removal only; parent has not accepted the proposed drop. possible_cover: g045/l2, supplied by parent, addresses the separate preparation removal skip; its finding is not refuted here."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g044/findings.jsonl",
+        "id": "c3",
+        "line": 9,
+        "disposition": "under-investigation",
+        "group": "g044-c3",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-027",
+          "key": "g044/c3",
+          "latest_line": 9,
+          "recommendation": "covered",
+          "bucket": "other",
+          "underlying_key": "retired-supervisor-tmux-pin",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The supervisor no longer runs tmux, and its legacy-server shutdown uses socket/process operations without executing tmux. Removing its runtime pin follows the explicit replacement contract. This does not establish that an inherited private tmux cannot be selected by a user's or agent's command/startup script; that separate preparation-removal question remains g045/l2's scope.",
+          "checks": [
+            "17a3fe858c5511a24b7403af15dd41c93bf69fd7 provisioning/plan.rs:1227-1241 renders the unit with only Farhelm/state inputs; its explanation explicitly says the supervisor starts no tmux.",
+            "Same revision SPEC_impl.md:2787-2805,2866-2872 says the running supervisor runs no tmux, its driver is gone, startup cleanup works without any tmux program and the unit names no tmux. Linux provisioning's distinct payload policy remains at that intermediate revision.",
+            "500548b9253b07a26fd03119679184b69544e31d snapshot_preparer.rs:48-60 passes only target/unit/state to final cleanup before publishing facts; :109-119 skips bundled-tmux removal. The checked earlier cleanup implementation at 5665983 tensorlake_backend.rs:207-300 accepts unit/state/cgroup/machine-id and ends by checking state/database absence, not private-lib absence. Source inspection only."
+          ],
+          "coverage_checked": [
+            "Current SPEC_impl.md:2780-2825 and7996-8020 preserves no-tmux supervisor/unit behavior and separately describes bundled-binary cleanup; SPEC.md:183-213 likewise distinguishes typed session commands/removal from supervisor runtime use.",
+            "TODO.md Planned/unlanded plan index empty; BUGS.md unrelated. Searched queue INDEX/active TRIAGE_OUTCOMES for runtime pin, inherited/private tmux and preparation removal; no exact existing queue coverage for the pin concern. g045/l2 is not an alias or coverage for this runtime-only candidate.",
+            "No FILTER.md used. Explicit specification acceptance is confined to unused supervisor pin removal."
+          ],
+          "exact_cover_quotes": [
+            "SPEC_impl.md:7996-7997: The supervisor runs no tmux. The supervisor unit, whether provisioning or `farhelm helm setup` renders it, names no tmux and puts no tmux directory on `PATH`",
+            "SPEC_impl.md:2786-2788: works whether or not any tmux program exists."
+          ],
+          "missing_premise": "No runtime-selection premise remains. Inherited private-lib absence is unproven by the final publication guard and must not be inferred from this result.",
+          "original_stronger_consequence": "Removing an approved exact tmux pin might reintroduce selection of an unapproved or below-floor binary. Supervisor selection is refuted; explicit user/agent command shadowing is a separate preserved concern owned by g045/l2.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Exact replacement contract accepts removing an unused supervisor tmux pin. Conservatively request independent checking because the original broader shadowing consequence touches user commands and must remain separated.",
+          "new_interface_evidence": "g045/l2: final cleanup receives no private-lib path and checks state/database absence, so that guard does not establish the inherited private binary's absence. The later preparation skip is explicit at 500548b snapshot_preparer.rs:109-119. This corroborates the supplied concern without deciding its supported trigger or consequence."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-027.json",
+          "key": "g044/c3",
+          "proposal": "claim-checks/claims-027/result.json",
+          "parent_proposal": "exact-no-tmux-supervisor-runtime-pin-retirement-with-command-shadowing-residual-separated",
+          "final_independent_gate": "required-by-conservative-user-command-shadowing-flag",
+          "reason": "Full027 supervisor/unitrunsnonames/PATHtmux, socket/processoldcleanupworksnoprogramsoexactunusedruntimepinremovalaccepted. DoesNOTestablishinheritedprivate-libabsence: finalcleanupunit/stateinputandstate/databasechecksno-libpath, later500preparerskip explicit. Separate045l2 user/agentcommandshadowingretainedandalreadyprimaryreconciled; nooldruntimepincoverofthatroot. Originalpotentialunapproved/belowfloorselectionbroadconsequencestaysfreshgate, runtimerouteonly."
+        }
+      ],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retired-supervisor-tmux-pin",
+        "destination": "trailing-retired-supervisor-tmux-pin.md"
+      }
+    },
+    {
+      "key": "g044/l4",
+      "owner": "g044",
+      "id": "l4",
+      "domain": "host-provisioning-lifecycle",
+      "purpose": "host-provisioning-lifecycle: crates/farhelm-helm/src/provisioning/e2e.rs, crates/farhelm-helm/src/provisioning/plan.rs, crates/farhelm-helm/src/provisioning/service.rs, crates/farhelm-helm/src/provisioning/session_launch_failure_tests.rs, crates/farhelm-helm/src/provisioning/snapshot_preparer.rs, crates/farhelm-helm/src/provisioning/tensorlake_add_tests.rs, crates/farhelm-helm/src/provisioning/tensorlake_backend.rs, crates/farhelm-helm/src/provisioning/tests/macos_real_tests.rs, crates/farhelm-helm/src/provisioning/macos.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l4",
+            "state": "open",
+            "summary": "Check whether eager Tensorlake preparer construction can panic helm startup",
+            "location": "crates/farhelm-helm/src/provisioning/service.rs:460",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR suspected: an otherwise usable helm state directory might make the helm crash before serving, even when Tensorlake is unused. Source basis: the new ProductionProvisioning::snapshot_preparer eagerly calls TensorlakeSnapshotPreparer::new(...).expect(valid Tensorlake access); the adapter calls TensorlakeSshAccess::for_state_dir at tensorlake/prepared.rs:33. lib.rs production assembly invokes snapshot_preparer at startup. Checks made: adapter validation and production one-shot composition were inspected for l1. Missing premise: whether selected state paths can pass ordinary helm initialization but fail Tensorlake access path validation, and whether startup already handles/refuses such paths before this call. Next checks: read TensorlakeSshAccess::for_state_dir and production initialization around lib.rs:2450 at this revision and parent. Suggested bucket: high if startup outage is established; could-be-highest: no established loss-of-work/security route. Confidence: unverified, investigation in progress. proposed_drop: false. possible_cover: none. No execution."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l4",
+            "state": "open",
+            "summary": "Eager preparer construction does not validate SSH option spelling",
+            "location": "crates/farhelm-helm/src/provisioning/service.rs:460",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR considered: an otherwise usable state directory might crash helm startup even when Tensorlake is unused. Source checks refute the suspected special-character path: TensorlakeSshAccess::for_state_dir at tensorlake/ssh.rs:86-89 merely computes tensorlake_dir, whose implementation at tensorlake/mod.rs:364-365 is std::path::absolute plus join. Restrictions on UTF-8, percent, quotes, backslashes and dollar-brace spelling belong to options at ssh.rs:104-126, which the new constructor does not call. The same absolute conversion was already mandatory in production_with_delivery at tensorlake/mod.rs:169; lib.rs:2456-2461 still calls that unconditionally. Thus the expect changes error presentation for an absolute-conversion failure but does not establish a newly unsupported selected state directory or startup route. Original suggested consequence high/startup outage preserved as considered and refuted. Suggested bucket: none. Could-be-highest: no established security or loss-of-work consequence. Confidence: confirmed by source; no execution. proposed_drop: source refutation. possible_cover: none. No open check remains."
+          }
+        }
+      ],
+      "latest": {
+        "line": 6,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l4",
+          "state": "open",
+          "summary": "Eager preparer construction does not validate SSH option spelling",
+          "location": "crates/farhelm-helm/src/provisioning/service.rs:460",
+          "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR considered: an otherwise usable state directory might crash helm startup even when Tensorlake is unused. Source checks refute the suspected special-character path: TensorlakeSshAccess::for_state_dir at tensorlake/ssh.rs:86-89 merely computes tensorlake_dir, whose implementation at tensorlake/mod.rs:364-365 is std::path::absolute plus join. Restrictions on UTF-8, percent, quotes, backslashes and dollar-brace spelling belong to options at ssh.rs:104-126, which the new constructor does not call. The same absolute conversion was already mandatory in production_with_delivery at tensorlake/mod.rs:169; lib.rs:2456-2461 still calls that unconditionally. Thus the expect changes error presentation for an absolute-conversion failure but does not establish a newly unsupported selected state directory or startup route. Original suggested consequence high/startup outage preserved as considered and refuted. Suggested bucket: none. Could-be-highest: no established security or loss-of-work consequence. Confidence: confirmed by source; no execution. proposed_drop: source refutation. possible_cover: none. No open check remains."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g044/findings.jsonl",
+        "id": "l4",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "eager-tensorlake-preparer-state-path-validation",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-027 after inspecting it. The eager constructor does not validate SSH option spelling. It only computes an absolute Tensorlake directory and key paths, the same absolute conversion already required unconditionally during production Tensorlake assembly. The new expect changes presentation of an absolute-conversion failure; it does not show a newly unsupported usable state directory or a new startup-outage route. This does not claim that later SSH option validation accepts every path spelling. Source refutation: special-character checks occur later in options(), while this constructor only repeats already mandatory absolute path construction. Checked source/results: [\"56659839785691f76da3af5d8f51b511cff4ba8b provisioning/service.rs:450-460 eagerly expects TensorlakeSnapshotPreparer::new; tensorlake/prepared.rs:23-34 calls only TensorlakeSshAccess::for_state_dir.\",\"Same revision tensorlake/ssh.rs:86-89 constructs paths through tensorlake_dir. Restrictions on UTF-8, percent, quotes, backslash and dollar-brace spelling live in options at :104-126, which new does not call.\",\"Same revision tensorlake/mod.rs:364-365 uses std::path::absolute plus join. production_with_delivery already calls this at :169, retained also in 5665983^; lib.rs:2456-2461 invokes that production assembly unconditionally. No runtime execution performed.\"] Current coverage/results: [\"Current SPEC_impl.md Tensorlake SSH/prepared-snapshot sections were searched for state paths and eager assembly; SPEC.md Add host/preparation sections do not accept a helm startup crash. Refutation comes from the actual constructor, not a specification exception.\",\"TODO.md Planned/unlanded plan index empty; BUGS.md's SSH-helper transfer hang is unrelated. Queue INDEX and active TRIAGE_OUTCOMES searches for eager preparer, startup panic, state-path/SSH option validation found no exact coverage.\",\"No FILTER.md proposed; an installation startup outage would not be a merely rare safe retry.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"An otherwise usable helm state directory could crash helm startup even when Tensorlake is unused; high/startup outage if established. No user-work loss or security route was asserted.\"; \"The originally missing usable-path/new-validation premise is refuted for the suspected special-character path. No open check remains for that stated mechanism.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g044/l4",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "eager-tensorlake-preparer-state-path-validation",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-027 after inspecting it. The eager constructor does not validate SSH option spelling. It only computes an absolute Tensorlake directory and key paths, the same absolute conversion already required unconditionally during production Tensorlake assembly. The new expect changes presentation of an absolute-conversion failure; it does not show a newly unsupported usable state directory or a new startup-outage route. This does not claim that later SSH option validation accepts every path spelling. Source refutation: special-character checks occur later in options(), while this constructor only repeats already mandatory absolute path construction. Checked source/results: [\"56659839785691f76da3af5d8f51b511cff4ba8b provisioning/service.rs:450-460 eagerly expects TensorlakeSnapshotPreparer::new; tensorlake/prepared.rs:23-34 calls only TensorlakeSshAccess::for_state_dir.\",\"Same revision tensorlake/ssh.rs:86-89 constructs paths through tensorlake_dir. Restrictions on UTF-8, percent, quotes, backslash and dollar-brace spelling live in options at :104-126, which new does not call.\",\"Same revision tensorlake/mod.rs:364-365 uses std::path::absolute plus join. production_with_delivery already calls this at :169, retained also in 5665983^; lib.rs:2456-2461 invokes that production assembly unconditionally. No runtime execution performed.\"] Current coverage/results: [\"Current SPEC_impl.md Tensorlake SSH/prepared-snapshot sections were searched for state paths and eager assembly; SPEC.md Add host/preparation sections do not accept a helm startup crash. Refutation comes from the actual constructor, not a specification exception.\",\"TODO.md Planned/unlanded plan index empty; BUGS.md's SSH-helper transfer hang is unrelated. Queue INDEX and active TRIAGE_OUTCOMES searches for eager preparer, startup panic, state-path/SSH option validation found no exact coverage.\",\"No FILTER.md proposed; an installation startup outage would not be a merely rare safe retry.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"An otherwise usable helm state directory could crash helm startup even when Tensorlake is unused; high/startup outage if established. No user-work loss or security route was asserted.\"; \"The originally missing usable-path/new-validation premise is refuted for the suspected special-character path. No open check remains for that stated mechanism.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-027",
+          "key": "g044/l4",
+          "latest_line": 6,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "eager-tensorlake-preparer-state-path-validation",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The eager constructor does not validate SSH option spelling. It only computes an absolute Tensorlake directory and key paths, the same absolute conversion already required unconditionally during production Tensorlake assembly. The new expect changes presentation of an absolute-conversion failure; it does not show a newly unsupported usable state directory or a new startup-outage route. This does not claim that later SSH option validation accepts every path spelling.",
+          "checks": [
+            "56659839785691f76da3af5d8f51b511cff4ba8b provisioning/service.rs:450-460 eagerly expects TensorlakeSnapshotPreparer::new; tensorlake/prepared.rs:23-34 calls only TensorlakeSshAccess::for_state_dir.",
+            "Same revision tensorlake/ssh.rs:86-89 constructs paths through tensorlake_dir. Restrictions on UTF-8, percent, quotes, backslash and dollar-brace spelling live in options at :104-126, which new does not call.",
+            "Same revision tensorlake/mod.rs:364-365 uses std::path::absolute plus join. production_with_delivery already calls this at :169, retained also in 5665983^; lib.rs:2456-2461 invokes that production assembly unconditionally. No runtime execution performed."
+          ],
+          "coverage_checked": [
+            "Current SPEC_impl.md Tensorlake SSH/prepared-snapshot sections were searched for state paths and eager assembly; SPEC.md Add host/preparation sections do not accept a helm startup crash. Refutation comes from the actual constructor, not a specification exception.",
+            "TODO.md Planned/unlanded plan index empty; BUGS.md's SSH-helper transfer hang is unrelated. Queue INDEX and active TRIAGE_OUTCOMES searches for eager preparer, startup panic, state-path/SSH option validation found no exact coverage.",
+            "No FILTER.md proposed; an installation startup outage would not be a merely rare safe retry."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "The originally missing usable-path/new-validation premise is refuted for the suspected special-character path. No open check remains for that stated mechanism.",
+          "original_stronger_consequence": "An otherwise usable helm state directory could crash helm startup even when Tensorlake is unused; high/startup outage if established. No user-work loss or security route was asserted.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation: special-character checks occur later in options(), while this constructor only repeats already mandatory absolute path construction."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "eager-tensorlake-preparer-state-path-validation",
+        "destination": null
+      }
+    },
+    {
+      "key": "g044/c5",
+      "owner": "g044",
+      "id": "c5",
+      "domain": "host-provisioning-lifecycle",
+      "purpose": "host-provisioning-lifecycle: crates/farhelm-helm/src/provisioning/e2e.rs, crates/farhelm-helm/src/provisioning/plan.rs, crates/farhelm-helm/src/provisioning/service.rs, crates/farhelm-helm/src/provisioning/session_launch_failure_tests.rs, crates/farhelm-helm/src/provisioning/snapshot_preparer.rs, crates/farhelm-helm/src/provisioning/tensorlake_add_tests.rs, crates/farhelm-helm/src/provisioning/tensorlake_backend.rs, crates/farhelm-helm/src/provisioning/tests/macos_real_tests.rs, crates/farhelm-helm/src/provisioning/macos.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c5",
+            "state": "open",
+            "summary": "Mac terminal test retains behavioral survival evidence after type removal",
+            "location": "crates/farhelm-helm/src/provisioning/tests/macos_real_tests.rs:354",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR considered: deleting terminal-kind and grid-stream assertions could let a Mac update-survival test pass for recreated or wrong-substrate terminals. Source refutation: client.rs:3967-4075 now has one grid-only attachment path and no byte/grid selection, matching the five-argument call. macos_real_tests.rs:341-409 still waits for this attachment's replay and decodes fresh GridOutput for a random uppercase token absent from command echo. mac_assert_survival at 495-575 compares the four original process identities, requires the same tab and live session, and executes fresh commands in both agent and tab checking a shell nonce. These observables distinguish retained live programs from reconstructed IDs without the removed metadata. Suggested bucket: none. Could-be-highest: no; this concern is confined to test coverage and retains the intended oracle. Confidence: confirmed by source; no test executed. proposed_drop: source refutation. possible_cover: none."
+          }
+        }
+      ],
+      "latest": {
+        "line": 7,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c5",
+          "state": "open",
+          "summary": "Mac terminal test retains behavioral survival evidence after type removal",
+          "location": "crates/farhelm-helm/src/provisioning/tests/macos_real_tests.rs:354",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR considered: deleting terminal-kind and grid-stream assertions could let a Mac update-survival test pass for recreated or wrong-substrate terminals. Source refutation: client.rs:3967-4075 now has one grid-only attachment path and no byte/grid selection, matching the five-argument call. macos_real_tests.rs:341-409 still waits for this attachment's replay and decodes fresh GridOutput for a random uppercase token absent from command echo. mac_assert_survival at 495-575 compares the four original process identities, requires the same tab and live session, and executes fresh commands in both agent and tab checking a shell nonce. These observables distinguish retained live programs from reconstructed IDs without the removed metadata. Suggested bucket: none. Could-be-highest: no; this concern is confined to test coverage and retains the intended oracle. Confidence: confirmed by source; no test executed. proposed_drop: source refutation. possible_cover: none."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g044/findings.jsonl",
+        "id": "c5",
+        "line": 7,
+        "disposition": "excluded",
+        "group": "mac-update-survival-metadata-assertion-removal",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-028 after inspecting it. The removed terminal-kind metadata does not supply the survival oracle. This Mac test still checks original process identities, shell state and fresh executed input after recovery. Source refutes the specific missing-survival-oracle premise. Agreement is narrow: this does not establish exhaustive terminal-survival test coverage. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-helm/src/provisioning/tests/macos_real_tests.rs:341-409 waits for this attachment's ReplayComplete, sends a lowercase random token and requires its uppercase form in decoded GridOutput. Echo alone cannot meet that predicate.\",\"Same revision, macos_real_tests.rs:495-575 requires the same session and tab, live status, all four original process identities and fresh nonce-checking commands in both terminals.\",\"Same revision, crates/farhelm-helm/src/client.rs:3967-3980,4040-4077 has one grid attachment path, without a terminal-kind selection. No execution performed.\"] Current coverage/results: [\"Recording-main SPEC_impl.md:2937-2955 explicitly removes stream-kind and terminal-kind metadata in protocol 77; SPEC.md terminal-survival promises do not require obsolete metadata assertions.\",\"TODO.md Planned and plans/queue/INDEX.md have no entries. BUGS.md has only the unrelated escaped-SSH-helper transfer hang.\",\"INDEX.md read in full; matching queue item tab-survival-missing-live-exchange.md read in full. It concerns another test that lacks fresh successor input, unlike this test. Targeted active TRIAGE_OUTCOMES.md searches found no exact item. FILTER.md supplies no needed basis.\"] Exact cited cover: [\"SPEC_impl.md:2944-2945: every attachment's data channel carries a grid stream\"] Original stronger consequence and missing premise remain preserved: \"Removing kind assertions might let the Mac update-survival test pass with recreated or wrong-substrate terminals. This was a test-oracle hypothesis, not a shipped process-loss claim.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g044/c5",
+        "line": 7,
+        "disposition": "excluded",
+        "group": "mac-update-survival-metadata-assertion-removal",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-028 after inspecting it. The removed terminal-kind metadata does not supply the survival oracle. This Mac test still checks original process identities, shell state and fresh executed input after recovery. Source refutes the specific missing-survival-oracle premise. Agreement is narrow: this does not establish exhaustive terminal-survival test coverage. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-helm/src/provisioning/tests/macos_real_tests.rs:341-409 waits for this attachment's ReplayComplete, sends a lowercase random token and requires its uppercase form in decoded GridOutput. Echo alone cannot meet that predicate.\",\"Same revision, macos_real_tests.rs:495-575 requires the same session and tab, live status, all four original process identities and fresh nonce-checking commands in both terminals.\",\"Same revision, crates/farhelm-helm/src/client.rs:3967-3980,4040-4077 has one grid attachment path, without a terminal-kind selection. No execution performed.\"] Current coverage/results: [\"Recording-main SPEC_impl.md:2937-2955 explicitly removes stream-kind and terminal-kind metadata in protocol 77; SPEC.md terminal-survival promises do not require obsolete metadata assertions.\",\"TODO.md Planned and plans/queue/INDEX.md have no entries. BUGS.md has only the unrelated escaped-SSH-helper transfer hang.\",\"INDEX.md read in full; matching queue item tab-survival-missing-live-exchange.md read in full. It concerns another test that lacks fresh successor input, unlike this test. Targeted active TRIAGE_OUTCOMES.md searches found no exact item. FILTER.md supplies no needed basis.\"] Exact cited cover: [\"SPEC_impl.md:2944-2945: every attachment's data channel carries a grid stream\"] Original stronger consequence and missing premise remain preserved: \"Removing kind assertions might let the Mac update-survival test pass with recreated or wrong-substrate terminals. This was a test-oracle hypothesis, not a shipped process-loss claim.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-028",
+          "key": "g044/c5",
+          "latest_line": 7,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "mac-update-survival-metadata-assertion-removal",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The removed terminal-kind metadata does not supply the survival oracle. This Mac test still checks original process identities, shell state and fresh executed input after recovery.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-helm/src/provisioning/tests/macos_real_tests.rs:341-409 waits for this attachment's ReplayComplete, sends a lowercase random token and requires its uppercase form in decoded GridOutput. Echo alone cannot meet that predicate.",
+            "Same revision, macos_real_tests.rs:495-575 requires the same session and tab, live status, all four original process identities and fresh nonce-checking commands in both terminals.",
+            "Same revision, crates/farhelm-helm/src/client.rs:3967-3980,4040-4077 has one grid attachment path, without a terminal-kind selection. No execution performed."
+          ],
+          "coverage_checked": [
+            "Recording-main SPEC_impl.md:2937-2955 explicitly removes stream-kind and terminal-kind metadata in protocol 77; SPEC.md terminal-survival promises do not require obsolete metadata assertions.",
+            "TODO.md Planned and plans/queue/INDEX.md have no entries. BUGS.md has only the unrelated escaped-SSH-helper transfer hang.",
+            "INDEX.md read in full; matching queue item tab-survival-missing-live-exchange.md read in full. It concerns another test that lacks fresh successor input, unlike this test. Targeted active TRIAGE_OUTCOMES.md searches found no exact item. FILTER.md supplies no needed basis."
+          ],
+          "exact_cover_quotes": [
+            "SPEC_impl.md:2944-2945: every attachment's data channel carries a grid stream"
+          ],
+          "missing_premise": null,
+          "original_stronger_consequence": "Removing kind assertions might let the Mac update-survival test pass with recreated or wrong-substrate terminals. This was a test-oracle hypothesis, not a shipped process-loss claim.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutes the specific missing-survival-oracle premise. Agreement is narrow: this does not establish exhaustive terminal-survival test coverage."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "mac-update-survival-metadata-assertion-removal",
+        "destination": null
+      }
+    },
+    {
+      "key": "g044/l6",
+      "owner": "g044",
+      "id": "l6",
+      "domain": "host-provisioning-lifecycle",
+      "purpose": "host-provisioning-lifecycle: crates/farhelm-helm/src/provisioning/e2e.rs, crates/farhelm-helm/src/provisioning/plan.rs, crates/farhelm-helm/src/provisioning/service.rs, crates/farhelm-helm/src/provisioning/session_launch_failure_tests.rs, crates/farhelm-helm/src/provisioning/snapshot_preparer.rs, crates/farhelm-helm/src/provisioning/tensorlake_add_tests.rs, crates/farhelm-helm/src/provisioning/tensorlake_backend.rs, crates/farhelm-helm/src/provisioning/tests/macos_real_tests.rs, crates/farhelm-helm/src/provisioning/macos.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l6",
+            "state": "open",
+            "summary": "Check whether stopped-environment attach refusal can pass its freshness gate",
+            "location": "crates/farhelm-helm/src/provisioning/service.rs:2916",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR suspected: a container that stops during setup/Update may time out with a generic attach error rather than the new stopped-environment/Resume remedy. Source basis: service.rs:297-299 adds HostState::Stopped to attach_refusal, but attach_supervisor at 2916-2919 invokes this only when status.refusal_attempt exceeds the retry ticket. Initial/update planning gates at 1362-1365 do not settle a later stop. Missing premise: whether the actor increments refusal_attempt for a Stopped provider-status observation, including a failed automatic start, after that ticket. Next checks: inspect manager status gating and fresh-window ticket assignments; check the exact applicable attachment contract and source attribution across the pinned range. Suggested bucket: other if diagnostic route is established. Could-be-highest: no established security or loss-of-work route. Confidence: unverified, investigation in progress. proposed_drop: false. possible_cover: none; supplied neighbour findings concern different dial diagnosis, not this ticket predicate. No execution or reproduction."
+          }
+        },
+        {
+          "line": 14,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l6",
+            "state": "open",
+            "summary": "Stopped-environment attach diagnosis is excluded by its own freshness gate",
+            "location": "crates/farhelm-helm/src/provisioning/service.rs:2916",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: if a container stops while setup or Update is waiting to reconnect, the run cannot use its new stopped-environment/Resume explanation; it waits for the ordinary attachment timeout and reports only a timeout instead. Details: this assigned commit adds HostState::Stopped to attach_refusal at service.rs:297-299, but the sole caller at 2916-2919 requires status.refusal_attempt > ticket before considering any mapped state. manager.rs:3841-3889 publishes both initial Stopped and failed-autostart Stopped through set_state. That follows set_state -> publish -> publish_with_live (5056-5087), which passes refusal_attempt=0; publish_refresh assigns that zero at 5224. retry_now_with_fresh_window reads the unsigned attempt counter and returns it as the ticket (2891-2926), so zero can never exceed a returned ticket. Thus no actor-published Stopped state can reach the new explanation. A stopped observation after a run's preflight is not covered by plan_update_owned's earlier suspended_refusal check at service.rs:1362-1365. The source contract for attach_refusal at 236-253 and its Stopped branch provides the intended specific reason, whereas attach_supervisor's timeout at 2923-2925 substitutes waiting for the provisioned supervisor: timed out. SPEC.md Container sessions:4782-4790 explicitly includes external podman stop or OOM and requires distinct Stopped reporting with a Resume remedy; the current host state can remain correctly Stopped while this run's result loses the explanation. Suggested fix: carry a fresh provider-observation attempt identity to these state publications, or otherwise distinguish fresh environment-state refusals from stale supervisor-refusal tickets; do not simply accept an old pre-update skew. Add an integration-level attach wait check, since directly testing attach_refusal's match cannot exercise the ticket predicate. Suggested bucket: other, diagnostic correctness plus an unnecessary bounded wait. Could-be-highest: no established security or work-loss consequence. Confidence: confirmed by source for the unreachable diagnosis, not observed execution; exact incidence of stopping in the attachment window is unmeasured. proposed_drop: false. possible_cover: none. Attribution: the new Stopped branch and production Podman route arrive at 566; this is distinct from the existing Suspended/Changing branches and from g056/f1's dial-process diagnosis. The full pinned service history shows no subsequent change to this freshness predicate. No reproduction, test or live-install action performed. Further finishing checks: confirm caller lock/automatic-start interaction and endpoint source; those do not affect the proven 0 > ticket impossibility."
+          }
+        },
+        {
+          "line": 15,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l6",
+            "state": "open",
+            "summary": "Stopped-environment attach diagnosis is excluded by its own freshness gate",
+            "location": "crates/farhelm-helm/src/provisioning/service.rs:2916",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: if a container stops while setup or Update is waiting to reconnect, the run cannot use its new stopped-environment/Resume explanation; it waits for the ordinary attachment timeout and reports only a timeout instead. Details: this assigned commit adds HostState::Stopped to attach_refusal at service.rs:297-299, but the sole caller at 2916-2919 requires status.refusal_attempt > ticket before considering any mapped state. manager.rs:3841-3889 publishes both initial Stopped and failed-autostart Stopped through set_state. That follows set_state -> publish -> publish_with_live (5056-5087), which passes refusal_attempt=0; publish_refresh assigns that zero at 5224. retry_now_with_fresh_window reads the unsigned attempt counter and returns it as the ticket (2891-2926), so zero can never exceed a returned ticket. Thus no actor-published Stopped state can reach the new explanation. A stopped observation after a run's preflight is not covered by plan_update_owned's earlier suspended_refusal check at service.rs:1362-1365. The source contract for attach_refusal at 236-253 and its Stopped branch provides the intended specific reason, whereas attach_supervisor's timeout at 2923-2925 substitutes waiting for the provisioned supervisor: timed out. SPEC.md Container sessions:4782-4790 explicitly includes external podman stop or OOM and requires distinct Stopped reporting with a Resume remedy; the host state can remain correctly Stopped while this run's result loses the explanation. Finishing checks establish a shipped source route: plan.rs:910-915 makes AttachSupervisor the action after RestartSupervisor for Update, so an external stop after successful restart can occur before the new connection attempt. service.rs:2091-2110 keeps the host provisioning lock across revalidation and all actions. The actor's Stopped branch attempts automatic start through lifecycle::change_with_manager, but Podman::change at environment/podman.rs:643-651 first tries that same provisioning lock and refuses busy, so an ongoing Update need not be rescued before its timeout. This is source-permitted external-stop ordering, not an execution observation or measured incidence. Endpoint 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db retains the exact gate at service.rs:2913-2915 and Stopped branch at 305-307; manager.rs:4067,4098 still uses set_state, whose publication at 5327 supplies zero and assignment at 5464 retains it. Full pinned service history attributes the new Stopped branch and production Podman path to 566, not a pre-range defect; later service changes do not repair it. Suggested fix: carry a fresh provider-observation attempt identity to these publications, or otherwise distinguish fresh environment-state refusals from stale supervisor-refusal tickets; do not simply accept an old pre-update skew. Add an integration-level attach wait check, since directly testing attach_refusal's match cannot exercise the ticket predicate. Suggested bucket: other, diagnostic correctness plus an unnecessary bounded wait. Could-be-highest: no established security or work-loss consequence. Confidence: confirmed by source for the unreachable diagnosis and caller route, not observed execution. proposed_drop: false. possible_cover: none. Caveats: the host's separate Stopped state/Resume control can still be correct; a container that successfully reconnects completes normally; this does not allege that the ticket bug causes the container to stop or loses its files. Existing Suspended/Changing branches may share the gate but are not adopted or attributed as a new issue here. This is distinct from g056/f1's dial-process diagnosis. No unresolved source premise remains for this bounded finding. No runtime tests, reproduction or live-install action performed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 15,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l6",
+          "state": "open",
+          "summary": "Stopped-environment attach diagnosis is excluded by its own freshness gate",
+          "location": "crates/farhelm-helm/src/provisioning/service.rs:2916",
+          "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: if a container stops while setup or Update is waiting to reconnect, the run cannot use its new stopped-environment/Resume explanation; it waits for the ordinary attachment timeout and reports only a timeout instead. Details: this assigned commit adds HostState::Stopped to attach_refusal at service.rs:297-299, but the sole caller at 2916-2919 requires status.refusal_attempt > ticket before considering any mapped state. manager.rs:3841-3889 publishes both initial Stopped and failed-autostart Stopped through set_state. That follows set_state -> publish -> publish_with_live (5056-5087), which passes refusal_attempt=0; publish_refresh assigns that zero at 5224. retry_now_with_fresh_window reads the unsigned attempt counter and returns it as the ticket (2891-2926), so zero can never exceed a returned ticket. Thus no actor-published Stopped state can reach the new explanation. A stopped observation after a run's preflight is not covered by plan_update_owned's earlier suspended_refusal check at service.rs:1362-1365. The source contract for attach_refusal at 236-253 and its Stopped branch provides the intended specific reason, whereas attach_supervisor's timeout at 2923-2925 substitutes waiting for the provisioned supervisor: timed out. SPEC.md Container sessions:4782-4790 explicitly includes external podman stop or OOM and requires distinct Stopped reporting with a Resume remedy; the host state can remain correctly Stopped while this run's result loses the explanation. Finishing checks establish a shipped source route: plan.rs:910-915 makes AttachSupervisor the action after RestartSupervisor for Update, so an external stop after successful restart can occur before the new connection attempt. service.rs:2091-2110 keeps the host provisioning lock across revalidation and all actions. The actor's Stopped branch attempts automatic start through lifecycle::change_with_manager, but Podman::change at environment/podman.rs:643-651 first tries that same provisioning lock and refuses busy, so an ongoing Update need not be rescued before its timeout. This is source-permitted external-stop ordering, not an execution observation or measured incidence. Endpoint 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db retains the exact gate at service.rs:2913-2915 and Stopped branch at 305-307; manager.rs:4067,4098 still uses set_state, whose publication at 5327 supplies zero and assignment at 5464 retains it. Full pinned service history attributes the new Stopped branch and production Podman path to 566, not a pre-range defect; later service changes do not repair it. Suggested fix: carry a fresh provider-observation attempt identity to these publications, or otherwise distinguish fresh environment-state refusals from stale supervisor-refusal tickets; do not simply accept an old pre-update skew. Add an integration-level attach wait check, since directly testing attach_refusal's match cannot exercise the ticket predicate. Suggested bucket: other, diagnostic correctness plus an unnecessary bounded wait. Could-be-highest: no established security or work-loss consequence. Confidence: confirmed by source for the unreachable diagnosis and caller route, not observed execution. proposed_drop: false. possible_cover: none. Caveats: the host's separate Stopped state/Resume control can still be correct; a container that successfully reconnects completes normally; this does not allege that the ticket bug causes the container to stop or loses its files. Existing Suspended/Changing branches may share the gate but are not adopted or attributed as a new issue here. This is distinct from g056/f1's dial-process diagnosis. No unresolved source premise remains for this bounded finding. No runtime tests, reproduction or live-install action performed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g044/findings.jsonl",
+        "id": "l6",
+        "line": 15,
+        "disposition": "rejected",
+        "group": "stopped-provider-state-zero-refusal-ticket",
+        "reason": "Parent explicitly accepted named filtered proposal from claims-028 after inspecting it. The unreachable stopped-environment explanation is established. The exact claim is a lost diagnostic and ordinary bounded attachment wait after an external stop within setup/Update's reconnect window, which fits the rare-diagnostic filter. Propose the complete rare-diagnostic filter match, while preserving that the source bug is real. If the parent broadens the consequence beyond this diagnostic/wait scope, retain and reassess the filter. Checked source/results: [\"56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/provisioning/service.rs:297-299 maps Stopped to a Resume explanation, but :2916-2919 requires refusal_attempt > ticket. manager.rs:3841-3889 publishes Stopped via set_state; :5056-5087 sends refusal_attempt=0; :5224 stores it. nudge_now at :2891-2926 returns an unsigned attempt-counter ticket. Zero cannot pass the gate.\",\"Same revision, service.rs:2091-2110 holds the provisioning lock across execution; plan.rs:910-915 puts AttachSupervisor after RestartSupervisor; environment/podman.rs:643-651 makes automatic start refuse the busy provisioning lock. An external stop after restart and before attachment is source-permitted.\",\"00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:service.rs:2913-2915 retains the gate. No runtime incidence or reproduction is claimed. The defect does not cause the external stop or erase files.\"] Current coverage/results: [\"SPEC.md:4857-4865 and SPEC_impl.md:5973-5981 require distinct Stopped state and automatic-start failure/Resume reporting. Those describe the host state, which can remain correct; neither expressly accepts the attach diagnostic bug.\",\"TODO.md Planned and plans/queue/INDEX.md are empty. BUGS.md's transfer hang has a different trigger, duration and mechanism.\",\"INDEX.md read in full; searches for refusal_attempt, attach_refusal and stopped-environment diagnosis in queue records and active TRIAGE_OUTCOMES.md found no exact cover. Existing stopped-host-update-floor-unresolved concerns version eligibility, not attachment diagnosis.\",\"FILTER.md, Rare, self-correcting glitches and imprecise diagnostics: external stop must fall inside the attachment window, and the entire established consequence is lost detail plus the existing 30-second attach wait. No security, wrong-target action, durable wrong record or user-work loss is attributed to this bug.\"] Exact cited cover: [\"FILTER.md: The trigger is rare: a narrow timing window, a crash or interruption at a specific point, or an input the shipped clients never send.\",\"FILTER.md: an error message, log line or other diagnostic that is imprecise, misleading, missing detail, or lost.\"] Original stronger consequence and missing premise remain preserved: \"Setup/Update waits for ordinary attachment timeout and reports a generic timeout instead of the new Stopped/Resume remedy. The host's separate Stopped state and controls may remain correct. No earlier security or work-loss consequence was alleged.\"; \"No premise remains for the bounded diagnostic defect. Frequency was not measured; the filter basis is the specifically narrow stop-during-attachment ordering, not an assertion that all container stops are rare.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g044/l6",
+        "line": 15,
+        "disposition": "rejected",
+        "group": "stopped-provider-state-zero-refusal-ticket",
+        "bucket": "other",
+        "recording": "filtered",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named filtered proposal from claims-028 after inspecting it. The unreachable stopped-environment explanation is established. The exact claim is a lost diagnostic and ordinary bounded attachment wait after an external stop within setup/Update's reconnect window, which fits the rare-diagnostic filter. Propose the complete rare-diagnostic filter match, while preserving that the source bug is real. If the parent broadens the consequence beyond this diagnostic/wait scope, retain and reassess the filter. Checked source/results: [\"56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/provisioning/service.rs:297-299 maps Stopped to a Resume explanation, but :2916-2919 requires refusal_attempt > ticket. manager.rs:3841-3889 publishes Stopped via set_state; :5056-5087 sends refusal_attempt=0; :5224 stores it. nudge_now at :2891-2926 returns an unsigned attempt-counter ticket. Zero cannot pass the gate.\",\"Same revision, service.rs:2091-2110 holds the provisioning lock across execution; plan.rs:910-915 puts AttachSupervisor after RestartSupervisor; environment/podman.rs:643-651 makes automatic start refuse the busy provisioning lock. An external stop after restart and before attachment is source-permitted.\",\"00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:service.rs:2913-2915 retains the gate. No runtime incidence or reproduction is claimed. The defect does not cause the external stop or erase files.\"] Current coverage/results: [\"SPEC.md:4857-4865 and SPEC_impl.md:5973-5981 require distinct Stopped state and automatic-start failure/Resume reporting. Those describe the host state, which can remain correct; neither expressly accepts the attach diagnostic bug.\",\"TODO.md Planned and plans/queue/INDEX.md are empty. BUGS.md's transfer hang has a different trigger, duration and mechanism.\",\"INDEX.md read in full; searches for refusal_attempt, attach_refusal and stopped-environment diagnosis in queue records and active TRIAGE_OUTCOMES.md found no exact cover. Existing stopped-host-update-floor-unresolved concerns version eligibility, not attachment diagnosis.\",\"FILTER.md, Rare, self-correcting glitches and imprecise diagnostics: external stop must fall inside the attachment window, and the entire established consequence is lost detail plus the existing 30-second attach wait. No security, wrong-target action, durable wrong record or user-work loss is attributed to this bug.\"] Exact cited cover: [\"FILTER.md: The trigger is rare: a narrow timing window, a crash or interruption at a specific point, or an input the shipped clients never send.\",\"FILTER.md: an error message, log line or other diagnostic that is imprecise, misleading, missing detail, or lost.\"] Original stronger consequence and missing premise remain preserved: \"Setup/Update waits for ordinary attachment timeout and reports a generic timeout instead of the new Stopped/Resume remedy. The host's separate Stopped state and controls may remain correct. No earlier security or work-loss consequence was alleged.\"; \"No premise remains for the bounded diagnostic defect. Frequency was not measured; the filter basis is the specifically narrow stop-during-attachment ordering, not an assertion that all container stops are rare.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-028",
+          "key": "g044/l6",
+          "latest_line": 15,
+          "recommendation": "filtered",
+          "bucket": "other",
+          "underlying_key": "stopped-provider-state-zero-refusal-ticket",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The unreachable stopped-environment explanation is established. The exact claim is a lost diagnostic and ordinary bounded attachment wait after an external stop within setup/Update's reconnect window, which fits the rare-diagnostic filter.",
+          "checks": [
+            "56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/provisioning/service.rs:297-299 maps Stopped to a Resume explanation, but :2916-2919 requires refusal_attempt > ticket. manager.rs:3841-3889 publishes Stopped via set_state; :5056-5087 sends refusal_attempt=0; :5224 stores it. nudge_now at :2891-2926 returns an unsigned attempt-counter ticket. Zero cannot pass the gate.",
+            "Same revision, service.rs:2091-2110 holds the provisioning lock across execution; plan.rs:910-915 puts AttachSupervisor after RestartSupervisor; environment/podman.rs:643-651 makes automatic start refuse the busy provisioning lock. An external stop after restart and before attachment is source-permitted.",
+            "00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:service.rs:2913-2915 retains the gate. No runtime incidence or reproduction is claimed. The defect does not cause the external stop or erase files."
+          ],
+          "coverage_checked": [
+            "SPEC.md:4857-4865 and SPEC_impl.md:5973-5981 require distinct Stopped state and automatic-start failure/Resume reporting. Those describe the host state, which can remain correct; neither expressly accepts the attach diagnostic bug.",
+            "TODO.md Planned and plans/queue/INDEX.md are empty. BUGS.md's transfer hang has a different trigger, duration and mechanism.",
+            "INDEX.md read in full; searches for refusal_attempt, attach_refusal and stopped-environment diagnosis in queue records and active TRIAGE_OUTCOMES.md found no exact cover. Existing stopped-host-update-floor-unresolved concerns version eligibility, not attachment diagnosis.",
+            "FILTER.md, Rare, self-correcting glitches and imprecise diagnostics: external stop must fall inside the attachment window, and the entire established consequence is lost detail plus the existing 30-second attach wait. No security, wrong-target action, durable wrong record or user-work loss is attributed to this bug."
+          ],
+          "exact_cover_quotes": [
+            "FILTER.md: The trigger is rare: a narrow timing window, a crash or interruption at a specific point, or an input the shipped clients never send.",
+            "FILTER.md: an error message, log line or other diagnostic that is imprecise, misleading, missing detail, or lost."
+          ],
+          "missing_premise": "No premise remains for the bounded diagnostic defect. Frequency was not measured; the filter basis is the specifically narrow stop-during-attachment ordering, not an assertion that all container stops are rare.",
+          "original_stronger_consequence": "Setup/Update waits for ordinary attachment timeout and reports a generic timeout instead of the new Stopped/Resume remedy. The host's separate Stopped state and controls may remain correct. No earlier security or work-loss consequence was alleged.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Propose the complete rare-diagnostic filter match, while preserving that the source bug is real. If the parent broadens the consequence beyond this diagnostic/wait scope, retain and reassess the filter."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "stopped-provider-state-zero-refusal-ticket",
+        "destination": "trailing-stopped-provider-state-zero-refusal-ticket.md"
+      }
+    },
+    {
+      "key": "g044/c7",
+      "owner": "g044",
+      "id": "c7",
+      "domain": "host-provisioning-lifecycle",
+      "purpose": "host-provisioning-lifecycle: crates/farhelm-helm/src/provisioning/e2e.rs, crates/farhelm-helm/src/provisioning/plan.rs, crates/farhelm-helm/src/provisioning/service.rs, crates/farhelm-helm/src/provisioning/session_launch_failure_tests.rs, crates/farhelm-helm/src/provisioning/snapshot_preparer.rs, crates/farhelm-helm/src/provisioning/tensorlake_add_tests.rs, crates/farhelm-helm/src/provisioning/tensorlake_backend.rs, crates/farhelm-helm/src/provisioning/tests/macos_real_tests.rs, crates/farhelm-helm/src/provisioning/macos.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c7",
+            "state": "open",
+            "summary": "Replacement launch fixture terminally withdraws its previous manager",
+            "location": "crates/farhelm-helm/src/provisioning/session_launch_failure_tests.rs:43",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR considered: replacing the fixture manager after a synchronous shutdown might leave the previous manager reconnecting or repopulating actors against the same store, making test state unreliable. Source refutation of that continuing-actor premise: Fixture::new calls harness.manager.shutdown before adding the place host and constructing the replacement. manager.rs:3093-3096 obtains and aborts withdrawn supervision tasks; withdraw_actors at 3110-3133 sets map.shut_down while holding the actor-map lock, drains the map, removes published clients, aborts each actor and retires withdrawn clients before returning. Its terminal gate is specifically shared with reconciliation, so later old-manager reconciliation cannot create replacements. This does not claim that synchronous shutdown joins every canceled future or that every possible fixture assertion is correct; it rules out the considered continuing/repopulating manager mechanism. The new manager's place readiness is separately awaited before Fixture::new returns (session_launch_failure_tests.rs:130-149). Suggested bucket: none for this refuted test-isolation concern. Could-be-highest: no; this was confined to maintainer test-fixture state, with no security or product work-loss route. Confidence: confirmed source-level terminal withdrawal, not execution. proposed_drop: source refutation. possible_cover: none. No checkout changes or reproduction."
+          }
+        }
+      ],
+      "latest": {
+        "line": 13,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c7",
+          "state": "open",
+          "summary": "Replacement launch fixture terminally withdraws its previous manager",
+          "location": "crates/farhelm-helm/src/provisioning/session_launch_failure_tests.rs:43",
+          "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR considered: replacing the fixture manager after a synchronous shutdown might leave the previous manager reconnecting or repopulating actors against the same store, making test state unreliable. Source refutation of that continuing-actor premise: Fixture::new calls harness.manager.shutdown before adding the place host and constructing the replacement. manager.rs:3093-3096 obtains and aborts withdrawn supervision tasks; withdraw_actors at 3110-3133 sets map.shut_down while holding the actor-map lock, drains the map, removes published clients, aborts each actor and retires withdrawn clients before returning. Its terminal gate is specifically shared with reconciliation, so later old-manager reconciliation cannot create replacements. This does not claim that synchronous shutdown joins every canceled future or that every possible fixture assertion is correct; it rules out the considered continuing/repopulating manager mechanism. The new manager's place readiness is separately awaited before Fixture::new returns (session_launch_failure_tests.rs:130-149). Suggested bucket: none for this refuted test-isolation concern. Could-be-highest: no; this was confined to maintainer test-fixture state, with no security or product work-loss route. Confidence: confirmed source-level terminal withdrawal, not execution. proposed_drop: source refutation. possible_cover: none. No checkout changes or reproduction."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g044/findings.jsonl",
+        "id": "c7",
+        "line": 13,
+        "disposition": "excluded",
+        "group": "replacement-launch-fixture-old-manager-repopulation",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-028 after inspecting it. The fixture shuts the old manager's registry before constructing its replacement. Its old reconciliation cannot repopulate actors after that terminal gate. Source refutes continuing/repopulating actors after terminal withdrawal; it does not establish synchronous joining or correctness of every fixture assertion. Checked source/results: [\"56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/provisioning/session_launch_failure_tests.rs:40-149 calls harness.manager.shutdown before adding the place host and constructing the replacement; it awaits the replacement place actor's connected state.\",\"Same revision, manager.rs:3093-3133 sets map.shut_down under the actor-map mutex, drains actor handles, clears published clients, aborts actors and retires clients. Reconciliation checks that gate under the insertion lock at :1725-1732, and revive does likewise at :2963-2969. Shutdown does not promise to join every cancelled future; the stated repopulation mechanism is nevertheless fenced. No runtime test performed.\"] Current coverage/results: [\"Both specifications searched for shutdown, provisioning and actor lifetime. SPEC_impl.md:5357-5359 explicitly requires terminal shutdown and no reconciliation repopulation. No accepted defective fixture behavior is needed for the source refutation.\",\"TODO.md Planned and plans/queue/INDEX.md are empty; BUGS.md is unrelated. INDEX.md read in full and targeted active ledger/queue searches found no exact old-manager-repopulation item. FILTER.md is not the basis.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The previous fixture manager might keep reconnecting or repopulating actors against the same store, making tests unreliable. This concerned fixture isolation only.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g044/c7",
+        "line": 13,
+        "disposition": "excluded",
+        "group": "replacement-launch-fixture-old-manager-repopulation",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-028 after inspecting it. The fixture shuts the old manager's registry before constructing its replacement. Its old reconciliation cannot repopulate actors after that terminal gate. Source refutes continuing/repopulating actors after terminal withdrawal; it does not establish synchronous joining or correctness of every fixture assertion. Checked source/results: [\"56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/provisioning/session_launch_failure_tests.rs:40-149 calls harness.manager.shutdown before adding the place host and constructing the replacement; it awaits the replacement place actor's connected state.\",\"Same revision, manager.rs:3093-3133 sets map.shut_down under the actor-map mutex, drains actor handles, clears published clients, aborts actors and retires clients. Reconciliation checks that gate under the insertion lock at :1725-1732, and revive does likewise at :2963-2969. Shutdown does not promise to join every cancelled future; the stated repopulation mechanism is nevertheless fenced. No runtime test performed.\"] Current coverage/results: [\"Both specifications searched for shutdown, provisioning and actor lifetime. SPEC_impl.md:5357-5359 explicitly requires terminal shutdown and no reconciliation repopulation. No accepted defective fixture behavior is needed for the source refutation.\",\"TODO.md Planned and plans/queue/INDEX.md are empty; BUGS.md is unrelated. INDEX.md read in full and targeted active ledger/queue searches found no exact old-manager-repopulation item. FILTER.md is not the basis.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The previous fixture manager might keep reconnecting or repopulating actors against the same store, making tests unreliable. This concerned fixture isolation only.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-028",
+          "key": "g044/c7",
+          "latest_line": 13,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "replacement-launch-fixture-old-manager-repopulation",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The fixture shuts the old manager's registry before constructing its replacement. Its old reconciliation cannot repopulate actors after that terminal gate.",
+          "checks": [
+            "56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/provisioning/session_launch_failure_tests.rs:40-149 calls harness.manager.shutdown before adding the place host and constructing the replacement; it awaits the replacement place actor's connected state.",
+            "Same revision, manager.rs:3093-3133 sets map.shut_down under the actor-map mutex, drains actor handles, clears published clients, aborts actors and retires clients. Reconciliation checks that gate under the insertion lock at :1725-1732, and revive does likewise at :2963-2969. Shutdown does not promise to join every cancelled future; the stated repopulation mechanism is nevertheless fenced. No runtime test performed."
+          ],
+          "coverage_checked": [
+            "Both specifications searched for shutdown, provisioning and actor lifetime. SPEC_impl.md:5357-5359 explicitly requires terminal shutdown and no reconciliation repopulation. No accepted defective fixture behavior is needed for the source refutation.",
+            "TODO.md Planned and plans/queue/INDEX.md are empty; BUGS.md is unrelated. INDEX.md read in full and targeted active ledger/queue searches found no exact old-manager-repopulation item. FILTER.md is not the basis."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "The previous fixture manager might keep reconnecting or repopulating actors against the same store, making tests unreliable. This concerned fixture isolation only.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutes continuing/repopulating actors after terminal withdrawal; it does not establish synchronous joining or correctness of every fixture assertion."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "replacement-launch-fixture-old-manager-repopulation",
+        "destination": null
+      }
+    },
+    {
+      "key": "g044/l8",
+      "owner": "g044",
+      "id": "l8",
+      "domain": "host-provisioning-lifecycle",
+      "purpose": "host-provisioning-lifecycle: crates/farhelm-helm/src/provisioning/e2e.rs, crates/farhelm-helm/src/provisioning/plan.rs, crates/farhelm-helm/src/provisioning/service.rs, crates/farhelm-helm/src/provisioning/session_launch_failure_tests.rs, crates/farhelm-helm/src/provisioning/snapshot_preparer.rs, crates/farhelm-helm/src/provisioning/tensorlake_add_tests.rs, crates/farhelm-helm/src/provisioning/tensorlake_backend.rs, crates/farhelm-helm/src/provisioning/tests/macos_real_tests.rs, crates/farhelm-helm/src/provisioning/macos.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 16,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l8",
+            "state": "open",
+            "summary": "Check whether the sealed-setup test can observe its claimed no-hold boundary",
+            "location": "crates/farhelm-helm/src/provisioning/tensorlake_add_tests.rs:2058",
+            "detail": "Reviewed commit: 222bf6253bcd168db04bcbb1df20180c88306998. TLDR suspected: the new sealed-setup regression test may pass even if setup takes a forbidden connection hold or leaves an admitted run behind. Source basis: setup_of_a_sealed_sandbox_is_refused_before_it_takes_the_host at 2033-2068 notes a seal, compares manager.state before/after start_add, and asserts backend events empty. Its docstring promises refusal before any hold/provider work and no retained run. Supplied neighbouring seal records say public manager snapshots overlay actor state with the seal, so this public-state equality might not observe an underlying hold. Missing premises: exact manager.state/hold implementation at this commit and whether any other assertion in this test or mandatory fixture detects a taken hold or retained provisioning run. Next checks: trace the state getter/hold and start_add admission/cleanup under the lock; compare the assigned patch, range base and endpoint. Suggested bucket: other if this is a distinct test-oracle gap. Could-be-highest: no; this concerns maintainer regression assurance, not an asserted product deletion defect. Confidence: unverified, investigation in progress. proposed_drop: false. possible_cover: none in supplied records for this specific test; seal runtime findings remain separately owned. No execution or reproduction."
+          }
+        },
+        {
+          "line": 17,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l8",
+            "state": "open",
+            "summary": "Sealed-setup regression test cannot observe its claimed no-hold boundary",
+            "location": "crates/farhelm-helm/src/provisioning/tensorlake_add_tests.rs:2058",
+            "detail": "Reviewed commit: 222bf6253bcd168db04bcbb1df20180c88306998. TLDR: the new regression test can pass even if refused setup takes a connection hold or leaves a provisioning run behind, although its name, docstring and assertion claim to protect those boundaries. This is a test-oracle defect, not an observed production failure. Details: setup_of_a_sealed_sandbox_is_refused_before_it_takes_the_host at tensorlake_add_tests.rs:2033-2068 records note_sealed, compares manager.state before/after start_add (2047-2048,2058-2061), and checks only that backend events are empty (2063-2067). manager.state at manager.rs:2237-2238 delegates to status, whose 2214-2224 replaces the actor's state with sealed_state for any recorded seal. sealed_state at 2669-2679 returns Deleting solely from the independent sealed map. Meanwhile hold_connection at 1655-1695 does not refuse a sealed host: it changes underlying actor state, removes its client, advances incarnation and sets status.hold at 1663-1672 without changing that map. Thus moving the refusal in tensorlake_add.rs:894-900 to after the hold at 905-913 would leave both compared public states equal, retain the same being-deleted error and execute no provisioning backend action; this test would not distinguish the forbidden hold from the intended ordering. Independently, start_add inserts memory.busy and memory.runs before this guard (866-874), then removes them in the refusal branch (895-897), but this test never reads either memory or service.view, despite explicitly promising 'leaves no run behind' at test line 2037. Omitting that cleanup is another concrete competing mechanism invisible to its assertions. Current production performs both the ordering and cleanup correctly; that does not refute the regression-test gap. Suggested fix: observe the actor hold boundary directly through a narrow fixture oracle (or a stable raw/connection incarnation observation with its premise established), and assert no retained run/busy entry after refusal. Keep the public deletion-state and backend-empty checks for their distinct guarantees. Contract: supplied Test authoring review requires an observable that distinguishes competing mechanisms and the premise before the action; root Docstrings on tests requires the declared what/why to match the actual test. Suggested bucket: other, maintainer regression assurance. Could-be-highest: no security or work-loss route is alleged; the finding is test evidence. Confidence: confirmed source-level indistinguishability, not executed mutation or reproduction. proposed_drop: false. possible_cover: none; supplied seal runtime records g027/l4 and g028/l3 concern other failure bookkeeping paths, not this assigned test. Attribution: the complete test is added by assigned 222bf625; full pinned path history has no later change to this test, and endpoint 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:2033-2068 retains it exactly. Original suspected test-state consequence is preserved and settled; no claim of a product failure, accepted drop or severity lowering. No runtime tests, reproductions or live-install actions. Remaining finishing premise: verify fixture/backend-event collection supplies no hidden actor-hold/run assertion; the visible test body has no such call."
+          }
+        },
+        {
+          "line": 19,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l8",
+            "state": "open",
+            "summary": "Sealed-setup regression test cannot observe its claimed no-hold boundary",
+            "location": "crates/farhelm-helm/src/provisioning/tensorlake_add_tests.rs:2058",
+            "detail": "Reviewed commit: 222bf6253bcd168db04bcbb1df20180c88306998. TLDR: the new regression test can pass even if refused setup takes a connection hold or leaves a provisioning run behind, although its name, docstring and assertion claim to protect those boundaries. This is a test-oracle defect, not an observed production failure. Details: setup_of_a_sealed_sandbox_is_refused_before_it_takes_the_host at tensorlake_add_tests.rs:2033-2068 records note_sealed, compares manager.state before/after start_add (2047-2048,2058-2061), and checks only that backend events are empty (2063-2067). manager.state at manager.rs:2237-2238 delegates to status, whose 2214-2224 replaces the actor's state with sealed_state for any recorded seal. sealed_state at 2669-2679 returns Deleting solely from the independent sealed map. Meanwhile hold_connection at 1655-1695 does not refuse a sealed host: it changes underlying actor state, removes its client, advances incarnation and sets status.hold at 1663-1672 without changing that map. Thus moving the refusal in tensorlake_add.rs:894-900 to after the hold at 905-913 would leave both compared public states equal, retain the same being-deleted error and execute no provisioning backend action; this test would not distinguish the forbidden hold from the intended ordering. Independently, start_add inserts memory.busy and memory.runs before this guard (866-874), then removes them in the refusal branch (895-897), but this test never reads either memory or service.view, despite explicitly promising 'leaves no run behind' at test line 2037. Omitting that cleanup is another concrete competing mechanism invisible to its assertions. Current production performs both the ordering and cleanup correctly; that does not refute the regression-test gap. Suggested fix: observe the actor hold boundary directly through a narrow fixture oracle (or a stable raw/connection incarnation observation with its premise established), and assert no retained run/busy entry after refusal. Keep the public deletion-state and backend-empty checks for their distinct guarantees. Contract: supplied Test authoring review requires an observable that distinguishes competing mechanisms and the premise before the action; root Docstrings on tests requires the declared what/why to match the actual test. Suggested bucket: other, maintainer regression assurance. Could-be-highest: no security or work-loss route is alleged; the finding is test evidence. Confidence: confirmed source-level indistinguishability, not executed mutation or reproduction. proposed_drop: false. possible_cover: none; supplied seal runtime records g027/l4 and g028/l3 concern other failure bookkeeping paths, not this assigned test. Attribution: the complete test is added by assigned 222bf625; full pinned path history has no later change to this test, and endpoint 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:2033-2068 retains it exactly. Original suspected test-state consequence is preserved and settled; no claim of a product failure, accepted drop or severity lowering. No runtime tests, reproductions or live-install actions. Finishing checks complete: backend_events at tensorlake_add_tests.rs:339-345 only reads and decodes backend/events.jsonl; it does not inspect actor holds, incarnation or provisioning memory. The fixture has no Drop assertion. The complete later diff for this test file through the pinned tip is empty. Other tests in this module explicitly inspect service.memory.busy or service.view, but the new sealed-setup test invokes neither and uses an independent fixture, so those assertions do not establish its no-run premise. No readily checkable premise remains unresolved for the stated test-oracle defect."
+          }
+        }
+      ],
+      "latest": {
+        "line": 19,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l8",
+          "state": "open",
+          "summary": "Sealed-setup regression test cannot observe its claimed no-hold boundary",
+          "location": "crates/farhelm-helm/src/provisioning/tensorlake_add_tests.rs:2058",
+          "detail": "Reviewed commit: 222bf6253bcd168db04bcbb1df20180c88306998. TLDR: the new regression test can pass even if refused setup takes a connection hold or leaves a provisioning run behind, although its name, docstring and assertion claim to protect those boundaries. This is a test-oracle defect, not an observed production failure. Details: setup_of_a_sealed_sandbox_is_refused_before_it_takes_the_host at tensorlake_add_tests.rs:2033-2068 records note_sealed, compares manager.state before/after start_add (2047-2048,2058-2061), and checks only that backend events are empty (2063-2067). manager.state at manager.rs:2237-2238 delegates to status, whose 2214-2224 replaces the actor's state with sealed_state for any recorded seal. sealed_state at 2669-2679 returns Deleting solely from the independent sealed map. Meanwhile hold_connection at 1655-1695 does not refuse a sealed host: it changes underlying actor state, removes its client, advances incarnation and sets status.hold at 1663-1672 without changing that map. Thus moving the refusal in tensorlake_add.rs:894-900 to after the hold at 905-913 would leave both compared public states equal, retain the same being-deleted error and execute no provisioning backend action; this test would not distinguish the forbidden hold from the intended ordering. Independently, start_add inserts memory.busy and memory.runs before this guard (866-874), then removes them in the refusal branch (895-897), but this test never reads either memory or service.view, despite explicitly promising 'leaves no run behind' at test line 2037. Omitting that cleanup is another concrete competing mechanism invisible to its assertions. Current production performs both the ordering and cleanup correctly; that does not refute the regression-test gap. Suggested fix: observe the actor hold boundary directly through a narrow fixture oracle (or a stable raw/connection incarnation observation with its premise established), and assert no retained run/busy entry after refusal. Keep the public deletion-state and backend-empty checks for their distinct guarantees. Contract: supplied Test authoring review requires an observable that distinguishes competing mechanisms and the premise before the action; root Docstrings on tests requires the declared what/why to match the actual test. Suggested bucket: other, maintainer regression assurance. Could-be-highest: no security or work-loss route is alleged; the finding is test evidence. Confidence: confirmed source-level indistinguishability, not executed mutation or reproduction. proposed_drop: false. possible_cover: none; supplied seal runtime records g027/l4 and g028/l3 concern other failure bookkeeping paths, not this assigned test. Attribution: the complete test is added by assigned 222bf625; full pinned path history has no later change to this test, and endpoint 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:2033-2068 retains it exactly. Original suspected test-state consequence is preserved and settled; no claim of a product failure, accepted drop or severity lowering. No runtime tests, reproductions or live-install actions. Finishing checks complete: backend_events at tensorlake_add_tests.rs:339-345 only reads and decodes backend/events.jsonl; it does not inspect actor holds, incarnation or provisioning memory. The fixture has no Drop assertion. The complete later diff for this test file through the pinned tip is empty. Other tests in this module explicitly inspect service.memory.busy or service.view, but the new sealed-setup test invokes neither and uses an independent fixture, so those assertions do not establish its no-run premise. No readily checkable premise remains unresolved for the stated test-oracle defect."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g044/findings.jsonl",
+        "id": "l8",
+        "line": 19,
+        "disposition": "verified",
+        "group": "sealed-setup-test-overlay-hides-hold-and-run-leak",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-028 after inspecting it. The test's public-state equality cannot detect the hold it claims to exclude, and it never checks that run/busy bookkeeping was removed. This is a test-oracle defect even though the implementation currently does both correctly. Retain a source-verified test finding. Add a direct hold/incarnation oracle and a no-run/no-busy assertion; preserve the existing checks for their separate guarantees. Checked source/results: [\"222bf6253bcd168db04bcbb1df20180c88306998:crates/farhelm-helm/src/provisioning/tensorlake_add_tests.rs:2033-2068 compares manager.state and checks only refusal wording/backend events. Its docstring promises refusal before a hold and no retained run.\",\"Same revision, manager.rs:2214-2238 overlays the public state with sealed_state; :2669-2679 derives Deleting from the separate seal map. hold_connection at :1655-1695 mutates raw state, client, incarnation and hold without changing that map. Moving the refusal after that hold would preserve both public-state values.\",\"tensorlake_add.rs:866-874 inserts busy/runs; :894-900 removes them for the sealed refusal. The test never observes either map or service.view. backend_events at test lines 339-345 only decodes the event file and supplies no hidden actor/memory oracle.\",\"git diff 222bf6253bcd168db04bcbb1df20180c88306998..00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db for this test file is empty. The complete test is in-range. No mutation test or reproduction performed.\"] Current coverage/results: [\"SPEC.md:1511-1533 establishes the seal and deletion/Retry behavior. SPEC_impl.md seal/setup/hold searches found no exception accepting an oracle that cannot observe its claimed boundary.\",\"TODO.md Planned and plans/queue/INDEX.md are empty. BUGS.md has no related test or seal issue.\",\"INDEX.md read in full; targeted queue and active TRIAGE_OUTCOMES.md searches for sealed setup, hold and this test found no exact coverage. Other lifecycle/runtime seal defects are distinct from the assigned test's missing observations. No FILTER.md boundary covers ordinary missing regression sensitivity.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The regression may pass if refused setup takes a connection hold or leaves an admitted run/busy entry. This remains maintainer regression assurance, not a claimed product deletion or user-work-loss defect.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g044/l8",
+        "line": 19,
+        "disposition": "verified",
+        "group": "sealed-setup-test-overlay-hides-hold-and-run-leak",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-028 after inspecting it. The test's public-state equality cannot detect the hold it claims to exclude, and it never checks that run/busy bookkeeping was removed. This is a test-oracle defect even though the implementation currently does both correctly. Retain a source-verified test finding. Add a direct hold/incarnation oracle and a no-run/no-busy assertion; preserve the existing checks for their separate guarantees. Checked source/results: [\"222bf6253bcd168db04bcbb1df20180c88306998:crates/farhelm-helm/src/provisioning/tensorlake_add_tests.rs:2033-2068 compares manager.state and checks only refusal wording/backend events. Its docstring promises refusal before a hold and no retained run.\",\"Same revision, manager.rs:2214-2238 overlays the public state with sealed_state; :2669-2679 derives Deleting from the separate seal map. hold_connection at :1655-1695 mutates raw state, client, incarnation and hold without changing that map. Moving the refusal after that hold would preserve both public-state values.\",\"tensorlake_add.rs:866-874 inserts busy/runs; :894-900 removes them for the sealed refusal. The test never observes either map or service.view. backend_events at test lines 339-345 only decodes the event file and supplies no hidden actor/memory oracle.\",\"git diff 222bf6253bcd168db04bcbb1df20180c88306998..00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db for this test file is empty. The complete test is in-range. No mutation test or reproduction performed.\"] Current coverage/results: [\"SPEC.md:1511-1533 establishes the seal and deletion/Retry behavior. SPEC_impl.md seal/setup/hold searches found no exception accepting an oracle that cannot observe its claimed boundary.\",\"TODO.md Planned and plans/queue/INDEX.md are empty. BUGS.md has no related test or seal issue.\",\"INDEX.md read in full; targeted queue and active TRIAGE_OUTCOMES.md searches for sealed setup, hold and this test found no exact coverage. Other lifecycle/runtime seal defects are distinct from the assigned test's missing observations. No FILTER.md boundary covers ordinary missing regression sensitivity.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The regression may pass if refused setup takes a connection hold or leaves an admitted run/busy entry. This remains maintainer regression assurance, not a claimed product deletion or user-work-loss defect.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-028",
+          "key": "g044/l8",
+          "latest_line": 19,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "sealed-setup-test-overlay-hides-hold-and-run-leak",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The test's public-state equality cannot detect the hold it claims to exclude, and it never checks that run/busy bookkeeping was removed. This is a test-oracle defect even though the implementation currently does both correctly.",
+          "checks": [
+            "222bf6253bcd168db04bcbb1df20180c88306998:crates/farhelm-helm/src/provisioning/tensorlake_add_tests.rs:2033-2068 compares manager.state and checks only refusal wording/backend events. Its docstring promises refusal before a hold and no retained run.",
+            "Same revision, manager.rs:2214-2238 overlays the public state with sealed_state; :2669-2679 derives Deleting from the separate seal map. hold_connection at :1655-1695 mutates raw state, client, incarnation and hold without changing that map. Moving the refusal after that hold would preserve both public-state values.",
+            "tensorlake_add.rs:866-874 inserts busy/runs; :894-900 removes them for the sealed refusal. The test never observes either map or service.view. backend_events at test lines 339-345 only decodes the event file and supplies no hidden actor/memory oracle.",
+            "git diff 222bf6253bcd168db04bcbb1df20180c88306998..00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db for this test file is empty. The complete test is in-range. No mutation test or reproduction performed."
+          ],
+          "coverage_checked": [
+            "SPEC.md:1511-1533 establishes the seal and deletion/Retry behavior. SPEC_impl.md seal/setup/hold searches found no exception accepting an oracle that cannot observe its claimed boundary.",
+            "TODO.md Planned and plans/queue/INDEX.md are empty. BUGS.md has no related test or seal issue.",
+            "INDEX.md read in full; targeted queue and active TRIAGE_OUTCOMES.md searches for sealed setup, hold and this test found no exact coverage. Other lifecycle/runtime seal defects are distinct from the assigned test's missing observations. No FILTER.md boundary covers ordinary missing regression sensitivity."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "The regression may pass if refused setup takes a connection hold or leaves an admitted run/busy entry. This remains maintainer regression assurance, not a claimed product deletion or user-work-loss defect.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain a source-verified test finding. Add a direct hold/incarnation oracle and a no-run/no-busy assertion; preserve the existing checks for their separate guarantees."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "sealed-setup-test-overlay-hides-hold-and-run-leak",
+        "destination": "trailing-sealed-setup-test-overlay-hides-hold-and-run-leak.md"
+      }
+    },
+    {
+      "key": "g044/c9",
+      "owner": "g044",
+      "id": "c9",
+      "domain": "host-provisioning-lifecycle",
+      "purpose": "host-provisioning-lifecycle: crates/farhelm-helm/src/provisioning/e2e.rs, crates/farhelm-helm/src/provisioning/plan.rs, crates/farhelm-helm/src/provisioning/service.rs, crates/farhelm-helm/src/provisioning/session_launch_failure_tests.rs, crates/farhelm-helm/src/provisioning/snapshot_preparer.rs, crates/farhelm-helm/src/provisioning/tensorlake_add_tests.rs, crates/farhelm-helm/src/provisioning/tensorlake_backend.rs, crates/farhelm-helm/src/provisioning/tests/macos_real_tests.rs, crates/farhelm-helm/src/provisioning/macos.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 18,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c9",
+            "state": "open",
+            "summary": "Spliced launch fixture keeps the manager peer alive after the operation reply task ends",
+            "location": "crates/farhelm-helm/src/provisioning/session_launch_failure_tests.rs:280",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR considered: Fixture::peer ends immediately after writing the initial create reply, so the launch result wait might rely on an already-dead supervisor peer or falsely manufacture connection loss. Source refutation of that transport-lifetime concern: session_launch_failure_tests.rs:325-368 explicitly gives the operation-specific task only the initial create exchange, while the harness owns other traffic. rest_harness.rs:588-604 ends the upstream relay when that peer finishes but deliberately keeps the manager-side connection open; the downstream path retains to_helm and answers lists at 625-644, and its writer task remains until the downstream/kill boundary at 652-657. Thus completion of the one-reply task does not itself end the modeled supervisor connection used by Fixture::finish. The fixture's phrase supervisor peer describes that composite mocked endpoint; the specific one-reply task is not promised to stay running after replying. This conclusion is about actual fixture ownership, not a general argument that working production code excuses test documentation or missing assertions. Suggested bucket: none for the refuted premature-peer-death concern. Could-be-highest: no; maintainer fixture only, no security/work-loss route. Confidence: confirmed source contract/implementation, no execution. proposed_drop: source refutation. possible_cover: none. No runtime observation or reproduction."
+          }
+        }
+      ],
+      "latest": {
+        "line": 18,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c9",
+          "state": "open",
+          "summary": "Spliced launch fixture keeps the manager peer alive after the operation reply task ends",
+          "location": "crates/farhelm-helm/src/provisioning/session_launch_failure_tests.rs:280",
+          "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR considered: Fixture::peer ends immediately after writing the initial create reply, so the launch result wait might rely on an already-dead supervisor peer or falsely manufacture connection loss. Source refutation of that transport-lifetime concern: session_launch_failure_tests.rs:325-368 explicitly gives the operation-specific task only the initial create exchange, while the harness owns other traffic. rest_harness.rs:588-604 ends the upstream relay when that peer finishes but deliberately keeps the manager-side connection open; the downstream path retains to_helm and answers lists at 625-644, and its writer task remains until the downstream/kill boundary at 652-657. Thus completion of the one-reply task does not itself end the modeled supervisor connection used by Fixture::finish. The fixture's phrase supervisor peer describes that composite mocked endpoint; the specific one-reply task is not promised to stay running after replying. This conclusion is about actual fixture ownership, not a general argument that working production code excuses test documentation or missing assertions. Suggested bucket: none for the refuted premature-peer-death concern. Could-be-highest: no; maintainer fixture only, no security/work-loss route. Confidence: confirmed source contract/implementation, no execution. proposed_drop: source refutation. possible_cover: none. No runtime observation or reproduction."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g044/findings.jsonl",
+        "id": "c9",
+        "line": 18,
+        "disposition": "excluded",
+        "group": "spliced-launch-peer-composite-transport-lifetime",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-028 after inspecting it. The one-reply peer task is only part of the mock supervisor. Ending it does not by itself close the manager-facing connection. Refute only the claim that ending the one-reply task itself ends this composite mocked connection. No general lifetime guarantee for arbitrary further forwarded traffic is implied. Checked source/results: [\"56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/provisioning/session_launch_failure_tests.rs:325-368 explicitly assigns exactly the initial CreateSession reply to this task; finish at :280-300 waits on the owned launch result.\",\"Same revision, rest_harness.rs:588-604 lets the peer-to-helm relay end while retaining the manager connection. The downstream owns a to_helm sender and handles forwarding setup and lists (:606-644); the writer is aborted at the downstream/kill boundary (:652-657). Peer-task completion is not that boundary. No execution performed.\"] Current coverage/results: [\"Both specifications searched for mock transport/peer lifetime; no accepted defective behavior is needed. The explicit fixture ownership contract and implementation settle the premise.\",\"TODO.md Planned and plans/queue/INDEX.md are empty, BUGS.md unrelated; full INDEX and targeted queue/active ledger searches found no exact premature-peer-death item. FILTER.md is not the basis.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The launch-result wait might depend on a dead supervisor peer and falsely manufacture connection loss after the initial reply task exits. This was a fixture concern only.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g044/c9",
+        "line": 18,
+        "disposition": "excluded",
+        "group": "spliced-launch-peer-composite-transport-lifetime",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-028 after inspecting it. The one-reply peer task is only part of the mock supervisor. Ending it does not by itself close the manager-facing connection. Refute only the claim that ending the one-reply task itself ends this composite mocked connection. No general lifetime guarantee for arbitrary further forwarded traffic is implied. Checked source/results: [\"56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/provisioning/session_launch_failure_tests.rs:325-368 explicitly assigns exactly the initial CreateSession reply to this task; finish at :280-300 waits on the owned launch result.\",\"Same revision, rest_harness.rs:588-604 lets the peer-to-helm relay end while retaining the manager connection. The downstream owns a to_helm sender and handles forwarding setup and lists (:606-644); the writer is aborted at the downstream/kill boundary (:652-657). Peer-task completion is not that boundary. No execution performed.\"] Current coverage/results: [\"Both specifications searched for mock transport/peer lifetime; no accepted defective behavior is needed. The explicit fixture ownership contract and implementation settle the premise.\",\"TODO.md Planned and plans/queue/INDEX.md are empty, BUGS.md unrelated; full INDEX and targeted queue/active ledger searches found no exact premature-peer-death item. FILTER.md is not the basis.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The launch-result wait might depend on a dead supervisor peer and falsely manufacture connection loss after the initial reply task exits. This was a fixture concern only.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-028",
+          "key": "g044/c9",
+          "latest_line": 18,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "spliced-launch-peer-composite-transport-lifetime",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The one-reply peer task is only part of the mock supervisor. Ending it does not by itself close the manager-facing connection.",
+          "checks": [
+            "56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/provisioning/session_launch_failure_tests.rs:325-368 explicitly assigns exactly the initial CreateSession reply to this task; finish at :280-300 waits on the owned launch result.",
+            "Same revision, rest_harness.rs:588-604 lets the peer-to-helm relay end while retaining the manager connection. The downstream owns a to_helm sender and handles forwarding setup and lists (:606-644); the writer is aborted at the downstream/kill boundary (:652-657). Peer-task completion is not that boundary. No execution performed."
+          ],
+          "coverage_checked": [
+            "Both specifications searched for mock transport/peer lifetime; no accepted defective behavior is needed. The explicit fixture ownership contract and implementation settle the premise.",
+            "TODO.md Planned and plans/queue/INDEX.md are empty, BUGS.md unrelated; full INDEX and targeted queue/active ledger searches found no exact premature-peer-death item. FILTER.md is not the basis."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "The launch-result wait might depend on a dead supervisor peer and falsely manufacture connection loss after the initial reply task exits. This was a fixture concern only.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Refute only the claim that ending the one-reply task itself ends this composite mocked connection. No general lifetime guarantee for arbitrary further forwarded traffic is implied."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "spliced-launch-peer-composite-transport-lifetime",
+        "destination": null
+      }
+    },
+    {
+      "key": "g044/l10",
+      "owner": "g044",
+      "id": "l10",
+      "domain": "host-provisioning-lifecycle",
+      "purpose": "host-provisioning-lifecycle: crates/farhelm-helm/src/provisioning/e2e.rs, crates/farhelm-helm/src/provisioning/plan.rs, crates/farhelm-helm/src/provisioning/service.rs, crates/farhelm-helm/src/provisioning/session_launch_failure_tests.rs, crates/farhelm-helm/src/provisioning/snapshot_preparer.rs, crates/farhelm-helm/src/provisioning/tensorlake_add_tests.rs, crates/farhelm-helm/src/provisioning/tensorlake_backend.rs, crates/farhelm-helm/src/provisioning/tests/macos_real_tests.rs, crates/farhelm-helm/src/provisioning/macos.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 20,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l10",
+            "state": "open",
+            "summary": "Check full-range attribution of the sensitive-read change-detection explanation",
+            "location": "crates/farhelm-helm/src/provisioning/tensorlake_backend.rs:131",
+            "detail": "Reviewed assigned commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR considered: the read helper says a file changed during its read is refused, although the shown checks compare only size before/after and the resulting byte count; same-size edits need not be detected. This could mislead maintenance of credential-settings reads, independently of the correctly redacted errors already recorded under c2. Source basis: tensorlake_backend.rs:131-133 makes the broad statement, while 146-185 uses wc, chunked dd and length equality without an identity/content epoch. Missing premise: whether that explanation or the relevant read semantics is introduced or newly invalidated inside the full pinned range, rather than an independent pre-range issue outside this assigned patch's scope. Next check: compare this function at exclusive base and path history, then read any relevant changed call contract. Suggested bucket: other if an in-range documentation defect is established. Could-be-highest: no established security/work-loss route; original considered harm is inaccurate read-consistency guidance, not credential disclosure. Confidence: unverified, attribution investigation in progress. proposed_drop: false. possible_cover: none. No runtime test or reproduction."
+          }
+        },
+        {
+          "line": 21,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l10",
+            "state": "open",
+            "summary": "Sensitive-read consistency explanation and same-size limitation predate the full pinned range",
+            "location": "crates/farhelm-helm/src/provisioning/tensorlake_backend.rs:131",
+            "detail": "Reviewed assigned commit: 56659839785691f76da3af5d8f51b511cff4ba8b. Original TLDR considered: the helper broadly says a file changed during its read is refused, while size-only before/after checks cannot detect every same-size edit; this may mislead maintenance of credential-settings reads. This concern is not source-refuted by production behavior. Full-range attribution instead excludes it from this assigned change review: exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a already has the exact explanation at tensorlake_backend.rs:128-130 and the same wc/chunked-dd/length-only checks at 143-182. The complete base-to-inclusive-tip diff for this file changes preparation script composition, the sensitive-error redaction mapping, and route spelling in tests; it changes neither that comment nor its read-consistency predicates. Full path history lists only 1038bb1f4549f6896fa6e064fecf540f4548b4da and 56659839785691f76da3af5d8f51b511cff4ba8b. Adding Podman reuse does not introduce the same-size limitation or make a formerly true universal consistency statement newly false; the pre-existing Tensorlake settings reader had it already. Proposed exclusion applies only to this independent pre-range explanation/limitation, not to any new caller policy or to whether the documentation is accurate in isolation. Suggested bucket: none within assigned review; underlying documentation concern would be other. Could-be-highest: no established security/work-loss route, and no credential disclosure is alleged. Confidence: confirmed base/current source attribution, not execution. proposed_drop: outside the assigned in-range change scope, based on exact exclusive-base and complete path-diff checks; not an accepted parent drop and not specification acceptance. possible_cover: none; no prohibited coverage source searched. No remaining attribution premise or open lead under this ID. No runtime tests or reproduction."
+          }
+        }
+      ],
+      "latest": {
+        "line": 21,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l10",
+          "state": "open",
+          "summary": "Sensitive-read consistency explanation and same-size limitation predate the full pinned range",
+          "location": "crates/farhelm-helm/src/provisioning/tensorlake_backend.rs:131",
+          "detail": "Reviewed assigned commit: 56659839785691f76da3af5d8f51b511cff4ba8b. Original TLDR considered: the helper broadly says a file changed during its read is refused, while size-only before/after checks cannot detect every same-size edit; this may mislead maintenance of credential-settings reads. This concern is not source-refuted by production behavior. Full-range attribution instead excludes it from this assigned change review: exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a already has the exact explanation at tensorlake_backend.rs:128-130 and the same wc/chunked-dd/length-only checks at 143-182. The complete base-to-inclusive-tip diff for this file changes preparation script composition, the sensitive-error redaction mapping, and route spelling in tests; it changes neither that comment nor its read-consistency predicates. Full path history lists only 1038bb1f4549f6896fa6e064fecf540f4548b4da and 56659839785691f76da3af5d8f51b511cff4ba8b. Adding Podman reuse does not introduce the same-size limitation or make a formerly true universal consistency statement newly false; the pre-existing Tensorlake settings reader had it already. Proposed exclusion applies only to this independent pre-range explanation/limitation, not to any new caller policy or to whether the documentation is accurate in isolation. Suggested bucket: none within assigned review; underlying documentation concern would be other. Could-be-highest: no established security/work-loss route, and no credential disclosure is alleged. Confidence: confirmed base/current source attribution, not execution. proposed_drop: outside the assigned in-range change scope, based on exact exclusive-base and complete path-diff checks; not an accepted parent drop and not specification acceptance. possible_cover: none; no prohibited coverage source searched. No remaining attribution premise or open lead under this ID. No runtime tests or reproduction."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g044/findings.jsonl",
+        "id": "l10",
+        "line": 21,
+        "disposition": "under-investigation",
+        "group": "g044-l10",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-028",
+          "key": "g044/l10",
+          "latest_line": 21,
+          "recommendation": "out-of-range",
+          "bucket": "other",
+          "underlying_key": "agent-file-size-only-read-consistency-docstring",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The inaccurate universal consistency wording and size-only checks are already present at the exclusive base. The range does not introduce or invalidate this explanation.",
+          "checks": [
+            "6e423e30068b62c6cfa276c6d720ee35bb70387a:crates/farhelm-helm/src/provisioning/tensorlake_backend.rs:128-182 already says a changed file is refused while comparing only sizes and accumulated length across chunked reads.",
+            "Complete git diff of that path from exclusive base to 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db changes preparation composition, read-error redaction and test route spelling; it does not change the explanation or consistency predicates. Path history confirms in-range modifications without attributing this limitation to them.",
+            "The same-size edit limitation is real as a conditional source observation. No affected file, mixed read or downstream settings loss was reproduced."
+          ],
+          "coverage_checked": [
+            "SPEC_impl.md Adding Tensorlake hosts describes bounded reads, merge and final replacement comparison; neither specification explicitly promises universal snapshot reads in this helper. These do not refute the comment defect.",
+            "settings-save-races-final-replacement.md read in full: it concerns a save after the final digest check, not this pre-existing read-consistency explanation. agent-settings-write-exceeds-next-read-limit.md also read in full: its output/input size mismatch is distinct. Active ledger's credential-save references concern the write window, not exact coverage here.",
+            "TODO.md Planned and plans/queue/INDEX.md empty; BUGS.md unrelated. Full INDEX and targeted queue/active ledger searches found no exact documentation item. No filter used."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No in-range introduction or newly changed consistency contract was found. A review of the old comment in isolation would be a different scope.",
+          "original_stronger_consequence": "The read helper's changed-file refusal claim can mislead maintainers because same-size edits need not be detected. No credential disclosure or user-work loss was originally established.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Exclude this independent pre-range documentation/consistency limitation only. Preserve it for the parent's drop register because it discusses reads used for credential settings; do not treat this consultation as independent authorization to drop any stronger settings-loss claim."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-028.json",
+          "key": "g044/l10",
+          "proposal": "claim-checks/claims-028/result.json",
+          "parent_proposal": "out-of-range-unchanged-size-only-read-consistency-comment",
+          "final_independent_gate": "required-by-conservative-credential-read-flag",
+          "reason": "Parent read full028 exclusivebasehasexactuniversalchangedfilerefusalwordingandonlysize/lengthconsistencychecks, wholerangepathdiffdoesnotchangeclaim/checks. Realconditionalsame-sizeeditlimitationnotrefutedbysecuritymergespecorindependentsettings-save/finaldigestqueue. No newinrangecontract/domainestablished; sourceagefornamedunchangedreadcommentonly, notallchangedredaction/preparation. Preservecredentialsettingscontext/possiblebroaderlossforfreshgate, noaffectedfile/mixedread/runtimeclaim."
+        }
+      ],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "agent-file-size-only-read-consistency-docstring",
+        "destination": "trailing-agent-file-size-only-read-consistency-docstring.md"
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete: all 12 assigned patches read at their recorded revisions.\n\nNo reportable findings established. Five ruled-out candidates recorded; no unresolved leads. Findings log and progress file are updated. No tests or reproductions run; no checkout files changed."
+    },
+    {
+      "turn": 2,
+      "reply": "Synthesis complete. Revised `l1`, `c3`, and `c2` in log events 8–11.\n\n- `l1`: limited the refutation to moved SSH access validation; checked the distinct outer-lock ownership.\n- `c3`: recorded evidence for g045/l2 that publication checks state-tree absence, not `lib/tmux` absence.\n- `c2`: traced retained diagnostics to fixed wording and the bounded route destination.\n\nNo new findings. Unresolved local lead IDs: none. No reproductions run."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 complete. New finding: **yes**.\n\n- **Verified `l6` (other):** stopped-container attachment publishes ticket zero, so the freshness gate excludes its specific Resume diagnosis and the run reports a timeout.\n- Checked caller locks, automatic-start interaction, range attribution, endpoint persistence, and remaining fixture/key/proxy interfaces.\n- New candidate `c7`: previous-manager continuation refuted.\n- New unverified findings: none. Open leads: none.\n\nLog updated through event 15. Source analysis only; no runtime actions."
+    },
+    {
+      "turn": 4,
+      "reply": "Discovery pass 2 complete. Anything new found: **yes**.\n\n- **New verified `l8` (other):** sealed-setup test cannot observe a forbidden actor hold and omits its promised no-run assertion.\n- Checked seal projection, hold mutation, fixture helpers, endpoint persistence, preparer failure tests, and peer lifetime.\n- New candidate `c9`: premature peer-death concern refuted.\n- New unverified IDs: none. Open leads: none.\n\nLog updated through event 19. Source analysis only."
+    },
+    {
+      "turn": 5,
+      "reply": "Discovery pass 3 complete. **No additional in-range finding established.**\n\nChecked preparation-script equivalence, fault configuration, sensitive-read exits, Mac replay assertions, and full-range attribution.\n\n- New verified IDs: none.\n- New unverified IDs: none.\n- Open leads: none.\n- `l10` resolved to a candidate: the concern predates the full pinned range.\n\nProgress and log updated through event 21. No runtime actions."
+    }
+  ],
+  "progress": "# g044 host-provisioning-lifecycle\n\nInitial review turn 1 completed. Discovery-pass count: 0 (no later synthesis/discovery turn performed). Read the full brief and inventory commits field only. All 12 assigned patch files, 1,506 lines, were read through the evidence launcher at their recorded revisions. Nothing assigned remains unread. Early evidence outputs were wrapped in the shell result object; every mandatory packet was subsequently reread with stdout delivered directly, one packet per call, for the parent audit.\n\nDurable records: no reportable findings; five candidates (l1, c2, c3, l4, c5); no open leads. l1 and l4 were first recorded as leads and then revised under the same IDs after source checks. New verified/unverified finding IDs this pass: none. Candidates retain the original consequence, source refutation or exact specification acceptance, bucket and highest-impact assessment, confidence, proposed_drop and possible_cover. The evidence recorder rejected state=closed on the first l1 revision; tooling.md clarified the permitted open/withdrawn states, and the candidate revision was successfully appended with state=open. No record was truncated.\n\nInterface conclusions: Tensorlake's new adapter keeps the old selected-access equality guard before preparing, with the same one-shot backend shared by adapter and installer. Podman's shared installer receives provider-observed route/home; production credential delivery and connection machinery share one place cache. The suspended/stopped gate consumes the validated registration row before probing. The accepted shared launch task clears busy/progress ownership before sending its oneshot result; failed cleanup retains the resource. Sealed Tensorlake setup rechecks under the provisioning lock before taking a connection hold. The later terminal API is grid-only, and Mac survival tests retain original process identities, shell nonce and fresh post-replay command oracles. Removing the supervisor unit's tmux pin matches the replacement runtime contract; Linux payload checks remain deliberate at that revision.\n\nMandatory evidence ranges (prep/parts/): 00193-000.patch 1-21; 00194-000.patch 1-13; 00195-000.patch 1-180 and 181-222; 00196-000.patch 1-200, 201-400, 401-600 and 601-773; 00197-000.patch 1-77; 00199-000.patch 1-119; 00200-000.patch 1-94; 00697-000.patch 1-48; 01035-000.patch 1-36; 01232-000.patch 1-78; 01271-000.patch 1-12; 01276-000.patch 1-13.\n\nContracts read at 56659839785691f76da3af5d8f51b511cff4ba8b: SPEC.md Sandbox sessions 1431-1528 (delivered 1431-1600), Container sessions 4737-4818; SPEC_impl.md Disposable environments and its subsections 6408-6600 (delivered 6408-6620), Tensorlake prepared snapshots and sandbox sessions/hosts 6912-7140, Provisioning 8084-8468. At 222bf6253bcd168db04bcbb1df20180c88306998 read the complete Environment Delete and the seal subsection 6597-6650 and following lifecycle/agent boundary through 6676. At 17a3fe858c5511a24b7403af15dd41c93bf69fd7 read Terminal substrate: private tmux server 2784-2876. Additional targeted searches located contracts and source callers; no prohibited coverage source was opened.\n\nContext source checked at recorded revisions: provisioning/service.rs 360-520, 2435-2530, 2975-3050; snapshot_preparer.rs 1-140; tensorlake_backend.rs 1-220; backend.rs 250-345; tensorlake/prepared.rs 1-100; tensorlake/ssh.rs 1-235; tensorlake/mod.rs 150-203, 350-390; tensorlake/build_script.rs 64-105; lib.rs 2355-2515 and parent assembly search; environment/mod.rs 1-200; environment/podman/failure_tests.rs 1-180; provisioning/e2e.rs 355-435; provisioning/tensorlake_add.rs 325-595, 975-1063. At 222bf6253bcd168db04bcbb1df20180c88306998: provisioning/tensorlake_add.rs 835-975. At f560058da19e02716e6f943883a9508b447aff4e: macos_real_tests.rs 295-575 (clipped 460-503 was reread), client.rs 3930-4100. At 17a3fe858c5511a24b7403af15dd41c93bf69fd7: units.rs 53-159. At 500548b9253b07a26fd03119679184b69544e31d: macos.rs 390-452. One client/mod.rs probe failed because this revision uses client.rs; corrected by inspecting the actual file.\n\nNo runtime tests, builds or reproductions were run; conclusions are source/contract analysis. No checkout files changed. Only private g044 artifacts were written. No helper agents spawned. Next action: return to parent for the separately prompted synthesis turn and its coverage audit.\n\nFinal context completion: also read provisioning/tensorlake_add.rs:595-626 at 56659839785691f76da3af5d8f51b511cff4ba8b; completed that revision's Provisioning contract through 8470; read f560058da19e02716e6f943883a9508b447aff4e SPEC_impl.md Grid streams in full (3009-3109, delivered 2990-3249). These checks changed no records. Recorder count confirms active=0, candidates=5, leads=0.\n\n## Synthesis turn 2 in progress\n\nDelivery audit accepted all 1,506 mandatory lines. No rereads needed for delivery. Parent supplied g045/l1 (outer source-lock lifetime) and g045/l2 (inherited private-tmux removal skip); inspected their named events only. Revised l1 to limit its refutation to the moved SSH-access check, preserving its original possible security harm and identifying the filesystem and outer-lock premises as separate. No proposed drop has been accepted by the parent. Next: inspect skip/publication guards and exact ordinary-Add guard ownership, then send new evidence to g045. Discovery-pass count remains 0. No open local lead.\n\nSynthesis turn 2 complete. Discovery-pass count: 0. Revised original IDs l1, c3 and c2 (four events, because l1 was first narrowed and then given the checked caller lifetime). No new local finding IDs, no verified/unverified findings, no unresolved local leads. No proposed drop is treated as accepted. All mandatory scope remains covered; no assigned unread material.\n\nNew evidence routed for g045 through the durable original-ID records: c3 records that the publication guard receives target/unit/state and its actual cleanup script's final absence predicates cover only the state tree, not lib/tmux. At 500548b9253b07a26fd03119679184b69544e31d backend.rs:2401-2415 confirms copied-state and finish-snapshot operations forward directly to those checked implementations; there is no intervening filesystem absence predicate. This corroborates g045/l2 without restating it as a local finding. l1 records the distinction between ordinary Add's outer guard, passed as None to create_recorded, and the session-provider guard moved through PreparedSandbox into create_recorded; only the latter's actual guard drops at Running. Readiness timeout checks do not determine outer guard ownership. This corroborates g045/l1 and does not attach that defect to the extracted installer or access adapter.\n\nOther synthesized premise: c2 now traces the safe transport diagnostic to a fixed locally constructed message plus the bounded route destination, proving its retained context contains no peer stderr/file capture. Existing l4 and c5 needed no revision after the initial source checks; no new premise was identified for them in this pass.\n\nAdditional source read this turn: at 500548b9253b07a26fd03119679184b69544e31d snapshot_preparer.rs:43-142, plan.rs:221-275, tensorlake_backend.rs:185-340, installation.rs:115-165 and backend.rs:2380-2422; at 56659839785691f76da3af5d8f51b511cff4ba8b installation.rs:1-260, tensorlake_add.rs:1300-1415 and 1570-1650, tensorlake/hosts.rs:180-350 and 400-510, provisioning/backend.rs:914-955, transport.rs:420-470. No runtime execution or reproductions. Next action: return this turn's delta and the cross-group evidence to the parent.\n\n## Discovery turn 3 in progress\n\nSeparate discovery pass 1. Read discovery-neighbours.json completely in bounded chunks (1-40, 41-90, 91-140, 141-190, 191-230, 231-272), including a reread of the initially oversized/clipped 1-160 output. These records are novelty context only. No pending named questions. Known neighbouring routes stay attributed to their owners; no new disposition of local proposed drops. Search focus: new test oracles and fixture lifecycle, E2E proxy-fault distinction, shared install-facts/home boundaries, and provisioning state-gate callers at their assigned revisions. No runtime work.\n\nDiscovery turn 3 completed. Discovery-pass count: 1. Anything new found: yes. New source-verified finding ID: l6, Stopped attachment diagnosis excluded by refusal freshness gate (other). New unverified-after-investigation finding IDs: none. New candidate c7 records source refutation of the continuing/repopulating previous-manager fixture mechanism. l6 was recorded immediately as a lead, promoted after resolving the publication predicate, and revised with lock interaction and endpoint evidence. Remaining lead IDs: none. Local finding log ends at event 15. Existing candidates/proposed drops are unchanged; no parent drop or lowering accepted. No assigned source is unread.\n\nUseful checks/results this pass: reviewed all neighbour input before searching for novelty; examined named fixture run gates and fake command ownership, spliced-peer setup and post-replay Mac context already in history, previous-manager terminal shutdown, E2E action labels/default schema, supplied/observed login home before common installer publication, missing/unreadable Tensorlake key test premises, Update plan/preflight/lock/action ordering, attach retry tickets, and actor provider-state publication. The new branch added by 566 emits a specific Stopped diagnosis only behind refusal_attempt > ticket; actor Stopped publications deterministically write zero. The current run holds the provisioning lock, so actor automatic start may refuse busy rather than repair an externally stopped container before attach timeout. Endpoint retains both sides. Checked remaining test/key/proxy/helper interfaces after recording l6; no second finding established. No runtime tests, builds, reproductions or live-install actions. No checkout changes.\n\nSource checks at 56659839785691f76da3af5d8f51b511cff4ba8b: service.rs:205-330,1305-1385,1960-2220,2860-2950; tensorlake_add_tests.rs:1-180,471-541; rest_harness.rs:315-350,385-475,960-1040; environment/podman/failure_tests.rs:238-317,430-530; environment/podman/build.rs:57-122,311-371; provisioning/e2e.rs:205-249; manager.rs:2850-2935,3070-3155,3765-3925,3965-4010,5040-5240; environment/lifecycle.rs:1-145; environment/podman.rs:630-677; provisioning/plan.rs:882-934; snapshot_preparer.rs:135-208; SPEC.md:4770-4792. At 500548b9253b07a26fd03119679184b69544e31d: provisioning/e2e.rs:46-99. Endpoint 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db: targeted Stopped/publication references in manager/service, service.rs:2900-2927. Full pinned path history for assigned fixture/preparer/E2E paths and service diff searched to attribute l6 to 566 and check later changes; no prohibited coverage source was read. Next: return discovery delta; a later pass remains separately prompted because this pass made a substantive discovery.\n\n## Discovery turn 4 in progress\n\nSeparate discovery pass 2. Read updated discovery-neighbours.json completely in bounded chunks 1-40,41-80,81-120,121-160,161-200,201-240,241-280,281-320,321-360,361-400,401-439. This is context/novelty input only. No named pending cross-group questions. Existing local record IDs and original harms/dispositions are retained. Search focus for this pass: new test fixture lifetime/oracle explanations and the common preparer's final-failure boundary, without repeating known progress, inherited-tmux, lock-lifetime or stopped-attach issues.\n\nDiscovery turn 4 completed. Discovery-pass count: 2. Anything new found: yes. New source-verified finding ID: l8, sealed-setup test cannot observe its promised no-hold boundary and omits promised no-run cleanup assertion (other/test assurance). New unverified-after-investigation IDs: none. New candidate c9 refutes premature manager-peer death when the one-reply task ends, using the actual spliced harness ownership. Remaining lead IDs: none. No earlier finding/candidate harm or proposed-drop basis was erased; no parent drop/lowering accepted. Assigned mandatory coverage remains complete.\n\nUseful checks/results: the new sealed-setup test's before/after manager.state is unconditionally masked by the seal map, while hold_connection can still take an underlying hold and change incarnation without touching that seal. Backend event collection only reads its JSONL file and cannot observe either holds or retained provisioning memory. The refusal inserts busy/run before checking the seal, so removing its cleanup is likewise invisible to this test. Current production ordering/cleanup is correct; this is a separately established regression-oracle defect, not a runtime report. Full test-file diff after 222bf625 through the endpoint is empty. Also inspected final-preparer failure tests, single-reply peer/relay lifetime, accepted-launch failure result timing, and retained common-install revalidation context after finding l8. No second finding established and no reproduction performed.\n\nContext source read this pass: at 56659839785691f76da3af5d8f51b511cff4ba8b rest_harness.rs:561-720; snapshot_preparer.rs:192-397 (file ends 272); session_launch_failure_tests.rs:279-386,591-641; service.rs:2230-2268. At 222bf6253bcd168db04bcbb1df20180c88306998 tensorlake_add_tests.rs:180-214,213-235,257-315,332-353,2010-2083, complete test-body read plus local assertion/Drop searches; tensorlake_add.rs:865-928; manager.rs:1638-1735,2170-2258,2653-2694; source accessor searches. Endpoint tensorlake_add_tests.rs:2030-2069 and complete 222-to-end path diff. Full pinned test-path log read for attribution. No source execution, runtime tests, build, live-install action or prohibited coverage search. Only private g044 artifacts changed. Next: return this pass's delta; later discovery remains separately prompted because this pass found a substantive new issue.\n\n## Discovery turn 5 in progress\n\nSeparate discovery pass 3. Read updated discovery-neighbours.json in full, bounded chunks 1-40,41-80,81-120,121-160,161-200,201-240,241-280,281-320,321-360,361-400,401-448. No named pending interface questions. Prior local history remains intact; no parent drops/lowerings accepted. Search focus: preparation script extraction/equivalence, default/fault configuration changes in new launch tests, credential/read failure exits, and later Mac test/API adaptation beyond the previously settled terminal-kind and peer-lifetime candidates. No runtime work.\n\nDiscovery turn 5 completed. Discovery-pass count: 3. Anything new found: no additional in-range finding. New verified finding IDs: none. New unverified-after-investigation IDs: none. New candidate l10 records an investigated read-consistency explanation concern whose exact comment and size-only predicate predate the exclusive range base; it is scope-excluded, not declared correct or accepted by the parent. Remaining lead IDs: none. Existing l6/l8 findings and every candidate/proposed-drop basis remain intact. No parent drop/lowering accepted. Assigned mandatory scope remains fully read.\n\nUseful checks/results: compared the preparation-script extraction with its original inline waiter and shared waiter; UID derivation, running/degraded readiness, HOME result, pacing and refusal statuses retain their old logic. Checked E2E target-key selection and per-target fault mapping; the later fixture's removed needs_tmux key matches the strict final E2eBehavior schema rather than silently changing a supported fault field. Rechecked the changed small-file error exits separately from size/data validation and performed a complete exclusive-base-to-tip file diff for the only new concrete lead. The same-size consistency limitation and its explanation are already present at the range base; in-range changes only alter redaction, preparation composition and test route spelling. Revisited the Mac API adaptation's replay-complete/fresh transformed-token witness and the tests' composite-peer lifetime from existing history; no new oracle or changed-path failure established. No speculation retained as an uninvestigated uncertainty.\n\nSource read this turn: full 566 parent-to-commit diff for provisioning/tensorlake_backend.rs and snapshot_preparer.rs; 566 provisioning/e2e.rs:140-205, tensorlake_backend.rs:127-186, tensorlake/build_script.rs:74-94; 500548b9253b07a26fd03119679184b69544e31d session_launch_failure_tests.rs:24-41 and e2e.rs:53-91; f560058da19e02716e6f943883a9508b447aff4e macos_real_tests.rs:340-410. For l10, exclusive base tensorlake_backend.rs:127-190, complete pinned path log, and complete base-to-inclusive-tip diff. All source reads bounded and fully delivered. No tests, builds, reproductions, live-install action or prohibited coverage search; only private g044 artifacts changed. Next: return the empty discovery result and candidate delta to parent.\n"
+}

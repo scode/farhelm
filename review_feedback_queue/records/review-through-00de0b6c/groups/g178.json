@@ -1,0 +1,631 @@
+{
+  "group": {
+    "id": "g178",
+    "domain": "browser-terminal-regressions",
+    "purpose": "browser-terminal-regressions: e2e/tests/terminal-unicode.spec.ts, e2e/tests/terminal.spec.ts, e2e/tests/terminal-restart.spec.ts, e2e/grid-client/grid-fit.spec.ts, e2e/tests/grid-flood.spec.ts, e2e/tests/grid-terminal.spec.ts, e2e/tests/mouse-modes.spec.ts, e2e/tests/terminal-create-idempotency.spec.ts; phases complete small per-commit changes",
+    "interfaces": [
+      "g005",
+      "g006",
+      "g007",
+      "g009",
+      "g010",
+      "g011",
+      "g079",
+      "g080",
+      "g081",
+      "g082",
+      "g083",
+      "g084",
+      "g091",
+      "g092",
+      "g174",
+      "g177",
+      "g179",
+      "g181",
+      "g182"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00839-000.patch",
+        "ranges": [
+          [
+            1,
+            150
+          ]
+        ],
+        "original_path": "e2e/tests/terminal-unicode.spec.ts",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,7417)",
+        "lines": 150,
+        "bytes": 7449,
+        "start": 0,
+        "end": 7417,
+        "original": "[private-run]/prep/originals/00839.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00840-000.patch",
+        "ranges": [
+          [
+            1,
+            441
+          ]
+        ],
+        "original_path": "e2e/tests/terminal.spec.ts",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,22782)",
+        "lines": 441,
+        "bytes": 22834,
+        "start": 0,
+        "end": 22782,
+        "original": "[private-run]/prep/originals/00840.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00886-000.patch",
+        "ranges": [
+          [
+            1,
+            30
+          ]
+        ],
+        "original_path": "e2e/tests/terminal-restart.spec.ts",
+        "commit": "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4",
+        "notes": "patch header; patch character offsets [0,1917)",
+        "lines": 30,
+        "bytes": 1919,
+        "start": 0,
+        "end": 1917,
+        "original": "[private-run]/prep/originals/00886.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01141-000.patch",
+        "ranges": [
+          [
+            1,
+            299
+          ]
+        ],
+        "original_path": "e2e/grid-client/grid-fit.spec.ts",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,14556)",
+        "lines": 299,
+        "bytes": 14556,
+        "start": 0,
+        "end": 14556,
+        "original": "[private-run]/prep/originals/01141.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01145-000.patch",
+        "ranges": [
+          [
+            1,
+            22
+          ]
+        ],
+        "original_path": "e2e/tests/grid-flood.spec.ts",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,1150)",
+        "lines": 22,
+        "bytes": 1150,
+        "start": 0,
+        "end": 1150,
+        "original": "[private-run]/prep/originals/01145.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01146-000.patch",
+        "ranges": [
+          [
+            1,
+            113
+          ]
+        ],
+        "original_path": "e2e/tests/grid-terminal.spec.ts",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,5595)",
+        "lines": 113,
+        "bytes": 5595,
+        "start": 0,
+        "end": 5595,
+        "original": "[private-run]/prep/originals/01146.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01157-000.patch",
+        "ranges": [
+          [
+            1,
+            195
+          ]
+        ],
+        "original_path": "e2e/tests/mouse-modes.spec.ts",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,11143)",
+        "lines": 195,
+        "bytes": 11177,
+        "start": 0,
+        "end": 11143,
+        "original": "[private-run]/prep/originals/01157.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01168-000.patch",
+        "ranges": [
+          [
+            1,
+            12
+          ]
+        ],
+        "original_path": "e2e/tests/terminal-create-idempotency.spec.ts",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,629)",
+        "lines": 12,
+        "bytes": 629,
+        "start": 0,
+        "end": 629,
+        "original": "[private-run]/prep/originals/01168.patch"
+      }
+    ],
+    "lines": 1262,
+    "bytes": 65309
+  },
+  "records": [
+    {
+      "key": "g178/g178-l1",
+      "owner": "g178",
+      "id": "g178-l1",
+      "domain": "browser-terminal-regressions",
+      "purpose": "browser-terminal-regressions: e2e/tests/terminal-unicode.spec.ts, e2e/tests/terminal.spec.ts, e2e/tests/terminal-restart.spec.ts, e2e/grid-client/grid-fit.spec.ts, e2e/tests/grid-flood.spec.ts, e2e/tests/grid-terminal.spec.ts, e2e/tests/mouse-modes.spec.ts, e2e/tests/terminal-create-idempotency.spec.ts; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "g178-l1",
+            "state": "open",
+            "summary": "Check removed xterm regressions against surviving terminal contracts",
+            "location": "e2e/tests/terminal.spec.ts:946; e2e/tests/terminal-unicode.spec.ts:104",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: Removing the old renderer's query, selection and emoji tests may leave promised behavior without relevant checks while adopted old terminals still run. Details: assigned patches remove three direct-write Unicode tests and the DECRPM, DECRQSS and input-selection regressions. SPEC.md Terminal experience still permits adopted old terminals at this revision; SPEC_impl.md The grid client (1948 onward) distinguishes browser-side xterm parsing from supervisor-side interpretation for grid terminals. Existing grid test names and surviving Unicode replay cases suggest replacement coverage, but their assertions and query ownership still need inspection. Suggested bucket: other (test coverage only; no established product malfunction). Could-be-highest: no established security or loss-of-work route from these deletions; reassess if a concrete product defect emerges. Confidence: unresolved lead, not a finding. proposed_drop: false pending source checks. possible_cover: none; prohibited coverage sources not read. Next checks: inspect surviving grid geometry/selection assertions and emulator query ownership, and determine whether legacy-only assertions retain an executable fixture. No execution or reproduction performed."
+          }
+        },
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "g178-l1",
+            "state": "open",
+            "summary": "Removed xterm assertions do not establish a terminal regression",
+            "location": "e2e/tests/terminal.spec.ts:946; e2e/tests/terminal-unicode.spec.ts:104",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: The removed tests reduce coverage of the old terminal renderer while old terminals can still be adopted at this intermediate revision, but no source-supported product malfunction follows from the deletions. Details: all removed cases use OLD_TERMINAL_TAG and call xterm-specific parsing or selection APIs. The replacement grid does not parse program escape sequences: SPEC_impl.md, The grid client, 1950-1954 says the browser receives rows of styled runs and draws them; The supervisor's terminal emulator, 2842-2860 assigns interpretation and query answers to the supervisor. Existing e2e/grid-client/grid-terminal.spec.ts:199-243 verifies two-cell geometry and following-run placement; :245-371 verifies column ownership against font shaping; :1046-1079 uses real drags and separate typing/paste legs, asserts the selection premise, empty document selection, and sent key/paste messages. The surviving real-program Unicode tests, e2e/tests/terminal-unicode.spec.ts:109-140 and :151-192, verify narrow text presentation and replayed VS16/cursor alignment on grid terminals. No duplicate browser query responder exists in that replacement architecture. This is not a claim that legacy terminals retained runtime coverage: the commit explicitly removes their runnable fixture, and old terminals still supported here lose those checks until retired. Suggested bucket: other, test coverage only; no concrete user-impact route established. Could-be-highest: no; none of the removed assertions or inspected replacement contracts establishes security or loss-of-work harm. Confidence: confirmed source analysis of coverage and ownership; no runtime observation. proposed_drop: no actionable defect demonstrated by removing renderer-specific tests; source refutation is the split of query ownership and the surviving independent grid assertions above. possible_cover: none; coverage sources not searched. Lead settled by inspecting surviving assertions and the complete emulator/grid contract sections; no missing premise retained."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "g178-l1",
+            "state": "open",
+            "summary": "Reassess intermediate old-renderer regression coverage separately from later retirement",
+            "location": "e2e/tests/terminal.spec.ts:946; e2e/tests/terminal-unicode.spec.ts:104",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: The first-pass proposed drop did not refute the original concern: useful query, selection and emoji regressions were removed while adopted old terminals remained supported. Details: preserve the original consequence, lost old-renderer regression coverage at this intermediate revision. The prior candidate said 'no actionable defect demonstrated by removing renderer-specific tests; source refutation is the split of query ownership and the surviving independent grid assertions above.' That basis is insufficient: grid-specific assertions cannot test the old renderer, and absence of an observed new product malfunction does not make a removed regression test useless. The proposed drop remains in append-only history and is not accepted. Suggested bucket: other, test coverage. Could-be-highest: no established security/loss-of-work route; no product malfunction claimed. Confidence: lead pending source checks of the still-supported old path and its later complete retirement. proposed_drop: false while reassessing; preserve possible later retirement as a separate disposition premise rather than a refutation of the intermediate coverage loss. possible_cover: none, no queue search. Next checks: inspect the old parsing/selection code and stream-selection callers at 647f0227, compare later retirement at f560058d and pinned tip, and retain grid-only observables separately. Source-only, no execution."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "g178-l1",
+            "state": "open",
+            "summary": "Old-renderer regressions lose coverage before the supported renderer is retired",
+            "location": "e2e/tests/terminal.spec.ts:946; e2e/tests/terminal-unicode.spec.ts:104",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: At this intermediate revision, existing sessions still use the old terminal renderer, but its query-reply, selection-dismissal and emoji regression checks are deleted. The later removal of the renderer ends the current need for those tests; it does not show the intermediate loss was harmless or that grid tests covered the old code. Details: SPEC.md:3016-3034 still promises that existing old terminals remain until the user moves them. The implementation still constructs xterm at crates/farhelm-ui/assets/terminal.js:3900, suppresses duplicate DECRQM replies at :4120-4128 and DECRQSS at :4144-4147, and clears both old-renderer/native selections through :4250-4295. These are precisely the safeguards exercised by the deleted terminal.spec.ts tests. The removed Unicode tests at parent revision e2e/tests/terminal-unicode.spec.ts:123-215 separately inspect wide/continuation cells, cursor-addressed redraws and the adjacent colored cell geometry in xterm's model/DOM. The same commit deletes e2e/suite-terminals.ts and removes the legacy test-run selection from playwright.config.ts; its deleted suite instructions explicitly said old terminals remain for sessions made by earlier versions and kept implementation-specific tests in their own run. Thus removal of the fixture and tests precedes removal of supported production paths. The independent grid geometry/selection tests at e2e/grid-client/grid-terminal.spec.ts:199-371 and :1046-1079, plus real-program grid Unicode replay at terminal-unicode.spec.ts:109-192, remain useful grid-specific observables; they neither call nor refute regressions in the retained xterm handlers. Cross-batch scope: f560058da19e02716e6f943883a9508b447aff4e later removes the old renderer/protocol branch, is an ancestor of pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, and its SPEC_impl.md:1842-1843 says every terminal mounts the grid. Pinned-tip source has no new Terminal, swallowDecrqm or registerDcsHandler in terminal.js and no vendor asset subtree; dismissSelectionSoon still appears as a generic attachment callback parameter, not the old implementation. Therefore this is a confirmed historical coverage gap, not a claim the pinned tip should restore xterm or has a current old-renderer bug. Suggested bucket: other, lost regression coverage in maintainer tooling; no new product malfunction or security/loss-of-work route established. Could-be-highest: no established route. Confidence: confirmed source/patch/contract analysis; no execution observation. proposed_drop: false. Preserve prior proposed drop verbatim in history: 'no actionable defect demonstrated by removing renderer-specific tests; source refutation is the split of query ownership and the surviving independent grid assertions above.' Synthesis rejects that rationale: absence of a new malfunction does not refute useful deleted regression tests, and grid ownership is not old-renderer coverage. Later complete retirement is a separate possible disposition reason for the parent, not an accepted drop; parent has accepted none. possible_cover: none; no queue or excluded-coverage search. No readily checkable premise remains open for this record."
+          }
+        }
+      ],
+      "latest": {
+        "line": 8,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "g178-l1",
+          "state": "open",
+          "summary": "Old-renderer regressions lose coverage before the supported renderer is retired",
+          "location": "e2e/tests/terminal.spec.ts:946; e2e/tests/terminal-unicode.spec.ts:104",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: At this intermediate revision, existing sessions still use the old terminal renderer, but its query-reply, selection-dismissal and emoji regression checks are deleted. The later removal of the renderer ends the current need for those tests; it does not show the intermediate loss was harmless or that grid tests covered the old code. Details: SPEC.md:3016-3034 still promises that existing old terminals remain until the user moves them. The implementation still constructs xterm at crates/farhelm-ui/assets/terminal.js:3900, suppresses duplicate DECRQM replies at :4120-4128 and DECRQSS at :4144-4147, and clears both old-renderer/native selections through :4250-4295. These are precisely the safeguards exercised by the deleted terminal.spec.ts tests. The removed Unicode tests at parent revision e2e/tests/terminal-unicode.spec.ts:123-215 separately inspect wide/continuation cells, cursor-addressed redraws and the adjacent colored cell geometry in xterm's model/DOM. The same commit deletes e2e/suite-terminals.ts and removes the legacy test-run selection from playwright.config.ts; its deleted suite instructions explicitly said old terminals remain for sessions made by earlier versions and kept implementation-specific tests in their own run. Thus removal of the fixture and tests precedes removal of supported production paths. The independent grid geometry/selection tests at e2e/grid-client/grid-terminal.spec.ts:199-371 and :1046-1079, plus real-program grid Unicode replay at terminal-unicode.spec.ts:109-192, remain useful grid-specific observables; they neither call nor refute regressions in the retained xterm handlers. Cross-batch scope: f560058da19e02716e6f943883a9508b447aff4e later removes the old renderer/protocol branch, is an ancestor of pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, and its SPEC_impl.md:1842-1843 says every terminal mounts the grid. Pinned-tip source has no new Terminal, swallowDecrqm or registerDcsHandler in terminal.js and no vendor asset subtree; dismissSelectionSoon still appears as a generic attachment callback parameter, not the old implementation. Therefore this is a confirmed historical coverage gap, not a claim the pinned tip should restore xterm or has a current old-renderer bug. Suggested bucket: other, lost regression coverage in maintainer tooling; no new product malfunction or security/loss-of-work route established. Could-be-highest: no established route. Confidence: confirmed source/patch/contract analysis; no execution observation. proposed_drop: false. Preserve prior proposed drop verbatim in history: 'no actionable defect demonstrated by removing renderer-specific tests; source refutation is the split of query ownership and the surviving independent grid assertions above.' Synthesis rejects that rationale: absence of a new malfunction does not refute useful deleted regression tests, and grid ownership is not old-renderer coverage. Later complete retirement is a separate possible disposition reason for the parent, not an accepted drop; parent has accepted none. possible_cover: none; no queue or excluded-coverage search. No readily checkable premise remains open for this record."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g178/findings.jsonl",
+        "id": "g178-l1",
+        "line": 8,
+        "disposition": "rejected",
+        "group": "old-xterm-query-selection-unicode-tests-removed-before-retirement",
+        "reason": "Full111:647 removesoldbrowserqueryreplysuppressionwithpositiveparsercontrol,local/nativeselectiondismissal,andwideemoji/model/DOMgeometrytests whileactualoldDECRQM/DECRQSS/browserrenderercontinues. Independentgridqueries/paintersdon'texerciseoldretainedpaths; initialsplitownership/noactionablebug dismissalwithdrawn. f560retiressubjectbytip; preserveactualintermediategap andno obsoletecurrentfixturefix or inferredunsafeinput/workloss."
+      },
+      "accepted_parent_decision": {
+        "key": "g178/g178-l1",
+        "line": 8,
+        "disposition": "rejected",
+        "group": "old-xterm-query-selection-unicode-tests-removed-before-retirement",
+        "bucket": "other",
+        "recording": "retired-in-range",
+        "needs_independent_drop_check": false,
+        "reason": "Full111:647 removesoldbrowserqueryreplysuppressionwithpositiveparsercontrol,local/nativeselectiondismissal,andwideemoji/model/DOMgeometrytests whileactualoldDECRQM/DECRQSS/browserrenderercontinues. Independentgridqueries/paintersdon'texerciseoldretainedpaths; initialsplitownership/noactionablebug dismissalwithdrawn. f560retiressubjectbytip; preserveactualintermediategap andno obsoletecurrentfixturefix or inferredunsafeinput/workloss."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-111",
+          "key": "g178/g178-l1",
+          "latest_line": 8,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "old-xterm-query-selection-unicode-tests-removed-before-retirement",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Useful query-reply, selection and emoji regressions are deleted while their old-renderer production paths remain supported. Grid-specific tests cannot cover those retained paths. Later complete removal ends the present need for them without disproving the historical gap.",
+          "checks": [
+            "647f0227:SPEC.md:3013-3038 retains existing old terminals. terminal.js:4120-4147 still installs DECRQM/DECRQSS duplicate-answer suppression; the deletion patch removes tests that observe their browser WebSocket output with a positive parser control.",
+            "647f0227 deletion patch removes terminal.spec.ts input-dismissal assertions for xterm/native selections and terminal-unicode.spec.ts direct xterm parser/model/DOM tests for wide continuation cells, cursor-addressed redraw and colored-neighbor geometry. It also deletes suite-terminals.ts and the legacy test-run selection.",
+            "At 00de0b6c the old responder/renderer names are absent from terminal.js. f560058d:terminal.js:4294-4355 creates only grids. This establishes retirement, not coverage of the intermediate xterm paths.",
+            "No product malfunction, runtime failure or security/data-loss route was reproduced or established."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md Terminal experience and SPEC_impl.md The grid client accept the current replacement architecture, not test coverage of the formerly supported browser parser.",
+            "TODO Planned empty. BUGS, active TRIAGE_OUTCOMES and INDEX searches for query reply, DECRQM/DECRQSS, old renderer regression coverage, selection/emoji test deletion found no exact cover.",
+            "The tmux-end-old-terminals plan explicitly staged test removal before runtime ending, but it is landed (plans/REPORTS.md:29), not an unlanded fix. No current unlanded matching plan found. The separate landed docs sweep does not retroactively supply missing tests.",
+            "FILTER does not cover removed maintainer regression protection. g177/c2 is related staging history, but its sustained viewport workaround assertions are distinct; no exact alias claimed."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Lost old-renderer query-reply, selection-dismissal and emoji protection at the intermediate revision. Preserve the rejected earlier rationale: 'no actionable defect demonstrated by removing renderer-specific tests; source refutation is the split of query ownership and the surviving independent grid assertions above.' That rationale does not refute useful deleted tests. No current xterm bug is asserted.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain the source-established historical test defect as other, with later retirement explicit. Parent decides historical obsolescence separately."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "old-xterm-query-selection-unicode-tests-removed-before-retirement",
+        "destination": "trailing-old-xterm-query-selection-unicode-tests-removed-before-retirement.md"
+      }
+    },
+    {
+      "key": "g178/g178-l2",
+      "owner": "g178",
+      "id": "g178-l2",
+      "domain": "browser-terminal-regressions",
+      "purpose": "browser-terminal-regressions: e2e/tests/terminal-unicode.spec.ts, e2e/tests/terminal.spec.ts, e2e/tests/terminal-restart.spec.ts, e2e/grid-client/grid-fit.spec.ts, e2e/tests/grid-flood.spec.ts, e2e/tests/grid-terminal.spec.ts, e2e/tests/mouse-modes.spec.ts, e2e/tests/terminal-create-idempotency.spec.ts; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "g178-l2",
+            "state": "open",
+            "summary": "Check whether SGR reconnect assertions can observe the claimed viewer-mode restoration",
+            "location": "e2e/tests/mouse-modes.spec.ts:391",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: The rewritten test rationale says the SGR detach/reattach leg catches omission of SGR encoding from what a viewer receives, but the grid architecture may keep this encoding solely on the supervisor. Details: assigned patch replaces the earlier PaneModes claim with 'a regression that dropped the SGR encoding specifically from what a reattached viewer is sent'. SPEC_impl.md, The grid client, says input goes up as JSON mouse messages and the supervisor encodes from terminal modes. Need inspect actual streamed state, browser mouse message and supervisor encoder before judging the claimed coverage. Suggested bucket: other (test/documentation correctness); could-be-highest: no, no destructive or security consequence established. Confidence: unresolved source lead. proposed_drop: false pending checks. possible_cover: none. No execution or reproduction. Next: inspect mouse-modes test at pinned revision, state format and encoder mode lookup; determine the exact failure this leg can distinguish."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "g178-l2",
+            "state": "open",
+            "summary": "Mouse test claims to check SGR viewer restoration that the grid protocol does not carry",
+            "location": "e2e/tests/mouse-modes.spec.ts:390-395",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: The mouse regression test now tells future maintainers it checks a reconnect failure that cannot occur in this architecture. It still usefully checks mouse input after reconnect, but does not test restoration of an SGR setting in the browser. Details: the newly rewritten rationale at e2e/tests/mouse-modes.spec.ts:390-395 says a bug dropping SGR encoding 'from what a reattached viewer is sent' would pass the earlier assertions and that the second reattach pins this branch. The wire contract has no such branch or field: crates/farhelm-proto/src/grid.rs:1098-1108 defines only off/click/drag/motion reporting modes, :1121-1148 defines the viewer's state, and :1632-1639 sends mouse coordinates/buttons without an encoding choice. The client explicitly documents that it cannot see the encoding at crates/farhelm-ui/assets/grid-terminal.js:1637-1648 and sends mouse messages based only on reporting mode. The supervisor input path uses its retained terminal modes (service/grid_stream.rs:1069-1077); grid_input.rs:737-745 selects SGR there. SPEC_impl.md, The grid client, assigns input encoding to that supervisor. Switching sessions at mouse-modes.spec.ts:397 does not restart that emulator or reconstruct its encoding state. The asserted counts at :399-405 therefore show that SGR reports still reach the program after a fresh browser attachment, not that SGR encoding was restored from viewer replay. Correct the rationale to describe that narrower contract; do not add an unnecessary encoding field or client encoder to satisfy it. The related old DECSET-replay wording at :357-358 is also stale, but the newly changed lines are the location for this finding. Suggested bucket: other, misleading test-coverage documentation without an established product failure. Could-be-highest: no security or loss-of-work route established. Confidence: confirmed by source and protocol analysis, no runtime observation. proposed_drop: false. possible_cover: none; prohibited coverage sources were not searched. Original suspected consequence retained: false confidence in SGR restoration coverage; source checks settle that there is no viewer encoding state to restore, rather than demonstrating missing product functionality."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "g178-l2",
+            "state": "open",
+            "summary": "Mouse test claims to check SGR viewer restoration that the grid protocol does not carry",
+            "location": "e2e/tests/mouse-modes.spec.ts:390-395",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: The rewritten mouse-test rationale claims coverage of SGR encoding restored to a browser, although the browser never receives that encoding setting. The test remains useful for checking SGR mouse input after reattachment. Details: synthesis re-read the newly changed comment at e2e/tests/mouse-modes.spec.ts:390-395, the complete TerminalState definition at crates/farhelm-proto/src/grid.rs:1127-1153, and MouseMode at :1098-1108. Neither defines an SGR/default encoding field: state exposes off/click/drag/motion reporting and other display/focus/status fields. grid-terminal.js:1630-1648 produces coordinate/button messages based on reporting mode and explicitly says the client cannot see the encoding. service/grid_stream.rs:1064-1077 decodes the message, takes retained modes from its status receiver, and passes them to InputEncoder; grid_input.rs:737-745 selects SGR from modes.mouse_encoding. The changed comment specifically claims a regression 'dropped the SGR encoding ... from what a reattached viewer is sent' and that the second reconnect pins 'that branch'. No such viewer-encoding branch exists. The count assertion at mouse-modes.spec.ts:399-405 proves SGR reports reach the program following the new browser attachment. It can catch breakage of post-reattach mouse input; it does not establish browser SGR restoration, and does not restart the supervisor or rebuild its emulator from a checkpoint. Preserve the narrower original consequence: misleading coverage documentation can lead maintainers to believe the test exercises an SGR replay/restoration mechanism it does not exercise. Correct the rationale to its actual contract; no product field, client encoder, or new product functionality is missing on this evidence. Suggested bucket: other. Could-be-highest: no security or loss-of-work route established. Confidence: confirmed source/protocol/caller analysis, not runtime observation. proposed_drop: false; no lowering or drop made in synthesis. possible_cover: none, no queue search. Revision adds complete-state and direct-encoder rechecks without broadening the finding into a product defect."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "g178-l2",
+            "state": "open",
+            "summary": "Mouse test claims to check SGR viewer restoration that the grid protocol does not carry",
+            "location": "e2e/tests/mouse-modes.spec.ts:390-395",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: The rewritten mouse-test rationale claims coverage of SGR encoding restored to a browser, although the browser never receives that encoding setting. It still usefully checks SGR mouse input after reattachment. Details: the changed comment at e2e/tests/mouse-modes.spec.ts:390-395 claims to pin a branch that sends SGR encoding to a returning viewer. Complete TerminalState at crates/farhelm-proto/src/grid.rs:1127-1153 has no encoding field; MouseMode at :1098-1108 exposes only off/click/drag/motion. grid-terminal.js:1630-1648 builds coordinate/button messages and explicitly says the client cannot see encoding. service/grid_stream.rs:1064-1077 reads the retained terminal modes, and grid_input.rs:737-745 chooses SGR there. The test's :399-405 counts reports after switching session selection through reattachWithModes (:247-257), which closes/replaces only its browser socket. Additional synthesis caller/lifetime checks settle the remaining premise: service/handlers.rs:1898-1916 states the host runtime is already connected and creates HostAttach from terminal.clone(); grid_stream.rs:1022-1040 subscribes to that host's retained status and creates a fresh per-attachment InputEncoder. hosts/terminal.rs:1205-1227 establishes shared runtime ownership across cloned handles, backed by an Arc, separate from viewer attachment. Thus a new attachment/encoder is exercised, but no browser SGR field or emulator checkpoint restoration is exercised. Preserve original consequence: misleading coverage documentation can cause maintainers to believe this test exercises SGR viewer replay/restoration. Correct its rationale to post-reattach mouse delivery. Do not infer a missing product field, a need for a client encoder, or a product encoding defect. Related DECSET-replay wording at :357-358 is stale too, but the finding targets the newly changed rationale. Suggested bucket: other. Could-be-highest: no established security or loss-of-work route. Confidence: confirmed protocol, implementation and caller/lifetime source analysis; no execution observation. proposed_drop: false; no lowering or accepted drop. possible_cover: none; no queue/excluded metadata search. This revision records the actual runtime/attachment boundary and preserves the narrower coverage-documentation consequence; no premise remains open."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "g178-l2",
+          "state": "open",
+          "summary": "Mouse test claims to check SGR viewer restoration that the grid protocol does not carry",
+          "location": "e2e/tests/mouse-modes.spec.ts:390-395",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: The rewritten mouse-test rationale claims coverage of SGR encoding restored to a browser, although the browser never receives that encoding setting. It still usefully checks SGR mouse input after reattachment. Details: the changed comment at e2e/tests/mouse-modes.spec.ts:390-395 claims to pin a branch that sends SGR encoding to a returning viewer. Complete TerminalState at crates/farhelm-proto/src/grid.rs:1127-1153 has no encoding field; MouseMode at :1098-1108 exposes only off/click/drag/motion. grid-terminal.js:1630-1648 builds coordinate/button messages and explicitly says the client cannot see encoding. service/grid_stream.rs:1064-1077 reads the retained terminal modes, and grid_input.rs:737-745 chooses SGR there. The test's :399-405 counts reports after switching session selection through reattachWithModes (:247-257), which closes/replaces only its browser socket. Additional synthesis caller/lifetime checks settle the remaining premise: service/handlers.rs:1898-1916 states the host runtime is already connected and creates HostAttach from terminal.clone(); grid_stream.rs:1022-1040 subscribes to that host's retained status and creates a fresh per-attachment InputEncoder. hosts/terminal.rs:1205-1227 establishes shared runtime ownership across cloned handles, backed by an Arc, separate from viewer attachment. Thus a new attachment/encoder is exercised, but no browser SGR field or emulator checkpoint restoration is exercised. Preserve original consequence: misleading coverage documentation can cause maintainers to believe this test exercises SGR viewer replay/restoration. Correct its rationale to post-reattach mouse delivery. Do not infer a missing product field, a need for a client encoder, or a product encoding defect. Related DECSET-replay wording at :357-358 is stale too, but the finding targets the newly changed rationale. Suggested bucket: other. Could-be-highest: no established security or loss-of-work route. Confidence: confirmed protocol, implementation and caller/lifetime source analysis; no execution observation. proposed_drop: false; no lowering or accepted drop. possible_cover: none; no queue/excluded metadata search. This revision records the actual runtime/attachment boundary and preserves the narrower coverage-documentation consequence; no premise remains open."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g178/findings.jsonl",
+        "id": "g178-l2",
+        "line": 10,
+        "disposition": "verified",
+        "group": "mouse-reattach-test-claims-nonexistent-viewer-sgr-encoding-restoration",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-111 after inspecting it. The changed comment says the test pins SGR encoding sent to a returning viewer. The viewer receives reporting mode, while the supervisor selects the encoding from retained terminal modes. The test usefully checks post-reattach mouse delivery, not the stated viewer restoration branch. Record the misleading test-coverage explanation as other; correct its contract to SGR mouse delivery after a fresh browser attachment. Checked source/results: [\"f560058d:e2e/tests/mouse-modes.spec.ts:390-405 explicitly claims SGR encoding restoration from what the viewer is sent, then counts SGR reports after reattachment. The text remains at 00de0b6c and recording main 24bc0580.\",\"f560058d:crates/farhelm-proto/src/grid.rs:1098-1108,1127-1153 exposes only mouse reporting mode and no mouse encoding field in complete TerminalState.\",\"f560058d:grid-terminal.js:1630-1648 constructs coordinate/button reports and explicitly says the client cannot see the encoding. service/grid_stream.rs:1064-1079 reads retained modes and encodes input; grid_input.rs:737-745 chooses SGR.\",\"The false test explanation is source-established. This supplies no missing product field, encoder defect or runtime failure.\"] Current coverage/results: [\"SPEC_impl.md The grid client:1836-1868 assigns interpretation and input encoding to the supervisor. SPEC.md Terminal experience's mouse behavior does not accept fictitious viewer encoding restoration coverage.\",\"TODO Planned empty; BUGS, active TRIAGE_OUTCOMES, INDEX and matching queue searches for SGR/viewer restoration and mouse-test rationale found no exact cover.\",\"plans/queue/tmux-drop-from-docs.md's rationale sweep is related context but already landed (REPORTS:32), and the incorrect text survives at recording main. Other plan hits concern unrelated layout or history numbering. No unlanded fix found.\",\"FILTER does not cover a persistent misleading test contract. No exact alias or existing item extension identified.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"False confidence that the reconnect test covers SGR viewer replay/restoration. The initial lead was about whether assertions observe that mechanism, not an established product encoding failure. Preserve the related stale DECSET-replay wording caveat; the changed rationale is the finding's target.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g178/g178-l2",
+        "line": 10,
+        "disposition": "verified",
+        "group": "mouse-reattach-test-claims-nonexistent-viewer-sgr-encoding-restoration",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-111 after inspecting it. The changed comment says the test pins SGR encoding sent to a returning viewer. The viewer receives reporting mode, while the supervisor selects the encoding from retained terminal modes. The test usefully checks post-reattach mouse delivery, not the stated viewer restoration branch. Record the misleading test-coverage explanation as other; correct its contract to SGR mouse delivery after a fresh browser attachment. Checked source/results: [\"f560058d:e2e/tests/mouse-modes.spec.ts:390-405 explicitly claims SGR encoding restoration from what the viewer is sent, then counts SGR reports after reattachment. The text remains at 00de0b6c and recording main 24bc0580.\",\"f560058d:crates/farhelm-proto/src/grid.rs:1098-1108,1127-1153 exposes only mouse reporting mode and no mouse encoding field in complete TerminalState.\",\"f560058d:grid-terminal.js:1630-1648 constructs coordinate/button reports and explicitly says the client cannot see the encoding. service/grid_stream.rs:1064-1079 reads retained modes and encodes input; grid_input.rs:737-745 chooses SGR.\",\"The false test explanation is source-established. This supplies no missing product field, encoder defect or runtime failure.\"] Current coverage/results: [\"SPEC_impl.md The grid client:1836-1868 assigns interpretation and input encoding to the supervisor. SPEC.md Terminal experience's mouse behavior does not accept fictitious viewer encoding restoration coverage.\",\"TODO Planned empty; BUGS, active TRIAGE_OUTCOMES, INDEX and matching queue searches for SGR/viewer restoration and mouse-test rationale found no exact cover.\",\"plans/queue/tmux-drop-from-docs.md's rationale sweep is related context but already landed (REPORTS:32), and the incorrect text survives at recording main. Other plan hits concern unrelated layout or history numbering. No unlanded fix found.\",\"FILTER does not cover a persistent misleading test contract. No exact alias or existing item extension identified.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"False confidence that the reconnect test covers SGR viewer replay/restoration. The initial lead was about whether assertions observe that mechanism, not an established product encoding failure. Preserve the related stale DECSET-replay wording caveat; the changed rationale is the finding's target.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-111",
+          "key": "g178/g178-l2",
+          "latest_line": 10,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "mouse-reattach-test-claims-nonexistent-viewer-sgr-encoding-restoration",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The changed comment says the test pins SGR encoding sent to a returning viewer. The viewer receives reporting mode, while the supervisor selects the encoding from retained terminal modes. The test usefully checks post-reattach mouse delivery, not the stated viewer restoration branch.",
+          "checks": [
+            "f560058d:e2e/tests/mouse-modes.spec.ts:390-405 explicitly claims SGR encoding restoration from what the viewer is sent, then counts SGR reports after reattachment. The text remains at 00de0b6c and recording main 24bc0580.",
+            "f560058d:crates/farhelm-proto/src/grid.rs:1098-1108,1127-1153 exposes only mouse reporting mode and no mouse encoding field in complete TerminalState.",
+            "f560058d:grid-terminal.js:1630-1648 constructs coordinate/button reports and explicitly says the client cannot see the encoding. service/grid_stream.rs:1064-1079 reads retained modes and encodes input; grid_input.rs:737-745 chooses SGR.",
+            "The false test explanation is source-established. This supplies no missing product field, encoder defect or runtime failure."
+          ],
+          "coverage_checked": [
+            "SPEC_impl.md The grid client:1836-1868 assigns interpretation and input encoding to the supervisor. SPEC.md Terminal experience's mouse behavior does not accept fictitious viewer encoding restoration coverage.",
+            "TODO Planned empty; BUGS, active TRIAGE_OUTCOMES, INDEX and matching queue searches for SGR/viewer restoration and mouse-test rationale found no exact cover.",
+            "plans/queue/tmux-drop-from-docs.md's rationale sweep is related context but already landed (REPORTS:32), and the incorrect text survives at recording main. Other plan hits concern unrelated layout or history numbering. No unlanded fix found.",
+            "FILTER does not cover a persistent misleading test contract. No exact alias or existing item extension identified."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "False confidence that the reconnect test covers SGR viewer replay/restoration. The initial lead was about whether assertions observe that mechanism, not an established product encoding failure. Preserve the related stale DECSET-replay wording caveat; the changed rationale is the finding's target.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Record the misleading test-coverage explanation as other; correct its contract to SGR mouse delivery after a fresh browser attachment."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "mouse-reattach-test-claims-nonexistent-viewer-sgr-encoding-restoration",
+        "destination": "trailing-mouse-reattach-test-claims-nonexistent-viewer-sgr-encoding-restoration.md"
+      }
+    },
+    {
+      "key": "g178/g178-c3",
+      "owner": "g178",
+      "id": "g178-c3",
+      "domain": "browser-terminal-regressions",
+      "purpose": "browser-terminal-regressions: e2e/tests/terminal-unicode.spec.ts, e2e/tests/terminal.spec.ts, e2e/tests/terminal-restart.spec.ts, e2e/grid-client/grid-fit.spec.ts, e2e/tests/grid-flood.spec.ts, e2e/tests/grid-terminal.spec.ts, e2e/tests/mouse-modes.spec.ts, e2e/tests/terminal-create-idempotency.spec.ts; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "g178-c3",
+            "state": "open",
+            "summary": "Removed old-renderer premise assertions remain established by grid-only fixtures",
+            "location": "e2e/tests/grid-flood.spec.ts:165; e2e/tests/grid-terminal.spec.ts:21; e2e/tests/terminal-create-idempotency.spec.ts:543; e2e/grid-client/grid-fit.spec.ts:124",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: Removing terminal-kind and xterm construction checks does not let the changed tests silently exercise another renderer. Details: grid-flood.spec.ts removes terminalKind()==grid, but its openGateAndStopReading at :115-121 throws without __farhelmGrid and an open socket, floodDone :129-131 reads its snapshot, and :192-209 requires its exact history/model output. grid-terminal.spec.ts:24-30 requires exactly one .grid-terminal, ready text and its focused class before typing; :55-58 asserts the unique output was absent before the owned program echoes it. terminal-create-idempotency.spec.ts:541-545 still requires the entropy refusal and zero mounted islands; the deleted __farhelmTermReady hook has no references anywhere under the pinned UI or test helpers (git grep returned no matches), so its undefined value was no longer independent evidence. The static fit suite still establishes font availability and formula/padding premises at :66-73 and :263-277; its only removed grid-specific test was compatibility handoff of an inherited old-renderer size, while SPEC_impl.md The grid client now mounts the grid before opening every socket, and direct fit has no handoff contract. Suggested bucket: other, considered test weakening without established functional gap. Could-be-highest: no established security/data-loss route. Confidence: confirmed source analysis, not runtime observation. proposed_drop: source refutation by surviving grid-specific oracles and retired compatibility path; no actionable defect established. possible_cover: none; coverage sources not searched. Caveat: the entropy test is not a direct network observer, but that predates this deletion and the removed readiness hook was not one either."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "g178-c3",
+            "state": "open",
+            "summary": "Removed old-renderer premise assertions remain established by grid-only fixtures",
+            "location": "e2e/tests/grid-flood.spec.ts:165; e2e/tests/grid-terminal.spec.ts:21; e2e/tests/terminal-create-idempotency.spec.ts:543; e2e/grid-client/grid-fit.spec.ts:124",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: The removed terminal-kind/xterm-hook assertions do not create an established coverage gap in these grid-only tests at this later revision. Details: preserve the initial candidate's evidence: grid-flood.spec.ts:115-121 requires __farhelmGrid and an open socket; :192-209 requires exact grid history/model output. grid-terminal.spec.ts:24-30 requires one .grid-terminal, ready text and focus; :55-58 checks that unique typed output was absent and then echoed. terminal-create-idempotency.spec.ts:541-545 retains the entropy refusal and zero mounted islands; the removed __farhelmTermReady name no longer occurs in pinned UI/helpers. The fit tests retain independent formula/font/padding premises. Additional synthesis checks distinguish this later revision from g178-l1: terminal.js:4294-4355 creates only a grid surface and passes no inherited size, while grid-terminal.js:473-497 directly fits from DEFAULT_SIZE and current measurement with no old-renderer handoff path. Thus the removed inherited-size test is attached to a retired contract, rather than a still-supported old-renderer path. Cross-check of the changed waitForMouseTracking at mouse-modes.spec.ts:479-488 found missing grid returns off; grid-model.js:611-624 validates mouse mode before committing state, so ordinary decoded state cannot spuriously satisfy the poll through a missing mouse field. Suggested bucket: other, considered test weakening. Could-be-highest: no established security/loss-of-work route; the entropy test's indirect zero-island oracle predates this deletion and the removed readiness hook was not a direct socket observer either. Confidence: confirmed source analysis, no runtime observation. proposed_drop: preserve initial wording, 'source refutation by surviving grid-specific oracles and retired compatibility path; no actionable defect established.' This remains a proposed exclusion for parent review, not an accepted drop. possible_cover: none; no queue/excluded metadata search. No new product malfunction or open premise established by synthesis."
+          }
+        }
+      ],
+      "latest": {
+        "line": 9,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "g178-c3",
+          "state": "open",
+          "summary": "Removed old-renderer premise assertions remain established by grid-only fixtures",
+          "location": "e2e/tests/grid-flood.spec.ts:165; e2e/tests/grid-terminal.spec.ts:21; e2e/tests/terminal-create-idempotency.spec.ts:543; e2e/grid-client/grid-fit.spec.ts:124",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: The removed terminal-kind/xterm-hook assertions do not create an established coverage gap in these grid-only tests at this later revision. Details: preserve the initial candidate's evidence: grid-flood.spec.ts:115-121 requires __farhelmGrid and an open socket; :192-209 requires exact grid history/model output. grid-terminal.spec.ts:24-30 requires one .grid-terminal, ready text and focus; :55-58 checks that unique typed output was absent and then echoed. terminal-create-idempotency.spec.ts:541-545 retains the entropy refusal and zero mounted islands; the removed __farhelmTermReady name no longer occurs in pinned UI/helpers. The fit tests retain independent formula/font/padding premises. Additional synthesis checks distinguish this later revision from g178-l1: terminal.js:4294-4355 creates only a grid surface and passes no inherited size, while grid-terminal.js:473-497 directly fits from DEFAULT_SIZE and current measurement with no old-renderer handoff path. Thus the removed inherited-size test is attached to a retired contract, rather than a still-supported old-renderer path. Cross-check of the changed waitForMouseTracking at mouse-modes.spec.ts:479-488 found missing grid returns off; grid-model.js:611-624 validates mouse mode before committing state, so ordinary decoded state cannot spuriously satisfy the poll through a missing mouse field. Suggested bucket: other, considered test weakening. Could-be-highest: no established security/loss-of-work route; the entropy test's indirect zero-island oracle predates this deletion and the removed readiness hook was not a direct socket observer either. Confidence: confirmed source analysis, no runtime observation. proposed_drop: preserve initial wording, 'source refutation by surviving grid-specific oracles and retired compatibility path; no actionable defect established.' This remains a proposed exclusion for parent review, not an accepted drop. possible_cover: none; no queue/excluded metadata search. No new product malfunction or open premise established by synthesis."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g178/findings.jsonl",
+        "id": "g178-c3",
+        "line": 9,
+        "disposition": "under-investigation",
+        "group": "g178-g178-c3",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-111",
+          "key": "g178/g178-c3",
+          "latest_line": 9,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "grid-only-tests-lost-redundant-renderer-premise-assertions",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The retained positive observations require a grid, and the removed inherited-size test belongs to the retired renderer handoff. Removal of the obsolete readiness hook adds no demonstrated entropy-refusal gap.",
+          "checks": [
+            "f560058d:e2e/tests/grid-flood.spec.ts:115-131 requires __farhelmGrid and an open socket and reads the grid snapshot. grid-terminal.spec.ts:21-30 requires one focused grid with ready output;55-58 requires a newly typed unique echo absent beforehand.",
+            "f560058d:terminal-create-idempotency.spec.ts:541-545 retains explicit high-entropy refusal and zero island count. Pinned git grep finds no __farhelmTermReady anywhere in UI or test helpers. Zero islands is an indirect socket oracle; the removed hook was not a direct network observer either.",
+            "f560058d:terminal.js:4313-4355 supplies no inherited size. grid-terminal.js:473-497 computes direct fit from DEFAULT_SIZE; the grid-fit deletion removes the inherited handoff test. grid-fit.spec.ts:66-73 still loads both weights and263-276 checks pixel ratio, canvas metrics, padding and computed size.",
+            "Source refutation is limited to the changed assertions and removed handoff; it is not certification of every test or lease-security behavior."
+          ],
+          "coverage_checked": [
+            "SPEC_impl.md The grid client specifies direct mounts at a fixed 80x24 fit reference; Terminal widget and SPEC.md Terminal experience specify only grid terminals now. No surviving inherited-size compatibility requirement found.",
+            "TODO Planned empty. BUGS, active TRIAGE_OUTCOMES, INDEX, matching queue files and plans/queue searches found no exact changed-assertion defect. Held-font attempt-witness item/decision is different from renderer identity and entropy readiness.",
+            "The tmux removal and docs plans landed; they supply retirement context only. FILTER not needed for the source refutation."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Suspected tests silently exercising the wrong renderer or losing a required handoff/entropy premise. Preserve the indirect zero-island oracle caveat: this check does not establish a direct no-socket witness, but deletion did not remove one.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Exclude the narrow redundant-renderer/handoff assertion candidate. Send the entropy-refusal portion through independent drop review because weak lease/takeover consequences could involve user-owned work; no such production route is claimed here."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "grid-only-tests-lost-redundant-renderer-premise-assertions",
+        "destination": null
+      }
+    },
+    {
+      "key": "g178/g178-c4",
+      "owner": "g178",
+      "id": "g178-c4",
+      "domain": "browser-terminal-regressions",
+      "purpose": "browser-terminal-regressions: e2e/tests/terminal-unicode.spec.ts, e2e/tests/terminal.spec.ts, e2e/tests/terminal-restart.spec.ts, e2e/grid-client/grid-fit.spec.ts, e2e/tests/grid-flood.spec.ts, e2e/tests/grid-terminal.spec.ts, e2e/tests/mouse-modes.spec.ts, e2e/tests/terminal-create-idempotency.spec.ts; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "g178-c4",
+            "state": "open",
+            "summary": "Grid fit formula and retained assertions agree after component removal",
+            "location": "e2e/grid-client/grid-fit.spec.ts:196-198,238-249",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: Considered whether simplifying the two-renderer fit test introduced incorrect pixel-ratio rounding or carried a prior fitted answer into later sizes. Source checks refute that concern. Details: the changed documentation specifies a fixed 80x24 reference. fittedSizes at :238 keeps that reference const, :245-246 rounds after dividing the full reference canvas by dpr, and :248-249 applies padding/scrollbar and dimension bounds. Production grid-terminal.js:222-227 computes deviceWidth=charWidth*dpr and returns Math.round(deviceWidth*cols/dpr)/cols, with height likewise rounding the reference canvas; this matches the test's parenthesization, rather than rounding individual device cells and dividing afterward. Production :242-245 applies the same independently stated bounds and scrollbar reserve. Test :265 checks actual pixel ratio; :272-276 checks font metric availability, padding, positive width and fitted rows/columns. No new formula mismatch or feedback of prior answers was established. Suggested bucket: other if such a test defect existed; candidate only. Could-be-highest: no established security/loss-of-work route. Confidence: confirmed source refutation, no execution observation. proposed_drop: the candidate rounding/reference concern is refuted by the exact implementation and assertion references above; pending parent disposition, no accepted drop implied. possible_cover: none; neighbour records were read only for novelty, no prohibited coverage search. This is a considered-and-refuted discovery check, not a new finding or an assertion that matching production alone proves every sizing behavior."
+          }
+        }
+      ],
+      "latest": {
+        "line": 11,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "g178-c4",
+          "state": "open",
+          "summary": "Grid fit formula and retained assertions agree after component removal",
+          "location": "e2e/grid-client/grid-fit.spec.ts:196-198,238-249",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: Considered whether simplifying the two-renderer fit test introduced incorrect pixel-ratio rounding or carried a prior fitted answer into later sizes. Source checks refute that concern. Details: the changed documentation specifies a fixed 80x24 reference. fittedSizes at :238 keeps that reference const, :245-246 rounds after dividing the full reference canvas by dpr, and :248-249 applies padding/scrollbar and dimension bounds. Production grid-terminal.js:222-227 computes deviceWidth=charWidth*dpr and returns Math.round(deviceWidth*cols/dpr)/cols, with height likewise rounding the reference canvas; this matches the test's parenthesization, rather than rounding individual device cells and dividing afterward. Production :242-245 applies the same independently stated bounds and scrollbar reserve. Test :265 checks actual pixel ratio; :272-276 checks font metric availability, padding, positive width and fitted rows/columns. No new formula mismatch or feedback of prior answers was established. Suggested bucket: other if such a test defect existed; candidate only. Could-be-highest: no established security/loss-of-work route. Confidence: confirmed source refutation, no execution observation. proposed_drop: the candidate rounding/reference concern is refuted by the exact implementation and assertion references above; pending parent disposition, no accepted drop implied. possible_cover: none; neighbour records were read only for novelty, no prohibited coverage search. This is a considered-and-refuted discovery check, not a new finding or an assertion that matching production alone proves every sizing behavior."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g178/findings.jsonl",
+        "id": "g178-c4",
+        "line": 11,
+        "disposition": "excluded",
+        "group": "grid-fit-test-rounding-reference-mismatch-concern",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-111 after inspecting it. The independently written test formula uses the documented fixed reference and matches production's round-the-reference-canvas arithmetic. It does not feed the previous fitted answer into the next case. Exclude only the considered rounding/reference mismatch; agreement with production alone is not a claim that all sizing behavior is tested. Checked source/results: [\"f560058d:e2e/grid-client/grid-fit.spec.ts:196-203 documents the formula;238 fixes from={cols:80,rows:24};245-249 divides and rounds the full canvas before per-cell division, then applies scrollbar and bounds.\",\"f560058d:grid-terminal.js:222-227 uses the same parenthesization;242-245 applies the same 14-pixel reserve and bounds;493 uses DEFAULT_SIZE rather than the previous answer.\",\"grid-fit.spec.ts:265,272-276 checks actual pixel ratio, canvas/font metrics, padding, positive character width and observed fitted dimensions. No execution was performed.\"] Current coverage/results: [\"SPEC_impl.md The grid client:1848-1856 explicitly defines a fixed 80-column,24-row proposal reference independent of resize history. SPEC.md Terminal experience supplies no conflicting rounding contract.\",\"TODO Planned empty. BUGS, active TRIAGE_OUTCOMES, INDEX and plans/queue searches for fit formula, pixel ratio, rounding and fittedSizes found no exact defect/decision. Landed tmux plans retain Farhelm's fit contract.\",\"FILTER not used; source and contract refute this specific mismatch concern.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Potential wrong pixel-ratio rounding or resize-history feedback in a simplified fit test. No security, user-work loss or production fit malfunction was established.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g178/g178-c4",
+        "line": 11,
+        "disposition": "excluded",
+        "group": "grid-fit-test-rounding-reference-mismatch-concern",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-111 after inspecting it. The independently written test formula uses the documented fixed reference and matches production's round-the-reference-canvas arithmetic. It does not feed the previous fitted answer into the next case. Exclude only the considered rounding/reference mismatch; agreement with production alone is not a claim that all sizing behavior is tested. Checked source/results: [\"f560058d:e2e/grid-client/grid-fit.spec.ts:196-203 documents the formula;238 fixes from={cols:80,rows:24};245-249 divides and rounds the full canvas before per-cell division, then applies scrollbar and bounds.\",\"f560058d:grid-terminal.js:222-227 uses the same parenthesization;242-245 applies the same 14-pixel reserve and bounds;493 uses DEFAULT_SIZE rather than the previous answer.\",\"grid-fit.spec.ts:265,272-276 checks actual pixel ratio, canvas/font metrics, padding, positive character width and observed fitted dimensions. No execution was performed.\"] Current coverage/results: [\"SPEC_impl.md The grid client:1848-1856 explicitly defines a fixed 80-column,24-row proposal reference independent of resize history. SPEC.md Terminal experience supplies no conflicting rounding contract.\",\"TODO Planned empty. BUGS, active TRIAGE_OUTCOMES, INDEX and plans/queue searches for fit formula, pixel ratio, rounding and fittedSizes found no exact defect/decision. Landed tmux plans retain Farhelm's fit contract.\",\"FILTER not used; source and contract refute this specific mismatch concern.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Potential wrong pixel-ratio rounding or resize-history feedback in a simplified fit test. No security, user-work loss or production fit malfunction was established.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-111",
+          "key": "g178/g178-c4",
+          "latest_line": 11,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "grid-fit-test-rounding-reference-mismatch-concern",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The independently written test formula uses the documented fixed reference and matches production's round-the-reference-canvas arithmetic. It does not feed the previous fitted answer into the next case.",
+          "checks": [
+            "f560058d:e2e/grid-client/grid-fit.spec.ts:196-203 documents the formula;238 fixes from={cols:80,rows:24};245-249 divides and rounds the full canvas before per-cell division, then applies scrollbar and bounds.",
+            "f560058d:grid-terminal.js:222-227 uses the same parenthesization;242-245 applies the same 14-pixel reserve and bounds;493 uses DEFAULT_SIZE rather than the previous answer.",
+            "grid-fit.spec.ts:265,272-276 checks actual pixel ratio, canvas/font metrics, padding, positive character width and observed fitted dimensions. No execution was performed."
+          ],
+          "coverage_checked": [
+            "SPEC_impl.md The grid client:1848-1856 explicitly defines a fixed 80-column,24-row proposal reference independent of resize history. SPEC.md Terminal experience supplies no conflicting rounding contract.",
+            "TODO Planned empty. BUGS, active TRIAGE_OUTCOMES, INDEX and plans/queue searches for fit formula, pixel ratio, rounding and fittedSizes found no exact defect/decision. Landed tmux plans retain Farhelm's fit contract.",
+            "FILTER not used; source and contract refute this specific mismatch concern."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Potential wrong pixel-ratio rounding or resize-history feedback in a simplified fit test. No security, user-work loss or production fit malfunction was established.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Exclude only the considered rounding/reference mismatch; agreement with production alone is not a claim that all sizing behavior is tested."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "grid-fit-test-rounding-reference-mismatch-concern",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial pass complete: all eight patches and 1,262 assigned lines reviewed.\n\nRecorded `g178-l2` (`other`): the mouse test incorrectly claims to verify SGR encoding restoration in the browser; encoding remains supervisor-owned.\n\nTwo rejected candidates recorded; no open leads. Findings and progress logs updated. No tests or reproductions run."
+    },
+    {
+      "turn": 2,
+      "reply": "- `g178-l1`: revised to a confirmed `other` finding for historical coverage loss while the old renderer remained supported. Later retirement is recorded separately; no drop accepted.\n- `g178-l2`: retained as documentation-only after protocol, encoder and runtime-lifetime checks. No missing product field inferred.\n- `g178-c3`: strengthened the source basis for proposed exclusion; disposition remains pending.\n\nLogs updated. Unresolved lead IDs: none."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 complete. Nothing new found.\n\nChecked fit formulas, mouse readiness, restart wording, focus/echo witnesses, flood gating, Unicode liveness and entropy-refusal assertions. Recorded refuted candidate `g178-c4`.\n\nNew verified IDs: none. New unverified IDs: none. Open leads: none. Progress updated; source-only review."
+    }
+  ],
+  "progress": "# g178 progress\n\nInitial review, turn 1 complete. Discovery passes: 0. Awaiting caller's later synthesis/discovery turn; no later-turn protocol was performed inside this initial turn.\n\nRead the full brief and only the inventory commits field. Read every mandatory patch through separate evidence packets: 8 patches, all 1,262 assigned lines, no unread assigned scope. Reviewed at 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513, dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 and f560058da19e02716e6f943883a9508b447aff4e. Read governing priority/recording sections, pinned Terminal experience and grid/emulator/testing contracts, and interrupted-session wording. Followed changed tests into their surviving assertions and pinned client/protocol/supervisor callers. An oversized exploratory whole-spec diff was clipped and was not used as complete evidence; the relevant contract sections were read separately in bounded ranges.\n\nInterface assumptions checked: the grid receives styled rows, not program escape bytes. TerminalState carries reporting mode, not SGR/default encoding. Browser mouse input carries coordinates/buttons; the supervisor encoder chooses SGR from retained emulator modes. Browser reattachment does not restart that emulator. The static grid tests retain geometry/selection oracles; flood and typing integration tests retain explicit grid-only observations. The old xterm tests lose legacy runtime coverage at the first intermediate revision, but their deletions alone establish no product malfunction.\n\nDurable records: g178-l1 revised from lead to candidate after source checks; g178-l2 revised from lead to confirmed finding (bucket other: inaccurate SGR viewer-restoration rationale); g178-c3 is a candidate refuted by retained grid premises and retired hooks/handoff. No open leads. New verified IDs this pass: g178-l2. New unverified finding IDs: none. Candidates: g178-l1, g178-c3. No highest/security/loss-of-work route established.\n\nRecording note: one candidate append was rejected because state=closed is unsupported. Read tooling.md, corrected it to state=open with kind=candidate, and successfully appended. No record was silently discarded; the earlier lead remains in the append-only history.\n\nNo runtime tests, builds, reproductions, checkout edits, helper agents, live-install operations or prohibited coverage-source reads. Conclusions are source-supported, not execution observations.\n\nNext action: caller audits delivery and considers g178-l2 plus the two candidate dispositions. Any requested later synthesis should revisit the exact test-coverage claim, not infer a product encoding failure from the comment error.\n\n# Synthesis turn 2\n\nLater-turn synthesis complete. Discovery-pass count remains 0. Original mandatory coverage remains complete and was audited by the caller; no unread assigned scope. No additional discovery pass was folded into this turn.\n\nRevised g178-l1 from candidate through lead to finding (other). The initial proposed drop confused absence of a new product malfunction with refutation of lost regression coverage. At 647f0227, existing old terminals still select buildXtermSurface (terminal.js:4650-4665), retain duplicate-query suppression and native-selection cleanup, and lose the implementation-specific tests plus their suite runner. Grid-specific observables test separate code. Later f560058d retires the old renderer and is an ancestor of pinned tip; the tip lacks the xterm construction/query handlers/vendor subtree. This bounds the finding to the intermediate supported-old-renderer coverage gap. Prior wording and proposed drop remain in the append-only log; parent has accepted no drops.\n\nRevised g178-l2 with complete TerminalState, client pointer message, supervisor input/encoder and actual attachment/runtime lifetime checks. handlers.rs:1898-1916 clones the already-connected host runtime; HostAttach subscribes to retained modes, while HostTerminal clones share the runtime. The second reattach exercises a new attachment/encoder and post-reattach delivery, not an SGR browser setting or emulator restoration. Finding remains other and documentation-only; no missing product field inferred.\n\nRevised g178-c3 with direct grid creation and deterministic fit checks. No inherited renderer-size path remains at f560058d. Mouse tracking's new poll returns off without a grid; committed state validates its mouse value. Proposed exclusion remains pending parent disposition.\n\nTurn delta: revised IDs g178-l1, g178-l2, g178-c3; newly retained verified finding g178-l1; no new unverified findings, no open leads. Source-only; no runtime tests, reproductions, builds, queue searches or checkout edits. Two guessed source paths did not exist; corrected through source search to actual handlers.rs and inspected it. Next: caller disposition/synthesis or requested later discovery. No unresolved check requires runtime reproduction.\n\n# Discovery turn 3\n\nSeparate discovery pass 1 complete. New verified findings: none. New unverified-after-investigation findings: none. Open leads: none. Explicit result: nothing new found beyond existing findings. New candidate g178-c4 records a considered fit-rounding/reference concern refuted by source; no proposed drop or lowering was accepted.\n\nRead all 263 lines of discovery-neighbours.json in four bounded chunks before searching. Neighbour findings/leads supplied context and novelty only; their old-page protocol, overlay, replay-idle and helper-boundary issues were not adopted as new findings or independently expanded outside this group. No named pending questions were supplied. Existing IDs/consequences/disposition proposals remain in the durable history.\n\nFresh source checks covered the assigned changes beyond the known findings: static fit script loading/font premises, fixed reference and formula parenthesization against grid-terminal.js cellFor/proposeSize; mouse tracking default and decode validation against the changed polling helper and its drag caller; restart wording/fixture shape against status.rs and session_view.rs render branches; grid typing focus plus absent-before-echo witness; gated flood's explicit grid/open-socket/input-frame checks; Unicode real-program request/reply/liveness setup and surviving neighbours at the deletion boundary; entropy refusal and zero-island assertions after the deleted readiness hook. Result: no distinct newly attributable oracle, contract, caller or documentation defect established. Formula source matches the retained independent test expectation; missing-grid and initial mouse mode both remain off, and state decoding rejects an absent/invalid mode; restart UI uses the asserted interrupted-state wording.\n\nAll original assigned material remains read and audited. No unread scope or unresolved accessible source premise. No runtime execution, reproduction, live-install action, checkout modification, queue search or excluded-coverage metadata access. Next action: caller decides whether further discovery is needed or completes consolidation.\n"
+}

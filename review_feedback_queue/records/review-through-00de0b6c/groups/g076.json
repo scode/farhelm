@@ -1,0 +1,607 @@
+{
+  "group": {
+    "id": "g076",
+    "domain": "helm-terminal-routing",
+    "purpose": "helm-terminal-routing: crates/farhelm-helm/src/terminal.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g009",
+      "g010",
+      "g011",
+      "g052",
+      "g053",
+      "g054",
+      "g074",
+      "g075",
+      "g117",
+      "g118",
+      "g119",
+      "g120",
+      "g121"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/01039-000.patch",
+        "ranges": [
+          [
+            1,
+            1097
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/terminal.rs",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,57101)",
+        "lines": 1097,
+        "bytes": 57185,
+        "start": 0,
+        "end": 57101,
+        "original": "[private-run]/prep/originals/01039.patch"
+      }
+    ],
+    "lines": 1097,
+    "bytes": 57185
+  },
+  "records": [
+    {
+      "key": "g076/c1",
+      "owner": "g076",
+      "id": "c1",
+      "domain": "helm-terminal-routing",
+      "purpose": "helm-terminal-routing: crates/farhelm-helm/src/terminal.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Old browser pages lose terminal compatibility after stream notice removal",
+            "location": "crates/farhelm-helm/src/terminal.rs:675",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: A page loaded before the helm update can draw grid messages as terminal text and lose its attachment on input until reloaded. Details: The assigned patch removes stream_notice and its initial WebSocket send, along with the grid query capability. SPEC_impl.md at this revision, Grid streams, lines 3021-3027 explicitly accepts the consequence: ‘A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.’ It continues: ‘any reconnect from it, automatic in that window or manual, misdraws the terminal’ and ‘what is typed into it ends the attachment as malformed input.’ ‘Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy.’ Suggested bucket: high/material UX if not accepted. Confidence: confirmed by source and contract, not observed by execution. proposed_drop: exact specification acceptance quoted above. possible_cover: none beyond that specification. Could-be-highest: no established security or user-owned-work loss route; the specified malformed input ends the viewer attachment, not the running agent. Caveat: this records the compatibility consequence rather than independently validating the browser decoder yet; the later caller check must confirm current pages build grids unconditionally."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Old browser pages lose terminal compatibility after stream notice removal",
+            "location": "crates/farhelm-helm/src/terminal.rs:675",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: A page loaded before the helm update can draw grid messages as terminal text and lose its attachment on input until reloaded. Details: The patch removes stream_notice and its initial WebSocket send, along with the grid query capability. SPEC_impl.md, Grid streams, :3021-3027 explicitly accepts this: ‘A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.’ It continues: ‘any reconnect from it, automatic in that window or manual, misdraws the terminal’ and ‘what is typed into it ends the attachment as malformed input.’ ‘Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy.’ Current-page source check: crates/farhelm-ui/assets/terminal.js:3387-3428 constructs and fits a grid before opening the WebSocket, :4051-4165 sends binary messages directly to receiveGrid with no stream notice dependency, and :4495-4507 encodes bounded input JSON as one binary message. Suggested bucket: high/material UX if not accepted. Confidence: confirmed by source and contract, not execution. proposed_drop: exact specification acceptance quoted above; current pages have the required unconditional grid construction. possible_cover: none beyond the specification. Could-be-highest: no established security or user-owned-work loss route; the specified malformed input ends the attachment, not the agent. Caveat: no runtime or historical-page decoder reproduction was performed."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Old browser pages lose terminal compatibility after stream notice removal",
+            "location": "crates/farhelm-helm/src/terminal.rs:675",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: A page loaded before the helm update can draw grid messages as terminal text and lose its attachment on input until reloaded. Details: The patch removes stream_notice and its initial WebSocket send, along with the grid query capability. SPEC_impl.md, Grid streams, :3021-3027 explicitly accepts the old-page consequence: ‘A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.’ It continues: ‘any reconnect from it, automatic in that window or manual, misdraws the terminal’ and ‘what is typed into it ends the attachment as malformed input.’ ‘Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy.’ This acceptance is limited to pages loaded from the previous helm; it supplies no exception for a current page's routing. Synthesis rechecked the current-page interface independently: terminal.js:3387-3428 constructs, installs and fits a grid before opening the WebSocket, :4051-4085 handles the replay marker without choosing a stream component, :4152-4165 passes binary messages directly to receiveGrid, :4465-4475 invokes grid.receive, and :4495-4507 encodes input as one binary grid message. terminal.rs:690-713 preserves the binary/catch-up-marker order and :762-774 forwards each binary message via send_grid_input. client.rs:4111-4135 preserves one-frame delivery and the input bound. No current-page dependency on the removed stream notice was found along these paths. Suggested bucket: high/material UX if the old-page consequence were not accepted. Confidence: confirmed source and contract analysis, not execution. proposed_drop: only the exact old-page specification acceptance quoted above, with current-page source checks kept separate; the caller has not accepted this drop. possible_cover: the same old-page rule may be shared with g053/g075, as the caller reports; no excluded coverage source was searched. Could-be-highest: no established security or user-owned-work loss route; malformed input ends the viewer attachment, not the agent. Caveats: this is a narrow routing/compatibility check, not an exhaustive review of the browser grid implementation, and no historical-page decoder reproduction was performed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 8,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Old browser pages lose terminal compatibility after stream notice removal",
+          "location": "crates/farhelm-helm/src/terminal.rs:675",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: A page loaded before the helm update can draw grid messages as terminal text and lose its attachment on input until reloaded. Details: The patch removes stream_notice and its initial WebSocket send, along with the grid query capability. SPEC_impl.md, Grid streams, :3021-3027 explicitly accepts the old-page consequence: ‘A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.’ It continues: ‘any reconnect from it, automatic in that window or manual, misdraws the terminal’ and ‘what is typed into it ends the attachment as malformed input.’ ‘Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy.’ This acceptance is limited to pages loaded from the previous helm; it supplies no exception for a current page's routing. Synthesis rechecked the current-page interface independently: terminal.js:3387-3428 constructs, installs and fits a grid before opening the WebSocket, :4051-4085 handles the replay marker without choosing a stream component, :4152-4165 passes binary messages directly to receiveGrid, :4465-4475 invokes grid.receive, and :4495-4507 encodes input as one binary grid message. terminal.rs:690-713 preserves the binary/catch-up-marker order and :762-774 forwards each binary message via send_grid_input. client.rs:4111-4135 preserves one-frame delivery and the input bound. No current-page dependency on the removed stream notice was found along these paths. Suggested bucket: high/material UX if the old-page consequence were not accepted. Confidence: confirmed source and contract analysis, not execution. proposed_drop: only the exact old-page specification acceptance quoted above, with current-page source checks kept separate; the caller has not accepted this drop. possible_cover: the same old-page rule may be shared with g053/g075, as the caller reports; no excluded coverage source was searched. Could-be-highest: no established security or user-owned-work loss route; malformed input ends the viewer attachment, not the agent. Caveats: this is a narrow routing/compatibility check, not an exhaustive review of the browser grid implementation, and no historical-page decoder reproduction was performed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g076/findings.jsonl",
+        "id": "c1",
+        "line": 8,
+        "disposition": "excluded",
+        "group": "grid-only-upgrade-stale-browser-needs-reload",
+        "reason": "Parent explicitly accepted named covered proposal from claims-048 after inspecting it. The specification explicitly accepts the previous-page consequence. Independently checked current-page code constructs and uses the grid without waiting for the removed stream notice. Exact old-page specification acceptance only, with the supplied sibling aliases recorded. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e SPEC_impl.md:3021-3027 accepts old-page misdrawing and input ending the viewer attachment until reload.\",\"At that hash terminal.js:3387-3428 constructs/fits the grid before WebSocket creation, :4152-4165 sends binary messages to receiveGrid, and :4495-4507 sends encoded binary grid input.\",\"terminal.rs:762-774 forwards through send_grid_input and ends reading on refusal; client.rs:4111-4135 preserves one-frame delivery and the input cap. Current-page correctness is separate corroboration, not coverage for the old page.\",\"Source-only routing check; no exhaustive browser-grid review or historical-page reproduction.\"] Current coverage/results: [\"Current SPEC_impl.md:2949-2955 has the exact old-page acceptance. SPEC.md terminal/upgrade rules contain no broader current-page routing exception.\",\"TODO.md Planned is empty; tmux-end-old-terminals.md:119-129 requires this removal and unconditional grid mount. No exact BUGS.md, INDEX.md/queue or active TRIAGE_OUTCOMES.md match. No FILTER.md basis is needed.\"] Exact cited cover: [\"SPEC_impl.md:2949-2950: A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.\",\"SPEC_impl.md:2955: malformed input. Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy.\"] Original stronger consequence and missing premise remain preserved: \"A page loaded before the update may draw grid messages as terminal text and lose its viewer attachment on input until reload. The acceptance says nothing about current-page routing or terminating the agent.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g076/c1",
+        "line": 8,
+        "disposition": "excluded",
+        "group": "grid-only-upgrade-stale-browser-needs-reload",
+        "bucket": "high",
+        "recording": "covered",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named covered proposal from claims-048 after inspecting it. The specification explicitly accepts the previous-page consequence. Independently checked current-page code constructs and uses the grid without waiting for the removed stream notice. Exact old-page specification acceptance only, with the supplied sibling aliases recorded. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e SPEC_impl.md:3021-3027 accepts old-page misdrawing and input ending the viewer attachment until reload.\",\"At that hash terminal.js:3387-3428 constructs/fits the grid before WebSocket creation, :4152-4165 sends binary messages to receiveGrid, and :4495-4507 sends encoded binary grid input.\",\"terminal.rs:762-774 forwards through send_grid_input and ends reading on refusal; client.rs:4111-4135 preserves one-frame delivery and the input cap. Current-page correctness is separate corroboration, not coverage for the old page.\",\"Source-only routing check; no exhaustive browser-grid review or historical-page reproduction.\"] Current coverage/results: [\"Current SPEC_impl.md:2949-2955 has the exact old-page acceptance. SPEC.md terminal/upgrade rules contain no broader current-page routing exception.\",\"TODO.md Planned is empty; tmux-end-old-terminals.md:119-129 requires this removal and unconditional grid mount. No exact BUGS.md, INDEX.md/queue or active TRIAGE_OUTCOMES.md match. No FILTER.md basis is needed.\"] Exact cited cover: [\"SPEC_impl.md:2949-2950: A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.\",\"SPEC_impl.md:2955: malformed input. Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy.\"] Original stronger consequence and missing premise remain preserved: \"A page loaded before the update may draw grid messages as terminal text and lose its viewer attachment on input until reload. The acceptance says nothing about current-page routing or terminating the agent.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-048",
+          "key": "g076/c1",
+          "latest_line": 8,
+          "recommendation": "covered",
+          "bucket": "high",
+          "underlying_key": "grid-only-upgrade-stale-browser-needs-reload",
+          "aliases": [
+            "g074/c1",
+            "g075/c1"
+          ],
+          "target_queue_file": null,
+          "why": "The specification explicitly accepts the previous-page consequence. Independently checked current-page code constructs and uses the grid without waiting for the removed stream notice.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e SPEC_impl.md:3021-3027 accepts old-page misdrawing and input ending the viewer attachment until reload.",
+            "At that hash terminal.js:3387-3428 constructs/fits the grid before WebSocket creation, :4152-4165 sends binary messages to receiveGrid, and :4495-4507 sends encoded binary grid input.",
+            "terminal.rs:762-774 forwards through send_grid_input and ends reading on refusal; client.rs:4111-4135 preserves one-frame delivery and the input cap. Current-page correctness is separate corroboration, not coverage for the old page.",
+            "Source-only routing check; no exhaustive browser-grid review or historical-page reproduction."
+          ],
+          "coverage_checked": [
+            "Current SPEC_impl.md:2949-2955 has the exact old-page acceptance. SPEC.md terminal/upgrade rules contain no broader current-page routing exception.",
+            "TODO.md Planned is empty; tmux-end-old-terminals.md:119-129 requires this removal and unconditional grid mount. No exact BUGS.md, INDEX.md/queue or active TRIAGE_OUTCOMES.md match. No FILTER.md basis is needed."
+          ],
+          "exact_cover_quotes": [
+            "SPEC_impl.md:2949-2950: A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.",
+            "SPEC_impl.md:2955: malformed input. Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy."
+          ],
+          "missing_premise": null,
+          "original_stronger_consequence": "A page loaded before the update may draw grid messages as terminal text and lose its viewer attachment on input until reload. The acceptance says nothing about current-page routing or terminating the agent.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Exact old-page specification acceptance only, with the supplied sibling aliases recorded."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "grid-only-upgrade-stale-browser-needs-reload",
+        "destination": null
+      }
+    },
+    {
+      "key": "g076/c2",
+      "owner": "g076",
+      "id": "c2",
+      "domain": "helm-terminal-routing",
+      "purpose": "helm-terminal-routing: crates/farhelm-helm/src/terminal.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Removing browser pause and resume leaves helm-owned flow control intact",
+            "location": "crates/farhelm-helm/src/terminal.rs:776",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: Considered whether ignoring browser pause/resume after removal of byte-stream routing lets a slow terminal viewer exhaust its queue. Source refutation: crates/farhelm-helm/src/client.rs:4016-4036 creates every attachment with GRID_EVENT_QUEUE and QueueGauge before sending Attach; :4062-4069 starts grid flow on every successful Attached, including bytes received before the reply; :4138-4178 sends the gauge's pause/resume decisions in order. terminal.rs:690-752 retains the output drain and independent detach signal. SPEC_impl.md, Grid streams, :3030-3041 says the helm enforces the bounds and pauses the supervisor itself, and ignores page pause/resume. Suggested bucket: high/material UX for a hypothetical stall regression. Confidence: confirmed source refutation, no execution. proposed_drop: refuted by the client registration and flow-control paths above. possible_cover: none. Could-be-highest: no established user-owned-work loss or security route; queue overflow detaches a viewer while the terminal host continues its agent. Caveat: this is limited to the effect of removing the browser control branches; it is not an independent review of the client's whole flow-control implementation."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Removing browser pause and resume leaves helm-owned flow control intact",
+            "location": "crates/farhelm-helm/src/terminal.rs:776",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: Considered whether ignoring browser pause/resume after byte-stream removal lets a slow viewer exhaust its output queue. Source refutation: client.rs:4016-4036 registers every attachment with GRID_EVENT_QUEUE and QueueGauge before sending Attach; :4062-4069 starts the gauge's flow observer after Attached, accounting for data already received. :815-898 initializes the gauge at zero and steers pause/resume from event/byte counts; :4138-4178 sends changes on the shared writer queue in order. terminal.rs:690-752 retains its independent output drain and detach race, and :776-798 ignores page pause/resume rather than overriding that gauge. SPEC_impl.md, Grid streams, :3029-3039 requires helm-owned flow control and explicitly ignores page pause/resume; :3041-3054 separately documents the paused-viewer deadline and bounded in-flight overflow. Suggested bucket: high/material UX for the hypothesized regression. Confidence: confirmed source refutation, not runtime observation. proposed_drop: limited to the claim that removing the browser branches disables flow control, refuted by these production registration/observer paths; the caller has not accepted a drop. possible_cover: none. Could-be-highest: no established security or user-owned-work loss route; output-queue overflow ends the viewer attachment while the terminal host keeps the agent. Caveats: this check does not certify all gauge/accounting paths or prove l1's shared writer queue is full. Synthetic output-queue overflow, production output gauge tests, the shared input writer's available permits, and Tokio's cooperative polling budget are different premises. In particular, g075/c2 supplies no evidence that the test in l1 crosses its caller-timeout/grace boundary. No runtime tests or reproductions were performed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 9,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Removing browser pause and resume leaves helm-owned flow control intact",
+          "location": "crates/farhelm-helm/src/terminal.rs:776",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: Considered whether ignoring browser pause/resume after byte-stream removal lets a slow viewer exhaust its output queue. Source refutation: client.rs:4016-4036 registers every attachment with GRID_EVENT_QUEUE and QueueGauge before sending Attach; :4062-4069 starts the gauge's flow observer after Attached, accounting for data already received. :815-898 initializes the gauge at zero and steers pause/resume from event/byte counts; :4138-4178 sends changes on the shared writer queue in order. terminal.rs:690-752 retains its independent output drain and detach race, and :776-798 ignores page pause/resume rather than overriding that gauge. SPEC_impl.md, Grid streams, :3029-3039 requires helm-owned flow control and explicitly ignores page pause/resume; :3041-3054 separately documents the paused-viewer deadline and bounded in-flight overflow. Suggested bucket: high/material UX for the hypothesized regression. Confidence: confirmed source refutation, not runtime observation. proposed_drop: limited to the claim that removing the browser branches disables flow control, refuted by these production registration/observer paths; the caller has not accepted a drop. possible_cover: none. Could-be-highest: no established security or user-owned-work loss route; output-queue overflow ends the viewer attachment while the terminal host keeps the agent. Caveats: this check does not certify all gauge/accounting paths or prove l1's shared writer queue is full. Synthetic output-queue overflow, production output gauge tests, the shared input writer's available permits, and Tokio's cooperative polling budget are different premises. In particular, g075/c2 supplies no evidence that the test in l1 crosses its caller-timeout/grace boundary. No runtime tests or reproductions were performed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g076/findings.jsonl",
+        "id": "c2",
+        "line": 9,
+        "disposition": "excluded",
+        "group": "removing-browser-pause-resume-disables-grid-flow-suspicion",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-048 after inspecting it. The removed page controls were not the surviving grid flow-control authority. Every attachment retains the helm-owned gauge and observer; ignoring old browser controls cannot override that gauge. Source refutation of the narrow removed-browser-branches claim. High describes the hypothesized UX consequence if it existed, not a demonstrated current failure. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e client.rs:4016-4036 registers the grid queue and gauge before Attach; :4062-4069 starts flow after Attached, including prior data accounting.\",\"At that hash :815-898 initializes counters, admits bounded events/bytes and steers pause/resume; :4138-4178 sends those changes through the shared writer. terminal.rs:776-798 ignores obsolete page controls.\",\"Queue overflow and per-attachment release remain handled at client.rs:2436-2519. This narrowly refutes removal disabling flow control; it does not certify all accounting paths or prove g076/l1's input writer has no spare permits. No runtime observation.\"] Current coverage/results: [\"SPEC.md:3011-3029 and SPEC_impl.md:2957-2982 require helm-owned queue control; the latter explicitly says the helm ignores page pause/resume and describes accepted in-flight-overflow/stall floors.\",\"TODO.md Planned is empty. tmux-end-old-terminals.md:119-124 explicitly removes browser-driven flow control but is not acceptance of broken helm control. No same issue in BUGS.md, INDEX.md/queue or active TRIAGE_OUTCOMES.md. FILTER.md is not needed.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Ignoring browser pause/resume might let a slow viewer exhaust its output queue and stall/detach. No shipped agent termination, security impact or user-owned-work loss was established. Production output accounting and input writer cooperative scheduling are separate premises.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g076/c2",
+        "line": 9,
+        "disposition": "excluded",
+        "group": "removing-browser-pause-resume-disables-grid-flow-suspicion",
+        "bucket": "high",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-048 after inspecting it. The removed page controls were not the surviving grid flow-control authority. Every attachment retains the helm-owned gauge and observer; ignoring old browser controls cannot override that gauge. Source refutation of the narrow removed-browser-branches claim. High describes the hypothesized UX consequence if it existed, not a demonstrated current failure. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e client.rs:4016-4036 registers the grid queue and gauge before Attach; :4062-4069 starts flow after Attached, including prior data accounting.\",\"At that hash :815-898 initializes counters, admits bounded events/bytes and steers pause/resume; :4138-4178 sends those changes through the shared writer. terminal.rs:776-798 ignores obsolete page controls.\",\"Queue overflow and per-attachment release remain handled at client.rs:2436-2519. This narrowly refutes removal disabling flow control; it does not certify all accounting paths or prove g076/l1's input writer has no spare permits. No runtime observation.\"] Current coverage/results: [\"SPEC.md:3011-3029 and SPEC_impl.md:2957-2982 require helm-owned queue control; the latter explicitly says the helm ignores page pause/resume and describes accepted in-flight-overflow/stall floors.\",\"TODO.md Planned is empty. tmux-end-old-terminals.md:119-124 explicitly removes browser-driven flow control but is not acceptance of broken helm control. No same issue in BUGS.md, INDEX.md/queue or active TRIAGE_OUTCOMES.md. FILTER.md is not needed.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Ignoring browser pause/resume might let a slow viewer exhaust its output queue and stall/detach. No shipped agent termination, security impact or user-owned-work loss was established. Production output accounting and input writer cooperative scheduling are separate premises.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-048",
+          "key": "g076/c2",
+          "latest_line": 9,
+          "recommendation": "refuted",
+          "bucket": "high",
+          "underlying_key": "removing-browser-pause-resume-disables-grid-flow-suspicion",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The removed page controls were not the surviving grid flow-control authority. Every attachment retains the helm-owned gauge and observer; ignoring old browser controls cannot override that gauge.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e client.rs:4016-4036 registers the grid queue and gauge before Attach; :4062-4069 starts flow after Attached, including prior data accounting.",
+            "At that hash :815-898 initializes counters, admits bounded events/bytes and steers pause/resume; :4138-4178 sends those changes through the shared writer. terminal.rs:776-798 ignores obsolete page controls.",
+            "Queue overflow and per-attachment release remain handled at client.rs:2436-2519. This narrowly refutes removal disabling flow control; it does not certify all accounting paths or prove g076/l1's input writer has no spare permits. No runtime observation."
+          ],
+          "coverage_checked": [
+            "SPEC.md:3011-3029 and SPEC_impl.md:2957-2982 require helm-owned queue control; the latter explicitly says the helm ignores page pause/resume and describes accepted in-flight-overflow/stall floors.",
+            "TODO.md Planned is empty. tmux-end-old-terminals.md:119-124 explicitly removes browser-driven flow control but is not acceptance of broken helm control. No same issue in BUGS.md, INDEX.md/queue or active TRIAGE_OUTCOMES.md. FILTER.md is not needed."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Ignoring browser pause/resume might let a slow viewer exhaust its output queue and stall/detach. No shipped agent termination, security impact or user-owned-work loss was established. Production output accounting and input writer cooperative scheduling are separate premises.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation of the narrow removed-browser-branches claim. High describes the hypothesized UX consequence if it existed, not a demonstrated current failure."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "removing-browser-pause-resume-disables-grid-flow-suspicion",
+        "destination": null
+      }
+    },
+    {
+      "key": "g076/l1",
+      "owner": "g076",
+      "id": "l1",
+      "domain": "helm-terminal-routing",
+      "purpose": "helm-terminal-routing: crates/farhelm-helm/src/terminal.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Detach timeout test may mistake cooperative yielding for writer backpressure",
+            "location": "crates/farhelm-helm/src/terminal.rs:1183",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: The rewritten stalled-writer test may pass without exercising the timeout that protects terminal teardown. Source basis: terminal.rs:1183-1195 polls an infinite send_grid_input loop exactly once and treats any Pending as proof that the writer queue is full; :1197 calls detach_bounded without asserting that the virtual teardown grace elapsed. send_grid_input in client.rs:4111-4134 awaits a mutex and a bounded mpsc send on every iteration. Pending may represent Tokio cooperative yielding rather than full queue capacity. Suggested bucket: other (test evidence only). Confidence: uninvestigated lead; dependency scheduling and prior implementation still need checking. proposed_drop: false. possible_cover: none. Could-be-highest: no; this concerns maintainer test coverage and establishes no shipped loss or security route. Missing premise: whether the single poll can exhaust cooperative budget before filling the writer queue in this test. Next checks: inspect the pinned Tokio mutex/mpsc cooperative accounting, the client's writer queue depth and initial scheduling, and the removed send_input implementation to distinguish an introduced gap from inherited test weakness. No runtime execution or reproduction performed."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "The detach timeout test yields before establishing writer backpressure",
+            "location": "crates/farhelm-helm/src/terminal.rs:1183-1197",
+            "detail": "# Detach timeout test does not establish its stalled-writer premise\n\nReviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\nThe rewritten terminal teardown test can pass without exercising the timeout that keeps a stuck host connection from holding a terminal socket open. Removing that timeout can therefore go undetected by the test named for it. This is a test-evidence defect; no shipped teardown failure is established here.\n\n## Details\nterminal.rs:1183-1195 replaces the old single send_input call with a loop of send_grid_input calls, polls it once, and treats any Pending as proof that the real writer queue is full. Each iteration now awaits both terminals.lock() and writer_tx.send() (client.rs:4111-4134). The pinned dependency is Tokio 1.53.2 (Cargo.lock). Its mutex acquires the batch semaphore (tokio-1.53.2/src/sync/mutex.rs:434-455,655-663); bounded Sender::send reserves through the same semaphore (sync/mpsc/bounded.rs:816-824,1116-1119,1272-1302); each successful Acquire poll consumes one cooperative budget unit (sync/batch_semaphore.rs:617-662). The task's poll budget is 128 (task/coop/mod.rs:105-117), and poll_proceed returns Pending when exhausted (:291-365). Thus this loop can exhaust its budget after at most 64 iterations while the writer's queue capacity is itself 64 (client.rs:173,1779). The successful oneshot receive returning the Attach reply has already consumed a budget unit before the loop (client.rs:2990-2992; Tokio sync/oneshot.rs:1317-1375), leaving at most 127, so the first Pending can occur after at most 63 input frames: before the queue fills. The test runs in an ordinary current-thread Tokio runtime, without unconstrained polling (farhelm-testtrace-macros/src/lib.rs:55-64; farhelm-testtrace/src/lib.rs:995-1013,1126-1142). The writer can dequeue additional frames when the test next yields, adding spare slots.\n\nAt terminal.rs:1197-1204 the test neither checks writer capacity nor checks that detach_bounded consumed WS_TEARDOWN_GRACE. Its release_upstream task (client.rs:2499-2519) can enqueue Detach into a spare slot and finish immediately. The peer is released only afterward, so receiving Detach proves eventual notification but not that a caller timeout occurred or that notification survived it. This violates the test's stated contract (:1116-1122) and the test-authoring requirement ‘Assert the fixture premise before the action or measurement that depends on it.’ A source-level repair is to establish exhausted writer capacity explicitly (for example, using the existing writer-capacity reservation seam) and assert the virtual grace actually elapsed before releasing the peer.\n\nSuggested bucket: other, because the established consequence is missing maintainer test coverage. Confidence: confirmed by source/dependency contract analysis; no runtime tests or reproductions were performed. proposed_drop: false. possible_cover: none; excluded coverage sources were not searched. Could-be-highest: no; this finding establishes no shipped security, data, process, or user-owned-work loss. Caveats: the previous send_input version also assumed Pending meant capacity pressure, but it charged one semaphore acquisition per chunk instead of two; this rewrite introduces an unavoidable cooperative-budget boundary at or before the 64-slot capacity and removes the source argument that the single poll filled it. The precise dynamic frame count is not claimed as observed."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "The detach timeout test yields before establishing writer backpressure",
+            "location": "crates/farhelm-helm/src/terminal.rs:1183-1197",
+            "detail": "# Detach timeout test does not establish its stalled-writer premise\n\nReviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\nThe rewritten terminal teardown test can pass without exercising the timeout that keeps a stuck host connection from holding a terminal socket open. Removing that timeout can therefore go undetected by the test named for it. This is a test-evidence defect; no shipped teardown failure is established here.\n\n## Details\nThe required boundary is explicit at terminal.rs:1116-1122: the peer stops reading, input fills the bounded writer queue, detach_bounded must return at its grace, and only after that may the released peer receive the independently owned Detach. Eventual notification alone does not establish the timeout or survival across caller timeout. At :1183-1195 the changed loop polls send_grid_input once and calls every Pending writer backpressure; :1197-1204 never checks capacity or elapsed virtual grace.\n\nSynthesis verified the exact dependency and polling scope. Cargo.lock pins Tokio 1.53.2. farhelm-testtrace-macros/src/lib.rs:248-259 selects CurrentThread for this start_paused test. farhelm-testtrace/src/lib.rs:995-1013 and :1126-1142 create a fresh ordinary runtime and block_on the test body. Tokio runtime/scheduler/current_thread/mod.rs:180-253 creates/takes that runtime's scheduler core; :815-834 wraps each root-future poll in coop::budget. task/coop/mod.rs:105-155 gives that outer poll 128 units and restores the previous budget only when the outer closure returns. terminal.rs:1191-1194 uses std::future::poll_fn and calls Future::poll directly; it neither creates a fresh Tokio task nor calls budget/unconstrained. An inner Pending is converted into Ready(true), so this manual poll does not itself leave the ordinary root cooperative scope.\n\nAttach consumes budget in that same scope: client.rs:2990-2992 successfully polls its oneshot receiver; Tokio sync/oneshot.rs:1317-1334 calls poll_proceed and made_progress on successful receipt. The success return through client.rs:4054-4069 and :3975-3976 has no subsequent await or scope reset before terminal.rs:1183-1194. start_grid_flow uses a synchronous gauge mutex, creates a false watch and starts an observer; it does not renew cooperative budget (client.rs:861-898,4155-4178). Thus at most 127 units remain for the input poll.\n\nEvery completed input iteration consumes two units: client.rs:4111-4134 acquires terminals.lock(), drops its guard, then awaits writer_tx.send(). Tokio's mutex uses semaphore acquire (sync/mutex.rs:434-455,655-663), bounded mpsc send reserves another semaphore permit (sync/mpsc/bounded.rs:816-824,1116-1119,1272-1307), and each successful semaphore Acquire consumes one unit (sync/batch_semaphore.rs:617-662). poll_proceed returns Pending at exhaustion (task/coop/mod.rs:291-365). The queue is 64 slots (client.rs:173,1779).\n\nConcrete source route: let the normal successful Attach resume its caller in a root poll with a full initial budget. The oneshot success leaves 127. With uncontended terminals.lock() and an initially empty writer queue, 63 complete input sends consume 126 units, the next mutex acquisition consumes the last unit, its guard is dropped, and the following mpsc send returns cooperative Pending without even testing/acquiring the still-available queue capacity. At most 63 of 64 slots hold input. The queue is initially empty on this fixture route: the peer must have consumed Attach before answering it; the plain start constructor enables neither heartbeat nor agent upcalls (client.rs:1613-1667), and this peer sends no grid events, so the false, empty gauge sends no pause (client.rs:861-898). This is a current-thread runtime: no writer task runs concurrently inside the one uninterrupted root poll. If earlier work used more budget, the same cooperative limit can be reached after fewer sends. No queue pressure is proved by this Pending.\n\nThe subsequent client.detach removes the local terminal and awaits release_upstream's separately spawned enqueue (client.rs:4088-4090,2499-2519). Once the root yields, that task has spare queue capacity, and the writer can free more. Detach can therefore be enqueued and return before the five-second grace, while the peer is still waiting for release_rx. The test then releases that peer and observes eventual Detach, satisfying its assertions despite never observing the caller-timeout boundary. The relevant distinction is writer-queue capacity versus cooperative scheduler budget, not synthetic output-queue overflow or production gauge accounting.\n\nA repair should establish an actually blocked independent Detach enqueue, assert that the local helper returns at the virtual grace before releasing the peer, and then assert that the peer receives the notification despite the caller timeout. Explicit capacity reservation/inspection is preferable to interpreting an arbitrary Pending.\n\nSuggested bucket: other (maintainer test coverage). Confidence: confirmed by source and pinned-dependency contracts, not runtime observation. proposed_drop: false. possible_cover: none; excluded coverage sources were not searched. Could-be-highest: no; no shipped security or user-owned-work loss route is established. Caveats: the previous send_input version also assumed Pending meant capacity pressure, but acquired one semaphore per chunk rather than two; the rewritten loop reaches the cooperative limit at or before filling the 64-slot queue. The concrete route above is source-derived and is not a measured scheduling trace. Exact observed frame count, elapsed time, and mutation-test results remain unavailable because no runtime reproduction was requested or performed; none is needed to establish the missing fixture assertion."
+          }
+        }
+      ],
+      "latest": {
+        "line": 7,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l1",
+          "state": "open",
+          "summary": "The detach timeout test yields before establishing writer backpressure",
+          "location": "crates/farhelm-helm/src/terminal.rs:1183-1197",
+          "detail": "# Detach timeout test does not establish its stalled-writer premise\n\nReviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\nThe rewritten terminal teardown test can pass without exercising the timeout that keeps a stuck host connection from holding a terminal socket open. Removing that timeout can therefore go undetected by the test named for it. This is a test-evidence defect; no shipped teardown failure is established here.\n\n## Details\nThe required boundary is explicit at terminal.rs:1116-1122: the peer stops reading, input fills the bounded writer queue, detach_bounded must return at its grace, and only after that may the released peer receive the independently owned Detach. Eventual notification alone does not establish the timeout or survival across caller timeout. At :1183-1195 the changed loop polls send_grid_input once and calls every Pending writer backpressure; :1197-1204 never checks capacity or elapsed virtual grace.\n\nSynthesis verified the exact dependency and polling scope. Cargo.lock pins Tokio 1.53.2. farhelm-testtrace-macros/src/lib.rs:248-259 selects CurrentThread for this start_paused test. farhelm-testtrace/src/lib.rs:995-1013 and :1126-1142 create a fresh ordinary runtime and block_on the test body. Tokio runtime/scheduler/current_thread/mod.rs:180-253 creates/takes that runtime's scheduler core; :815-834 wraps each root-future poll in coop::budget. task/coop/mod.rs:105-155 gives that outer poll 128 units and restores the previous budget only when the outer closure returns. terminal.rs:1191-1194 uses std::future::poll_fn and calls Future::poll directly; it neither creates a fresh Tokio task nor calls budget/unconstrained. An inner Pending is converted into Ready(true), so this manual poll does not itself leave the ordinary root cooperative scope.\n\nAttach consumes budget in that same scope: client.rs:2990-2992 successfully polls its oneshot receiver; Tokio sync/oneshot.rs:1317-1334 calls poll_proceed and made_progress on successful receipt. The success return through client.rs:4054-4069 and :3975-3976 has no subsequent await or scope reset before terminal.rs:1183-1194. start_grid_flow uses a synchronous gauge mutex, creates a false watch and starts an observer; it does not renew cooperative budget (client.rs:861-898,4155-4178). Thus at most 127 units remain for the input poll.\n\nEvery completed input iteration consumes two units: client.rs:4111-4134 acquires terminals.lock(), drops its guard, then awaits writer_tx.send(). Tokio's mutex uses semaphore acquire (sync/mutex.rs:434-455,655-663), bounded mpsc send reserves another semaphore permit (sync/mpsc/bounded.rs:816-824,1116-1119,1272-1307), and each successful semaphore Acquire consumes one unit (sync/batch_semaphore.rs:617-662). poll_proceed returns Pending at exhaustion (task/coop/mod.rs:291-365). The queue is 64 slots (client.rs:173,1779).\n\nConcrete source route: let the normal successful Attach resume its caller in a root poll with a full initial budget. The oneshot success leaves 127. With uncontended terminals.lock() and an initially empty writer queue, 63 complete input sends consume 126 units, the next mutex acquisition consumes the last unit, its guard is dropped, and the following mpsc send returns cooperative Pending without even testing/acquiring the still-available queue capacity. At most 63 of 64 slots hold input. The queue is initially empty on this fixture route: the peer must have consumed Attach before answering it; the plain start constructor enables neither heartbeat nor agent upcalls (client.rs:1613-1667), and this peer sends no grid events, so the false, empty gauge sends no pause (client.rs:861-898). This is a current-thread runtime: no writer task runs concurrently inside the one uninterrupted root poll. If earlier work used more budget, the same cooperative limit can be reached after fewer sends. No queue pressure is proved by this Pending.\n\nThe subsequent client.detach removes the local terminal and awaits release_upstream's separately spawned enqueue (client.rs:4088-4090,2499-2519). Once the root yields, that task has spare queue capacity, and the writer can free more. Detach can therefore be enqueued and return before the five-second grace, while the peer is still waiting for release_rx. The test then releases that peer and observes eventual Detach, satisfying its assertions despite never observing the caller-timeout boundary. The relevant distinction is writer-queue capacity versus cooperative scheduler budget, not synthetic output-queue overflow or production gauge accounting.\n\nA repair should establish an actually blocked independent Detach enqueue, assert that the local helper returns at the virtual grace before releasing the peer, and then assert that the peer receives the notification despite the caller timeout. Explicit capacity reservation/inspection is preferable to interpreting an arbitrary Pending.\n\nSuggested bucket: other (maintainer test coverage). Confidence: confirmed by source and pinned-dependency contracts, not runtime observation. proposed_drop: false. possible_cover: none; excluded coverage sources were not searched. Could-be-highest: no; no shipped security or user-owned-work loss route is established. Caveats: the previous send_input version also assumed Pending meant capacity pressure, but acquired one semaphore per chunk rather than two; the rewritten loop reaches the cooperative limit at or before filling the 64-slot queue. The concrete route above is source-derived and is not a measured scheduling trace. Exact observed frame count, elapsed time, and mutation-test results remain unavailable because no runtime reproduction was requested or performed; none is needed to establish the missing fixture assertion."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g076/findings.jsonl",
+        "id": "l1",
+        "line": 7,
+        "disposition": "verified",
+        "group": "detach-timeout-test-confuses-cooperative-yield-with-writer-capacity",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-048 after inspecting it. The changed test treats any Pending from its manually polled input loop as full writer capacity and never asserts elapsed teardown grace. Pinned cooperative accounting supplies a concrete source route yielding with capacity remaining, so eventual Detach alone does not establish timeout coverage. Retain source-confirmed test-evidence defect. Production gauge tests and the two correctly witnessed Resize writer tests do not cover this distinct input-writer timeout fixture. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e terminal.rs:1116-1122 promises blocked-writer timeout survival; :1183-1204 polls input once, equates Pending with pressure, calls detach_bounded, then releases the peer without checking capacity or elapsed grace.\",\"The commit diff replaces one send_input over eight MiB with a loop of send_grid_input. client.rs:4111-4134 acquires the terminal mutex and bounded sender for each message; :2989-2992 successfully awaits the Attach reply's oneshot first.\",\"That hash Cargo.lock:6278-6281 pins Tokio 1.53.2. Its local primary sources task/coop/mod.rs:105-155 give a root poll 128 units; sync/batch_semaphore.rs:617-662 charges a successful Acquire, and sync/oneshot.rs:1317-1334 charges successful receive. mutex.rs:434-455 and mpsc/bounded.rs:1272-1307 use semaphore acquisition.\",\"testtrace-macros/src/lib.rs:248-259 selects CurrentThread, and Tokio runtime/scheduler/current_thread/mod.rs:815-834 budgets the root future poll. The direct Future::poll inside poll_fn does not create another task or renew budget. At most 127 units remain after the reply, allowing at most 63 complete two-acquire sends before yielding, short of the 64-slot queue.\",\"client.rs:2499-2519 independently spawns the Detach enqueue. Once the root yields it can enqueue with spare capacity, so the asserted eventual peer notification can occur without a caller timeout. This is a conditional source route, not a measured scheduler trace or mutation-test result.\",\"The inherited test also lacked an elapsed-grace assertion, but the in-range loop rewrite adds the second acquisition per frame and destroys the source argument that the first Pending fills the queue. Suggested repair: establish an actually blocked independent enqueue, assert grace elapsed before releasing the peer, then observe surviving Detach.\"] Current coverage/results: [\"SPEC.md terminal/responsiveness searches and SPEC_impl.md:2957-2982 / :3101-3146 specify bounded, isolated flow and the 64-frame writer. Neither accepts a regression test that omits its stated timeout boundary.\",\"TODO.md Planned is empty. Searched all plans/queue for detach, timeout, writer, backpressure and cooperative budget; no unlanded plan repairs this test oracle. BUGS.md's SSH provisioning hang is unrelated.\",\"Read INDEX.md and searched queue/active TRIAGE_OUTCOMES.md for ordinary_detach_wait, detach_bounded, stalled writer and cooperative budget: no exact existing item. Other timeout/writer-test items involve different fixtures and mechanisms. No FILTER.md boundary covers this test-evidence defect.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The timeout that prevents a stuck host connection holding a terminal socket open can be removed without this named test proving that regression. This is lost maintainer test sensitivity; no shipped teardown defect, security harm or user-owned-work loss is established. Earlier source revisions distinguished cooperative yielding from actual writer pressure; that distinction remains intact.\"; \"No missing premise for the absent capacity/grace witness. Exact dynamic frame count, elapsed time and timeout-removal mutation behavior remain unmeasured because no reproduction or tests were authorized.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g076/l1",
+        "line": 7,
+        "disposition": "verified",
+        "group": "detach-timeout-test-confuses-cooperative-yield-with-writer-capacity",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": "review_feedback_queue/detach-timeout-test-lacks-writer-pressure.md",
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-048 after inspecting it. The changed test treats any Pending from its manually polled input loop as full writer capacity and never asserts elapsed teardown grace. Pinned cooperative accounting supplies a concrete source route yielding with capacity remaining, so eventual Detach alone does not establish timeout coverage. Retain source-confirmed test-evidence defect. Production gauge tests and the two correctly witnessed Resize writer tests do not cover this distinct input-writer timeout fixture. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e terminal.rs:1116-1122 promises blocked-writer timeout survival; :1183-1204 polls input once, equates Pending with pressure, calls detach_bounded, then releases the peer without checking capacity or elapsed grace.\",\"The commit diff replaces one send_input over eight MiB with a loop of send_grid_input. client.rs:4111-4134 acquires the terminal mutex and bounded sender for each message; :2989-2992 successfully awaits the Attach reply's oneshot first.\",\"That hash Cargo.lock:6278-6281 pins Tokio 1.53.2. Its local primary sources task/coop/mod.rs:105-155 give a root poll 128 units; sync/batch_semaphore.rs:617-662 charges a successful Acquire, and sync/oneshot.rs:1317-1334 charges successful receive. mutex.rs:434-455 and mpsc/bounded.rs:1272-1307 use semaphore acquisition.\",\"testtrace-macros/src/lib.rs:248-259 selects CurrentThread, and Tokio runtime/scheduler/current_thread/mod.rs:815-834 budgets the root future poll. The direct Future::poll inside poll_fn does not create another task or renew budget. At most 127 units remain after the reply, allowing at most 63 complete two-acquire sends before yielding, short of the 64-slot queue.\",\"client.rs:2499-2519 independently spawns the Detach enqueue. Once the root yields it can enqueue with spare capacity, so the asserted eventual peer notification can occur without a caller timeout. This is a conditional source route, not a measured scheduler trace or mutation-test result.\",\"The inherited test also lacked an elapsed-grace assertion, but the in-range loop rewrite adds the second acquisition per frame and destroys the source argument that the first Pending fills the queue. Suggested repair: establish an actually blocked independent enqueue, assert grace elapsed before releasing the peer, then observe surviving Detach.\"] Current coverage/results: [\"SPEC.md terminal/responsiveness searches and SPEC_impl.md:2957-2982 / :3101-3146 specify bounded, isolated flow and the 64-frame writer. Neither accepts a regression test that omits its stated timeout boundary.\",\"TODO.md Planned is empty. Searched all plans/queue for detach, timeout, writer, backpressure and cooperative budget; no unlanded plan repairs this test oracle. BUGS.md's SSH provisioning hang is unrelated.\",\"Read INDEX.md and searched queue/active TRIAGE_OUTCOMES.md for ordinary_detach_wait, detach_bounded, stalled writer and cooperative budget: no exact existing item. Other timeout/writer-test items involve different fixtures and mechanisms. No FILTER.md boundary covers this test-evidence defect.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The timeout that prevents a stuck host connection holding a terminal socket open can be removed without this named test proving that regression. This is lost maintainer test sensitivity; no shipped teardown defect, security harm or user-owned-work loss is established. Earlier source revisions distinguished cooperative yielding from actual writer pressure; that distinction remains intact.\"; \"No missing premise for the absent capacity/grace witness. Exact dynamic frame count, elapsed time and timeout-removal mutation behavior remain unmeasured because no reproduction or tests were authorized.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-048",
+          "key": "g076/l1",
+          "latest_line": 7,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "detach-timeout-test-confuses-cooperative-yield-with-writer-capacity",
+          "aliases": [],
+          "target_queue_file": "review_feedback_queue/detach-timeout-test-lacks-writer-pressure.md",
+          "why": "The changed test treats any Pending from its manually polled input loop as full writer capacity and never asserts elapsed teardown grace. Pinned cooperative accounting supplies a concrete source route yielding with capacity remaining, so eventual Detach alone does not establish timeout coverage.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e terminal.rs:1116-1122 promises blocked-writer timeout survival; :1183-1204 polls input once, equates Pending with pressure, calls detach_bounded, then releases the peer without checking capacity or elapsed grace.",
+            "The commit diff replaces one send_input over eight MiB with a loop of send_grid_input. client.rs:4111-4134 acquires the terminal mutex and bounded sender for each message; :2989-2992 successfully awaits the Attach reply's oneshot first.",
+            "That hash Cargo.lock:6278-6281 pins Tokio 1.53.2. Its local primary sources task/coop/mod.rs:105-155 give a root poll 128 units; sync/batch_semaphore.rs:617-662 charges a successful Acquire, and sync/oneshot.rs:1317-1334 charges successful receive. mutex.rs:434-455 and mpsc/bounded.rs:1272-1307 use semaphore acquisition.",
+            "testtrace-macros/src/lib.rs:248-259 selects CurrentThread, and Tokio runtime/scheduler/current_thread/mod.rs:815-834 budgets the root future poll. The direct Future::poll inside poll_fn does not create another task or renew budget. At most 127 units remain after the reply, allowing at most 63 complete two-acquire sends before yielding, short of the 64-slot queue.",
+            "client.rs:2499-2519 independently spawns the Detach enqueue. Once the root yields it can enqueue with spare capacity, so the asserted eventual peer notification can occur without a caller timeout. This is a conditional source route, not a measured scheduler trace or mutation-test result.",
+            "The inherited test also lacked an elapsed-grace assertion, but the in-range loop rewrite adds the second acquisition per frame and destroys the source argument that the first Pending fills the queue. Suggested repair: establish an actually blocked independent enqueue, assert grace elapsed before releasing the peer, then observe surviving Detach."
+          ],
+          "coverage_checked": [
+            "SPEC.md terminal/responsiveness searches and SPEC_impl.md:2957-2982 / :3101-3146 specify bounded, isolated flow and the 64-frame writer. Neither accepts a regression test that omits its stated timeout boundary.",
+            "TODO.md Planned is empty. Searched all plans/queue for detach, timeout, writer, backpressure and cooperative budget; no unlanded plan repairs this test oracle. BUGS.md's SSH provisioning hang is unrelated.",
+            "Read INDEX.md and searched queue/active TRIAGE_OUTCOMES.md for ordinary_detach_wait, detach_bounded, stalled writer and cooperative budget: no exact existing item. Other timeout/writer-test items involve different fixtures and mechanisms. No FILTER.md boundary covers this test-evidence defect."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No missing premise for the absent capacity/grace witness. Exact dynamic frame count, elapsed time and timeout-removal mutation behavior remain unmeasured because no reproduction or tests were authorized.",
+          "original_stronger_consequence": "The timeout that prevents a stuck host connection holding a terminal socket open can be removed without this named test proving that regression. This is lost maintainer test sensitivity; no shipped teardown defect, security harm or user-owned-work loss is established. Earlier source revisions distinguished cooperative yielding from actual writer pressure; that distinction remains intact.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain source-confirmed test-evidence defect. Production gauge tests and the two correctly witnessed Resize writer tests do not cover this distinct input-writer timeout fixture."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "detach-timeout-test-confuses-cooperative-yield-with-writer-capacity",
+        "destination": "trailing-detach-timeout-test-confuses-cooperative-yield-with-writer-capacity.md"
+      }
+    },
+    {
+      "key": "g076/c3",
+      "owner": "g076",
+      "id": "c3",
+      "domain": "helm-terminal-routing",
+      "purpose": "helm-terminal-routing: crates/farhelm-helm/src/terminal.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Removing stream kind from attachment tracing does not break the desktop smoke parser",
+            "location": "crates/farhelm-helm/src/terminal.rs:106-135",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: Considered whether removal of the attachment trace's stream field breaks the desktop smoke test's ability to identify its open terminal. Source refutation: terminal.rs retains the same target, terminal attached/terminal ended messages, session field, and terminal=agent value. scripts/desktop-smoke.sh:289-323 parses only those retained fields: its regex ends at terminal=agent followed by a word boundary, and its count uses the same retained fixed prefix; it never requires stream=bytes or stream=grid. The changed trace test at terminal.rs:1335-1401 uses arrival of the first data frame as the readiness boundary now that no stream notice exists, then checks exactly one start and one end. Suggested bucket: other (maintainer-tooling regression if real). Confidence: confirmed source refutation, no execution. proposed_drop: refuted by the smoke script's actual parser and retained event fields. possible_cover: none. Could-be-highest: no; only smoke-test observations were at issue. Caveat: this check covers the documented desktop-smoke consumer, not a guarantee for undocumented external log parsers."
+          }
+        }
+      ],
+      "latest": {
+        "line": 6,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Removing stream kind from attachment tracing does not break the desktop smoke parser",
+          "location": "crates/farhelm-helm/src/terminal.rs:106-135",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: Considered whether removal of the attachment trace's stream field breaks the desktop smoke test's ability to identify its open terminal. Source refutation: terminal.rs retains the same target, terminal attached/terminal ended messages, session field, and terminal=agent value. scripts/desktop-smoke.sh:289-323 parses only those retained fields: its regex ends at terminal=agent followed by a word boundary, and its count uses the same retained fixed prefix; it never requires stream=bytes or stream=grid. The changed trace test at terminal.rs:1335-1401 uses arrival of the first data frame as the readiness boundary now that no stream notice exists, then checks exactly one start and one end. Suggested bucket: other (maintainer-tooling regression if real). Confidence: confirmed source refutation, no execution. proposed_drop: refuted by the smoke script's actual parser and retained event fields. possible_cover: none. Could-be-highest: no; only smoke-test observations were at issue. Caveat: this check covers the documented desktop-smoke consumer, not a guarantee for undocumented external log parsers."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g076/findings.jsonl",
+        "id": "c3",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "removed-stream-trace-field-breaks-desktop-smoke-parser-suspicion",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-048 after inspecting it. The documented smoke parser reads retained trace fields and does not require the removed stream field. Source-refuted breakage of the actual documented desktop smoke consumer. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e terminal.rs:106-135 retains the target, attached/ended messages, session field and terminal=agent spelling.\",\"At that hash scripts/desktop-smoke.sh:289-323 uses a regex ending in terminal=agent followed by a word boundary and counts the same fixed prefix. Neither requires stream=bytes or stream=grid.\",\"This checks the documented consumer only, not undocumented external parsers or an executed smoke pass.\"] Current coverage/results: [\"SPEC.md terminal/diagnostic searches and SPEC_impl.md Grid streams/Multi­plexing searches contain no contrary stream-field requirement. This is source refutation, not specification acceptance of broken tooling.\",\"TODO.md Planned is empty. Searched plans/queue, BUGS.md, INDEX.md/queue and active TRIAGE_OUTCOMES.md for attachment tracing, stream fields and desktop smoke parser changes; no exact defect coverage.\",\"Read terminal-attachment-trace-retains-raw-session-id.md: that distinct existing item concerns diagnostic normalization, not stream-field removal. No alias or extension is warranted. FILTER.md is not used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing the attachment trace's stream field might prevent the desktop smoke test identifying its open terminal. No product failure or user-owned-work/security route was claimed; undocumented log parsers were outside the check.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g076/c3",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "removed-stream-trace-field-breaks-desktop-smoke-parser-suspicion",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-048 after inspecting it. The documented smoke parser reads retained trace fields and does not require the removed stream field. Source-refuted breakage of the actual documented desktop smoke consumer. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e terminal.rs:106-135 retains the target, attached/ended messages, session field and terminal=agent spelling.\",\"At that hash scripts/desktop-smoke.sh:289-323 uses a regex ending in terminal=agent followed by a word boundary and counts the same fixed prefix. Neither requires stream=bytes or stream=grid.\",\"This checks the documented consumer only, not undocumented external parsers or an executed smoke pass.\"] Current coverage/results: [\"SPEC.md terminal/diagnostic searches and SPEC_impl.md Grid streams/Multi­plexing searches contain no contrary stream-field requirement. This is source refutation, not specification acceptance of broken tooling.\",\"TODO.md Planned is empty. Searched plans/queue, BUGS.md, INDEX.md/queue and active TRIAGE_OUTCOMES.md for attachment tracing, stream fields and desktop smoke parser changes; no exact defect coverage.\",\"Read terminal-attachment-trace-retains-raw-session-id.md: that distinct existing item concerns diagnostic normalization, not stream-field removal. No alias or extension is warranted. FILTER.md is not used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing the attachment trace's stream field might prevent the desktop smoke test identifying its open terminal. No product failure or user-owned-work/security route was claimed; undocumented log parsers were outside the check.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-048",
+          "key": "g076/c3",
+          "latest_line": 6,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "removed-stream-trace-field-breaks-desktop-smoke-parser-suspicion",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The documented smoke parser reads retained trace fields and does not require the removed stream field.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e terminal.rs:106-135 retains the target, attached/ended messages, session field and terminal=agent spelling.",
+            "At that hash scripts/desktop-smoke.sh:289-323 uses a regex ending in terminal=agent followed by a word boundary and counts the same fixed prefix. Neither requires stream=bytes or stream=grid.",
+            "This checks the documented consumer only, not undocumented external parsers or an executed smoke pass."
+          ],
+          "coverage_checked": [
+            "SPEC.md terminal/diagnostic searches and SPEC_impl.md Grid streams/Multi­plexing searches contain no contrary stream-field requirement. This is source refutation, not specification acceptance of broken tooling.",
+            "TODO.md Planned is empty. Searched plans/queue, BUGS.md, INDEX.md/queue and active TRIAGE_OUTCOMES.md for attachment tracing, stream fields and desktop smoke parser changes; no exact defect coverage.",
+            "Read terminal-attachment-trace-retains-raw-session-id.md: that distinct existing item concerns diagnostic normalization, not stream-field removal. No alias or extension is warranted. FILTER.md is not used."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Removing the attachment trace's stream field might prevent the desktop smoke test identifying its open terminal. No product failure or user-owned-work/security route was claimed; undocumented log parsers were outside the check.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source-refuted breakage of the actual documented desktop smoke consumer."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "removed-stream-trace-field-breaks-desktop-smoke-parser-suspicion",
+        "destination": null
+      }
+    },
+    {
+      "key": "g076/l2",
+      "owner": "g076",
+      "id": "l2",
+      "domain": "helm-terminal-routing",
+      "purpose": "helm-terminal-routing: crates/farhelm-helm/src/terminal.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l2",
+            "state": "open",
+            "summary": "The stalled-browser test may treat a pause request as proof of a blocked WebSocket send",
+            "location": "crates/farhelm-helm/src/terminal.rs:1467-1519",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: A changed output-teardown test says it observes a handler blocked sending to a browser, but its oracle is receipt of PauseOutput. A temporarily scheduled output backlog could trigger that control without the output task actually being stuck in a send, allowing a missing detach-race regression to escape. Source basis: the assigned patch retains the grid flood_until_heard branch, removes the byte-stream branch, and strengthens/unifies its explanation at terminal.rs:1467-1474. The pause premise is asserted at :1512-1519, before injecting the stalled Detached. Suggested bucket: other (test-oracle accuracy if established). Confidence: open lead, not yet a conclusion. proposed_drop: false. possible_cover: none. Could-be-highest: no established shipped loss or security consequence; only test coverage is suspected. Missing premises: whether the flood helper's yielding/readiness or source scheduling establishes blocked send rather than mere queue accumulation, and whether this concern predates the full pinned range. Next checks: inspect the flood helper, gauge trigger and output teardown caller; compare history against the exclusive base, not just the assigned commit's parent. No runtime execution or reproduction performed."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l2",
+            "state": "open",
+            "summary": "The stalled-browser pause oracle is unchanged from the exclusive review base",
+            "location": "crates/farhelm-helm/src/terminal.rs:1467-1519",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR of considered consequence, preserved: if PauseOutput can arise from a temporary backlog before ws_tx.send is blocked, the stalled-browser teardown test could pass without exercising the detach race it claims to cover. This is distinct from l1's input-writer timeout boundary, and production correctness would not refute such an oracle defect. Details/checks: f560 terminal.rs:1454-1579 asserts PauseOutput then injects Detached and expects two Detach messages; its helper at :1972-2016 bounds the flood and yields after every frame, but exposes neither a blocked-send signal nor a direct socket-send readiness assertion. The queue gauge (client.rs:837-898, already read) bases PauseOutput on event/byte backlog, not a WebSocket send state. Pinned Tokio 1.53.2 task/yield_now.rs:6-35 expressly does not guarantee polling order; its implementation :38-63 defers the waker to give ready work and IO a turn. These checks establish why the pause observation is not a direct blocked-send measurement, but do not establish an actual false-pass run under the pinned scheduler.\n\nFull-range attribution resolves this review lead: exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a already contains the same assertion of a parked-send premise and PauseOutput explanation at terminal.rs:1668-1682, the identical grid flood/pause oracle at :1749-1758, and the same helper/yield behavior at :2465-2508. The scoped git log -G search across 6e423e3..00de0b6 found only f560 touching these phrases/helper references. Its diff removes the bytes-only branch and preserves the grid branch's oracle, buffer sizes, first-data readiness, injected detach and completion expectations; rewriting ‘For a grid stream it is observed’ as ‘Both are observed’ does not newly strengthen the claim for the surviving grid case. This is not merely a comparison to f560's parent: the same questionable premise is present at the range's exclusive base.\n\nSuggested bucket: other if the inherited oracle concern were established in an independently authorized review. Confidence: confirmed full-range attribution; the underlying false-pass scheduling route was not established or observed. proposed_drop: this candidate is outside the assigned changed behavior because the relevant grid oracle and its documentation already exist at the exclusive base, with no discovered in-range worsening; retain this basis for caller checking, no drop accepted. possible_cover: none; excluded coverage sources were not searched. Could-be-highest: no established shipped security, data, process or user-owned-work loss; the suspected consequence is test coverage. Caveat: no assertion is made that the inherited oracle is sound. Whether a transient backlog actually yields a false pass would require a separate source proof of a feasible scheduler/socket sequence or an authorized execution; this pass does not broaden into fixing or reproducing that pre-range concern. Lead l2 is closed as a candidate under the same ID; no open investigation remains within assigned scope."
+          }
+        }
+      ],
+      "latest": {
+        "line": 11,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l2",
+          "state": "open",
+          "summary": "The stalled-browser pause oracle is unchanged from the exclusive review base",
+          "location": "crates/farhelm-helm/src/terminal.rs:1467-1519",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR of considered consequence, preserved: if PauseOutput can arise from a temporary backlog before ws_tx.send is blocked, the stalled-browser teardown test could pass without exercising the detach race it claims to cover. This is distinct from l1's input-writer timeout boundary, and production correctness would not refute such an oracle defect. Details/checks: f560 terminal.rs:1454-1579 asserts PauseOutput then injects Detached and expects two Detach messages; its helper at :1972-2016 bounds the flood and yields after every frame, but exposes neither a blocked-send signal nor a direct socket-send readiness assertion. The queue gauge (client.rs:837-898, already read) bases PauseOutput on event/byte backlog, not a WebSocket send state. Pinned Tokio 1.53.2 task/yield_now.rs:6-35 expressly does not guarantee polling order; its implementation :38-63 defers the waker to give ready work and IO a turn. These checks establish why the pause observation is not a direct blocked-send measurement, but do not establish an actual false-pass run under the pinned scheduler.\n\nFull-range attribution resolves this review lead: exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a already contains the same assertion of a parked-send premise and PauseOutput explanation at terminal.rs:1668-1682, the identical grid flood/pause oracle at :1749-1758, and the same helper/yield behavior at :2465-2508. The scoped git log -G search across 6e423e3..00de0b6 found only f560 touching these phrases/helper references. Its diff removes the bytes-only branch and preserves the grid branch's oracle, buffer sizes, first-data readiness, injected detach and completion expectations; rewriting ‘For a grid stream it is observed’ as ‘Both are observed’ does not newly strengthen the claim for the surviving grid case. This is not merely a comparison to f560's parent: the same questionable premise is present at the range's exclusive base.\n\nSuggested bucket: other if the inherited oracle concern were established in an independently authorized review. Confidence: confirmed full-range attribution; the underlying false-pass scheduling route was not established or observed. proposed_drop: this candidate is outside the assigned changed behavior because the relevant grid oracle and its documentation already exist at the exclusive base, with no discovered in-range worsening; retain this basis for caller checking, no drop accepted. possible_cover: none; excluded coverage sources were not searched. Could-be-highest: no established shipped security, data, process or user-owned-work loss; the suspected consequence is test coverage. Caveat: no assertion is made that the inherited oracle is sound. Whether a transient backlog actually yields a false pass would require a separate source proof of a feasible scheduler/socket sequence or an authorized execution; this pass does not broaden into fixing or reproducing that pre-range concern. Lead l2 is closed as a candidate under the same ID; no open investigation remains within assigned scope."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g076/findings.jsonl",
+        "id": "l2",
+        "line": 11,
+        "disposition": "excluded",
+        "group": "helm-wedged-browser-test-pause-does-not-directly-witness-blocked-send",
+        "reason": "Parent explicitly accepted named out-of-range proposal from claims-049 after inspecting it. The latest attribution claim is established: the exclusive base already contains the surviving grid test's pause oracle, parked-send claim, flood helper and teardown expectations. The in-range rewrite removes the byte-stream case and preserves that grid case. This does not establish that the inherited oracle is sound, or that it can actually false-pass. Do not record this as a defect introduced or worsened in the pinned review range: the exclusive base contains the same questionable grid oracle and documentation. Preserve the withdrawal and unresolved false-pass premise. The established consequence is confined to maintainer test coverage, so the suggested bucket is other; no stronger user-visible route was claimed or established. This is a proposed range disposition for the parent, not a finding that the oracle is correct. Checked source/results: [\"6e423e30068b62c6cfa276c6d720ee35bb70387a:crates/farhelm-helm/src/terminal.rs:1668-1682 already describes PauseOutput as observing a parked send for the grid case; :1749-1758 already uses flood_until_heard(..., 32 * 1024, 0) and asserts its first control is PauseOutput.\",\"The exclusive base's terminal.rs:2455-2508 already implements the bounded flood with an independent watcher and yield_now after every frame. It does not expose a socket-send readiness or blocked-send witness. Base :1771-1818 already waits for the same two Detach messages before reading the browser again.\",\"f560058da19e02716e6f943883a9508b447aff4e:terminal.rs:1454-1579 retains that grid setup, pause assertion, injected stalled Detached, two-Detach expectation and final close. Its focused diff changes 'For a grid stream it is observed' to 'Both are observed' after deleting the byte-stream branch; 'Both' refers to the two premises, not newly introduced stream coverage. The only intervening readiness removal is the obsolete stream-kind notice.\",\"f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-helm/src/client.rs:837-898 counts queue events/bytes and steers pause from their marks. It does not inspect WebSocket send state. terminal.rs:1972-2016 retains the same helper behavior.\",\"Scoped git log -G checks over 6e423e3..00de0b6 for flood_until_heard, the parked-send explanation, the test name, SMALL_RECEIVE_BUFFER and MOST_FRAMES identify only f560058d in terminal.rs. The inclusive tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:terminal.rs:1467-1521 retains the same explanation and assertion. No in-range worsening of this named oracle was found.\",\"Source inspection only. No runtime, scheduler, mutation or reproduction experiment was performed. The record's Tokio scheduling citation was not needed to decide full-range attribution and was not independently rechecked.\"] Current coverage/results: [\"Current SPEC.md:3013-3031 requires slow/wedged viewers to pause and eventually detach; it does not accept a weak regression oracle. Searches for PauseOutput, blocked-send, stall-detach, backpressure and test-oracle wording found no exact acceptance of this claim.\",\"Current SPEC_impl.md, Grid streams (:2937-3038), defines backlog-based PauseOutput and the 60-second stall timeout. Testing (:8163-8232) does not exempt this test's premise. These product and testing requirements are context, not coverage of the suspected oracle defect.\",\"TODO.md's Planned bucket (:25-26) is empty. plans/queue/INDEX.md has no unlanded plan entries. Targeted searches of plans/queue found no work fixing this oracle; the archived-in-place tmux-end-old-terminals text concerns removal of old terminals, not proving a blocked-send premise.\",\"BUGS.md was read in full; its only accepted bug concerns a provisioning ssh helper holding output open, not terminal WebSocket test pressure.\",\"review_feedback_queue/INDEX.md and matching queue text were searched for the named test/helper and pause, stall, blocked-send and oracle terms. host-flood-stall-window-claim.md was read in full: it concerns terminal_tabs.rs, an eight-second test claiming to cross a sixty-second timeout, and an input-echo flood witness. It has a different test, trigger and cause; it is neither an alias nor exact coverage of this terminal.rs queue-pause oracle.\",\"Active TRIAGE_OUTCOMES.md was searched; the matching removed-deflake-items-leave-exclusions.md section (:47-70) was read in full and concerns stale test exclusions. It does not decide this oracle. The archive was not read.\",\"FILTER.md was read in full. No filter fully matches a possible false-pass regression oracle. A rare scheduling trigger alone does not make this a self-correcting display, safe retry or diagnostic-only defect. No filter is proposed.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"If a temporary queue backlog can produce PauseOutput before ws_tx.send is blocked, the stalled-browser teardown regression can pass without exercising the detach race it claims to cover, allowing a later missing detach-race protection to escape. The original lead never established a current shipped resource leak, security consequence or loss of user-owned work. Latest line 11 withdraws in-range attribution, not the inherited concern itself.\"; \"A feasible scheduler/socket sequence in which PauseOutput is received while the browser send has not blocked, and the teardown test consequently passes without exercising the intended detach race, remains unestablished. The absence of a direct blocked-send witness alone is not an observed false pass.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g076/l2",
+        "line": 11,
+        "disposition": "excluded",
+        "group": "helm-wedged-browser-test-pause-does-not-directly-witness-blocked-send",
+        "bucket": "other",
+        "recording": "out-of-range",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named out-of-range proposal from claims-049 after inspecting it. The latest attribution claim is established: the exclusive base already contains the surviving grid test's pause oracle, parked-send claim, flood helper and teardown expectations. The in-range rewrite removes the byte-stream case and preserves that grid case. This does not establish that the inherited oracle is sound, or that it can actually false-pass. Do not record this as a defect introduced or worsened in the pinned review range: the exclusive base contains the same questionable grid oracle and documentation. Preserve the withdrawal and unresolved false-pass premise. The established consequence is confined to maintainer test coverage, so the suggested bucket is other; no stronger user-visible route was claimed or established. This is a proposed range disposition for the parent, not a finding that the oracle is correct. Checked source/results: [\"6e423e30068b62c6cfa276c6d720ee35bb70387a:crates/farhelm-helm/src/terminal.rs:1668-1682 already describes PauseOutput as observing a parked send for the grid case; :1749-1758 already uses flood_until_heard(..., 32 * 1024, 0) and asserts its first control is PauseOutput.\",\"The exclusive base's terminal.rs:2455-2508 already implements the bounded flood with an independent watcher and yield_now after every frame. It does not expose a socket-send readiness or blocked-send witness. Base :1771-1818 already waits for the same two Detach messages before reading the browser again.\",\"f560058da19e02716e6f943883a9508b447aff4e:terminal.rs:1454-1579 retains that grid setup, pause assertion, injected stalled Detached, two-Detach expectation and final close. Its focused diff changes 'For a grid stream it is observed' to 'Both are observed' after deleting the byte-stream branch; 'Both' refers to the two premises, not newly introduced stream coverage. The only intervening readiness removal is the obsolete stream-kind notice.\",\"f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-helm/src/client.rs:837-898 counts queue events/bytes and steers pause from their marks. It does not inspect WebSocket send state. terminal.rs:1972-2016 retains the same helper behavior.\",\"Scoped git log -G checks over 6e423e3..00de0b6 for flood_until_heard, the parked-send explanation, the test name, SMALL_RECEIVE_BUFFER and MOST_FRAMES identify only f560058d in terminal.rs. The inclusive tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:terminal.rs:1467-1521 retains the same explanation and assertion. No in-range worsening of this named oracle was found.\",\"Source inspection only. No runtime, scheduler, mutation or reproduction experiment was performed. The record's Tokio scheduling citation was not needed to decide full-range attribution and was not independently rechecked.\"] Current coverage/results: [\"Current SPEC.md:3013-3031 requires slow/wedged viewers to pause and eventually detach; it does not accept a weak regression oracle. Searches for PauseOutput, blocked-send, stall-detach, backpressure and test-oracle wording found no exact acceptance of this claim.\",\"Current SPEC_impl.md, Grid streams (:2937-3038), defines backlog-based PauseOutput and the 60-second stall timeout. Testing (:8163-8232) does not exempt this test's premise. These product and testing requirements are context, not coverage of the suspected oracle defect.\",\"TODO.md's Planned bucket (:25-26) is empty. plans/queue/INDEX.md has no unlanded plan entries. Targeted searches of plans/queue found no work fixing this oracle; the archived-in-place tmux-end-old-terminals text concerns removal of old terminals, not proving a blocked-send premise.\",\"BUGS.md was read in full; its only accepted bug concerns a provisioning ssh helper holding output open, not terminal WebSocket test pressure.\",\"review_feedback_queue/INDEX.md and matching queue text were searched for the named test/helper and pause, stall, blocked-send and oracle terms. host-flood-stall-window-claim.md was read in full: it concerns terminal_tabs.rs, an eight-second test claiming to cross a sixty-second timeout, and an input-echo flood witness. It has a different test, trigger and cause; it is neither an alias nor exact coverage of this terminal.rs queue-pause oracle.\",\"Active TRIAGE_OUTCOMES.md was searched; the matching removed-deflake-items-leave-exclusions.md section (:47-70) was read in full and concerns stale test exclusions. It does not decide this oracle. The archive was not read.\",\"FILTER.md was read in full. No filter fully matches a possible false-pass regression oracle. A rare scheduling trigger alone does not make this a self-correcting display, safe retry or diagnostic-only defect. No filter is proposed.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"If a temporary queue backlog can produce PauseOutput before ws_tx.send is blocked, the stalled-browser teardown regression can pass without exercising the detach race it claims to cover, allowing a later missing detach-race protection to escape. The original lead never established a current shipped resource leak, security consequence or loss of user-owned work. Latest line 11 withdraws in-range attribution, not the inherited concern itself.\"; \"A feasible scheduler/socket sequence in which PauseOutput is received while the browser send has not blocked, and the teardown test consequently passes without exercising the intended detach race, remains unestablished. The absence of a direct blocked-send witness alone is not an observed false pass.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-049",
+          "key": "g076/l2",
+          "latest_line": 11,
+          "recommendation": "out-of-range",
+          "bucket": "other",
+          "underlying_key": "helm-wedged-browser-test-pause-does-not-directly-witness-blocked-send",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The latest attribution claim is established: the exclusive base already contains the surviving grid test's pause oracle, parked-send claim, flood helper and teardown expectations. The in-range rewrite removes the byte-stream case and preserves that grid case. This does not establish that the inherited oracle is sound, or that it can actually false-pass.",
+          "checks": [
+            "6e423e30068b62c6cfa276c6d720ee35bb70387a:crates/farhelm-helm/src/terminal.rs:1668-1682 already describes PauseOutput as observing a parked send for the grid case; :1749-1758 already uses flood_until_heard(..., 32 * 1024, 0) and asserts its first control is PauseOutput.",
+            "The exclusive base's terminal.rs:2455-2508 already implements the bounded flood with an independent watcher and yield_now after every frame. It does not expose a socket-send readiness or blocked-send witness. Base :1771-1818 already waits for the same two Detach messages before reading the browser again.",
+            "f560058da19e02716e6f943883a9508b447aff4e:terminal.rs:1454-1579 retains that grid setup, pause assertion, injected stalled Detached, two-Detach expectation and final close. Its focused diff changes 'For a grid stream it is observed' to 'Both are observed' after deleting the byte-stream branch; 'Both' refers to the two premises, not newly introduced stream coverage. The only intervening readiness removal is the obsolete stream-kind notice.",
+            "f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-helm/src/client.rs:837-898 counts queue events/bytes and steers pause from their marks. It does not inspect WebSocket send state. terminal.rs:1972-2016 retains the same helper behavior.",
+            "Scoped git log -G checks over 6e423e3..00de0b6 for flood_until_heard, the parked-send explanation, the test name, SMALL_RECEIVE_BUFFER and MOST_FRAMES identify only f560058d in terminal.rs. The inclusive tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:terminal.rs:1467-1521 retains the same explanation and assertion. No in-range worsening of this named oracle was found.",
+            "Source inspection only. No runtime, scheduler, mutation or reproduction experiment was performed. The record's Tokio scheduling citation was not needed to decide full-range attribution and was not independently rechecked."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:3013-3031 requires slow/wedged viewers to pause and eventually detach; it does not accept a weak regression oracle. Searches for PauseOutput, blocked-send, stall-detach, backpressure and test-oracle wording found no exact acceptance of this claim.",
+            "Current SPEC_impl.md, Grid streams (:2937-3038), defines backlog-based PauseOutput and the 60-second stall timeout. Testing (:8163-8232) does not exempt this test's premise. These product and testing requirements are context, not coverage of the suspected oracle defect.",
+            "TODO.md's Planned bucket (:25-26) is empty. plans/queue/INDEX.md has no unlanded plan entries. Targeted searches of plans/queue found no work fixing this oracle; the archived-in-place tmux-end-old-terminals text concerns removal of old terminals, not proving a blocked-send premise.",
+            "BUGS.md was read in full; its only accepted bug concerns a provisioning ssh helper holding output open, not terminal WebSocket test pressure.",
+            "review_feedback_queue/INDEX.md and matching queue text were searched for the named test/helper and pause, stall, blocked-send and oracle terms. host-flood-stall-window-claim.md was read in full: it concerns terminal_tabs.rs, an eight-second test claiming to cross a sixty-second timeout, and an input-echo flood witness. It has a different test, trigger and cause; it is neither an alias nor exact coverage of this terminal.rs queue-pause oracle.",
+            "Active TRIAGE_OUTCOMES.md was searched; the matching removed-deflake-items-leave-exclusions.md section (:47-70) was read in full and concerns stale test exclusions. It does not decide this oracle. The archive was not read.",
+            "FILTER.md was read in full. No filter fully matches a possible false-pass regression oracle. A rare scheduling trigger alone does not make this a self-correcting display, safe retry or diagnostic-only defect. No filter is proposed."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "A feasible scheduler/socket sequence in which PauseOutput is received while the browser send has not blocked, and the teardown test consequently passes without exercising the intended detach race, remains unestablished. The absence of a direct blocked-send witness alone is not an observed false pass.",
+          "original_stronger_consequence": "If a temporary queue backlog can produce PauseOutput before ws_tx.send is blocked, the stalled-browser teardown regression can pass without exercising the detach race it claims to cover, allowing a later missing detach-race protection to escape. The original lead never established a current shipped resource leak, security consequence or loss of user-owned work. Latest line 11 withdraws in-range attribution, not the inherited concern itself.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Do not record this as a defect introduced or worsened in the pinned review range: the exclusive base contains the same questionable grid oracle and documentation. Preserve the withdrawal and unresolved false-pass premise. The established consequence is confined to maintainer test coverage, so the suggested bucket is other; no stronger user-visible route was claimed or established. This is a proposed range disposition for the parent, not a finding that the oracle is correct."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "helm-wedged-browser-test-pause-does-not-directly-witness-blocked-send",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial pass complete; all 1,097 assigned patch lines reviewed.\n\n- **l1 — other:** teardown test can pass without exercising its timeout because Tokio yielding is mistaken for writer backpressure.\n- Recorded three candidates set aside with supporting evidence.\n- No open leads or unread assigned scope.\n\nFindings and progress are saved in the designated logs. Conclusions are source-based; no tests or reproductions were run."
+    },
+    {
+      "turn": 2,
+      "reply": "- **l1 revised:** verified shared cooperative scope and a source-derived route to `Pending` before writer pressure; confirmed assertions do not establish grace expiry.\n- **c1/c2 revised:** narrowed their proposed-drop bases and separated current-page routing, output accounting, and teardown-timeout evidence. No drop applied.\n- No new findings. Unresolved lead IDs: **none**.\n\nLogs updated; no runtime reproduction performed."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 complete.\n\n- Checked changed message boundaries, readiness oracles, frame limits, replay ordering, and supervisor reply ordering.\n- Investigated **l2** and revised it to a candidate: its oracle concern already exists at the exclusive range base; no in-range worsening established.\n- New verified findings: **none**.\n- New unverified-after-investigation findings: **none**.\n- Open leads: **none**.\n\nNo new in-scope issue found. Logs updated; no runtime execution performed."
+    }
+  ],
+  "progress": "# g076 initial review progress\n\nGroup: helm-terminal-routing. Reviewed revision: f560058da19e02716e6f943883a9508b447aff4e.\nTurn type/count: initial review, turn 1 complete. Discovery-pass count: 0 (later-turn discovery has not begun).\nNext action: return to the caller for a later synthesis/discovery turn. Do not treat this initial pass as the later-turn protocol.\n\nThe complete brief and inventory.json commits field were read. No excluded inventory coverage metadata or prohibited coverage sources were read. The root AGENTS.md End sentinel was present. Skillette and scode-voice were loaded. The queue priority rules, recording template, machine rules, and test-authoring checklist were read.\n\n## Durable records\n\nfindings.jsonl is append-only and authoritative. New verified ID in this pass: l1, revised from lead to finding (other bucket): the changed teardown test can mistake Tokio cooperative yielding for a full writer queue and never exercise its timeout. New unverified findings: none. Open lead IDs: none.\n\nCandidate IDs: c1 (old page compatibility is explicitly accepted by SPEC_impl.md), c2 (helm-owned flow control remains active), c3 (desktop smoke parser does not depend on the removed stream field). c1 was revised with the current-browser source check. Every considered drop is in findings.jsonl. No runtime tests, builds, reproductions, or fixes were performed.\n\n## Assigned evidence coverage\n\nAll 1,097 assigned lines of prep/parts/01039-000.patch were read through the absolute evidence read command against g076/manifest.json. Packets: 1-180, 181-360, 361-540, 541-720, 721-900, 901-1097. Packet 1-180 was repeated with stdout directly emitted. No assigned patch scope is unread. The assigned packet ends partway through an old test's deletion; replacement type/wire contracts were checked in context. This is coverage of this group's assigned part, not a claim to have reviewed all other terminal.rs parts assigned elsewhere.\n\n## Contracts and interfaces checked\n\nAt the reviewed revision: SPEC.md Terminal experience, 2855-3177, read in three bounded chunks. SPEC_impl.md transport and Grid streams, 2896-3110; Multiplexing, owning-helm and supervisor trust sections, 3173-3249; GUI Answers bind to what was drawn paragraph and surrounding context, 1060-1115; complete Terminal widget and grid client section, 1504-1887. No GUI confirmation handler changes occur in this patch.\n\nTerminal routing keeps the original supervisor connection, bare session ID, terminal selector, lease, and displacing/non-displacing policy. Every success registers a bounded grid queue before Attach, starts helm-owned flow decisions, sends each browser input message as one data frame, and tears down only the attachment on oversized input. Browser pause/resume branches are unnecessary because this queue owns the supervisor's pause state. Current browser pages construct a grid before opening the socket and need no stream notice. The protocol version is 77, and Attached no longer carries a stream kind. The smoke parser consumes retained event fields only.\n\nSource context read at f560058da19e02716e6f943883a9508b447aff4e:\n- crates/farhelm-helm/src/terminal.rs: 1-510, 512-890, 960-1705, 1706-1978. Changed test boundaries, real-socket forwarding assertions, oversize input teardown, trace readiness, and stalled-browser teardown were inspected. Unchanged portions not needed as context were not exhaustively read.\n- crates/farhelm-helm/src/client.rs: 155-180, 1760-1845, 2490-2555, 2890-3005, 3950-4235; targeted symbol searches for flow control and queue sizing. The parent revision's send_input context at 4250-4310 was read to assess the test rewrite.\n- crates/farhelm-ui/assets/terminal.js: 3370-3428, 4051-4168, 4465-4525, plus targeted symbol searches.\n- scripts/desktop-smoke.sh: 285-329, plus targeted trace-consumer searches.\n- crates/farhelm-proto/src/lib.rs: 3745-3850, plus protocol version and attach/control symbol searches.\n- crates/farhelm-testtrace-macros/src/lib.rs: 1-230; crates/farhelm-testtrace/src/lib.rs: 980-1035, 1124-1158, plus runtime symbol searches.\n- Cargo.lock's pinned Tokio entry (1.53.2).\n\nDependency contract check for l1 used the local registry's exact tokio-1.53.2 source, not another version: sync/mutex.rs 430-455 and 650-668; sync/mpsc/bounded.rs 810-825, 1108-1125, 1272-1307; sync/batch_semaphore.rs 600-668; task/coop/mod.rs 95-125 and 285-365; sync/oneshot.rs 1310-1380; runtime/scheduler/current_thread/mod.rs 804-841. This establishes two budget-consuming semaphore acquisitions per new loop iteration and ordinary budgeted root-future polling. It is source evidence, not an observed test run.\n\nInterface assumptions remaining: none material to the recorded conclusions. Other groups own broader supervisor, environment, protocol, browser, and client changes; this pass traced only the contracts needed to judge the assigned patch.\n\n## Later-turn synthesis, turn 2 started\n\nRevisit l1's pinned Tokio accounting, Attach return budget, manual poll scope, and the required grace/notification boundary. Recheck c1/current-page routing and c2/c3 interface assumptions. No candidate drop has been accepted by the caller. Discovery-pass count remains 0. No open lead at turn entry; conclusions will be revised under their original IDs as evidence warrants.\n\n## Later-turn synthesis, turn 2 complete\n\nTurn type/count: synthesis, turn 2. Discovery-pass count: 0. New IDs: none. Revised IDs: l1, c1, c2. Unresolved lead IDs: none. No assigned scope is unread. No drop was accepted or applied. No runtime execution or reproduction was performed.\n\nl1 remains a confirmed source-based finding in the other bucket. The single manual poll runs inside the same ordinary current-thread root cooperative scope as the successful Attach oneshot receive; it gets no new budget. On the concrete continuation route with an initial 128 units, the reply consumes one, 63 complete inputs consume 126, and the next mutex acquisition consumes the final unit. The following mpsc acquisition yields cooperatively while the 64-slot writer queue still has capacity. The constructor has no heartbeat/upcall producer and the no-output peer leaves the new gauge false, so no hidden producer is needed on this route. The test's intended boundary is unchanged from its parent: helper returns at the grace while the peer is blocked, followed by notification after the peer resumes. Its current assertions establish eventual notification only. The record distinguishes this source-derived route from an observed dynamic trace and retains the prior-version caveat.\n\nc1's proposed acceptance is explicitly confined to old pages. Rechecked current-page grid construction before WebSocket creation, direct binary receiveGrid routing, bounded single-message input, and server binary/marker forwarding. c2's source refutation remains confined to the browser pause/resume removal: it does not establish l1's writer-pressure or timeout premise and is not inferred from synthetic output-queue overflow. c3 is unchanged and remains preserved for independent checking. No additional substantive issue emerged from the batch/caller interaction checks.\n\nAdditional/revisited source reads for this turn, all at f560058da19e02716e6f943883a9508b447aff4e unless noted: terminal.rs 1116-1205,264-286,650-752,759-811,860-887; client.rs 1-38,800-910,1575-1779,2938-3018,3957-4076,4080-4178; terminal.js 3385-3430,4051-4087,4148-4166,4465-4508; SPEC_impl.md 3009-3058; farhelm-testtrace-macros/src/lib.rs 240-290. Parent terminal.rs targeted excerpts at 1263-1269 and 1339-1352 confirm the unchanged boundary and old input setup. Pinned Tokio 1.53.2: current_thread/mod.rs 180-265 and 804-850; task/coop/mod.rs 95-155 and 252-365; sync/oneshot.rs 1315-1340; sync/batch_semaphore.rs 616-665. Prior reads retained in context cover the mutex/mpsc acquire chain and runtime builder. No unavailable scheduling premise remains necessary for the narrow missing-fixture finding; actual runtime timings/frame counts remain unmeasured.\n\nNext action: return this turn's delta and await the caller's next pass request.\n\n## Discovery pass 1, turn 3 started\n\nRead discovery-neighbours.json completely (120 lines, 16,965 bytes). No named pending questions were supplied. Neighbour synthesis separates intentional old-terminal retirement, old-page reload, permanent terminal-host compatibility, and documentation accuracy. None changes this group's recorded routing conclusions or establishes l1's timeout oracle. c1-c3 and l1 remain in the durable history, with no accepted drops. Search now targets other consequences of the assigned terminal.rs patch and changed test boundaries; no runtime work is authorized.\n\n## Discovery pass 1, turn 3 complete\n\nTurn type/count: discovery, turn 3. Discovery-pass count: 1 complete. New verified findings: none. New unverified-after-investigation findings: none. New considered candidate: l2 (initial lead immediately recorded, then revised to candidate after full-range attribution). Remaining open lead IDs: none. No new in-scope issue found; no assigned material is unread. Existing findings and candidates were not withdrawn or lowered, and no caller drop was accepted. No tests, reproductions, builds, prohibited coverage searches or live-install actions occurred.\n\nChecks/results beyond the known records: re-examined changed outbound control/data selection and inbound error boundaries, the two WebSocket message/frame caps, the changed resize and trace readiness oracles, frame-header-only refusal after stream-notice removal, panic cleanup admission, replay/data ordering, and the early-data test's revised documentation. The supervisor caller at handlers.rs:1889-1926 really enqueues Attached before spawning grid output, so the new early-data documentation matches its caller. Changed tests that lost a stream-notice wait retain appropriate first-data or later-action observations for their stated boundary; no additional changed-boundary failure was established.\n\nInvestigated l2's separate PauseOutput/blocked-send oracle concern through the current flood helper, retained gauge contract, pinned Tokio yield semantics, complete relevant base ranges, and full-range path/pickaxe history. The suspected test-evidence consequence remains recorded, but the identical surviving grid oracle and assertion of a blocked-send observation exist at exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a. The assigned commit removes the byte-stream case without a discovered worsening of that surviving premise. This is a source-supported scope disposition, not proof that the inherited test oracle is sound. No dynamic false-pass route was claimed observed.\n\nAdditional context read this turn: complete discovery-neighbours.json, 1-120; f560 terminal.rs diff packets 1-230,430-650,800-960; f560 terminal.rs 435-498,512-539,1002-1047,1263-1401,1425-1452,1454-1579,1581-1704,1948-2042; f560 client.rs 920-1018, reusing previously read gauge/input contracts; f560 supervisor service/handlers.rs 1852-1935, only as caller context for the new relay documentation. Exclusive-base terminal.rs 1667-1773 and 2465-2508; scoped path history and -G history across the full pinned interval. Pinned Tokio 1.53.2 task/yield_now.rs 1-100. No new source outside assigned changes was independently reviewed for defects.\n\nNext action: return discovery checks and delta, with no open leads, and await the caller's next instruction.\n"
+}

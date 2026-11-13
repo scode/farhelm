@@ -1,0 +1,1231 @@
+{
+  "group": {
+    "id": "g043",
+    "domain": "host-provisioning-lifecycle",
+    "purpose": "host-provisioning-lifecycle: crates/farhelm-helm/src/provisioning.rs, crates/farhelm-helm/src/provisioning/credential_delivery_tests.rs, crates/farhelm-helm/src/provisioning/service.rs, crates/farhelm-helm/src/provisioning/tensorlake_add.rs, crates/farhelm-helm/src/provisioning/tensorlake_add_tests.rs, crates/farhelm-helm/src/provisioning/credential_delivery.rs, crates/farhelm-helm/src/provisioning/e2e.rs, crates/farhelm-helm/src/provisioning/plan.rs, crates/farhelm-helm/src/provisioning/snapshot_preparer.rs, crates/farhelm-helm/src/provisioning/tensorlake_backend.rs, crates/farhelm-helm/src/provisioning/tests/macos_real_tests.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g022",
+      "g023",
+      "g024",
+      "g025",
+      "g026",
+      "g027",
+      "g028",
+      "g029",
+      "g044",
+      "g045",
+      "g046",
+      "g047",
+      "g048",
+      "g055",
+      "g056",
+      "g057"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00090-000.patch",
+        "ranges": [
+          [
+            1,
+            71
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/provisioning.rs",
+        "commit": "ee39aeacdaccfeaa0cea25246540b20008c868f0",
+        "notes": "patch header; patch character offsets [0,2913)",
+        "lines": 71,
+        "bytes": 2913,
+        "start": 0,
+        "end": 2913,
+        "original": "[private-run]/prep/originals/00090.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00091-000.patch",
+        "ranges": [
+          [
+            1,
+            64
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/provisioning/credential_delivery_tests.rs",
+        "commit": "ee39aeacdaccfeaa0cea25246540b20008c868f0",
+        "notes": "patch header; patch character offsets [0,2582)",
+        "lines": 64,
+        "bytes": 2582,
+        "start": 0,
+        "end": 2582,
+        "original": "[private-run]/prep/originals/00091.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00092-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/provisioning/service.rs",
+        "commit": "ee39aeacdaccfeaa0cea25246540b20008c868f0",
+        "notes": "patch header; patch character offsets [0,654)",
+        "lines": 13,
+        "bytes": 654,
+        "start": 0,
+        "end": 654,
+        "original": "[private-run]/prep/originals/00092.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00093-000.patch",
+        "ranges": [
+          [
+            1,
+            15
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/provisioning/tensorlake_add.rs",
+        "commit": "ee39aeacdaccfeaa0cea25246540b20008c868f0",
+        "notes": "patch header; patch character offsets [0,927)",
+        "lines": 15,
+        "bytes": 927,
+        "start": 0,
+        "end": 927,
+        "original": "[private-run]/prep/originals/00093.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00094-000.patch",
+        "ranges": [
+          [
+            1,
+            22
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/provisioning/tensorlake_add_tests.rs",
+        "commit": "ee39aeacdaccfeaa0cea25246540b20008c868f0",
+        "notes": "patch header; patch character offsets [0,1229)",
+        "lines": 22,
+        "bytes": 1229,
+        "start": 0,
+        "end": 1229,
+        "original": "[private-run]/prep/originals/00094.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00107-000.patch",
+        "ranges": [
+          [
+            1,
+            31
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/provisioning.rs",
+        "commit": "1038bb1f4549f6896fa6e064fecf540f4548b4da",
+        "notes": "patch header; patch character offsets [0,1437)",
+        "lines": 31,
+        "bytes": 1437,
+        "start": 0,
+        "end": 1437,
+        "original": "[private-run]/prep/originals/00107.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00109-000.patch",
+        "ranges": [
+          [
+            1,
+            27
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/provisioning/credential_delivery.rs",
+        "commit": "1038bb1f4549f6896fa6e064fecf540f4548b4da",
+        "notes": "patch header; patch character offsets [0,1373)",
+        "lines": 27,
+        "bytes": 1373,
+        "start": 0,
+        "end": 1373,
+        "original": "[private-run]/prep/originals/00109.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00110-000.patch",
+        "ranges": [
+          [
+            1,
+            19
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/provisioning/e2e.rs",
+        "commit": "1038bb1f4549f6896fa6e064fecf540f4548b4da",
+        "notes": "patch header; patch character offsets [0,881)",
+        "lines": 19,
+        "bytes": 881,
+        "start": 0,
+        "end": 881,
+        "original": "[private-run]/prep/originals/00110.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00111-000.patch",
+        "ranges": [
+          [
+            1,
+            115
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/provisioning/plan.rs",
+        "commit": "1038bb1f4549f6896fa6e064fecf540f4548b4da",
+        "notes": "patch header; patch character offsets [0,4719)",
+        "lines": 115,
+        "bytes": 4719,
+        "start": 0,
+        "end": 4719,
+        "original": "[private-run]/prep/originals/00111.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00112-000.patch",
+        "ranges": [
+          [
+            1,
+            87
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/provisioning/service.rs",
+        "commit": "1038bb1f4549f6896fa6e064fecf540f4548b4da",
+        "notes": "patch header; patch character offsets [0,4394)",
+        "lines": 87,
+        "bytes": 4394,
+        "start": 0,
+        "end": 4394,
+        "original": "[private-run]/prep/originals/00112.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00113-000.patch",
+        "ranges": [
+          [
+            1,
+            46
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/provisioning/snapshot_preparer.rs",
+        "commit": "1038bb1f4549f6896fa6e064fecf540f4548b4da",
+        "notes": "patch header; patch character offsets [0,2314)",
+        "lines": 46,
+        "bytes": 2314,
+        "start": 0,
+        "end": 2314,
+        "original": "[private-run]/prep/originals/00113.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00114-000.patch",
+        "ranges": [
+          [
+            1,
+            38
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/provisioning/tensorlake_add.rs",
+        "commit": "1038bb1f4549f6896fa6e064fecf540f4548b4da",
+        "notes": "patch header; patch character offsets [0,1835)",
+        "lines": 38,
+        "bytes": 1835,
+        "start": 0,
+        "end": 1835,
+        "original": "[private-run]/prep/originals/00114.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00115-000.patch",
+        "ranges": [
+          [
+            1,
+            32
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/provisioning/tensorlake_backend.rs",
+        "commit": "1038bb1f4549f6896fa6e064fecf540f4548b4da",
+        "notes": "patch header; patch character offsets [0,1548)",
+        "lines": 32,
+        "bytes": 1548,
+        "start": 0,
+        "end": 1548,
+        "original": "[private-run]/prep/originals/00115.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00116-000.patch",
+        "ranges": [
+          [
+            1,
+            32
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/provisioning/tests/macos_real_tests.rs",
+        "commit": "1038bb1f4549f6896fa6e064fecf540f4548b4da",
+        "notes": "patch header; patch character offsets [0,1762)",
+        "lines": 32,
+        "bytes": 1762,
+        "start": 0,
+        "end": 1762,
+        "original": "[private-run]/prep/originals/00116.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00124-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/provisioning.rs",
+        "commit": "56040bb964270bb40d191902173dbb84b3ba78fc",
+        "notes": "patch header; patch character offsets [0,578)",
+        "lines": 13,
+        "bytes": 578,
+        "start": 0,
+        "end": 578,
+        "original": "[private-run]/prep/originals/00124.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00125-000.patch",
+        "ranges": [
+          [
+            1,
+            22
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/provisioning/tensorlake_add.rs",
+        "commit": "56040bb964270bb40d191902173dbb84b3ba78fc",
+        "notes": "patch header; patch character offsets [0,1080)",
+        "lines": 22,
+        "bytes": 1080,
+        "start": 0,
+        "end": 1080,
+        "original": "[private-run]/prep/originals/00125.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00126-000.patch",
+        "ranges": [
+          [
+            1,
+            133
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/provisioning/tensorlake_add_tests.rs",
+        "commit": "56040bb964270bb40d191902173dbb84b3ba78fc",
+        "notes": "patch header; patch character offsets [0,5674)",
+        "lines": 133,
+        "bytes": 5674,
+        "start": 0,
+        "end": 5674,
+        "original": "[private-run]/prep/originals/00126.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00153-000.patch",
+        "ranges": [
+          [
+            1,
+            78
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/provisioning.rs",
+        "commit": "04ffdbb35773cef36e73eb798c005ddbeb9a9de6",
+        "notes": "patch header; patch character offsets [0,3326)",
+        "lines": 78,
+        "bytes": 3326,
+        "start": 0,
+        "end": 3326,
+        "original": "[private-run]/prep/originals/00153.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00154-000.patch",
+        "ranges": [
+          [
+            1,
+            99
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/provisioning/service.rs",
+        "commit": "04ffdbb35773cef36e73eb798c005ddbeb9a9de6",
+        "notes": "patch header; patch character offsets [0,4972)",
+        "lines": 99,
+        "bytes": 4972,
+        "start": 0,
+        "end": 4972,
+        "original": "[private-run]/prep/originals/00154.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00189-000.patch",
+        "ranges": [
+          [
+            1,
+            137
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/provisioning.rs",
+        "commit": "56659839785691f76da3af5d8f51b511cff4ba8b",
+        "notes": "patch header; patch character offsets [0,5827)",
+        "lines": 137,
+        "bytes": 5827,
+        "start": 0,
+        "end": 5827,
+        "original": "[private-run]/prep/originals/00189.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00191-000.patch",
+        "ranges": [
+          [
+            1,
+            202
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/provisioning/credential_delivery.rs",
+        "commit": "56659839785691f76da3af5d8f51b511cff4ba8b",
+        "notes": "patch header; patch character offsets [0,10145)",
+        "lines": 202,
+        "bytes": 10145,
+        "start": 0,
+        "end": 10145,
+        "original": "[private-run]/prep/originals/00191.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00192-000.patch",
+        "ranges": [
+          [
+            1,
+            130
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/provisioning/credential_delivery_tests.rs",
+        "commit": "56659839785691f76da3af5d8f51b511cff4ba8b",
+        "notes": "patch header; patch character offsets [0,4807)",
+        "lines": 130,
+        "bytes": 4807,
+        "start": 0,
+        "end": 4807,
+        "original": "[private-run]/prep/originals/00192.patch"
+      }
+    ],
+    "lines": 1426,
+    "bytes": 64977
+  },
+  "records": [
+    {
+      "key": "g043/c1",
+      "owner": "g043",
+      "id": "c1",
+      "domain": "host-provisioning-lifecycle",
+      "purpose": "host-provisioning-lifecycle: crates/farhelm-helm/src/provisioning.rs, crates/farhelm-helm/src/provisioning/credential_delivery_tests.rs, crates/farhelm-helm/src/provisioning/service.rs, crates/farhelm-helm/src/provisioning/tensorlake_add.rs, crates/farhelm-helm/src/provisioning/tensorlake_add_tests.rs, crates/farhelm-helm/src/provisioning/credential_delivery.rs, crates/farhelm-helm/src/provisioning/e2e.rs, crates/farhelm-helm/src/provisioning/plan.rs, crates/farhelm-helm/src/provisioning/snapshot_preparer.rs, crates/farhelm-helm/src/provisioning/tensorlake_backend.rs, crates/farhelm-helm/src/provisioning/tests/macos_real_tests.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Credential warning changes retain typed redaction",
+            "location": "crates/farhelm-helm/src/provisioning/credential_delivery.rs:493",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: Considered whether newly preserved transport diagnostics could expose credential-bearing remote output in host warnings. Details: changed delivery call sites use BackendFailure::redacted_reason; provisioning/backend.rs:316-325 returns the fixed caller sentence unless safe_refusal is present, and never renders stderr. Source analysis refutes raw stderr propagation through these changed sites. Suggested bucket: highest if credential exposure existed; could-be-highest: yes. Confidence: confirmed source refutation, no execution. proposed_drop: source refutation by backend.rs:316-325 (\"arbitrary backend or peer text must use the caller's fixed sentence\"). possible_cover: none. Caveat: this conclusion concerns the new redacted_reason call sites, not an independent audit of every transport failure constructor."
+          }
+        }
+      ],
+      "latest": {
+        "line": 1,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Credential warning changes retain typed redaction",
+          "location": "crates/farhelm-helm/src/provisioning/credential_delivery.rs:493",
+          "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: Considered whether newly preserved transport diagnostics could expose credential-bearing remote output in host warnings. Details: changed delivery call sites use BackendFailure::redacted_reason; provisioning/backend.rs:316-325 returns the fixed caller sentence unless safe_refusal is present, and never renders stderr. Source analysis refutes raw stderr propagation through these changed sites. Suggested bucket: highest if credential exposure existed; could-be-highest: yes. Confidence: confirmed source refutation, no execution. proposed_drop: source refutation by backend.rs:316-325 (\"arbitrary backend or peer text must use the caller's fixed sentence\"). possible_cover: none. Caveat: this conclusion concerns the new redacted_reason call sites, not an independent audit of every transport failure constructor."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g043/findings.jsonl",
+        "id": "c1",
+        "line": 1,
+        "disposition": "under-investigation",
+        "group": "g043-c1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-027",
+          "key": "g043/c1",
+          "latest_line": 1,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "backend-typed-refusal-redaction-not-peer-text",
+          "aliases": [
+            "g044/c2"
+          ],
+          "target_queue_file": null,
+          "why": "The changed warning boundary returns a fixed caller sentence for ordinary failures. The typed exception contains locally constructed diagnostic text, not credential-bearing stderr. This refutes the named new-call-site route only, not every transport constructor or every diagnostic sink.",
+          "checks": [
+            "56659839785691f76da3af5d8f51b511cff4ba8b provisioning/credential_delivery.rs:483-494 calls redacted_reason for home/settings read failures.",
+            "Same revision provisioning/backend.rs:287-325: new sets safe_refusal=None; redacted_reason returns context only for the typed exception and otherwise the caller fallback; stderr is never rendered there.",
+            "Same revision provisioning/backend.rs:939-948 and transport.rs:423-460: the exception comes from SSH-nested Podman exit 255 plus refusal classification, and its wording contains only the bounded route destination. The peer bytes select a fixed diagnosis rather than becoming its content. Source inspection only."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:4912-4930 retains remote-host and redaction boundaries; SPEC_impl.md:6331-6350 governs copied-state admission and credential merging. Neither accepts credential-bearing warnings.",
+            "TODO.md Planned is empty; plans/queue/INDEX.md lists no unlanded plans. BUGS.md contains only the escaped-local-SSH-helper transfer hang, with a different trigger and consequence.",
+            "Searched queue INDEX and active TRIAGE_OUTCOMES for redaction, credential disclosure, stderr and preparation. Read sandbox-status-diagnosis-bypasses-cleaning.md: successful API-status diagnosis propagation is a different source/sink, not coverage. No exact queue or active decision coverage found.",
+            "FILTER.md has no whole-boundary match for potential credential disclosure; no filter proposed."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No missing premise for refuting this changed warning route. No claim is made about unrelated failure constructors.",
+          "original_stronger_consequence": "Credential-bearing remote output could become a host warning; highest/security if established.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Source refutation of raw stderr propagation at the changed redacted_reason call sites. g044/c2 shares the typed exception root but checks the sensitive-read boundary separately."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-027.json",
+          "key": "g043/c1",
+          "proposal": "claim-checks/claims-027/result.json",
+          "parent_proposal": "source-refuted-changed-warning-raw-stderr-secret-propagation",
+          "final_independent_gate": "required-before-highest-secret-drop",
+          "reason": "Parent read full027. OrdinaryBackendFailure safe_refusalNone returnsfixedfallback; exceptionproducercheckedSSHnestedPodmanexit255/refusalclassifieremitsfixedboundedroutedestinationnotpeerbytes. Refutesnamednewcredentialdeliverywarningsinkonly, notallconstructors/sinks. Originalcredential-bearingstderrwarningsecuritykeptfreshgate;044c2samesourcewithsensitivereadsink, sandbox-status-diagnosisqueue separate."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "backend-typed-refusal-redaction-not-peer-text",
+        "destination": null
+      }
+    },
+    {
+      "key": "g043/c2",
+      "owner": "g043",
+      "id": "c2",
+      "domain": "host-provisioning-lifecycle",
+      "purpose": "host-provisioning-lifecycle: crates/farhelm-helm/src/provisioning.rs, crates/farhelm-helm/src/provisioning/credential_delivery_tests.rs, crates/farhelm-helm/src/provisioning/service.rs, crates/farhelm-helm/src/provisioning/tensorlake_add.rs, crates/farhelm-helm/src/provisioning/tensorlake_add_tests.rs, crates/farhelm-helm/src/provisioning/credential_delivery.rs, crates/farhelm-helm/src/provisioning/e2e.rs, crates/farhelm-helm/src/provisioning/plan.rs, crates/farhelm-helm/src/provisioning/snapshot_preparer.rs, crates/farhelm-helm/src/provisioning/tensorlake_backend.rs, crates/farhelm-helm/src/provisioning/tests/macos_real_tests.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Container Update cannot replace initial copied-state admission",
+            "location": "crates/farhelm-helm/src/provisioning/service.rs:1324",
+            "detail": "Reviewed commit: 04ffdbb35773cef36e73eb798c005ddbeb9a9de6. TLDR: Considered whether Update could accept a container's copied supervisor identity before its first setup checks. Details: service.rs:1324-1332 refuses environment rows missing either admitted installation coordinate before resolving or probing a route. ExistingEnvironment registration at 966-993 is only reached after that gate for Update; store/podman.rs:200-243 compares entry UUID, canonical container binding, previous installation coordinates, recipe and pending marker before changing coordinates. Suggested bucket: highest if copied-state admission could be bypassed; could-be-highest: yes. Confidence: confirmed source refutation of this Update route, no execution. proposed_drop: source refutation by service.rs:1324-1332 (\"replace the provider's initial copied-state admission check\" is explicitly forbidden and guarded). possible_cover: none. Caveat: this is the changed Update admission route, not an independent audit of initial container provisioning."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Update and shared provider admission preserve distinct copied-state boundaries",
+            "location": "crates/farhelm-helm/src/provisioning/service.rs:1324",
+            "detail": "Reviewed commits: 04ffdbb35773cef36e73eb798c005ddbeb9a9de6 and 56659839785691f76da3af5d8f51b511cff4ba8b. Original consequence considered: Update or shared provider admission might accept copied supervisor identity before first setup checks. TLDR: The Update refusal remains effective after provider dispatch; the new clone path relies on its own prepared-create facts, not on finding an empty state directory after boot. At 04ffdbb service.rs:1324-1332 refuses missing admitted coordinates before probing, and 966-993 uses the guarded ExistingEnvironment registration. At 5665983 the same refusal remains at service.rs:1352-1360, while manager.rs:4185-4196 blocks every environment actor's first dial until both coordinates exist, before even reading provider status. The common installer calls refuse_copied_supervisor before installing (snapshot_preparer.rs:97-99); the backend refuses existing or dangling-link supervisor.db (tensorlake_backend.rs:188-198), then finalization verifies stopped service/cgroup, removes the entire state directory and checks absence before returning facts (233-292). Shared provider admission reads only the created row's saved prepared facts (tensorlake_add.rs:567-592; environment/mod.rs:142-177). Podman create persists the selected facts plus observed login under the expected binding before run (environment/podman.rs:1103-1125; store/podman.rs:256-278); admit_podman_install requires canonical ID and login and compares the complete expected binding before setting coordinates (295-329). Preparation invokes the common installer before image commit (environment/podman/build.rs:345-374). Suggested bucket: highest if copied identity were admitted; could-be-highest: yes. Confidence: confirmed source refutation for Update and the inspected shared admission chain, no execution. proposed_drop: source refutation by pre-probe/pre-dial gates, pre-capture copied-state refusal/whole-state verification, and create-specific saved-facts admission. possible_cover: none. Caveats: a legitimate clone boots its own supervisor and creates its own database before admission, so rechecking state absence on that clone would reject correct behavior; the safety claim depends on the provider's verified prepared image/facts chain, not a fresh empty-database check on the running clone. This is not a complete independent audit of provider build/capture implementations or external image mutation. No missing premise remains for the changed Update route."
+          }
+        }
+      ],
+      "latest": {
+        "line": 11,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Update and shared provider admission preserve distinct copied-state boundaries",
+          "location": "crates/farhelm-helm/src/provisioning/service.rs:1324",
+          "detail": "Reviewed commits: 04ffdbb35773cef36e73eb798c005ddbeb9a9de6 and 56659839785691f76da3af5d8f51b511cff4ba8b. Original consequence considered: Update or shared provider admission might accept copied supervisor identity before first setup checks. TLDR: The Update refusal remains effective after provider dispatch; the new clone path relies on its own prepared-create facts, not on finding an empty state directory after boot. At 04ffdbb service.rs:1324-1332 refuses missing admitted coordinates before probing, and 966-993 uses the guarded ExistingEnvironment registration. At 5665983 the same refusal remains at service.rs:1352-1360, while manager.rs:4185-4196 blocks every environment actor's first dial until both coordinates exist, before even reading provider status. The common installer calls refuse_copied_supervisor before installing (snapshot_preparer.rs:97-99); the backend refuses existing or dangling-link supervisor.db (tensorlake_backend.rs:188-198), then finalization verifies stopped service/cgroup, removes the entire state directory and checks absence before returning facts (233-292). Shared provider admission reads only the created row's saved prepared facts (tensorlake_add.rs:567-592; environment/mod.rs:142-177). Podman create persists the selected facts plus observed login under the expected binding before run (environment/podman.rs:1103-1125; store/podman.rs:256-278); admit_podman_install requires canonical ID and login and compares the complete expected binding before setting coordinates (295-329). Preparation invokes the common installer before image commit (environment/podman/build.rs:345-374). Suggested bucket: highest if copied identity were admitted; could-be-highest: yes. Confidence: confirmed source refutation for Update and the inspected shared admission chain, no execution. proposed_drop: source refutation by pre-probe/pre-dial gates, pre-capture copied-state refusal/whole-state verification, and create-specific saved-facts admission. possible_cover: none. Caveats: a legitimate clone boots its own supervisor and creates its own database before admission, so rechecking state absence on that clone would reject correct behavior; the safety claim depends on the provider's verified prepared image/facts chain, not a fresh empty-database check on the running clone. This is not a complete independent audit of provider build/capture implementations or external image mutation. No missing premise remains for the changed Update route."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g043/findings.jsonl",
+        "id": "c2",
+        "line": 11,
+        "disposition": "under-investigation",
+        "group": "g043-c2",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-027",
+          "key": "g043/c2",
+          "latest_line": 11,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "environment-update-and-prepared-clone-admission",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Update cannot open the first-admission gate. The inspected clone path instead admits that create's saved preparation facts after preparation refuses copied state and verifies whole-state removal. A legitimate clone can already have minted its own database before admission; absence must be verified before capture, not by rejecting every running clone with a database. This conclusion does not audit every provider capture implementation or external image mutation.",
+          "checks": [
+            "04ffdbb35773cef36e73eb798c005ddbeb9a9de6 provisioning/service.rs:1321-1332 refuses either missing coordinate before probing; :966-993 requires guarded ExistingEnvironment admission. store/podman.rs:200-243 compares entry UUID, binding, old coordinates, recipe and pending marker.",
+            "56659839785691f76da3af5d8f51b511cff4ba8b provisioning/service.rs:1349-1360 retains that gate; manager.rs:4185-4199 refuses first dial before provider-status I/O when either coordinate is missing.",
+            "Same revision provisioning/snapshot_preparer.rs:97-99 refuses copied state; tensorlake_backend.rs:188-198 checks existing and dangling-link supervisor.db; :243-292 verifies stopped processes, removes the whole state tree and verifies absence before facts publication.",
+            "Same revision provisioning/tensorlake_add.rs:567-592 reads the created row's saved facts and admits those paths; environment/mod.rs:142-177 dispatches saved-fact reads/admission by provider. environment/podman.rs:1103-1125 saves selected facts/login before run; store/podman.rs:256-329 guards the saved create and admission. environment/podman/build.rs:345-374 runs preparation before committing its prepared image. Source inspection only."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:383-403,568-586 and SPEC_impl.md:6307-6342,6532-6584 require saved-create recovery, no copied state and durable first-dial admission. They forbid the suspected bypass rather than accept it.",
+            "TODO.md Planned empty; no unlanded plan is listed in plans/queue/INDEX.md; BUGS.md's SSH-helper hang does not match copied identity admission.",
+            "Searched queue INDEX and active TRIAGE_OUTCOMES for copied state/identity, admission, prepared snapshots and Update. Snapshot cleanup/retirement entries concern source deletion/selection, not accepting copied supervisor identity. No exact coverage found.",
+            "No FILTER.md boundary covers this security/identity consequence."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No missing premise remains for the narrow Update route or inspected saved-facts admission chain; uninspected external mutation and provider capture internals are excluded.",
+          "original_stronger_consequence": "Update or shared admission could accept another host's copied supervisor identity before initial checks; potentially highest/security or user-work ownership harm.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Pre-probe/pre-dial coordinate gates plus pre-capture copied-state refusal, whole-state verification and create-specific saved-facts admission."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-027.json",
+          "key": "g043/c2",
+          "proposal": "claim-checks/claims-027/result.json",
+          "parent_proposal": "source-refuted-Update-and-saved-prepared-create-admission-bypass",
+          "final_independent_gate": "required-before-highest-identity-drop",
+          "reason": "Full027 Updatepremissingcoordinatepreprobe/managerpredialgates, ExistingEnvironmentregistrationguard, preparationcopied-db/danglingsymlinkrefusal andwhole-state/processabsencebeforefactspublication, create-specificsavedfacts/loginbeforePodmanrunandprecommitpreparer. LegitimatefreshclonecanmintownDBbeforeadmission; don'trejecteveryrunningcloneDBorassertcapturemustobserveabsenceafterrun. Refutesnamedcopiedidentityrouteonly, notexternalimageediting/allcaptureproviderinternals. Originalsecurity/workownershipharmretainedfreshgate."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "environment-update-and-prepared-clone-admission",
+        "destination": null
+      }
+    },
+    {
+      "key": "g043/c3",
+      "owner": "g043",
+      "id": "c3",
+      "domain": "host-provisioning-lifecycle",
+      "purpose": "host-provisioning-lifecycle: crates/farhelm-helm/src/provisioning.rs, crates/farhelm-helm/src/provisioning/credential_delivery_tests.rs, crates/farhelm-helm/src/provisioning/service.rs, crates/farhelm-helm/src/provisioning/tensorlake_add.rs, crates/farhelm-helm/src/provisioning/tensorlake_add_tests.rs, crates/farhelm-helm/src/provisioning/credential_delivery.rs, crates/farhelm-helm/src/provisioning/e2e.rs, crates/farhelm-helm/src/provisioning/plan.rs, crates/farhelm-helm/src/provisioning/snapshot_preparer.rs, crates/farhelm-helm/src/provisioning/tensorlake_backend.rs, crates/farhelm-helm/src/provisioning/tests/macos_real_tests.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Shared destruction wrapper preserves Tensorlake removal proof",
+            "location": "crates/farhelm-helm/src/provisioning/tensorlake_add.rs:559",
+            "detail": "Reviewed commit: ee39aeacdaccfeaa0cea25246540b20008c868f0. TLDR: Considered whether generalizing deletion evidence could forget a billed sandbox before cleanup. Details: environment/mod.rs:197-211 wraps the same opaque SandboxDeleted and forwards its host ID. store.rs:7883,7910-7913 still refuses Tensorlake removal without a proof for that row. tensorlake_add.rs:537-565 issues the never-created proof only on new-row registry handoff failure, before a create task is started at 608-613. The changed service signature does not weaken this check. Suggested bucket: highest if ownership loss stranded user work; could-be-highest: yes. Confidence: confirmed source refutation, no execution. proposed_drop: source refutation by the retained row-bound proof check and pre-create ordering. possible_cover: none. Caveat: no separate audit of provider destruction implementation beyond this changed proof interface."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Shared proof remains bound to locked provider destruction or pre-create rollback",
+            "location": "crates/farhelm-helm/src/provisioning/tensorlake_add.rs:559",
+            "detail": "Reviewed commits: ee39aeacdaccfeaa0cea25246540b20008c868f0 and 56659839785691f76da3af5d8f51b511cff4ba8b. Original consequence considered: generalizing deletion evidence might forget a billed sandbox/resource before cleanup and strand user work. TLDR: Synthesis confirms the narrow refutation across the changed provider dispatch; no shipped cross-provider proof mismatch is established. At ee39aea environment/mod.rs:197-211 wraps the original opaque SandboxDeleted and preserves its host ID; store.rs:7883,7910-7913 checks that ID. At 5665983 hosts.rs:1464-1508 holds the caller's provisioning guard, reads the current environment binding, parks its actor, selects the provider from that binding, obtains destroy evidence, and only then calls delete_registered_host. environment/mod.rs:520-531 dispatches exhaustively, and the store checks proof.host() == host and requires proof for both provider kinds (store.rs:8034-8068). TestProvider also delegates destroy to its actual provider (environment/mod.rs:617-618), rather than the status-only observation fake. Podman destroy refuses a handle for another provider (environment/podman.rs:1294-1297), never-created evidence requires neither canonical ID nor pending create (1298-1302), and the created-resource route attests only after remove_container returns (1333-1335), which verifies absence after owned removal (400-414). The shared launch's rollback evidence is minted at provisioning/tensorlake_add.rs:411-417 on registry handoff failure, before the task that can prepare/create starts at 472-481. Suggested bucket: highest if ownership loss stranded user work; could-be-highest: yes. Confidence: confirmed source refutation for these callers, no execution. proposed_drop: source refutation by locked same-binding dispatch, row-ID proof check, and rollback-before-provider-I/O ordering. possible_cover: none. Caveats: the proof type exposes a host ID rather than independently validating provider/resource facts in the store; the refutation relies on the checked production caller ordering and immutable bindings, not a claim that any arbitrary in-crate proof fabrication would be rejected. No independent full audit of provider cleanup internals or external database mutation is claimed. No missing readily checkable premise remains for the changed wrapper/callers."
+          }
+        }
+      ],
+      "latest": {
+        "line": 9,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Shared proof remains bound to locked provider destruction or pre-create rollback",
+          "location": "crates/farhelm-helm/src/provisioning/tensorlake_add.rs:559",
+          "detail": "Reviewed commits: ee39aeacdaccfeaa0cea25246540b20008c868f0 and 56659839785691f76da3af5d8f51b511cff4ba8b. Original consequence considered: generalizing deletion evidence might forget a billed sandbox/resource before cleanup and strand user work. TLDR: Synthesis confirms the narrow refutation across the changed provider dispatch; no shipped cross-provider proof mismatch is established. At ee39aea environment/mod.rs:197-211 wraps the original opaque SandboxDeleted and preserves its host ID; store.rs:7883,7910-7913 checks that ID. At 5665983 hosts.rs:1464-1508 holds the caller's provisioning guard, reads the current environment binding, parks its actor, selects the provider from that binding, obtains destroy evidence, and only then calls delete_registered_host. environment/mod.rs:520-531 dispatches exhaustively, and the store checks proof.host() == host and requires proof for both provider kinds (store.rs:8034-8068). TestProvider also delegates destroy to its actual provider (environment/mod.rs:617-618), rather than the status-only observation fake. Podman destroy refuses a handle for another provider (environment/podman.rs:1294-1297), never-created evidence requires neither canonical ID nor pending create (1298-1302), and the created-resource route attests only after remove_container returns (1333-1335), which verifies absence after owned removal (400-414). The shared launch's rollback evidence is minted at provisioning/tensorlake_add.rs:411-417 on registry handoff failure, before the task that can prepare/create starts at 472-481. Suggested bucket: highest if ownership loss stranded user work; could-be-highest: yes. Confidence: confirmed source refutation for these callers, no execution. proposed_drop: source refutation by locked same-binding dispatch, row-ID proof check, and rollback-before-provider-I/O ordering. possible_cover: none. Caveats: the proof type exposes a host ID rather than independently validating provider/resource facts in the store; the refutation relies on the checked production caller ordering and immutable bindings, not a claim that any arbitrary in-crate proof fabrication would be rejected. No independent full audit of provider cleanup internals or external database mutation is claimed. No missing readily checkable premise remains for the changed wrapper/callers."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g043/findings.jsonl",
+        "id": "c3",
+        "line": 9,
+        "disposition": "under-investigation",
+        "group": "g043-c3",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-027",
+          "key": "g043/c3",
+          "latest_line": 9,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "provider-destruction-proof-row-and-caller-ordering",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The generalized evidence keeps its host ID. Production deletion selects a provider from the held row's binding, obtains destruction evidence, then removes that row; rollback's never-created evidence precedes create-capable work. The store validates only row identity, not independent provider/resource facts, so the refutation depends on these production callers and immutable bindings. It does not claim arbitrary fabricated in-crate proofs are safe or independently audit all provider cleanup internals or external database edits.",
+          "checks": [
+            "ee39aeacdaccfeaa0cea25246540b20008c868f0 environment/mod.rs:197-211 wraps SandboxDeleted and forwards host(). provisioning/tensorlake_add.rs:537-565 mints never-created evidence only on registration handoff failure, before the create task at :608-613.",
+            "56659839785691f76da3af5d8f51b511cff4ba8b hosts.rs:1464-1508 retains the caller's provisioning guard, holds the actor, resolves the current binding/provider and calls destroy before delete_registered_host. environment/mod.rs:520-531 is exhaustive and :617-618 delegates test destruction to the actual provider.",
+            "Same revision store.rs:8034-8068 requires proof.host()==host for both environment providers. environment/podman.rs:1294-1335 rejects another provider's handle, issues never-created proof only without canonical ID/pending create, and attests created-resource deletion after remove_container; :400-414 checks absence after owned removal.",
+            "Same revision provisioning/tensorlake_add.rs:411-417 removes registration using never-created evidence before task preparation/create at :472-481. Source inspection only."
+          ],
+          "coverage_checked": [
+            "Current SPEC_impl.md:6294-6305 and :6685-6701 describe durable create ownership and deletion evidence; SPEC.md:399-403 keeps ambiguous-create ownership listed. These do not accept premature forgetting.",
+            "TODO.md Planned empty; unlanded plans index empty; BUGS.md has no destruction-proof exception.",
+            "Searched queue INDEX/active TRIAGE_OUTCOMES for deletion proofs, never-created evidence, provider deletion and ownership. Snapshot-cleanup and Podman storage-selection items have different causes/consequences; no exact coverage found.",
+            "Potential loss of ownership/user work does not match FILTER.md."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No supported cross-provider proof mismatch is shown in the checked callers. A claim about arbitrary proof fabrication or all cleanup internals would require a separate premise and is not refuted here.",
+          "original_stronger_consequence": "Forgetting a billed sandbox/resource before cleanup could strand user work; potentially highest.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Opaque proof wrapping retains row identity; locked same-binding production dispatch and rollback-before-create ordering preserve the changed interface's boundary."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-027.json",
+          "key": "g043/c3",
+          "proposal": "claim-checks/claims-027/result.json",
+          "parent_proposal": "source-refuted-generalized-provider-proof-row-caller-mismatch",
+          "final_independent_gate": "required-before-highest-ownership-drop",
+          "reason": "Full027 opaqueproofkeepshostID/storechecksrowonly; safetydependsactualguardedcurrentbindingproviderdispatch→destroy→forget andnever-createdrollbackbeforeanycreate-capabletask. Podmanrequiresmatchinghandle/canonicalIDpendingchecksandabsenceafterremove. Notindependentresourceproofverifiedbystore, arbitraryfabricatedincrateproof/externalDB/providerinternalsoutsidebasis. Originalprematureforgetbilledresource/userworkroutepreservedfreshgate, no broaddestructioncertification."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "provider-destruction-proof-row-and-caller-ordering",
+        "destination": null
+      }
+    },
+    {
+      "key": "g043/l1",
+      "owner": "g043",
+      "id": "l1",
+      "domain": "host-provisioning-lifecycle",
+      "purpose": "host-provisioning-lifecycle: crates/farhelm-helm/src/provisioning.rs, crates/farhelm-helm/src/provisioning/credential_delivery_tests.rs, crates/farhelm-helm/src/provisioning/service.rs, crates/farhelm-helm/src/provisioning/tensorlake_add.rs, crates/farhelm-helm/src/provisioning/tensorlake_add_tests.rs, crates/farhelm-helm/src/provisioning/credential_delivery.rs, crates/farhelm-helm/src/provisioning/e2e.rs, crates/farhelm-helm/src/provisioning/plan.rs, crates/farhelm-helm/src/provisioning/snapshot_preparer.rs, crates/farhelm-helm/src/provisioning/tensorlake_backend.rs, crates/farhelm-helm/src/provisioning/tests/macos_real_tests.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Check fresh route resolution against credential lease identity",
+            "location": "crates/farhelm-helm/src/provisioning/credential_delivery.rs:436",
+            "detail": "Reviewed commit: 1038bb1f4549f6896fa6e064fecf540f4548b4da (also 56659839785691f76da3af5d8f51b511cff4ba8b). TLDR: A changed resolver now obtains delivery destination by current numeric host ID after reading delivery state for an older row identity. Need establish whether a supported removal/replacement/retarget can change that ID's destination before delivery resolves it, potentially delivering credentials to another target. Source basis: apply reads entry_uuid-guarded record before resolve_host_access; resolver independently lists current rows by id. Checks so far: Podman place retarget is refused while referenced; push cancellation and SQL entry UUID guards exist. Missing premise: a shipped path that changes an environment host's execution destination or reuses a deleted row ID while an old apply survives. Suggested bucket: highest if that route exists. Confidence: open source investigation; no execution. proposed_drop: false. possible_cover: none. Next checks: host schema allocation, retarget/remove serialization, connect-hook cancellation and setup holds."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Fresh credential route cannot retarget a live environment row",
+            "location": "crates/farhelm-helm/src/provisioning/credential_delivery.rs:436",
+            "detail": "Reviewed commits: 1038bb1f4549f6896fa6e064fecf540f4548b4da and 56659839785691f76da3af5d8f51b511cff4ba8b. Original consequence considered: fresh numeric-ID route lookup after an entry_uuid-guarded read could deliver credentials to a replacement target. TLDR: Source checks refute the supported row replacement or retarget premise. At 5665983 store.rs:2714-2715 defines hosts.id as INTEGER PRIMARY KEY AUTOINCREMENT; IDs are not reused on removal. store.rs:7563-7564 refuses retargeting either environment kind; 7567 calls podman::refuse_referenced_place, whose podman.rs:215-225 rejects place retarget with any referring environment. Delivery only accepts non-null environment names in its record read. Deleting a row before lookup therefore fails resolution instead of finding a successor. Suggested bucket: highest if misdelivery route existed; could-be-highest: yes. Confidence: confirmed source refutation for supported mutations; no execution. proposed_drop: source refutation by non-reused row IDs, immutable environment destinations and referenced-place refusal. possible_cover: none. Caveats: external database editing and SSH configuration changes are outside this claimed race; no unverified shipped route remains. Lead l1 is settled as a candidate, with no further investigation pending."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Credential route refutation starts only after environment registration",
+            "location": "crates/farhelm-helm/src/provisioning/credential_delivery.rs:436",
+            "detail": "Reviewed commits: 1038bb1f4549f6896fa6e064fecf540f4548b4da and 56659839785691f76da3af5d8f51b511cff4ba8b; caller-interface check at 190d844e58c96cf197aa838d0b0eea8062f48435. Original consequence considered: a fresh numeric-ID route lookup after an entry_uuid-guarded read might deliver credentials to a replacement machine. TLDR: Retain the source refutation only for a live registered ENVIRONMENT row. It does not refute an earlier pending approval's PLACE identity problem (g020/l1), and no proposed drop of that finding is intended. At 190d844, start_session_environment registers the environment at provisioning/tensorlake_add.rs:388-398, through ProviderHandle::register_session; store/podman.rs:364-394 inserts place_host and a fresh entry_uuid inside one transaction and commits at 392. That commit is the precise boundary where store/podman.rs:215-225's referring-row query begins blocking ordinary place retargets. Preparation and create then run at tensorlake_add.rs:521-555. Credential delivery receives a fresh row for the created/admitted ENVIRONMENT (567-605), after its own saved prepared paths are admitted at 582-592. That row and its place reference preserve current post-registration routing; they do not carry the earlier approval's physical-place snapshot. A place retarget already committed before registration can therefore remain the route that delivery uses. Existing source refutations remain: host IDs are AUTOINCREMENT (5665983 store.rs:2714-2715), environment destination changes are refused (7563-7564), and retarget of an ordinary place with an environment reference is refused (7567; store/podman.rs:215-225). Suggested bucket: highest if misdelivery occurred across this post-registration boundary; could-be-highest: yes. Confidence: confirmed source refutation for supported mutations after registration; no execution. proposed_drop: source refutation limited to changing the execution target of an already registered environment; explicitly excludes changing the place before registration/approval consumption. possible_cover: none; g020/l1 is a separate pre-registration authority finding, not coverage for this candidate. Caveats: the earlier event's phrase 'no unverified shipped route remains' was too broad unless read as post-registration only. External database edits and SSH configuration changes also remain outside this narrow refutation. No unresolved premise remains for this candidate's narrower route."
+          }
+        }
+      ],
+      "latest": {
+        "line": 8,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l1",
+          "state": "open",
+          "summary": "Credential route refutation starts only after environment registration",
+          "location": "crates/farhelm-helm/src/provisioning/credential_delivery.rs:436",
+          "detail": "Reviewed commits: 1038bb1f4549f6896fa6e064fecf540f4548b4da and 56659839785691f76da3af5d8f51b511cff4ba8b; caller-interface check at 190d844e58c96cf197aa838d0b0eea8062f48435. Original consequence considered: a fresh numeric-ID route lookup after an entry_uuid-guarded read might deliver credentials to a replacement machine. TLDR: Retain the source refutation only for a live registered ENVIRONMENT row. It does not refute an earlier pending approval's PLACE identity problem (g020/l1), and no proposed drop of that finding is intended. At 190d844, start_session_environment registers the environment at provisioning/tensorlake_add.rs:388-398, through ProviderHandle::register_session; store/podman.rs:364-394 inserts place_host and a fresh entry_uuid inside one transaction and commits at 392. That commit is the precise boundary where store/podman.rs:215-225's referring-row query begins blocking ordinary place retargets. Preparation and create then run at tensorlake_add.rs:521-555. Credential delivery receives a fresh row for the created/admitted ENVIRONMENT (567-605), after its own saved prepared paths are admitted at 582-592. That row and its place reference preserve current post-registration routing; they do not carry the earlier approval's physical-place snapshot. A place retarget already committed before registration can therefore remain the route that delivery uses. Existing source refutations remain: host IDs are AUTOINCREMENT (5665983 store.rs:2714-2715), environment destination changes are refused (7563-7564), and retarget of an ordinary place with an environment reference is refused (7567; store/podman.rs:215-225). Suggested bucket: highest if misdelivery occurred across this post-registration boundary; could-be-highest: yes. Confidence: confirmed source refutation for supported mutations after registration; no execution. proposed_drop: source refutation limited to changing the execution target of an already registered environment; explicitly excludes changing the place before registration/approval consumption. possible_cover: none; g020/l1 is a separate pre-registration authority finding, not coverage for this candidate. Caveats: the earlier event's phrase 'no unverified shipped route remains' was too broad unless read as post-registration only. External database edits and SSH configuration changes also remain outside this narrow refutation. No unresolved premise remains for this candidate's narrower route."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g043/findings.jsonl",
+        "id": "l1",
+        "line": 8,
+        "disposition": "under-investigation",
+        "group": "g043-l1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-027",
+          "key": "g043/l1",
+          "latest_line": 8,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "credential-delivery-post-registration-route-retarget",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "For an already registered environment, deleting a row cannot provide a replacement numeric ID, environment destinations cannot be retargeted, and its place cannot be ordinarily retargeted while referenced. This is narrower than event 5's unqualified 'no unverified shipped route remains'. It does not refute g020/l1's earlier approval/PLACE boundary: a retarget committed before environment registration can remain the route later used for delivery. External database editing and SSH configuration changes remain excluded.",
+          "checks": [
+            "56659839785691f76da3af5d8f51b511cff4ba8b store.rs:2714-2715 uses AUTOINCREMENT; :7563-7567 refuses environment retargets and checks referenced ordinary places. store/podman.rs:215-225 counts all referring rows, including unresolved/stopped environments.",
+            "190d844e58c96cf197aa838d0b0eea8062f48435 store/podman.rs:364-394 inserts place_host with a fresh entry_uuid and commits in one transaction. That commit starts the referring-row exclusion; it cannot bind a previously displayed approval's place snapshot.",
+            "56659839785691f76da3af5d8f51b511cff4ba8b provisioning/tensorlake_add.rs:391-398 registers before preparation/create at :521-555 and delivers through the fresh admitted environment row at :567-605. Source inspection only."
+          ],
+          "coverage_checked": [
+            "Current SPEC_impl.md:6307-6342 requires create-specific saved facts and admission before delivery; SPEC.md:383-403 defines clone/setup behavior. No accepted misdelivery exception found.",
+            "TODO.md Planned and unlanded plan index empty; BUGS.md's escaped-helper hang is unrelated.",
+            "Searched queue INDEX and active TRIAGE_OUTCOMES for retarget, credential route/target and misdelivery. update-preplanning-retarget-consent-ambiguity.md concerns a logical ordinary-host Update before server planning, not this registered-environment route. No exact queue/decision coverage found. g020/l1 is a separately supplied pre-registration claim, not coverage or an alias.",
+            "No FILTER.md match for credential misdelivery."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No missing supported mutation premise remains for this post-registration claim. The pre-registration approval authority question stays outside this refutation.",
+          "original_stronger_consequence": "A fresh numeric-ID lookup after entry_uuid-guarded delivery-state reading might deliver credentials to a replacement machine; highest/security if established.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Refute only execution-target replacement after the environment row has registered, using non-reused IDs, immutable environment destinations and transactional place-reference refusal. Preserve the explicit narrowing from the earlier broad wording."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-027.json",
+          "key": "g043/l1",
+          "proposal": "claim-checks/claims-027/result.json",
+          "parent_proposal": "source-refuted-post-registration-credential-route-target-replacement-only",
+          "final_independent_gate": "required-before-highest-misdelivery-drop",
+          "reason": "Full027 AUTOINCREMENTnonreuse, immutableenvironmentdestinationandordinaryplaceeditrefusedwhileanyreferencingenvrowincludingstopped/unresolved; transactionalregistrationstartsbarrier. Exactpost-registration lookup cannotnewlypickreplacementnumericID/machine. Originalbroader'no unverified route remains'withdrawn: pre-registrationapprovalplace-retarget020l1/041l2notrefuted, externalSSHconfig/DBexcluded. Freshgatepreservecredentialswrongmachineriskandnarrowtimeboundary."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "credential-delivery-post-registration-route-retarget",
+        "destination": null
+      }
+    },
+    {
+      "key": "g043/c4",
+      "owner": "g043",
+      "id": "c4",
+      "domain": "host-provisioning-lifecycle",
+      "purpose": "host-provisioning-lifecycle: crates/farhelm-helm/src/provisioning.rs, crates/farhelm-helm/src/provisioning/credential_delivery_tests.rs, crates/farhelm-helm/src/provisioning/service.rs, crates/farhelm-helm/src/provisioning/tensorlake_add.rs, crates/farhelm-helm/src/provisioning/tensorlake_add_tests.rs, crates/farhelm-helm/src/provisioning/credential_delivery.rs, crates/farhelm-helm/src/provisioning/e2e.rs, crates/farhelm-helm/src/provisioning/plan.rs, crates/farhelm-helm/src/provisioning/snapshot_preparer.rs, crates/farhelm-helm/src/provisioning/tensorlake_backend.rs, crates/farhelm-helm/src/provisioning/tests/macos_real_tests.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Recorded Tensorlake creates retain recovery after recipe provider changes",
+            "location": "crates/farhelm-helm/src/provisioning/tensorlake_add.rs:436",
+            "detail": "Reviewed commit: 56040bb964270bb40d191902173dbb84b3ba78fc. TLDR: Considered whether the new provider-compatibility refusal should also reject setup recovery when a recipe now has a Podman-only base. Details: tensorlake_add.rs:384-414 sets new_install for a saved prepared create or a genuinely unstarted row; 436-442 rejects incompatible new creation while preserving saved-prepared recovery. Existing recorded IDs or pending ordinary creates retain ordinary recovery, and prepared_tensorlake_steps:1088 onward falls back to ordinary installation when no saved facts exist. SPEC_impl.md, Adding Tensorlake hosts, explicitly says: \"An interrupted create recovers its own saved facts, not the recipe's latest prepared record. Later Rerun and Update retain ordinary installation\"; SPEC.md, Add host, says \"Rerunning an interrupted initial create first recovers that create's saved installation facts, rather than using the recipe's latest prepared snapshot.\" This preserves the original resource instead of authorizing a new one. Suggested bucket: other if contradictory refusal behavior existed. Could-be-highest: no established security or loss-of-work consequence. Confidence: confirmed source/contract acceptance, no execution. proposed_drop: exact specification acceptance cited above; recorded-create recovery is deliberately independent of later recipe base changes. possible_cover: SPEC_impl.md Adding Tensorlake hosts / SPEC.md Add host, as quoted. Caveat: this conclusion does not authorize a fresh create from an unsupported recipe; that path is refused before SSH key creation and provider operations."
+          }
+        }
+      ],
+      "latest": {
+        "line": 6,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c4",
+          "state": "open",
+          "summary": "Recorded Tensorlake creates retain recovery after recipe provider changes",
+          "location": "crates/farhelm-helm/src/provisioning/tensorlake_add.rs:436",
+          "detail": "Reviewed commit: 56040bb964270bb40d191902173dbb84b3ba78fc. TLDR: Considered whether the new provider-compatibility refusal should also reject setup recovery when a recipe now has a Podman-only base. Details: tensorlake_add.rs:384-414 sets new_install for a saved prepared create or a genuinely unstarted row; 436-442 rejects incompatible new creation while preserving saved-prepared recovery. Existing recorded IDs or pending ordinary creates retain ordinary recovery, and prepared_tensorlake_steps:1088 onward falls back to ordinary installation when no saved facts exist. SPEC_impl.md, Adding Tensorlake hosts, explicitly says: \"An interrupted create recovers its own saved facts, not the recipe's latest prepared record. Later Rerun and Update retain ordinary installation\"; SPEC.md, Add host, says \"Rerunning an interrupted initial create first recovers that create's saved installation facts, rather than using the recipe's latest prepared snapshot.\" This preserves the original resource instead of authorizing a new one. Suggested bucket: other if contradictory refusal behavior existed. Could-be-highest: no established security or loss-of-work consequence. Confidence: confirmed source/contract acceptance, no execution. proposed_drop: exact specification acceptance cited above; recorded-create recovery is deliberately independent of later recipe base changes. possible_cover: SPEC_impl.md Adding Tensorlake hosts / SPEC.md Add host, as quoted. Caveat: this conclusion does not authorize a fresh create from an unsupported recipe; that path is refused before SSH key creation and provider operations."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g043/findings.jsonl",
+        "id": "c4",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "tensorlake-recorded-create-recovery-after-recipe-base-change",
+        "reason": "Parent explicitly accepted named covered proposal from claims-027 after inspecting it. The compatibility refusal is for new work. Recovery retains the recorded resource and that create's saved facts despite later recipe edits; existing ordinary installs keep their ordinary recovery path. This does not authorize a fresh Tensorlake create from a Podman-only base. Exact specification acceptance of saved-create/ordinary-install recovery independently of the latest recipe preparation record. Checked source/results: [\"56040bb964270bb40d191902173dbb84b3ba78fc provisioning/tensorlake_add.rs:384-414 distinguishes saved-prepared recovery, genuinely unstarted rows, recorded IDs and pending creates; :433-442 refuses incompatible new work unless recovering saved prepared facts.\",\"Same revision :1088-1105 falls back to ordinary installation when the resource has no saved prepared facts. These checks establish the claimed distinction without executing it.\"] Current coverage/results: [\"Current SPEC.md:383-403 and SPEC_impl.md:6307-6321 explicitly accept the exact recovery trigger/consequence/scope. Quoted below.\",\"TODO.md Planned empty; unlanded plans index empty; BUGS.md unrelated. Searched queue INDEX/active TRIAGE_OUTCOMES for recovery, saved facts, recipe/base changes and provider compatibility; no narrower contrary decision or separate exact item found.\",\"FILTER.md not used; this is explicit contract acceptance.\"] Exact cited cover: [\"SPEC.md:390-391: Rerunning an interrupted initial create first recovers that create's saved installation facts, rather than using the recipe's latest prepared snapshot.\",\"SPEC_impl.md:6314-6316: An interrupted create recovers its own saved facts, not the recipe's latest prepared record. Later Rerun and Update retain ordinary installation\"] Original stronger consequence and missing premise remain preserved: \"Setup recovery might incorrectly avoid the new provider-compatibility refusal after the recipe changes to a Podman-only base; other if contradictory. No security or user-work-loss route was asserted.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g043/c4",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "tensorlake-recorded-create-recovery-after-recipe-base-change",
+        "bucket": "other",
+        "recording": "covered",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named covered proposal from claims-027 after inspecting it. The compatibility refusal is for new work. Recovery retains the recorded resource and that create's saved facts despite later recipe edits; existing ordinary installs keep their ordinary recovery path. This does not authorize a fresh Tensorlake create from a Podman-only base. Exact specification acceptance of saved-create/ordinary-install recovery independently of the latest recipe preparation record. Checked source/results: [\"56040bb964270bb40d191902173dbb84b3ba78fc provisioning/tensorlake_add.rs:384-414 distinguishes saved-prepared recovery, genuinely unstarted rows, recorded IDs and pending creates; :433-442 refuses incompatible new work unless recovering saved prepared facts.\",\"Same revision :1088-1105 falls back to ordinary installation when the resource has no saved prepared facts. These checks establish the claimed distinction without executing it.\"] Current coverage/results: [\"Current SPEC.md:383-403 and SPEC_impl.md:6307-6321 explicitly accept the exact recovery trigger/consequence/scope. Quoted below.\",\"TODO.md Planned empty; unlanded plans index empty; BUGS.md unrelated. Searched queue INDEX/active TRIAGE_OUTCOMES for recovery, saved facts, recipe/base changes and provider compatibility; no narrower contrary decision or separate exact item found.\",\"FILTER.md not used; this is explicit contract acceptance.\"] Exact cited cover: [\"SPEC.md:390-391: Rerunning an interrupted initial create first recovers that create's saved installation facts, rather than using the recipe's latest prepared snapshot.\",\"SPEC_impl.md:6314-6316: An interrupted create recovers its own saved facts, not the recipe's latest prepared record. Later Rerun and Update retain ordinary installation\"] Original stronger consequence and missing premise remain preserved: \"Setup recovery might incorrectly avoid the new provider-compatibility refusal after the recipe changes to a Podman-only base; other if contradictory. No security or user-work-loss route was asserted.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-027",
+          "key": "g043/c4",
+          "latest_line": 6,
+          "recommendation": "covered",
+          "bucket": "other",
+          "underlying_key": "tensorlake-recorded-create-recovery-after-recipe-base-change",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The compatibility refusal is for new work. Recovery retains the recorded resource and that create's saved facts despite later recipe edits; existing ordinary installs keep their ordinary recovery path. This does not authorize a fresh Tensorlake create from a Podman-only base.",
+          "checks": [
+            "56040bb964270bb40d191902173dbb84b3ba78fc provisioning/tensorlake_add.rs:384-414 distinguishes saved-prepared recovery, genuinely unstarted rows, recorded IDs and pending creates; :433-442 refuses incompatible new work unless recovering saved prepared facts.",
+            "Same revision :1088-1105 falls back to ordinary installation when the resource has no saved prepared facts. These checks establish the claimed distinction without executing it."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:383-403 and SPEC_impl.md:6307-6321 explicitly accept the exact recovery trigger/consequence/scope. Quoted below.",
+            "TODO.md Planned empty; unlanded plans index empty; BUGS.md unrelated. Searched queue INDEX/active TRIAGE_OUTCOMES for recovery, saved facts, recipe/base changes and provider compatibility; no narrower contrary decision or separate exact item found.",
+            "FILTER.md not used; this is explicit contract acceptance."
+          ],
+          "exact_cover_quotes": [
+            "SPEC.md:390-391: Rerunning an interrupted initial create first recovers that create's saved installation facts, rather than using the recipe's latest prepared snapshot.",
+            "SPEC_impl.md:6314-6316: An interrupted create recovers its own saved facts, not the recipe's latest prepared record. Later Rerun and Update retain ordinary installation"
+          ],
+          "missing_premise": null,
+          "original_stronger_consequence": "Setup recovery might incorrectly avoid the new provider-compatibility refusal after the recipe changes to a Podman-only base; other if contradictory. No security or user-work-loss route was asserted.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Exact specification acceptance of saved-create/ordinary-install recovery independently of the latest recipe preparation record."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "tensorlake-recorded-create-recovery-after-recipe-base-change",
+        "destination": null
+      }
+    },
+    {
+      "key": "g043/c5",
+      "owner": "g043",
+      "id": "c5",
+      "domain": "host-provisioning-lifecycle",
+      "purpose": "host-provisioning-lifecycle: crates/farhelm-helm/src/provisioning.rs, crates/farhelm-helm/src/provisioning/credential_delivery_tests.rs, crates/farhelm-helm/src/provisioning/service.rs, crates/farhelm-helm/src/provisioning/tensorlake_add.rs, crates/farhelm-helm/src/provisioning/tensorlake_add_tests.rs, crates/farhelm-helm/src/provisioning/credential_delivery.rs, crates/farhelm-helm/src/provisioning/e2e.rs, crates/farhelm-helm/src/provisioning/plan.rs, crates/farhelm-helm/src/provisioning/snapshot_preparer.rs, crates/farhelm-helm/src/provisioning/tensorlake_backend.rs, crates/farhelm-helm/src/provisioning/tests/macos_real_tests.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c5",
+            "state": "open",
+            "summary": "Route wrapping retains preparer isolation and authentication",
+            "location": "crates/farhelm-helm/src/provisioning/snapshot_preparer.rs:79",
+            "detail": "Reviewed commit: 1038bb1f4549f6896fa6e064fecf540f4548b4da. TLDR: Considered whether replacing the preparer's SSH target with a common route could reuse a previous preparer's SSH master or change which credentials reach it. Details: tensorlake/ssh.rs:52-59 constructs the same destination with SshAccessKind::Tensorlake. snapshot_preparer.rs:75-81 still compares supplied SSH access with the selected helm state before forming this route. backend.rs:782-799 selects OneShot from the backend's existing one_shot flag and lowers that route through the same constructor; access.rs:268-275 uses Tensorlake oneshot_options. SnapshotPreparer remains separate from credential delivery and excludes attachment (snapshot_preparer.rs:104-128), preserving the no-managed-credentials contract. Suggested bucket: highest if a reused preparer connection or credential leak existed; could-be-highest: yes. Confidence: confirmed source refutation of the changed routing boundary, no execution. proposed_drop: source refutation by retained one-shot policy, Tensorlake access and attachment exclusion. possible_cover: none. Caveat: this does not assess independent defects in existing SSH or snapshot cleanup internals."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c5",
+            "state": "open",
+            "summary": "Direct Tensorlake preparation remains one-shot after shared installer dispatch",
+            "location": "crates/farhelm-helm/src/provisioning/snapshot_preparer.rs:79",
+            "detail": "Reviewed commits: 1038bb1f4549f6896fa6e064fecf540f4548b4da and 56659839785691f76da3af5d8f51b511cff4ba8b. Original consequence considered: route wrapping might reuse a previous preparer's SSH master or send managed credentials into a reusable image. TLDR: Synthesis confirms direct Tensorlake preparation retains one-shot SSH and selected gateway authentication; do not generalize this to say nested Podman exec is one-shot. At 1038bb1 service.rs:418-446 constructs a separate SystemBackend::one_shot and gives it to InstallerSnapshotPreparer. At 5665983 service.rs:432-474 gives the same preparation backend to both TensorlakeSnapshotPreparer and the shared EnvironmentPreparer. The gateway access equality check moved to tensorlake/prepared.rs:39-56, which prepares the user manager with that backend and then passes its Tensorlake route/home to the common installer. backend.rs:816-833 preserves its one_shot policy for direct SSH, and access.rs:266-281 passes that policy to SSH lowering. In contrast, nested Podman exec deliberately selects the PLACE's Supervisor master at access.rs:318-323, after retaining the canonical container ID and user in container argv. That is the documented nested-transport contract, not evidence that a direct sandbox preparer can reuse its name's old master. Shared InstallerSnapshotPreparer has no delivery service and excludes AttachSupervisor (snapshot_preparer.rs:103-121). Both providers enter that same state-checking installer before publishing install facts; Podman build.rs:345-374 records facts only after prepare returns. Suggested bucket: highest if stale-preparer connection or managed-credential capture existed; could-be-highest: yes. Confidence: confirmed source refutation for the changed preparer composition, no execution. proposed_drop: source refutation by direct-SSH one-shot assembly, preserved gateway access check, and credential/attachment exclusion. possible_cover: none. Caveats: 'one-shot preparer' is scoped to direct Tensorlake SSH; Podman intentionally borrows its place master. Authentication already in a custom base remains the base author's responsibility, and this candidate does not assert its removal. No readily checkable assembly premise remains missing."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c5",
+          "state": "open",
+          "summary": "Direct Tensorlake preparation remains one-shot after shared installer dispatch",
+          "location": "crates/farhelm-helm/src/provisioning/snapshot_preparer.rs:79",
+          "detail": "Reviewed commits: 1038bb1f4549f6896fa6e064fecf540f4548b4da and 56659839785691f76da3af5d8f51b511cff4ba8b. Original consequence considered: route wrapping might reuse a previous preparer's SSH master or send managed credentials into a reusable image. TLDR: Synthesis confirms direct Tensorlake preparation retains one-shot SSH and selected gateway authentication; do not generalize this to say nested Podman exec is one-shot. At 1038bb1 service.rs:418-446 constructs a separate SystemBackend::one_shot and gives it to InstallerSnapshotPreparer. At 5665983 service.rs:432-474 gives the same preparation backend to both TensorlakeSnapshotPreparer and the shared EnvironmentPreparer. The gateway access equality check moved to tensorlake/prepared.rs:39-56, which prepares the user manager with that backend and then passes its Tensorlake route/home to the common installer. backend.rs:816-833 preserves its one_shot policy for direct SSH, and access.rs:266-281 passes that policy to SSH lowering. In contrast, nested Podman exec deliberately selects the PLACE's Supervisor master at access.rs:318-323, after retaining the canonical container ID and user in container argv. That is the documented nested-transport contract, not evidence that a direct sandbox preparer can reuse its name's old master. Shared InstallerSnapshotPreparer has no delivery service and excludes AttachSupervisor (snapshot_preparer.rs:103-121). Both providers enter that same state-checking installer before publishing install facts; Podman build.rs:345-374 records facts only after prepare returns. Suggested bucket: highest if stale-preparer connection or managed-credential capture existed; could-be-highest: yes. Confidence: confirmed source refutation for the changed preparer composition, no execution. proposed_drop: source refutation by direct-SSH one-shot assembly, preserved gateway access check, and credential/attachment exclusion. possible_cover: none. Caveats: 'one-shot preparer' is scoped to direct Tensorlake SSH; Podman intentionally borrows its place master. Authentication already in a custom base remains the base author's responsibility, and this candidate does not assert its removal. No readily checkable assembly premise remains missing."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g043/findings.jsonl",
+        "id": "c5",
+        "line": 10,
+        "disposition": "under-investigation",
+        "group": "g043-c5",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-027",
+          "key": "g043/c5",
+          "latest_line": 10,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "preparer-route-one-shot-and-delivery-exclusion",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Direct Tensorlake preparation retains one-shot SSH, the selected gateway access and an installer with no credential delivery/attachment authority. Do not generalize the one-shot claim to SSH-nested Podman exec: that route intentionally uses its place's supervisor master. Custom-base authentication is left intact and remains the author's responsibility. Existing SSH and provider cleanup internals are outside this route-composition check.",
+          "checks": [
+            "1038bb1f4549f6896fa6e064fecf540f4548b4da provisioning/service.rs:418-446 selects SystemBackend::one_shot for the preparer; snapshot_preparer.rs:75-82 checks selected Tensorlake access before forming the route and :110-128 skips attachment.",
+            "56659839785691f76da3af5d8f51b511cff4ba8b service.rs:432-474 supplies the same selected preparation backend to the Tensorlake adapter and common installer; tensorlake/prepared.rs:39-56 preserves access equality and passes the same route/home to it.",
+            "Same revision backend.rs:816-833 passes its one_shot policy into direct route lowering; access.rs:266-281 preserves it for SSH, whereas :318-323 deliberately chooses the place's Supervisor master for nested Podman exec.",
+            "Same revision snapshot_preparer.rs:1-6,103-121 has no delivery service and skips attachment; environment/podman/build.rs:345-374 enters this common installer before prepared-image commit. Source inspection only."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:568-586 separates preparation from credential delivery and preserves custom-base authentication. SPEC_impl.md:6566-6583 requires direct preparer one-shot transport and no delivery/gh/tunnels; the named source satisfies those requirements.",
+            "TODO.md Planned/unlanded plan index empty; BUGS.md unrelated. Queue INDEX and active TRIAGE_OUTCOMES searches for preparer access, one-shot reuse, managed-credential capture and transport routing found no exact coverage.",
+            "No FILTER.md match for the hypothetical security route."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No readily checkable production assembly premise remains. No claim is made that custom-base authentication is removed or every nested transport is one-shot.",
+          "original_stronger_consequence": "Route wrapping could reuse a prior preparer's SSH master or capture Farhelm-managed credentials in a reusable image; highest/security if established.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Source refutation limited to direct Tensorlake one-shot/gateway composition and common-installer credential/attachment exclusion. g044/l1 shares equality-check evidence but its narrower removed-validation root is recorded separately."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-027.json",
+          "key": "g043/c5",
+          "proposal": "claim-checks/claims-027/result.json",
+          "parent_proposal": "source-refuted-direct-Tensorlake-preparer-route-and-managed-credential-capture",
+          "final_independent_gate": "required-before-highest-preparer-security-drop",
+          "reason": "Full027 sameone-shotselectedbackendsharedTensorlakeadapter/commoninstaller, selectedaccessvalidatedandgatewayroutepreserved. Commoninstallerhasnodeliveryauthority/skipsattach, entersPodmanbuildbeforecommit. DirectTensorlakeSSHone-shotonly: nestedPodmanintentionallyusesplaceSupervisormaster; custombaseauthretainedauthorresponsibility. Refutesnamedmovedroute/managedcredentialcapture, notallSSH/cleanup. Originalmasterreuse/exposurekeptfreshgate;044l1equalitysharedbutnarrowerroot."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "preparer-route-one-shot-and-delivery-exclusion",
+        "destination": null
+      }
+    },
+    {
+      "key": "g043/c6",
+      "owner": "g043",
+      "id": "c6",
+      "domain": "host-provisioning-lifecycle",
+      "purpose": "host-provisioning-lifecycle: crates/farhelm-helm/src/provisioning.rs, crates/farhelm-helm/src/provisioning/credential_delivery_tests.rs, crates/farhelm-helm/src/provisioning/service.rs, crates/farhelm-helm/src/provisioning/tensorlake_add.rs, crates/farhelm-helm/src/provisioning/tensorlake_add_tests.rs, crates/farhelm-helm/src/provisioning/credential_delivery.rs, crates/farhelm-helm/src/provisioning/e2e.rs, crates/farhelm-helm/src/provisioning/plan.rs, crates/farhelm-helm/src/provisioning/snapshot_preparer.rs, crates/farhelm-helm/src/provisioning/tensorlake_backend.rs, crates/farhelm-helm/src/provisioning/tests/macos_real_tests.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c6",
+            "state": "open",
+            "summary": "Fresh Update route lookup does not authorize mutation after SSH retarget",
+            "location": "crates/farhelm-helm/src/provisioning/service.rs:1303",
+            "detail": "Reviewed commit: 1038bb1f4549f6896fa6e064fecf540f4548b4da. TLDR: Considered whether separately refreshing the execution route during Update planning can combine an older row's installation paths with a new SSH destination and later mutate the wrong machine. Details: service.rs:1286-1308 reads the row, then resolves the probe route afresh; 1418-1428 retains the plan with registration_for_row(&row), deliberately preserving the original registry configuration. Confirmation revalidate requires registration unchanged before backend work (the same service's Update branch, inspected in the earlier synthesis, at 04ffdbb:2283-2287), and registration_for_row includes ordinary SSH destination and installation coordinates (04ffdbb:3026 onward). Thus an intervening ordinary SSH retarget can affect read-only planning probes, but cannot pass the original registration comparison and authorize the Update mutation. Suggested bucket: highest if unauthorized machine mutation occurred; could-be-highest: yes. Confidence: confirmed source refutation of this ordinary Update planning race; no execution. proposed_drop: source refutation by retained original registration and pre-mutation comparison. possible_cover: none. Caveats: this concerns ordinary Update's own retained plan, not an agent environment approval before registration (g020/l1), and does not claim a single database snapshot covers all planning reads. This candidate requires checking the identical guards at the reviewed revision rather than relying solely on the cited later context; that readily checkable attribution check is next."
+          }
+        },
+        {
+          "line": 14,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c6",
+            "state": "open",
+            "summary": "Fresh Update route lookup retains original registration authority",
+            "location": "crates/farhelm-helm/src/provisioning/service.rs:1303",
+            "detail": "Reviewed commit: 1038bb1f4549f6896fa6e064fecf540f4548b4da. Original consequence considered: separately refreshing Update's route might combine old installation paths with a retargeted SSH destination and authorize mutation on another machine. TLDR: The pinned revision itself retains the required original-registration guard; the earlier event's attribution check is now complete. service.rs:1286-1308 may observe different row/route snapshots during read-only planning, but :1426-1428 freezes registration_for_row(&row). The reviewed revision's Update revalidation calls require_registration_unchanged at :2242-2243 before its new probe at :2246. require_registration_unchanged compares the current registration at :2378-2398, and registration_for_row includes SSH destination, remote_farhelm and remote_state_dir at :2985-2998. A supported retarget changes that comparison rather than silently changing the retained plan's mutation authority. Suggested bucket: highest if unauthorized target mutation occurred; could-be-highest: yes. Confidence: confirmed source refutation at the reviewed revision; no execution. proposed_drop: source refutation by pinned pre-mutation original-registration comparison, not by later production code alone. possible_cover: none. Caveats: this is ordinary Update's retained plan only; it does not refute a pending agent environment approval before registration (g020/l1), promise atomic planning reads, or assess external SSH configuration changes. No missing readily checkable premise remains."
+          }
+        }
+      ],
+      "latest": {
+        "line": 14,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c6",
+          "state": "open",
+          "summary": "Fresh Update route lookup retains original registration authority",
+          "location": "crates/farhelm-helm/src/provisioning/service.rs:1303",
+          "detail": "Reviewed commit: 1038bb1f4549f6896fa6e064fecf540f4548b4da. Original consequence considered: separately refreshing Update's route might combine old installation paths with a retargeted SSH destination and authorize mutation on another machine. TLDR: The pinned revision itself retains the required original-registration guard; the earlier event's attribution check is now complete. service.rs:1286-1308 may observe different row/route snapshots during read-only planning, but :1426-1428 freezes registration_for_row(&row). The reviewed revision's Update revalidation calls require_registration_unchanged at :2242-2243 before its new probe at :2246. require_registration_unchanged compares the current registration at :2378-2398, and registration_for_row includes SSH destination, remote_farhelm and remote_state_dir at :2985-2998. A supported retarget changes that comparison rather than silently changing the retained plan's mutation authority. Suggested bucket: highest if unauthorized target mutation occurred; could-be-highest: yes. Confidence: confirmed source refutation at the reviewed revision; no execution. proposed_drop: source refutation by pinned pre-mutation original-registration comparison, not by later production code alone. possible_cover: none. Caveats: this is ordinary Update's retained plan only; it does not refute a pending agent environment approval before registration (g020/l1), promise atomic planning reads, or assess external SSH configuration changes. No missing readily checkable premise remains."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g043/findings.jsonl",
+        "id": "c6",
+        "line": 14,
+        "disposition": "under-investigation",
+        "group": "g043-c6",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-027",
+          "key": "g043/c6",
+          "latest_line": 14,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "ordinary-update-retained-registration-mutation-authority",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Read-only Update planning can see separate row/route snapshots, but the retained plan freezes its original registration and checks it again before execution-side probing/mutation. This is ordinary Update's own plan, not an earlier environment approval, and promises neither atomic planning reads nor protection from external SSH configuration changes.",
+          "checks": [
+            "1038bb1f4549f6896fa6e064fecf540f4548b4da provisioning/service.rs:1286-1308 reads the row then resolves/probes; :1426-1428 freezes registration_for_row(&row), preserving the original row rather than the effective probe row.",
+            "Same reviewed revision :2242-2246 calls require_registration_unchanged before its execution-side probe. :2378-2398 compares the current registration and refuses a mismatch; :2985-2998 includes ordinary SSH destination and both installation coordinates. The earlier event's revision-attribution check is therefore resolved at the pinned commit itself. Source inspection only."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:122-134 governs Update authority; SPEC_impl.md:7782-7792 requires retained one-use plans, host/registry-fact revalidation before admission and recorded-coordinate use. No accepted unauthorized-mutation route was found or used as coverage.",
+            "TODO.md Planned empty; unlanded plans index empty; BUGS.md unrelated. Read update-preplanning-retarget-consent-ambiguity.md after the queue INDEX match: that item freezes a newer row before planning and questions stale GUI consent. It does not cover mixing the old plan's installation authority with a later destination. No exact active TRIAGE_OUTCOMES match found.",
+            "No FILTER.md match for wrong-machine mutation."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No missing attribution premise remains for this ordinary Update race. A pre-registration environment approval or external SSH-config route is outside this check.",
+          "original_stronger_consequence": "Separately refreshing Update's route could combine old installation paths with a retargeted destination and authorize mutation on another machine; potentially highest.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Pinned-source original-registration retention and pre-mutation equality guard, rather than a later revision's guard or coverage from the distinct preplanning-consent item."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-027.json",
+          "key": "g043/c6",
+          "proposal": "claim-checks/claims-027/result.json",
+          "parent_proposal": "source-refuted-ordinary-Update-old-registration-new-route-mutation",
+          "final_independent_gate": "required-before-highest-wrong-machine-drop",
+          "reason": "Full027 pinned1038readsrowthenroute butfreezesregistrationoriginalrow, preexecutionprobeguardcomparesdestination/installcoordsandrefuseschangedregistration. Notatomicplanningreadpromise, notlaterrevisionguard. Distinctcurrentqueuepreplanningnewrow/staleGUIconsent andearlierenvironmentapprovalboundarynotrefuted. Preserveoriginalwrongmachinepathmutationsecurityfreshgate, externalSSHconfigoutside."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "ordinary-update-retained-registration-mutation-authority",
+        "destination": null
+      }
+    },
+    {
+      "key": "g043/c7",
+      "owner": "g043",
+      "id": "c7",
+      "domain": "host-provisioning-lifecycle",
+      "purpose": "host-provisioning-lifecycle: crates/farhelm-helm/src/provisioning.rs, crates/farhelm-helm/src/provisioning/credential_delivery_tests.rs, crates/farhelm-helm/src/provisioning/service.rs, crates/farhelm-helm/src/provisioning/tensorlake_add.rs, crates/farhelm-helm/src/provisioning/tensorlake_add_tests.rs, crates/farhelm-helm/src/provisioning/credential_delivery.rs, crates/farhelm-helm/src/provisioning/e2e.rs, crates/farhelm-helm/src/provisioning/plan.rs, crates/farhelm-helm/src/provisioning/snapshot_preparer.rs, crates/farhelm-helm/src/provisioning/tensorlake_backend.rs, crates/farhelm-helm/src/provisioning/tests/macos_real_tests.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c7",
+            "state": "open",
+            "summary": "New container credential test targets shared selection/storage seams",
+            "location": "crates/farhelm-helm/src/provisioning/credential_delivery_tests.rs:20",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: Considered whether the new container credential test falsely proves a real connection hook or full secret-delivery round trip. Details: credential_delivery_tests.rs:24-68 explicitly establishes a decoded Podman-only row, directly asserts read_bindings(...).uses(\"work\"), and round-trips remembered home through read_record. It does not call connect/enter, install credentials or assert delivery stamps. This is useful direct coverage of the actual changed branch: credential_delivery.rs:678-684 replaces the Tensorlake-only recipe lookup with environment_binding, so restoring the old lookup makes line 59 fail. The test's first docstring sentence says shared selections and records; its function name and 'hook' wording are broader than the calls. The source does not establish that this focused seam test promises complete connection/secret-delivery coverage; no reportable test-oracle defect is asserted solely from missing unrelated integration steps. Suggested bucket: other if documentation were judged misleading; could-be-highest: no (this is a test-evidence scope question, not credential exposure). Confidence: confirmed narrow source coverage; no execution. proposed_drop: source refutation of the claim that the test lacks a distinguishing observable for the changed Tensorlake-only selection regression; that observable is the direct Podman read_bindings assertion. possible_cover: none. Caveats: this test must not be cited as evidence that an actual provider connected hook acquired a lease, wrote credentials, retained secret stamps or ran Podman. Production correctness alone would not refute such a separate hook-test claim. The unchanged Tensorlake hook fixtures are not treated as Podman end-to-end coverage."
+          }
+        }
+      ],
+      "latest": {
+        "line": 13,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c7",
+          "state": "open",
+          "summary": "New container credential test targets shared selection/storage seams",
+          "location": "crates/farhelm-helm/src/provisioning/credential_delivery_tests.rs:20",
+          "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: Considered whether the new container credential test falsely proves a real connection hook or full secret-delivery round trip. Details: credential_delivery_tests.rs:24-68 explicitly establishes a decoded Podman-only row, directly asserts read_bindings(...).uses(\"work\"), and round-trips remembered home through read_record. It does not call connect/enter, install credentials or assert delivery stamps. This is useful direct coverage of the actual changed branch: credential_delivery.rs:678-684 replaces the Tensorlake-only recipe lookup with environment_binding, so restoring the old lookup makes line 59 fail. The test's first docstring sentence says shared selections and records; its function name and 'hook' wording are broader than the calls. The source does not establish that this focused seam test promises complete connection/secret-delivery coverage; no reportable test-oracle defect is asserted solely from missing unrelated integration steps. Suggested bucket: other if documentation were judged misleading; could-be-highest: no (this is a test-evidence scope question, not credential exposure). Confidence: confirmed narrow source coverage; no execution. proposed_drop: source refutation of the claim that the test lacks a distinguishing observable for the changed Tensorlake-only selection regression; that observable is the direct Podman read_bindings assertion. possible_cover: none. Caveats: this test must not be cited as evidence that an actual provider connected hook acquired a lease, wrote credentials, retained secret stamps or ran Podman. Production correctness alone would not refute such a separate hook-test claim. The unchanged Tensorlake hook fixtures are not treated as Podman end-to-end coverage."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g043/findings.jsonl",
+        "id": "c7",
+        "line": 13,
+        "disposition": "excluded",
+        "group": "container-credential-selection-test-distinguishing-oracle",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-027 after inspecting it. The focused test has a distinguishing Podman selection assertion: restoring the legacy Tensorlake-only lookup makes it fail. Its name and 'hook' wording are broader than its calls, and its home round trip is not a stamp assertion. This test supplies no evidence of real connection-hook entry, leases, secret writes, delivery stamps or a Podman round trip; unchanged Tensorlake fixtures supply none of that Podman integration evidence either. Refute only the alleged absence of a distinguishing observable, not any separately asserted hook-coverage promise. Source refutation of 'no distinguishing observable' only. Keep the narrower evidence limits and broader wording caveat with any final disposition. Checked source/results: [\"56659839785691f76da3af5d8f51b511cff4ba8b provisioning/credential_delivery_tests.rs:20-68 registers and decodes a Podman-only row, asserts its type at :55-58, directly checks read_bindings(...).uses(\\\"work\\\") at :59, and round-trips only remembered home at :60-66.\",\"Same revision credential_delivery.rs:678-684 changes selection from the legacy Tensorlake binding to environment_binding. A Podman row without the former binding distinguishes that change without connecting. Test calls were inspected, not executed.\"] Current coverage/results: [\"Current SPEC.md:391-394 and SPEC_impl.md Adding Tensorlake hosts / named credentials describe production delivery, but do not make this unit-seam test proof of the full hook. Production correctness was not used to dismiss a test-oracle defect.\",\"TODO.md Planned/unlanded plan index empty; BUGS.md unrelated. Searched queue INDEX/active TRIAGE_OUTCOMES for credential-hook/container test, selection, stamps and record coverage; no exact queue or decision match found.\",\"No FILTER.md match proposed for a test/documentation scope claim.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The new container credential test might falsely prove a real connected hook or a complete secret-delivery round trip. Other/test-evidence scope; no credential exposure consequence was asserted.\"; \"A separate claim that this seam test promises actual connected-hook or stamp coverage would need its precise asserted contract. The broad name/comment alone does not remove the observable for the changed selection regression.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g043/c7",
+        "line": 13,
+        "disposition": "excluded",
+        "group": "container-credential-selection-test-distinguishing-oracle",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-027 after inspecting it. The focused test has a distinguishing Podman selection assertion: restoring the legacy Tensorlake-only lookup makes it fail. Its name and 'hook' wording are broader than its calls, and its home round trip is not a stamp assertion. This test supplies no evidence of real connection-hook entry, leases, secret writes, delivery stamps or a Podman round trip; unchanged Tensorlake fixtures supply none of that Podman integration evidence either. Refute only the alleged absence of a distinguishing observable, not any separately asserted hook-coverage promise. Source refutation of 'no distinguishing observable' only. Keep the narrower evidence limits and broader wording caveat with any final disposition. Checked source/results: [\"56659839785691f76da3af5d8f51b511cff4ba8b provisioning/credential_delivery_tests.rs:20-68 registers and decodes a Podman-only row, asserts its type at :55-58, directly checks read_bindings(...).uses(\\\"work\\\") at :59, and round-trips only remembered home at :60-66.\",\"Same revision credential_delivery.rs:678-684 changes selection from the legacy Tensorlake binding to environment_binding. A Podman row without the former binding distinguishes that change without connecting. Test calls were inspected, not executed.\"] Current coverage/results: [\"Current SPEC.md:391-394 and SPEC_impl.md Adding Tensorlake hosts / named credentials describe production delivery, but do not make this unit-seam test proof of the full hook. Production correctness was not used to dismiss a test-oracle defect.\",\"TODO.md Planned/unlanded plan index empty; BUGS.md unrelated. Searched queue INDEX/active TRIAGE_OUTCOMES for credential-hook/container test, selection, stamps and record coverage; no exact queue or decision match found.\",\"No FILTER.md match proposed for a test/documentation scope claim.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The new container credential test might falsely prove a real connected hook or a complete secret-delivery round trip. Other/test-evidence scope; no credential exposure consequence was asserted.\"; \"A separate claim that this seam test promises actual connected-hook or stamp coverage would need its precise asserted contract. The broad name/comment alone does not remove the observable for the changed selection regression.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-027",
+          "key": "g043/c7",
+          "latest_line": 13,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "container-credential-selection-test-distinguishing-oracle",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The focused test has a distinguishing Podman selection assertion: restoring the legacy Tensorlake-only lookup makes it fail. Its name and 'hook' wording are broader than its calls, and its home round trip is not a stamp assertion. This test supplies no evidence of real connection-hook entry, leases, secret writes, delivery stamps or a Podman round trip; unchanged Tensorlake fixtures supply none of that Podman integration evidence either. Refute only the alleged absence of a distinguishing observable, not any separately asserted hook-coverage promise.",
+          "checks": [
+            "56659839785691f76da3af5d8f51b511cff4ba8b provisioning/credential_delivery_tests.rs:20-68 registers and decodes a Podman-only row, asserts its type at :55-58, directly checks read_bindings(...).uses(\"work\") at :59, and round-trips only remembered home at :60-66.",
+            "Same revision credential_delivery.rs:678-684 changes selection from the legacy Tensorlake binding to environment_binding. A Podman row without the former binding distinguishes that change without connecting. Test calls were inspected, not executed."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:391-394 and SPEC_impl.md Adding Tensorlake hosts / named credentials describe production delivery, but do not make this unit-seam test proof of the full hook. Production correctness was not used to dismiss a test-oracle defect.",
+            "TODO.md Planned/unlanded plan index empty; BUGS.md unrelated. Searched queue INDEX/active TRIAGE_OUTCOMES for credential-hook/container test, selection, stamps and record coverage; no exact queue or decision match found.",
+            "No FILTER.md match proposed for a test/documentation scope claim."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "A separate claim that this seam test promises actual connected-hook or stamp coverage would need its precise asserted contract. The broad name/comment alone does not remove the observable for the changed selection regression.",
+          "original_stronger_consequence": "The new container credential test might falsely prove a real connected hook or a complete secret-delivery round trip. Other/test-evidence scope; no credential exposure consequence was asserted.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation of 'no distinguishing observable' only. Keep the narrower evidence limits and broader wording caveat with any final disposition."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "container-credential-selection-test-distinguishing-oracle",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial pass complete: all 22 assigned patches read.\n\nNo reportable findings; six candidates recorded with supporting refutations or specification acceptance. No unresolved leads or unread assigned scope.\n\nUpdated `findings.jsonl` and `progress.md`. No tests or reproductions run. Ready for the later synthesis turn."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised `l1`, `c2`, `c3`, and `c5` with caller-chain evidence and narrower caveats.\n\n`l1` now explicitly applies only after environment registration commits; it does not refute `g020/l1`’s pending-approval issue.\n\nNo new findings. Unresolved lead IDs: none."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 complete. No new reportable defect found.\n\nChecked Update route revalidation, changed test premises and oracles, plan serialization, and fixture transport adaptations. Recorded set-aside candidates `c6` and `c7`.\n\nNew verified findings: none. New unverified findings: none. Open leads: none. No runtime execution."
+    }
+  ],
+  "progress": "# g043 host-provisioning-lifecycle\n\nTurn type/count: initial / 1. Discovery-pass count: 0. Initial assigned pass complete; ready for the caller's later synthesis turn. No later-turn protocol was run inside this turn.\n\nAll 22 assigned patch files (1426 lines, 64977 bytes) were read using the absolute evidence command. The 202-line credential-delivery patch was split at 180 into two evidence calls. No assigned patch range remains unread. The complete inventory commits field was read; excluded inventory metadata and coverage sources were not read. No checkout changes, runtime tests, builds or reproductions were made.\n\nThe findings log is append-only. This pass added c1, c2, c3, c4, c5 and l1. l1 began as a route-identity lead and was revised under its original ID to a source-refuted candidate. Latest records: six candidates; zero reportable findings; zero unresolved leads. New verified IDs this pass: none (findings); new unverified finding IDs: none. Candidates are source/contract conclusions, not observed runtime behavior. The first c1 record attempt used an unsupported state and failed without appending; the corrected event was then recorded successfully. No records were removed or truncated.\n\nInterface conclusions:\n\n- Environment destruction retains the opaque provider proof and its host-ID check; the changed rollback wraps a never-sent-create proof before starting any provider task.\n- Shared transport keeps Tensorlake authentication, the established flat serialized SSH plan and the preparer's one-shot policy.\n- Container Update refuses before probing when either admitted install coordinate is absent. Existing-environment registration uses a compare-and-update guard over the full binding and old installation facts.\n- Credential route refresh cannot point an old environment row at a supported successor: host IDs are AUTOINCREMENT, environment destinations are immutable and referenced place retarget is refused.\n- Credential warning changes preserve only typed local session-limit diagnoses; arbitrary backend output is discarded.\n- Tensorlake provider compatibility is checked for fresh creation, while recorded creates recover their own saved installation facts after recipe edits, as specified.\n\nGoverning contracts read at pinned revisions: SPEC.md remote provisioning (106-204), Add host (358-391), shared recipes/credential delivery (442-513), snapshots/preparation (533-590); SPEC_impl.md Disposable environments including its full subsections (6408-6592), Adding Tensorlake hosts (6647-6775), Tensorlake prepared snapshots (6912-6964), Provisioning (8084-8470), and the Answers bind to what was drawn paragraph (1068-1090; no GUI handlers were assigned). The specs have no endpoint diff between ee39aeacdaccfeaa0cea25246540b20008c868f0 and 56659839785691f76da3af5d8f51b511cff4ba8b. Required root instructions, machine rules, queue priority/template rules, skillette and scode-voice were read.\n\nContext source reads, in addition to all assigned patch ranges recorded in the manifest audit:\n\n- ee39aeacdaccfeaa0cea25246540b20008c868f0: environment/mod.rs 1-212; tensorlake/hosts.rs 40-117; provisioning/tensorlake_add.rs 510-635; store.rs 7860-7935; provisioning/credential_delivery_tests.rs 1260-1405; provisioning.rs 4190-4348.\n- 1038bb1f4549f6896fa6e064fecf540f4548b4da: tensorlake/ssh.rs 1-105; provisioning/snapshot_preparer.rs 1-145; provisioning/backend.rs context search around remote_command 770-836; access.rs 240-325 and 348-420 (test context); provisioning/service.rs 2420-2510. Targeted store schema/retarget searches confirmed AUTOINCREMENT at 2612 and managed Tensorlake destination refusal at 7409.\n- 56040bb964270bb40d191902173dbb84b3ba78fc: provisioning/tensorlake_add.rs 270-515 and 855-1097.\n- 04ffdbb35773cef36e73eb798c005ddbeb9a9de6: provisioning/service.rs 950-1090, 1310-1510, 2130-2400 and require_registration_unchanged 2419-2440; store/podman.rs 1-270.\n- 56659839785691f76da3af5d8f51b511cff4ba8b: provisioning/credential_delivery.rs 1-210, 270-475 and 677-827; access.rs 1-280 and 350-485; provisioning/backend.rs 211-325 plus targeted redaction test context; provisioning/service.rs 175-355 and production composition context 430-548; provisioning/credential_delivery_tests.rs 145-270; store.rs 898-920, 2708-2725, 7527-7605; store/podman.rs 213-251. Additional git-grep searches were confined to relevant source callers and guards, never coverage sources.\n\nNext action: await the caller's synthesis prompt. If asked to continue, reread the brief after compaction and use the existing log IDs for revisions. No source lead is awaiting execution or outside evidence.\n\n## Synthesis turn 2 in progress\n\nTurn type/count: synthesis / 2; discovery-pass count remains 0. Parent audited all mandatory patches. Revisit l1 against g020/l1's pre-registration approval route at 190d844e58c96cf197aa838d0b0eea8062f48435, then revisit c3 proof dispatch, c5 one-shot preparation, and c2 copied-state admission. No new reportable finding is established. All existing proposed drops remain proposals; the parent has accepted none.\n\n## Synthesis turn 2 complete\n\nTurn type/count: synthesis / 2; discovery-pass count: 0. Revisited interactions across registration, provider creation, credential delivery, destruction, shared preparation and first-dial admission. Revised original IDs l1, c3, c5 and c2 immediately on reaching the respective conclusions. No new IDs, verified findings or unverified findings this turn. No unresolved lead IDs. The six candidate records remain proposed drops for the parent's independent handling; none is treated as accepted. All assigned patch scope remains read; no additional unread assigned material. No runtime execution or reproduction.\n\nThe material correction is the scope of l1: its refutation begins when registration commits the ENVIRONMENT row's place_host reference. It says nothing about a prior pending approval's PLACE machine identity. The caller's g020/l1 at event line 9 is not duplicated or proposed for drop. At 190d844e58c96cf197aa838d0b0eea8062f48435, registration commits at store/podman.rs:392; delivery later receives the admitted environment's own fresh HostRow at provisioning/tensorlake_add.rs:597-605. This retains a place endpoint already changed before registration, rather than comparing it with the machine originally shown by a pending approval.\n\nOther synthesis results: c3 now names the locked same-binding destruction route, actual-provider delegation in test dispatch, and the limited host-ID proof contract. c5 now documents both production one-shot assembly and the moved Tensorlake access check, while explicitly excluding nested Podman exec from its one-shot claim. c2 now separates pre-capture copied-state verification from post-boot clone admission and names the actor's durable first-dial gate and saved-facts write chain. No readily checkable premise is left unsettled within these narrowed routes.\n\nAdditional source context read this turn:\n\n- 190d844e58c96cf197aa838d0b0eea8062f48435: provisioning/tensorlake_add.rs 270-440 and 480-650; store/podman.rs 210-255 and 325-440. Read only the caller-named line 9 in g020/findings.jsonl, not other groups' records or coverage sources.\n- 1038bb1f4549f6896fa6e064fecf540f4548b4da: provisioning/service.rs 380-490 (original production preparation-backend selection).\n- 56659839785691f76da3af5d8f51b511cff4ba8b: provisioning/snapshot_preparer.rs 1-215; environment/mod.rs 105-195, 265-315, 455-655; environment/podman.rs 1-60, 60-95, 920-1038, 1039-1210, 1280-1398, plus remove_container 390-450 context; tensorlake/prepared.rs 14-89 (adapter/trait) and its stale-facts context through 138; store.rs 8000-8098; hosts.rs 1420-1520; provisioning/tensorlake_add.rs 343-418, 440-492, 495-620; provisioning/service.rs 390-475, 1320-1375, 2985-3022; access.rs 258-333; environment/podman/build.rs 288-410; provisioning/backend.rs 806-836 and 2390-2430; provisioning/tensorlake_backend.rs 1-353; store/podman.rs 253-330; manager.rs 4178-4220 context. Targeted source searches located provider destruction/creation and copied-state delegates before reading these ranges. All were bounded and delivered without truncation.\n\nNext action: await the caller's next later-turn prompt. No further synthesis/discovery pass was folded into this turn.\n\n## Discovery turn 3 in progress\n\nTurn type/count: discovery / 3; discovery-pass count: 1. Read discovery-neighbours.json lines 1-203 in bounded source-only context chunks. No named pending questions were supplied. Neighbour input is for novelty only: do not duplicate g045's ordinary-Add source-lock delay, g056's over-redacted failed-cleanup diagnostics, or unrelated lifecycle/test documentation findings. Current narrower candidate histories remain in force and proposed drops remain unaccepted. New search focuses on the assigned recipe-compatibility gate, updated test premises, plan serialization, execution-route refresh and environment-specific registration; no new lead is established yet.\n\n## Discovery turn 3 complete\n\nTurn type/count: discovery / 3. Discovery-pass count: 1. No new reportable defect found. New verified finding IDs: none. New unverified-after-investigation finding IDs: none. Open lead IDs: none. New set-aside candidate IDs: c6 and c7; c6 received a same-ID follow-up with pinned attribution evidence. No older consequence, bucket or proposed-drop basis was silently removed. The parent's earlier drops/lowerings remain unaccepted.\n\nUseful checks/results beyond the earlier synthesis:\n\n- Followed the changed store-backed probe resolution through ordinary Update planning, the original registration snapshot, confirmation revalidation and registration_for_row at 1038bb1. Read-only planning can mix observations across a retarget, but the pinned confirmation code refuses the changed destination/paths before mutation. This distinct ordinary-Update route is recorded as c6, not generalized to agent approvals.\n- Read the newly added retained-checkpoint compatibility test with its entire fixture setup. The test establishes that the old prepared snapshot is still fresh after changing the recipe base, the SSH key is absent before probing, and the API event log, key and host list remain unchanged after the specific refusal. No separate test-oracle defect established there.\n- Read the new Podman credential-selection/record test and compared it with the exact read_bindings change. Its direct selection assertion distinguishes the old Tensorlake-only lookup; it does not establish connection-hook execution or secret/stamp delivery. c7 records that narrow evidence boundary explicitly, without using production correctness to claim end-to-end test coverage.\n- Revisited the actual unfinished-container Update test: it asserts canonical resource identity plus missing install coordinates before the action, the intended refusal, zero probes/operations, and unchanged stored rows afterwards. No new premise/oracle defect established.\n- Inspected the changed remote-route serialization and plan action selection alongside the E2E target adapter. Ordinary SSH serialization retains its flat fields, and container exec uses the remote upload/install path. Inspected the changed Mac reboot-shell fixture: the same remote constructor is followed by null input, owned process-group setup, bounded capture and retained numeric exit status. No new defect established in these assigned adaptations.\n- Reviewed updated Add-test provider injection and request helpers at the original ee39aea revision rather than treating later provider assembly as proof of that earlier fixture. The explicit replacement account is installed in the mutation registry before requests use the router; fixture-only source checks were not counted as live provider evidence.\n\nAdditional pinned source reads this turn: 56040bb964270bb40d191902173dbb84b3ba78fc provisioning/tensorlake_add.rs 620-855 and provisioning/tensorlake_add_tests.rs 1-148,1208-1270; 1038bb1f4549f6896fa6e064fecf540f4548b4da provisioning/service.rs 1260-1430,2235-2265,2350-2410,2985-3000 (requested 3014-3050 was past EOF), provisioning/plan.rs 520-635,750-845, provisioning/e2e.rs 1-225, provisioning/tests/macos_real_tests.rs 888-980; 56659839785691f76da3af5d8f51b511cff4ba8b provisioning/credential_delivery_tests.rs 1-147; 04ffdbb35773cef36e73eb798c005ddbeb9a9de6 provisioning/service.rs 1190-1238,3018-3050 and provisioning.rs 2970-3025; ee39aeacdaccfeaa0cea25246540b20008c868f0 provisioning/tensorlake_add_tests.rs 109-195. One overly broad stamp-context search in unchanged credential tests clipped its middle; no claim of reading or reviewing those omitted unchanged ranges is made, and all assigned changed test lines were separately read in full. The clipped search supplied no finding premise.\n\nAll mandatory source scope remains fully read per the parent's audit. No runtime tests, reproductions, builds, checkout mutations, live-install actions or prohibited coverage searches. This was one discovery pass only. Next action: await the caller's next prompt.\n"
+}

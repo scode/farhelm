@@ -1,0 +1,321 @@
+[
+  {
+    "key": "g077/f1",
+    "latest_line": 10,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "ui-environment-place-reader-discards-probe-refresh-intent",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Source establishes that an explicit probe refresh overlapping a cached read is answered by another cached read. This is stale readiness and ineffective Refresh, with no established security or work-loss route. No execution was performed.",
+    "checks": [
+      "350a4b33b6d4476f4a78e43cea124bc2b828f462:crates/farhelm-ui/src/environment_ui.rs:693-711 captures refresh in each arriving closure and consumes it before awaiting; :713-728 sends true on opening/Refresh and false on feed/fallback reads.",
+      "Same revision:crates/farhelm-ui/src/reader.rs:444-456 records Explicit demand while running but declines the new caller; :651-665 discards that caller's closure and reuses the original closure. :517-535 dispatches the queued demand, so the defect is operation choice rather than missing demand.",
+      "Same revision:crates/farhelm-ui/src/containers_settings.rs:53-62 disables Refresh only for deletion busy, allowing overlap. api/environments.rs:6-14 is GET-only; :103-112 sends the probe POSTs. crates/farhelm-helm/src/hosts.rs:4294-4306 auto-probes only hosts without checked_at, so an already-checked changed host is affected.",
+      "The spent-true closure also makes an automatic retry after refresh failure perform GET only. An idle explicit click or remount requests true again; an existing independent probe can mask the issue. No permanent inability to probe is established. The range's environment_ui.rs diff leaves this hook unchanged."
+    ],
+    "coverage_checked": [
+      "Recording main 24bc058066fd57848e788b465719b0e6da2f98f7: SPEC.md Container sessions and SPEC_impl.md Podman places, creation and images distinguish background probes and cached availability; neither accepts discarding explicit refresh intent.",
+      "TODO.md Planned is empty. Searched plans/queue for probe/refresh/readiness routes; relevant podman-environments work is already landed (plans/REPORTS.md:21), and no unlanded exact fix was found.",
+      "Searched BUGS.md, the complete INDEX.md and active TRIAGE_OUTCOMES.md for probe refresh/cached place readiness. No exact trigger/consequence/scope coverage or same-root item found. Recipe-status and orphan-discovery issues use different readers and endpoints.",
+      "FILTER.md checked: rare-glitch coverage is ambiguous, not established. The trigger is any overlapping cached request, with no proved narrow duration; later automatic cached reads do not repair the missing probe. Retain rather than infer rarity or brief self-correction."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No runtime ordering or frequency measurement. Those are not needed for the conditional closure-loss conclusion; no stronger impact route is established.",
+    "original_stronger_consequence": "Original and latest records concern stale readiness and an ineffective explicit refresh; neither establishes security harm or loss of user-owned work.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain the source-confirmed refresh-intent loss, including the failed-refresh retry variant and ordinary recovery limits."
+  },
+  {
+    "key": "g077/f2",
+    "latest_line": 12,
+    "recommendation": "covered",
+    "bucket": "other",
+    "underlying_key": "ui-agent-environment-launch-last-session-consequence",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The launch-card wording matches the accepted last-session deletion contract at its own revision and recording main. It is a creation card. The original feared destruction beyond a Delete warning remains a proposed refutation requiring an independent check.",
+    "checks": [
+      "190d844e58c96cf197aa838d0b0eea8062f48435:crates/farhelm-ui/src/environment_ui.rs:60-67 says deleting the last session removes the environment; approvals.rs:1070-1106 installs it in LaunchEnvironment's creation card.",
+      "At that same reviewed hash, SPEC.md:1504-1543 defines last-session sealing, separate both-outcomes consent, and an explicit whole-resource fallback. :4875-4885 applies the parallel container rule. Using 350a4b33's earlier whole-resource-only contract would be the wrong historical comparison.",
+      "Historical staging caveat: 190d844e environment_ui.rs:94-110 still contains whole-resource Delete wording. This is not proof that every executable Delete path already implemented the newly specified narrower contract at 190d844e. Later in-range 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa:environment_ui.rs:129-190 and the examined row/header token paths distinguish both outcomes from whole-resource Delete. No reproduction or all-path certification is claimed."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md Sandbox sessions and Container sessions expressly retain last-session deletion, separate fallback and host-level whole-resource consent. SPEC_impl.md Environment ownership and refusal / Environment Delete and the seal agrees.",
+      "TODO.md Planned is empty; matching environment-agent-operations and podman-environments plans are already landed per plans/REPORTS.md:21,28. No separate unlanded coverage needed or found.",
+      "Searched BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md for launch-card deletion promises and last-session consequences; no exact queue item or ledger decision found. No FILTER.md omission is proposed."
+    ],
+    "exact_cover_quotes": [
+      "190d844e:SPEC.md:1504: **Delete removes the sandbox together with its last session.**",
+      "190d844e:SPEC.md:1514-1516: The confirmation states both outcomes: the session and its checkout are deleted, and if it is the last session in the sandbox, the sandbox, every process and file in it and its snapshots are deleted too, with **Delete session**. It is never skipped, since it may destroy the sandbox.",
+      "190d844e:SPEC.md:4875-4877: User Delete follows Sandbox sessions' rule: it asks the container's Farhelm to delete the session and seal the container if no other session remains, removes the container together with its last session, and otherwise reports that the container stays and how many other sessions are in it. The confirmation states both outcomes and is never skipped."
+    ],
+    "missing_premise": "The stronger concern needs a shipped destructive path that omits the actual whole-resource consequence. That path was not established. This consultation does not certify every intermediate executable implementation against the specification.",
+    "original_stronger_consequence": "A launch explanation might falsely imply other sessions protect the environment, leading to destruction of other sessions and files beyond understood consent if actual Delete still always destroys the resource without a separate warning. The history proposes specification acceptance, not an accepted parent drop.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Propose coverage only for the named creation-card wording under the contemporaneous accepted contract. Preserve the original work-loss concern and the historical staging caveat for independent checking.",
+    "new_interface_evidence": "At 190d844e, environment_ui.rs:94-110 still has the old whole-resource Delete copy even though SPEC.md already specifies last-session deletion. The later in-range 2ef10815 UI patch introduces the two lanes. This prevents treating contemporaneous specification acceptance as proof that every intermediate executable path already implemented the new contract; it does not establish an unwarned destructive route."
+  },
+  {
+    "key": "g077/f3",
+    "latest_line": 5,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "ui-container-leftover-delete-captured-confirmed-target",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The examined cleanup confirmation displays and sends the same captured resource token. Refreshing the list does not substitute a different target. This remains a proposed source refutation, not an authorized drop.",
+    "checks": [
+      "350a4b33b6d4476f4a78e43cea124bc2b828f462:crates/farhelm-ui/src/containers_settings.rs:128-179 reads confirm.current(), displays shown.key().name, clones shown into answers, takes precisely that token, and passes shown.key() to deletion.",
+      "Same revision:api/environments.rs:76-98 constructs the owned request from the captured host or place/id, not the live catalog. hosts/settings_dialog.rs:809-829 likewise derives host-removal copy from shown.key(), and :924 sends shown.clone().",
+      "SPEC_impl.md Answers bind to what was drawn requires precisely this render-bound token/target behavior. No runtime observation or certification of other consumers is claimed."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md Container sessions and SPEC_impl.md Shared recipes and prepared artifacts / Answers bind to what was drawn require confirmed owned-resource cleanup; they do not authorize target drift. The examined source follows them.",
+      "TODO.md Planned empty; searched unlanded plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md for refreshed leftover confirmations targeting another container. No exact existing item or decision found. Related orphan/trash focus items concern focus or placement, not this identity premise.",
+      "FILTER.md is not the basis: wrong-target destruction would be outside its ordinary glitch filters."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No source route substitutes a refreshed container for the confirmed captured target in these consumers.",
+    "original_stronger_consequence": "A refreshed leftovers list might redirect Delete to another container, destroying different user-owned sessions and files. Source refutes the live-target premise in the examined path; this is potentially highest if that premise exists elsewhere.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Refute only the named live-catalog target substitution hypothesis, using the captured token and owned API request."
+  },
+  {
+    "key": "g077/f4",
+    "latest_line": 7,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "ui-podman-reason-labels-unsafe-remote-text-premise",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Raw reason interpolation exists, but the inspected current Podman producers do not supply the hypothesized unsafe remote formatting. This does not justify weakening final escaping or claim all future producers are safe.",
+    "checks": [
+      "350a4b33b6d4476f4a78e43cea124bc2b828f462:crates/farhelm-ui/src/containers_settings.rs:217-241 renders only Podman place rows and interpolates row.reason; environment_ui.rs:634-648 interpolates place.reason in the host option label.",
+      "Same revision:crates/farhelm-helm/src/tensorlake/build.rs:605-669 gets the Podman reason from last_failure or fixed freshness prose. environment/podman/build.rs:280-286 stores failure through tensorlake::shell::shown; shell.rs:194-212 strips presentation-unsafe characters and bounds the result.",
+      "Same revision:hosts.rs:4361-4366 can supply the place reason. environment/podman_probe.rs:518-539 replaces raw command errors with fixed prerequisite prose except typed SessionLimitRefusal; :545-625 uses fixed refusal strings; :667-692 parses the version semantically before quoting it.",
+      "transport.rs:421-441 deliberately preserves a bounded registered SSH destination in SessionLimitRefusal. That locally configured value is not escaped by diagnostic_excerpt at this boundary. No remote-controlled producer for that value, harmful destructive/security decision, or HTML execution sink was established. This limitation must survive any proposed refutation."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:4944-4950 requires escaping host-supplied text. SPEC_impl.md peer-text rules were searched; there is no accepted unsafe-display exception applicable to these labels. The proposed refutation rests on missing unsafe remote input, not specification acceptance.",
+      "TODO.md Planned empty. Searched unlanded plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md for Podman reason formatting/bidi/unsafe diagnostic producers. No exact same-root coverage found; remote-version and sandbox-diagnostic records concern other producers.",
+      "FILTER.md is not invoked; a demonstrated trust-boundary consequence would exclude ordinary diagnostic filtering."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A shipped remote-controlled unsafe reason that reaches these particular unsanitized labels, and any route from spoofed text to security or destructive consent, remain unestablished. The bounded locally configured destination is a separate retained limitation.",
+    "original_stronger_consequence": "Invisible or bidi formatting in provider errors might spoof diagnostics; a potentially highest consequence was conditional on a destructive consent or security decision depending on that spoofing. No such decision route or HTML execution was claimed or established.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Propose source refutation of the inspected remote-output premise only; preserve the original conditional security concern and the locally configured destination caveat for independent checking."
+  },
+  {
+    "key": "g077/f5",
+    "latest_line": 11,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "ui-shared-sandbox-recipe-choices-omit-resource-sizes",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The actual launcher picker omits CPU and memory from every recipe option despite an explicit chooser requirement. The later creation question supplies sizes, limiting this to recipe comparison/usability rather than a proven billing-authority failure.",
+    "checks": [
+      "350a4b33b6d4476f4a78e43cea124bc2b828f462:crates/farhelm-ui/src/environment_ui.rs:559-608 renders a native recipe select whose labels contain name plus refusal only, with no recipe.size. create_form.rs:7448-7455 installs it in the launcher.",
+      "Same revision:SPEC.md:1440-1445 expressly requires CPU and memory on New sandbox recipe choices. create_form.rs:9219-9243 separately renders the later creation question, with CPU/memory/disk at :9227 and billing/irreversible consequences. The claim requires textual sizes, not SVG inside native options.",
+      "The review-tip diff retains the option-label omission. No runtime display, accessibility or billing bypass experiment was performed."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:1455-1470 retains chooser sizes and the distinct creation question. SPEC_impl.md:6010-6056 keeps size Tensorlake-only and describes shared placement; it does not remove the chooser obligation.",
+      "TODO.md Planned empty. Searched unlanded plans/queue, BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md for recipe picker sizes/CPU/memory. No exact coverage. Relevant sandbox-sessions and podman-environments plans are already landed (plans/REPORTS.md:7,21); live-resize TODO work is unrelated.",
+      "FILTER.md does not match this ordinary chooser omission. No security or work-loss route is established by the acknowledged creation-question opt-out."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No stronger billing-consent or loss-of-work route is established; the ordinary later confirmation retains resource sizes.",
+    "original_stronger_consequence": "Original and latest finding concern missing recipe comparison information. They expressly distinguish that omission from a billing authorization bypass.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain the omitted textual CPU/memory disclosure for Tensorlake recipe choices, preserving the later-consent limitation."
+  },
+  {
+    "key": "g077/f6",
+    "latest_line": 17,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "ui-podman-start-help-overpromises-interrupted-and-restart",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The starting-container explanation universally promises Interrupted and Restart although known exits retain their outcome and Restart depends on captured resumable conversation. Backend classification remains correct; the established defect is guidance.",
+    "checks": [
+      "350a4b33b6d4476f4a78e43cea124bc2b828f462:crates/farhelm-ui/src/environment_ui.rs:249-267 reuses unconditional starting_help for stopped Resume. sandbox_sessions.rs:124-130 installs it for starting:true; :345 uses resume_help. session_view.rs:2022-2024 and :2357-2363 do not exclude known-exited sessions from those host surfaces.",
+      "Same revision:crates/farhelm-helm/src/environment/podman.rs:667-704 derives starting:true from actual start and performs it. manager.rs:3841-3889 automatically starts a stopped environment without inspecting ended session outcomes.",
+      "Same revision:SPEC.md:4782-4789 preserves known exits and ordinary same-boot classification. crates/farhelm-supervisor/src/service/core.rs:6993-7010 compares boots; :7085-7097 converts only Launching/Running/StopRequested on reboot. :6817-6826 documents retained exited outcomes. The environment_ui.rs review-tip diff leaves starting_help unchanged.",
+      "Conditional shipped route: a retained known-exited session in a stopped container sees this during start or via its stopped Resume tooltip. No runtime observation, wrong backend status, automatic restart or process-loss route is claimed."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md Container sessions retains ordinary classification and conditional Restart. SPEC_impl.md Podman lifecycle and supervisor startup contracts were searched/read where relevant; no universal Interrupted promise is accepted.",
+      "TODO.md Planned empty. Searched unlanded plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md for starting-container/interrupted/Restart wording. No exact coverage. The originating podman-environments plan is already landed.",
+      "FILTER.md rare-diagnostic boundary does not clearly match: the wording occurs on ordinary stopped-container starts, including complete evidence of a known exit. The session crash/incomplete-recovery filter does not establish acceptance of universal guidance when actual known outcomes are preserved. Retain."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No runtime frequency or duration measurement; no unverified premise remains for the conditional wording mismatch.",
+    "original_stronger_consequence": "The lead and final finding concern inaccurate recovery/status guidance only. They expressly preserve correct backend classification and deny any established automatic restart, data-loss or security route.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain the universal Interrupted/Restart promise as an ordinary guidance defect, including known-exit and captured-conversation caveats."
+  },
+  {
+    "key": "g077/f7",
+    "latest_line": 16,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "ui-container-leftover-question-missing-answer-focus-handoff",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The new container-leftover question provides no opening-bound answer focus. Keyboard activation can leave focus on its still-enabled opener; another Enter opens another question instead of reaching an answer. The finding does not choose the risky confirming answer over Cancel.",
+    "checks": [
+      "350a4b33b6d4476f4a78e43cea124bc2b828f462:crates/farhelm-ui/src/containers_settings.rs:112-121 keeps the opener enabled and only opens confirm. The full component and :128-181 have no autofocus, onmounted focus or effect handoff for the alertdialog answers.",
+      "Same revision:settings.rs:329-344 installs the already-mounted Settings root. modal_dialog.rs:949-967 keeps child handoffs independent; :999-1008 installs only on root mount. modal_isolation.rs:185-209 permits focus already inside Settings and observes outside siblings, not new answer focus. modal_dialog.rs:580-618 declines recovery while a usable control retains focus.",
+      "SPEC.md Keyboard focus, Opening and closing requires a just-opened confirmation to start on an answer; its irreversible-action exception affects which answer, not whether a handoff exists. A keyboard opener supplies the focus premise without assuming pointer focus behavior on every engine. No execution or destructive auto-confirmation was established."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:3261-3290 and SPEC_impl.md GUI focus were checked. General irreversible-default ambiguity does not accept leaving focus on the opener.",
+      "TODO.md Planned empty. Searched unlanded plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md for container-leftover question focus. No exact coverage.",
+      "Read queue items orphan-confirmation-opens-outside-visible-scroll.md, trash-question-reopen-skips-answer-focus.md and irreversible-confirmation-focus-contract.md in full. They concern a different component's long-list reveal, a mount-only replacement-token lifecycle, and choice of default answer respectively. None fixes this new component's absent initial handoff; no exact alias or extension identified.",
+      "FILTER.md does not match the ordinary opening sequence; scrolling-only filtering does not cover the missing keyboard handoff."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No runtime focus observation or engine-wide pointer behavior measurement. The verified route is keyboard activation while the opener owns focus.",
+    "original_stronger_consequence": "The initial lead suggested focus should reach the confirming answer. The final finding correctly narrows that to an appropriate answer, with Cancel under the irreversible rule. Neither version establishes wrong-target destruction, automatic consent or user-work loss.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain missing question-answer focus independently of the unresolved Confirm-versus-Cancel default."
+  },
+  {
+    "key": "g077/f8",
+    "latest_line": 19,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "ui-recipe-panel-move-leaves-old-key-location-and-module-map",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Moving Recipes into its own Settings section leaves both user guidance and module documentation describing its former position below the Tensorlake API-key form. The source-documentation defect is in scope alongside the visible setup guidance.",
+    "checks": [
+      "350a4b33b6d4476f4a78e43cea124bc2b828f462:crates/farhelm-ui/src/tensorlake_settings.rs:320 keeps TensorlakeKey in TensorlakeSettings; :472-479 mounts only RecipeList in RecipesSettings. settings.rs:629-647 separates the hidden Recipes and Tensorlake panels.",
+      "Same revision:tensorlake/recipes.rs:465-552 contains the catalog and recipe controls, with no key form; :512-519 disables Build without a key and tells the user to Save an API key above to build snapshots.",
+      "Same revision:tensorlake_settings.rs:23-25 still says the recipe list sits between the ssh key and the switch and this section places it. This is stale responsibility documentation, not evidence of a backend failure.",
+      "Diff to 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db is empty for tensorlake_settings.rs and tensorlake/recipes.rs. The relocation creates the mismatch in range; the pre-relocation layout made the old guidance accurate. No runtime observation is claimed."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md Settings places recipes in a separate Recipes section and keys in Tensorlake/Credentials; SPEC_impl.md:6052-6055 assigns those responsibilities explicitly. Neither accepts the obsolete location instruction or module map.",
+      "TODO.md Planned empty. Searched unlanded plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md for Recipes panel/key-above/layout guidance. No exact coverage. tensorlake-key-order is about SSH key offering, and the responsible podman-environments relocation plan is already landed.",
+      "FILTER.md rare-diagnostic rule does not match ordinary missing-key setup, and does not clearly cover the independently stale source responsibility map."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No runtime observation; source establishes the two incompatible layouts. No permanent build block or failed save is established.",
+    "original_stronger_consequence": "Wrong setup location guidance; the final history additionally preserves the stale module responsibility documentation. Users can recover by choosing the existing key section. No billing, security or user-work-loss consequence was alleged.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain both stale statements from the same responsibility move, preserving the user-facing and future-reader consequences."
+  },
+  {
+    "key": "g077/f9",
+    "latest_line": 21,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "podman-unregistered-explicit-cleanup-lacks-retained-operation-reason",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "For an unregistered leftover, failed cleanup is reported only to the initiating Settings component. Closing it loses that error, including a failure arriving after close, contrary to the retained cleanup-state contract. The resource remains discoverable and can still be deleted again.",
+    "checks": [
+      "350a4b33b6d4476f4a78e43cea124bc2b828f462:crates/farhelm-ui/src/containers_settings.rs:46 keeps action_error locally; :165-174 lets deletion survive but drops result handling after unmount. Section switching preserves the mounted component; closing/reopening does not.",
+      "Same revision:api/environments.rs:80-95 sends host=None rows to DELETE /api/container-orphans. crates/farhelm-helm/src/environment/podman.rs:725-765 revalidates ownership/references and removes the resource; :876-907 owns the attempt but returns its error only in the HTTP reply. No failure-operation record is created there.",
+      "Same revision:farhelm-proto/src/environment.rs:160-166 exposes only id/name/place/role/host; environment/podman.rs:827-833 constructs that view without prior cleanup results. A successful later discovery restores the resource, not the lost reason.",
+      "Same revision:SPEC.md:4812-4814 adopts the sandbox-leftover pattern, whose cleanup state survives Settings closure; SPEC_impl.md:6569-6570 explicitly retains resource and reason for retry. No failure was reproduced. The claim is conditional on cleanup returning an error, not on its measured frequency."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:528-539 retains the explicit error/Retry cleanup state across closure and Container sessions:4888-4890 adopts that pattern. SPEC_impl.md:6089-6091 requires visible failed cleanup; :6810-6829 describes the separate sandbox implementation. These require the missing behavior, not acceptance of its omission.",
+      "TODO.md Planned empty. Searched unlanded plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md for container cleanup error retention/Settings close/retry. No exact coverage; row-backed host failures, sandbox orphan discovery overlays and recipe-status issues are separate scopes. Relevant Podman plan is already landed.",
+      "FILTER.md diagnostic-loss match is not established: every failed unregistered cleanup loses its report on ordinary closure, without a proved rare timing trigger. Session-operation status filtering is a different resource/operation scope. Retain rather than infer rarity."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No runtime cleanup failure or frequency observation. No missing-resource, permanent lockout, automatic cleanup or work-loss route is established. Row-backed resources may have an independent Hosts diagnostic and are outside the concrete retained scope.",
+    "original_stronger_consequence": "The final record extends the initial after-reopen loss to closing before completion, which can discard the only visible failure report. It continues to state that the resource remains retryable and no user work is lost.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain only unregistered explicit cleanup state/reason retention across Settings openings, including in-flight completion after close."
+  },
+  {
+    "key": "g077/f10",
+    "latest_line": 22,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "ui-recipe-place-rebuild-owned-request-lifetime",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The requested rebuild runs outside the disappearing component and guards late UI painting. The considered cancellation and stale-component-access premises are refuted in the examined path.",
+    "checks": [
+      "350a4b33b6d4476f4a78e43cea124bc2b828f462:crates/farhelm-ui/src/containers_settings.rs:199-205 arms a mounted guard; :263-281 captures recipe/place, constructs the API future synchronously and drives it with spawn_forever. The mounted check precedes all completion signal writes and on_refresh.",
+      "Same revision:api/environments.rs:42-59 returns an owned use<> future with URL/body and sending already captured. api.rs:2259-2267 registers the configuration-save ticket synchronously. Registration is not server admission and is not claimed as such.",
+      "Same revision:crates/farhelm-helm/src/tensorlake/build.rs:694-724 joins an existing compatible job or stores a registry-owned receiver and tokio::spawn task. Dropping a caller watch receiver does not cancel that task. No runtime observation or running-container-work-loss claim."
+    ],
+    "coverage_checked": [
+      "Current SPEC_impl.md:6032-6036 defines Rebuild admission/joining; SPEC.md Container sessions preserves running environments during image maintenance. The inspected path meets the relevant ownership contract.",
+      "TODO.md Planned empty. Searched unlanded plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md for closing RecipePlaces/Settings cancelling Rebuild or writing retired component state. No exact existing item/decision found. Recipe-status refresh and completion invalidation remain distinct and are not refuted by this lifetime check.",
+      "FILTER.md is not the basis for this proposed source refutation."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No component-owned cancellation or unguarded late signal access was found in the examined request. This does not certify separate status/error invalidation behavior.",
+    "original_stronger_consequence": "Opening the editor or closing Settings might cancel maintenance or let completion touch dropped component state. The record expressly did not allege loss of running container work; its proposed drop remains unaccepted.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Refute only the named Rebuild lifetime/cancelled-component premise through owned futures, detached task ownership and mounted completion fencing."
+  },
+  {
+    "key": "g078/c1",
+    "latest_line": 11,
+    "recommendation": "covered",
+    "bucket": "other",
+    "underlying_key": "ui-legacy-container-editor-specified-retirement",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Removing the legacy editor is explicitly required. The examined stored-choice paths refuse the retired isolation choice instead of silently projecting an ordinary agent launch. The original potential isolation-loss consequence still requires an independent drop check.",
+    "checks": [
+      "04d85f0c98a9b635709d00b056719a0baa7fd3fc removes container_controls.rs and its LaunchControls mounting/module wiring in the same patch. The absence of that old editor is the specified target, not accidental feature loss.",
+      "Same revision:crates/farhelm-ui/src/list/create_form/draft.rs:222-232 retains the old configuration and explicit refusal; :747-750 refuses structured projection; :1965-1974 and :2650-2656 refuse old recent setups before adopting their destination.",
+      "Same revision:create_form.rs:5863-5866 and :6830-6835 enforce refusal before structured submission and after key minting; :9189-9193 refuses saving it as a new template. farhelm-proto/src/launcher.rs:667-669 rejects a non-null stored container object before applying fields.",
+      "Same revision:create_form.rs:759-764 only strips a redundant template field matching held restart data; it does not clear the held refusal. draft.rs:1090-1099 clears the old choice only through explicit Reset choices, also clearing the agent. No all-launcher-path certification or runtime execution is claimed."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:4892-4900 and SPEC_impl.md:8312-8326 explicitly retain the retirement, explained drop/refusal and removal of old launch fields/switches. Historical exact text at the reviewed commit has the same rule.",
+      "TODO.md Planned empty. Searched unlanded plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md for retired editor/removal silently dropping isolation. The responsible podman-environments plan is landed (plans/REPORTS.md:21), not pending coverage. Existing old template draft-off/on feedback concerns the retired implementation, not this deletion premise.",
+      "FILTER.md is not invoked; an established loss of isolation would be a security boundary concern."
+    ],
+    "exact_cover_quotes": [
+      "04d85f0c:SPEC.md:4822-4823: Templates, recent setups and history with that choice still load. Using them drops or refuses the retired choice with an explanation and cannot create another old-style session. The old launcher switch and account-selection flow are gone.",
+      "04d85f0c:SPEC_impl.md:8647-8650: The earlier supervisor-outside model is retired. Keep decoding stored `ContainerConfig`, including legacy `image_file`, so sessions, templates, recent setups and history remain readable. A retired session supports Delete only. Refuse all other lifecycle, terminal and exec paths, including plain Replace. Drop or refuse retired container selections when using a stored setup, with an explanation. No path creates another old-style session.",
+      "04d85f0c:SPEC_impl.md:8654-8656: Remove creation helpers, account selection, launch fields and switches, hooks-off branches, special tab/attach and file-confinement paths once nothing can create or open these sessions."
+    ],
+    "missing_premise": "The stronger consequence requires an unexamined stored-choice path that silently launches previously isolated agent work on the host. The paths checked here refuse it; that is not a certificate for every launcher path.",
+    "original_stronger_consequence": "Applying a stored setup after editor removal might silently run previously isolated work on the host, potentially highest if established. Every history event preserves that concern and proposes retirement/source-refutation only; no drop was accepted.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Propose explicit specification coverage for editor removal and narrow source refutation for the inspected stored-choice bypass hypothesis, preserving the all-path limitation."
+  },
+  {
+    "key": "g078/c2",
+    "latest_line": 7,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "ui-retained-whole-environment-question-stale-unreachable-rationale",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "A retained whole-environment question continues to state that Farhelm cannot ask the environment after it reconnects. Its whole-resource destructive consequence remains explicit and its scope remains token-bound. Retain the diagnostic/recovery defect while sending the original potential highest consequence lowering to the independent check.",
+    "checks": [
+      "2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa:crates/farhelm-ui/src/sandbox_sessions.rs:195-203 selects Whole for a current known disconnected host. environment_ui.rs:164-170 states Farhelm cannot ask and recommends resuming/updating, in present tense.",
+      "Same revision:list/view.rs:3245-3258 retains the open question; :2473-2476 records a new host read without replacing it; :2228-2248 retains a row question while the session stays listed. list/row.rs:1234-1242 keeps whole_delete_warning by the retained question lane. Thus reconnecting elsewhere can make the rationale stale until cancel/reopen.",
+      "Same revision:list/row.rs:2529-2538 sends the drawn token; list/view.rs:3293-3300 consumes that exact token and derives scope through its key. session_view.rs:2073-2087 selects copy by header_delete_shown, and :2790-2800 derives dispatch scope from that token. list/lifecycle.rs:430-435,473-491,505-508 renders and dispatches one captured bulk target set.",
+      "Same revision:hosts.rs:1554-1570,1592-1625 retains host identity across failures but marks lookup uncertain; sandbox_sessions.rs:195-203 makes uncertain lookup Session, not Whole. If ownership facts disappear, crates/farhelm-helm/src/sessions/sandbox.rs:382-394 refuses unconfirmed whole-resource cleanup. These checks refute the named live-state unwarned escalation route in the examined consumers, not every unrelated Delete path.",
+      "The whole warning explicitly names all sessions/processes/files and the whole resource; no harm beyond that stated consent was established. No runtime reproduction or native event-ordering observation."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md Sandbox sessions and Container sessions retain both-outcomes consent and whole-resource fallback. The bulk rule expressly snapshots reachability at opening. SPEC_impl.md:1069-1093 binds answers to drawn tokens. Those rules require preserved scope but do not require a formerly true inability to be stated as current after reconnection.",
+      "TODO.md Planned empty. Searched unlanded plans/queue, BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md for retained whole-delete rationale/reconnected narrower option. No exact coverage or same-root queue alias found. Existing retained lifecycle-answer/outage-card items concern refusal/read failure, not this false present-tense explanation. environment-agent-operations is already landed (plans/REPORTS.md:28).",
+      "FILTER.md rare-diagnostic coverage is ambiguous: reconnecting during a retained question need not require a sub-second or otherwise proved narrow window, and this is wording inside destructive consent. Do not infer the full filter boundary from the diagnostic-only established impact."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "The stronger consequence needs dispatch to widen beyond the question's explicit whole-resource consent, or some distinct harmful route beyond a person choosing the accurately warned scope despite a stale rationale. Neither was established in the examined consumers.",
+    "original_stronger_consequence": "Original c2 hypothesized that changing connectivity while a Delete question is open could silently turn session Delete into destruction of the whole environment, including other sessions and files without the accepted warning. Later events propose refuting that highest route and retaining only stale diagnostic/recovery wording. No drop or lowering has been accepted by the parent.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Retain the source-confirmed stale rationale separately from intentional snapshot scope. Independently check the proposed lowering/refutation of unwarned whole-resource destruction before accepting it."
+  }
+]

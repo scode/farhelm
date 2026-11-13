@@ -1,0 +1,62 @@
+[
+  {
+    "key": "g136/c3",
+    "latest_line": 10,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "terminal-files-cursor-teardown-comment-misattributes-global-setter-to-grid",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The changed test comment incorrectly describes the shipped grid's cursor ownership. The stronger isolated fixture remains valid; its validity does not establish the comment's claim about production setters.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/js-tests/terminal-files.test.js:577-596 says grid accessors can write another current link, and models that hazard with a setter closing over a reassigned external cursor object.",
+      "f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/assets/grid-terminal.js:1384-1404 instead closes over the decorated link's own pointerCursor and touches the visible cursor only when hoverLink === link. Lines 1407-1421 install accessors before calling hover. A retired link's setter cannot redirect to an unrelated current link through this code.",
+      "The f560058da19e02716e6f943883a9508b447aff4e patch changes the comment's subject from xterm to the grid. This inaccurate production attribution is introduced inside the review range.",
+      "00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:crates/farhelm-ui/js-tests/terminal-files.test.js:577-596 retains the comment and fixture; its assets/grid-terminal.js:1382-1418 retains the guarded setter and accessor-before-hover ordering.",
+      "f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/assets/terminal-files.js:441-469 clears cursor admission synchronously on leave and reserves deferred teardown for abort, timers and disclosure. SPEC_impl.md:3673-3674 at that revision explicitly requires no teardown cursor writes. The fixture and the separate restoration test at terminal-files.test.js:481-505 can therefore remain defensive helper-contract tests.",
+      "Source inspection only. No runtime cursor corruption, security consequence or loss of user-owned work was demonstrated or claimed in the supplied history."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md terminal file-path paragraph (:3130-3168) and SPEC_impl.md, Session-host file reads (:3514-3614), searched and matching paragraphs read: they define file-link recognition and cursor/teardown contracts, but do not accept an incorrect description of grid setters.",
+      "TODO.md Planned bucket (:25-26) is empty. BUGS.md contains only the SSH-helper provisioning hang, unrelated to these claims.",
+      "plans/queue searched for cursor, teardown, FileLinks, terminal-files, cut paths, file links and comments. The potential tmux comment-sweep match in tmux-drop-from-docs.md:68-74,87-99 is broad, and plans/REPORTS.md:32 records that plan already landed. tmux-end-old-terminals also landed (:29). Neither supplies an unlanded exact repair of this surviving grid-attribution error.",
+      "INDEX.md and queue Markdown searched for the actual setter, teardown, fixture, cut-path and file-link claims. transition-accessor-comment.md was read: it concerns Transition::pane in a supervisor store test, a different underlying defect. changed-file-hover-test-clicks-before-stat-readiness.md and joined-link-spec-omits-cursor-tail-exception.md were also read; their readiness and hyperlink-comparison contracts do not cover this comment. Other file-hover/container matches concern admission or redraw behavior, not this setter explanation.",
+      "Active TRIAGE_OUTCOMES.md searched for cursor, teardown, terminal files, file links, accessors, comments and vacuity; no matching decision. Archive not read.",
+      "FILTER.md read in full. No filter's entire boundary matches a persistent inaccurate source comment; the rare diagnostic/display filter does not apply."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Line 5 considered whether retaining the retired renderer's cursor-setter model made the test substantively incorrect, then proposed dropping that test-oracle concern because the fixture checks an independent helper invariant. It already noted that the comment overstates the grid hazard. Lines 9-10 retain only the introduced false grid-specific explanation. Neither the earlier concern nor the latest claim establishes product cursor corruption, security impact or loss of work; the separate restoration test remains a valid defensive helper test.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain the source-confirmed documentation defect as other. Preserve the earlier test-oracle refutation and proposed drop as a narrower historical disposition, not as coverage for the inaccurate comment. No exact named-claim or existing-queue alias found."
+  },
+  {
+    "key": "g136/l2",
+    "latest_line": 12,
+    "recommendation": "out-of-range",
+    "bucket": "other",
+    "underlying_key": "terminal-files-cut-path-negative-no-join-oracle-predates-range",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The empty-result limitation is real as a property of every(), but the same negative oracle and fixture existed at the excluded baseline. The reviewed change preserves the surviving renderer's assertions and does not introduce the stronger preservation promise suggested by the initial lead.",
+    "checks": [
+      "6e423e30068b62c6cfa276c6d720ee35bb70387a:crates/farhelm-ui/js-tests/terminal-files.test.js:342-377 already declares the no-join/two-row contract, includes the same seven row fixtures and every(start.abs === end.abs) assertion (:358), and has the fit-boundary and exact wide-path controls (:364-375). Its first adapter view is lines(rows), the fixture retained after renderer retirement.",
+      "git log over the explicit review range for terminal-files.test.js lists only 04d85f0c98a9b635709d00b056719a0baa7fd3fc and f560058da19e02716e6f943883a9508b447aff4e. The 04d85f0 patch's first changed hunk is after this test (old line 397 with one line of context), so it does not introduce this oracle.",
+      "The f560058da19e02716e6f943883a9508b447aff4e patch removes only the xtermLines adapter iteration from this test and preserves the lines(rows) every predicate, fit controls, and exact wide-path assertion. Its terminal-files.test.js:328-358 retains the stated negative contract. The neighboring positive path-preservation test remains at :361-375.",
+      "00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:crates/farhelm-ui/js-tests/terminal-files.test.js:328-358 has the same retained assertions. This does not claim that every() alone proves positive recognition, or that production correctness refutes a test defect.",
+      "Source inspection only; no runtime parser failure, timing regression, security impact or loss of user-owned work was alleged or demonstrated."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:3130-3141 and SPEC_impl.md:3564-3577 were searched and read in their full matching paragraphs. They require conservative path recognition and the isolated two-row exception; they do not require this particular negative assertion to prove all valid single-row links. The out-of-range basis is baseline attribution, not specification coverage.",
+      "TODO.md Planned is empty; BUGS.md has only the unrelated SSH-helper provisioning hang. Searches of plans/queue for cut paths, single-row, no-join, hard-broken rows and terminal-files found no exact unlanded test-oracle repair. Broad renderer-removal and comment-sweep plans already landed according to plans/REPORTS.md:29,32.",
+      "INDEX.md and queue Markdown searched for cut-path, no-join, terminal-files, vacuity and related file-link tests. No exact item or useful same-root extension found. The read changed-file-hover readiness item concerns an asynchronous browser click oracle, not this baseline no-join assertion; the read joined-link specification item concerns OSC warning comparison, not printed file-path recognition.",
+      "Active TRIAGE_OUTCOMES.md searched for the assertion's behavior and terminology; no matching decision. Archive not read.",
+      "FILTER.md supplies no exact exclusion. The proposed disposition does not depend on a filter or on rarity."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Line 11 raised a possible loss of a nonvacuous preservation oracle: every() accepts no links and therefore cannot by itself certify valid single-row targets. Line 12 explicitly resolves the attribution question and proposes dropping the in-range test-defect claim, while preserving that mathematical limitation. No new positive-preservation assertion was removed; no broader review of unchanged tests or shipped loss/security route was claimed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Exclude this narrow limitation from this review range because its oracle and retained fixture predate the exclusive baseline. The initial claim that the assigned patch loses distinct positive coverage is source-refuted; no independent review of the unchanged baseline test is assigned. This recommendation preserves the withdrawal and the original empty-result caveat."
+  }
+]

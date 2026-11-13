@@ -1,0 +1,977 @@
+{
+  "group": {
+    "id": "g094",
+    "domain": "local-test-lifecycle",
+    "purpose": "local-test-lifecycle: scripts/devbuild-mac.sh, deflake/bin/deflake, scripts/check-tmux-cutover.py, scripts/desktop-smoke.sh; phases complete small per-commit changes",
+    "interfaces": [
+      "g005",
+      "g007",
+      "g093",
+      "g144",
+      "g145",
+      "g146",
+      "g147",
+      "g200"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/01339-000.patch",
+        "ranges": [
+          [
+            1,
+            168
+          ]
+        ],
+        "original_path": "scripts/devbuild-mac.sh",
+        "commit": "cb762a313abbe6da03ae0bf041f07486c4ed4df9",
+        "notes": "patch header; patch character offsets [0,8426)",
+        "lines": 168,
+        "bytes": 8426,
+        "start": 0,
+        "end": 8426,
+        "original": "[private-run]/prep/originals/01339.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01405-000.patch",
+        "ranges": [
+          [
+            1,
+            161
+          ]
+        ],
+        "original_path": "deflake/bin/deflake",
+        "commit": "d751ff1633bb479c7bf53920f2e4ea4ba932a1c2",
+        "notes": "patch header; patch character offsets [0,10796)",
+        "lines": 161,
+        "bytes": 10796,
+        "start": 0,
+        "end": 10796,
+        "original": "[private-run]/prep/originals/01405.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01416-000.patch",
+        "ranges": [
+          [
+            1,
+            313
+          ]
+        ],
+        "original_path": "scripts/check-tmux-cutover.py",
+        "commit": "d751ff1633bb479c7bf53920f2e4ea4ba932a1c2",
+        "notes": "patch header; patch character offsets [0,10876)",
+        "lines": 313,
+        "bytes": 10876,
+        "start": 0,
+        "end": 10876,
+        "original": "[private-run]/prep/originals/01416.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01417-000.patch",
+        "ranges": [
+          [
+            1,
+            178
+          ]
+        ],
+        "original_path": "scripts/desktop-smoke.sh",
+        "commit": "d751ff1633bb479c7bf53920f2e4ea4ba932a1c2",
+        "notes": "patch header; patch character offsets [0,10072)",
+        "lines": 178,
+        "bytes": 10072,
+        "start": 0,
+        "end": 10072,
+        "original": "[private-run]/prep/originals/01417.patch"
+      }
+    ],
+    "lines": 820,
+    "bytes": 40170
+  },
+  "records": [
+    {
+      "key": "g094/c1",
+      "owner": "g094",
+      "id": "c1",
+      "domain": "local-test-lifecycle",
+      "purpose": "local-test-lifecycle: scripts/devbuild-mac.sh, deflake/bin/deflake, scripts/check-tmux-cutover.py, scripts/desktop-smoke.sh; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removed tmux staging does not leave stale payloads available to Update",
+            "location": "scripts/devbuild-mac.sh:494",
+            "detail": "Reviewed commit: cb762a313abbe6da03ae0bf041f07486c4ed4df9. TLDR: considered whether removing tmux download/staging could leave an older staged tmux available to a later remote Update. Source refutation: scripts/devbuild-mac.sh:494-498 removes and recreates the entire payload directory before writing this run's archives; lines 504-531 stage only the selected current farhelm archives. The old target/devbuild/tmux cache can remain on disk, but is no longer copied into payloads. Contract: SPEC_impl.md, Terminal substrate: private tmux server, says provisioning no longer inspects, downloads, uploads or installs any tmux. Suggested bucket: other (no established impact). Confidence: confirmed by source, no execution. proposed_drop: refuted by the payload-directory reset at lines 494-498. possible_cover: none. Could-be-highest: no; this candidate concerns stale maintainer payload staging, and its suspected route is refuted. Caveat: consumer compatibility is checked separately; this record settles only stale payload retention."
+          }
+        }
+      ],
+      "latest": {
+        "line": 1,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Removed tmux staging does not leave stale payloads available to Update",
+          "location": "scripts/devbuild-mac.sh:494",
+          "detail": "Reviewed commit: cb762a313abbe6da03ae0bf041f07486c4ed4df9. TLDR: considered whether removing tmux download/staging could leave an older staged tmux available to a later remote Update. Source refutation: scripts/devbuild-mac.sh:494-498 removes and recreates the entire payload directory before writing this run's archives; lines 504-531 stage only the selected current farhelm archives. The old target/devbuild/tmux cache can remain on disk, but is no longer copied into payloads. Contract: SPEC_impl.md, Terminal substrate: private tmux server, says provisioning no longer inspects, downloads, uploads or installs any tmux. Suggested bucket: other (no established impact). Confidence: confirmed by source, no execution. proposed_drop: refuted by the payload-directory reset at lines 494-498. possible_cover: none. Could-be-highest: no; this candidate concerns stale maintainer payload staging, and its suspected route is refuted. Caveat: consumer compatibility is checked separately; this record settles only stale payload retention."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g094/findings.jsonl",
+        "id": "c1",
+        "line": 1,
+        "disposition": "excluded",
+        "group": "devbuild-removed-tmux-staging-leaves-old-payload-selected",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-062 after inspecting it. The development build deletes and recreates its entire selected payload directory. An old cache may remain elsewhere, but it is no longer staged for Update. Source refutation by payload directory replacement and removal of the only cache-to-payload copy. No security or user-work-loss route was asserted for this bounded staging candidate. Checked source/results: [\"cb762a313abbe6da03ae0bf041f07486c4ed4df9:scripts/devbuild-mac.sh:494-498 removes and recreates payloads; :504-531 writes only the selected farhelm archives. The same patch removes the tmux cache-to-payload copy.\",\"At the same revision provisioning/assets.rs:43-85 enumerates farhelm/farhelm-desktop archives only, and provisioning/installation.rs:13-44 resolves the plan's one farhelm payload. This record's refutation remains bounded to stale tmux staging. No execution.\"] Current coverage/results: [\"SPEC.md:181-187 and SPEC_impl.md:7996-8014,8038-8059 describe no tmux provisioning and one farhelm payload. They corroborate the consumer inventory.\",\"TODO.md Planned is empty. plans/queue/tmux-drop-from-install.md:49-55,77-80 explicitly removes staging; plans/REPORTS.md:30 says it already landed, so this is implementation context rather than pending cover.\",\"BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact stale tmux staging claim. FILTER.md has no applicable boundary.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"An older staged tmux might remain available to a later remote Update after its producer was removed. Consumer/authentication questions remain separate, principally c6.\"; \"The proposed stale-cache-to-selected-payload route is absent.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g094/c1",
+        "line": 1,
+        "disposition": "excluded",
+        "group": "devbuild-removed-tmux-staging-leaves-old-payload-selected",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-062 after inspecting it. The development build deletes and recreates its entire selected payload directory. An old cache may remain elsewhere, but it is no longer staged for Update. Source refutation by payload directory replacement and removal of the only cache-to-payload copy. No security or user-work-loss route was asserted for this bounded staging candidate. Checked source/results: [\"cb762a313abbe6da03ae0bf041f07486c4ed4df9:scripts/devbuild-mac.sh:494-498 removes and recreates payloads; :504-531 writes only the selected farhelm archives. The same patch removes the tmux cache-to-payload copy.\",\"At the same revision provisioning/assets.rs:43-85 enumerates farhelm/farhelm-desktop archives only, and provisioning/installation.rs:13-44 resolves the plan's one farhelm payload. This record's refutation remains bounded to stale tmux staging. No execution.\"] Current coverage/results: [\"SPEC.md:181-187 and SPEC_impl.md:7996-8014,8038-8059 describe no tmux provisioning and one farhelm payload. They corroborate the consumer inventory.\",\"TODO.md Planned is empty. plans/queue/tmux-drop-from-install.md:49-55,77-80 explicitly removes staging; plans/REPORTS.md:30 says it already landed, so this is implementation context rather than pending cover.\",\"BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact stale tmux staging claim. FILTER.md has no applicable boundary.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"An older staged tmux might remain available to a later remote Update after its producer was removed. Consumer/authentication questions remain separate, principally c6.\"; \"The proposed stale-cache-to-selected-payload route is absent.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-062",
+          "key": "g094/c1",
+          "latest_line": 1,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "devbuild-removed-tmux-staging-leaves-old-payload-selected",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The development build deletes and recreates its entire selected payload directory. An old cache may remain elsewhere, but it is no longer staged for Update.",
+          "checks": [
+            "cb762a313abbe6da03ae0bf041f07486c4ed4df9:scripts/devbuild-mac.sh:494-498 removes and recreates payloads; :504-531 writes only the selected farhelm archives. The same patch removes the tmux cache-to-payload copy.",
+            "At the same revision provisioning/assets.rs:43-85 enumerates farhelm/farhelm-desktop archives only, and provisioning/installation.rs:13-44 resolves the plan's one farhelm payload. This record's refutation remains bounded to stale tmux staging. No execution."
+          ],
+          "coverage_checked": [
+            "SPEC.md:181-187 and SPEC_impl.md:7996-8014,8038-8059 describe no tmux provisioning and one farhelm payload. They corroborate the consumer inventory.",
+            "TODO.md Planned is empty. plans/queue/tmux-drop-from-install.md:49-55,77-80 explicitly removes staging; plans/REPORTS.md:30 says it already landed, so this is implementation context rather than pending cover.",
+            "BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact stale tmux staging claim. FILTER.md has no applicable boundary."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "The proposed stale-cache-to-selected-payload route is absent.",
+          "original_stronger_consequence": "An older staged tmux might remain available to a later remote Update after its producer was removed. Consumer/authentication questions remain separate, principally c6.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation by payload directory replacement and removal of the only cache-to-payload copy. No security or user-work-loss route was asserted for this bounded staging candidate."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "devbuild-removed-tmux-staging-leaves-old-payload-selected",
+        "destination": null
+      }
+    },
+    {
+      "key": "g094/c2",
+      "owner": "g094",
+      "id": "c2",
+      "domain": "local-test-lifecycle",
+      "purpose": "local-test-lifecycle: scripts/devbuild-mac.sh, deflake/bin/deflake, scripts/check-tmux-cutover.py, scripts/desktop-smoke.sh; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Deflake recorder arguments remain compatible after removing tmux metadata",
+            "location": "deflake/bin/deflake:924",
+            "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. TLDR: considered whether dropping the per-phase tmux field and --tmux argument would prevent the sweep's test recorder from starting. Source refutation: deflake/bin/deflake:525-543 defines argv immediately after concurrency; every full/eval Phase call at 573-615 removes exactly the former tmux positional argument. recorder_argv at 924-930 still provides kind, selection, concurrency, timeout and optional runner. At this same revision scripts/record-test-run.py:232-246 defines those arguments and no --tmux argument. Contract: the recorder command-line parser is the immediate compatibility contract. Suggested bucket: other. Confidence: confirmed by source, no execution. proposed_drop: refuted by matching constructor positions and recorder parser at the reviewed revision. possible_cover: none. Could-be-highest: no; suspected failure is confined to maintainer sweep startup. Caveat: this does not settle tmux prerequisite coverage, which is checked separately."
+          }
+        },
+        {
+          "line": 18,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Deflake recorder arguments remain compatible after removing tmux metadata",
+            "location": "deflake/bin/deflake:924",
+            "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. TLDR: considered whether dropping the per-phase tmux field and --tmux argument would prevent the sweep's test recorder from starting. Source refutation: deflake/bin/deflake:525-543 defines argv immediately after concurrency; every full/eval Phase call at 573-615 removes exactly the former tmux positional argument. recorder_argv at 924-930 still provides kind, selection, concurrency, timeout and optional runner. At this same revision scripts/record-test-run.py:232-246 defines those arguments and no --tmux argument. Contract: the recorder command-line parser is the immediate compatibility contract. Suggested bucket: other. Confidence: confirmed by source, no execution. proposed_drop: refuted by matching constructor positions and recorder parser at the reviewed revision. possible_cover: none. Could-be-highest: no; suspected failure is confined to maintainer sweep startup. Caveat: this does not settle tmux prerequisite coverage, which is checked separately.\n\nDiscovery turn 3: c2's source refutation is bounded to matching the driver and recorder at d751ff16. Newly verified l2 covers the distinct cross-revision path: --base can check out an older recorder while retaining this checkout's current driver. In that path omitted --tmux selects the older recorder's warn default and the selected base's required/pinned substrate policy is lost. The original same-revision constructor/parser compatibility conclusion remains valid; it does not refute l2 or certify historical-base compatibility. No parent drop accepted."
+          }
+        }
+      ],
+      "latest": {
+        "line": 18,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Deflake recorder arguments remain compatible after removing tmux metadata",
+          "location": "deflake/bin/deflake:924",
+          "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. TLDR: considered whether dropping the per-phase tmux field and --tmux argument would prevent the sweep's test recorder from starting. Source refutation: deflake/bin/deflake:525-543 defines argv immediately after concurrency; every full/eval Phase call at 573-615 removes exactly the former tmux positional argument. recorder_argv at 924-930 still provides kind, selection, concurrency, timeout and optional runner. At this same revision scripts/record-test-run.py:232-246 defines those arguments and no --tmux argument. Contract: the recorder command-line parser is the immediate compatibility contract. Suggested bucket: other. Confidence: confirmed by source, no execution. proposed_drop: refuted by matching constructor positions and recorder parser at the reviewed revision. possible_cover: none. Could-be-highest: no; suspected failure is confined to maintainer sweep startup. Caveat: this does not settle tmux prerequisite coverage, which is checked separately.\n\nDiscovery turn 3: c2's source refutation is bounded to matching the driver and recorder at d751ff16. Newly verified l2 covers the distinct cross-revision path: --base can check out an older recorder while retaining this checkout's current driver. In that path omitted --tmux selects the older recorder's warn default and the selected base's required/pinned substrate policy is lost. The original same-revision constructor/parser compatibility conclusion remains valid; it does not refute l2 or certify historical-base compatibility. No parent drop accepted."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g094/findings.jsonl",
+        "id": "c2",
+        "line": 18,
+        "disposition": "excluded",
+        "group": "deflake-same-revision-phase-arguments-after-tmux-removal",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-062 after inspecting it. The changed phase constructors and recorder parser agree at the same reviewed revision. This does not certify compatibility when --base selects an older recorder; l2 retains that distinct route. Bounded source refutation of same-revision CLI and constructor incompatibility. Checked source/results: [\"d751ff1633bb479c7bf53920f2e4ea4ba932a1c2:deflake/bin/deflake:525-543 places argv immediately after concurrency; :573-615 updates the constructors accordingly; :924-930 passes the remaining recorder flags.\",\"The same revision's scripts/record-test-run.py:223-246 accepts those flags and has no --tmux option. The parent used phase.tmux and the old option. No execution.\"] Current coverage/results: [\"SPEC.md/SPEC_impl.md searches found no phase/parser contract beyond the actual same-revision interfaces. No specification acceptance is needed for this refutation.\",\"TODO.md Planned is empty. plans/queue/tmux-drop-from-tooling.md:46-55 and :130-133 removes mode and callers together; plans/REPORTS.md:31 confirms it landed. It says nothing explicit about historical-base compatibility.\",\"BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md have no exact same-revision constructor/parser failure match. FILTER.md is not the proposed basis.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing the per-phase tmux field or recorder argument might prevent sweep startup. Refutation is bounded to matching driver and recorder revisions; it does not erase the later historical-base finding.\"; \"No mismatched same-revision flag or positional constructor was found. Historical-base policy is evaluated separately in g094/l2.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g094/c2",
+        "line": 18,
+        "disposition": "excluded",
+        "group": "deflake-same-revision-phase-arguments-after-tmux-removal",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-062 after inspecting it. The changed phase constructors and recorder parser agree at the same reviewed revision. This does not certify compatibility when --base selects an older recorder; l2 retains that distinct route. Bounded source refutation of same-revision CLI and constructor incompatibility. Checked source/results: [\"d751ff1633bb479c7bf53920f2e4ea4ba932a1c2:deflake/bin/deflake:525-543 places argv immediately after concurrency; :573-615 updates the constructors accordingly; :924-930 passes the remaining recorder flags.\",\"The same revision's scripts/record-test-run.py:223-246 accepts those flags and has no --tmux option. The parent used phase.tmux and the old option. No execution.\"] Current coverage/results: [\"SPEC.md/SPEC_impl.md searches found no phase/parser contract beyond the actual same-revision interfaces. No specification acceptance is needed for this refutation.\",\"TODO.md Planned is empty. plans/queue/tmux-drop-from-tooling.md:46-55 and :130-133 removes mode and callers together; plans/REPORTS.md:31 confirms it landed. It says nothing explicit about historical-base compatibility.\",\"BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md have no exact same-revision constructor/parser failure match. FILTER.md is not the proposed basis.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing the per-phase tmux field or recorder argument might prevent sweep startup. Refutation is bounded to matching driver and recorder revisions; it does not erase the later historical-base finding.\"; \"No mismatched same-revision flag or positional constructor was found. Historical-base policy is evaluated separately in g094/l2.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-062",
+          "key": "g094/c2",
+          "latest_line": 18,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "deflake-same-revision-phase-arguments-after-tmux-removal",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The changed phase constructors and recorder parser agree at the same reviewed revision. This does not certify compatibility when --base selects an older recorder; l2 retains that distinct route.",
+          "checks": [
+            "d751ff1633bb479c7bf53920f2e4ea4ba932a1c2:deflake/bin/deflake:525-543 places argv immediately after concurrency; :573-615 updates the constructors accordingly; :924-930 passes the remaining recorder flags.",
+            "The same revision's scripts/record-test-run.py:223-246 accepts those flags and has no --tmux option. The parent used phase.tmux and the old option. No execution."
+          ],
+          "coverage_checked": [
+            "SPEC.md/SPEC_impl.md searches found no phase/parser contract beyond the actual same-revision interfaces. No specification acceptance is needed for this refutation.",
+            "TODO.md Planned is empty. plans/queue/tmux-drop-from-tooling.md:46-55 and :130-133 removes mode and callers together; plans/REPORTS.md:31 confirms it landed. It says nothing explicit about historical-base compatibility.",
+            "BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md have no exact same-revision constructor/parser failure match. FILTER.md is not the proposed basis."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No mismatched same-revision flag or positional constructor was found. Historical-base policy is evaluated separately in g094/l2.",
+          "original_stronger_consequence": "Removing the per-phase tmux field or recorder argument might prevent sweep startup. Refutation is bounded to matching driver and recorder revisions; it does not erase the later historical-base finding.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Bounded source refutation of same-revision CLI and constructor incompatibility."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "deflake-same-revision-phase-arguments-after-tmux-removal",
+        "destination": null
+      }
+    },
+    {
+      "key": "g094/c3",
+      "owner": "g094",
+      "id": "c3",
+      "domain": "local-test-lifecycle",
+      "purpose": "local-test-lifecycle: scripts/devbuild-mac.sh, deflake/bin/deflake, scripts/check-tmux-cutover.py, scripts/desktop-smoke.sh; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Desktop smoke does not need legacy tmux liveness or teardown branches",
+            "location": "scripts/desktop-smoke.sh:224",
+            "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. TLDR: considered whether removing tmux liveness checks and kill-server calls would misdiagnose or leave behind this smoke run's terminals. Source refutation: scripts/desktop-smoke.sh:130-162 creates fresh run/state directories and refuses existing ones; 645-673 builds and selects the current checkout's farhelm; the replacement at 1648 copies that same binary, and the answering fixture at 1786-1817 creates fresh state with that binary and a real terminal host. The script has no remaining tmux invocation (pinned source search). Current hosts still stop through stop_terminal_hosts at 464-479, after stop_recorded_supervisor at 558-563 or stop_answering at 424-443; failed host stops retain the run at 584-586. Contract: SPEC_impl.md:2786-2791 says every terminal runs in a terminal host and the supervisor runs no tmux; 2599-2603 says shell harnesses stop-terminal-hosts after the supervisor is gone and retain uncertain cleanup. Suggested bucket: other. Confidence: confirmed by source for the removed tmux branches, no execution. proposed_drop: refuted by fresh current-version fixtures and retained host cleanup, not by permission to leak terminals. possible_cover: none. Could-be-highest: no; concern is maintenance fixture cleanup, and the suspected dependency on legacy terminals is refuted. Caveat: this does not certify every pre-existing teardown race or the behavior of user programs that independently launch their own tmux."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Desktop smoke does not need legacy tmux liveness or teardown branches",
+            "location": "scripts/desktop-smoke.sh:224",
+            "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. TLDR: considered whether removing tmux liveness checks and kill-server calls would misdiagnose or leave behind this smoke run's terminals. Source refutation: scripts/desktop-smoke.sh:130-162 creates fresh run/state directories and refuses existing ones; 645-673 builds and selects the current checkout's farhelm; the replacement at 1648 copies that same binary, and the answering fixture at 1786-1817 creates fresh state with that binary and a real terminal host. The script has no remaining tmux invocation (pinned source search). Current hosts still stop through stop_terminal_hosts at 464-479, after stop_recorded_supervisor at 558-563 or stop_answering at 424-443; failed host stops retain the run at 584-586. Contract: SPEC_impl.md:2786-2791 says every terminal runs in a terminal host and the supervisor runs no tmux; 2599-2603 says shell harnesses stop-terminal-hosts after the supervisor is gone and retain uncertain cleanup. Suggested bucket: other. Confidence: confirmed by source for the removed tmux branches, no execution. proposed_drop: refuted by fresh current-version fixtures and retained host cleanup, not by permission to leak terminals. possible_cover: none. Could-be-highest: no; concern is maintenance fixture cleanup, and the suspected dependency on legacy terminals is refuted. Caveat: this does not certify every pre-existing teardown race or the behavior of user programs that independently launch their own tmux.\n\nSynthesis revision, turn 2: parent reports g091/c3 independently agrees that fresh browser stacks create only host terminals. This is consistent with the desktop smoke's fresh current-binary fixtures but does not certify browser or desktop teardown generally. The refutation remains limited to removing legacy tmux-specific branches from these current-stack fixtures; it does not settle pre-existing supervisor-stop races, descendant cleanup or all failure paths. Original consequence considered and disposition are unchanged; parent has accepted no drop."
+          }
+        }
+      ],
+      "latest": {
+        "line": 9,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Desktop smoke does not need legacy tmux liveness or teardown branches",
+          "location": "scripts/desktop-smoke.sh:224",
+          "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. TLDR: considered whether removing tmux liveness checks and kill-server calls would misdiagnose or leave behind this smoke run's terminals. Source refutation: scripts/desktop-smoke.sh:130-162 creates fresh run/state directories and refuses existing ones; 645-673 builds and selects the current checkout's farhelm; the replacement at 1648 copies that same binary, and the answering fixture at 1786-1817 creates fresh state with that binary and a real terminal host. The script has no remaining tmux invocation (pinned source search). Current hosts still stop through stop_terminal_hosts at 464-479, after stop_recorded_supervisor at 558-563 or stop_answering at 424-443; failed host stops retain the run at 584-586. Contract: SPEC_impl.md:2786-2791 says every terminal runs in a terminal host and the supervisor runs no tmux; 2599-2603 says shell harnesses stop-terminal-hosts after the supervisor is gone and retain uncertain cleanup. Suggested bucket: other. Confidence: confirmed by source for the removed tmux branches, no execution. proposed_drop: refuted by fresh current-version fixtures and retained host cleanup, not by permission to leak terminals. possible_cover: none. Could-be-highest: no; concern is maintenance fixture cleanup, and the suspected dependency on legacy terminals is refuted. Caveat: this does not certify every pre-existing teardown race or the behavior of user programs that independently launch their own tmux.\n\nSynthesis revision, turn 2: parent reports g091/c3 independently agrees that fresh browser stacks create only host terminals. This is consistent with the desktop smoke's fresh current-binary fixtures but does not certify browser or desktop teardown generally. The refutation remains limited to removing legacy tmux-specific branches from these current-stack fixtures; it does not settle pre-existing supervisor-stop races, descendant cleanup or all failure paths. Original consequence considered and disposition are unchanged; parent has accepted no drop."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g094/findings.jsonl",
+        "id": "c3",
+        "line": 9,
+        "disposition": "excluded",
+        "group": "desktop-smoke-removed-tmux-branches-needed-by-current-fixtures",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-062 after inspecting it. The affected smoke fixtures start fresh state with the current binary, whose terminals run in terminal hosts. Their cleanup still targets those hosts. Removing retired tmux-specific branches does not establish a new dependency or leak. Bounded source refutation of the removed legacy dependency. This is confined to maintainer fixture cleanup; no loss of unrelated user-owned work or catastrophic tooling harm is established. Checked source/results: [\"d751ff1633bb479c7bf53920f2e4ea4ba932a1c2:scripts/desktop-smoke.sh:130-162 creates private fresh state; :645-673 selects current build output; :1786-1817 starts the answering fixture and its real terminal host using that binary.\",\"The same script:464-479 retains stop_terminal_hosts; :558-563 runs it after recorded-supervisor cleanup; :424-443 runs it for the answering fixture; :584-586 retains state after uncertain host cleanup. Its exact remaining teardown semantics are not certified by this check.\",\"Reviewed SPEC_impl.md:2784-2791 says every terminal runs in a host and no old tmux driver remains. A targeted same-revision executable-path search found no tmux invocation in the changed smoke script. No execution.\"] Current coverage/results: [\"SPEC.md:2998-3013 and SPEC_impl.md:2588-2603,2784-2791 establish terminal hosts and their retained cleanup path; they do not authorize cleanup leaks.\",\"TODO.md Planned is empty. Matching plans/queue removal criteria concern retiring tmux paths; those plans already landed per REPORTS.md:29-31.\",\"BUGS.md has no fixture cleanup entry. INDEX.md's desktop-smoke-supervisor-precedes-cleanup-record.md was read in full: interruption before ownership publication is a separate pre-existing cause, not an alias or refutation of every cleanup concern. Active TRIAGE_OUTCOMES.md's browser-helper ownership entry is likewise distinct. FILTER.md is not used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing tmux liveness or kill-server branches might misdiagnose or leave this smoke run's terminals behind. The withdrawal does not certify pre-existing supervisor-stop races, descendants, every failure path, or user programs that start their own tmux.\"; \"No legacy tmux fixture requiring the removed branches was found in these fresh current-version paths.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g094/c3",
+        "line": 9,
+        "disposition": "excluded",
+        "group": "desktop-smoke-removed-tmux-branches-needed-by-current-fixtures",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-062 after inspecting it. The affected smoke fixtures start fresh state with the current binary, whose terminals run in terminal hosts. Their cleanup still targets those hosts. Removing retired tmux-specific branches does not establish a new dependency or leak. Bounded source refutation of the removed legacy dependency. This is confined to maintainer fixture cleanup; no loss of unrelated user-owned work or catastrophic tooling harm is established. Checked source/results: [\"d751ff1633bb479c7bf53920f2e4ea4ba932a1c2:scripts/desktop-smoke.sh:130-162 creates private fresh state; :645-673 selects current build output; :1786-1817 starts the answering fixture and its real terminal host using that binary.\",\"The same script:464-479 retains stop_terminal_hosts; :558-563 runs it after recorded-supervisor cleanup; :424-443 runs it for the answering fixture; :584-586 retains state after uncertain host cleanup. Its exact remaining teardown semantics are not certified by this check.\",\"Reviewed SPEC_impl.md:2784-2791 says every terminal runs in a host and no old tmux driver remains. A targeted same-revision executable-path search found no tmux invocation in the changed smoke script. No execution.\"] Current coverage/results: [\"SPEC.md:2998-3013 and SPEC_impl.md:2588-2603,2784-2791 establish terminal hosts and their retained cleanup path; they do not authorize cleanup leaks.\",\"TODO.md Planned is empty. Matching plans/queue removal criteria concern retiring tmux paths; those plans already landed per REPORTS.md:29-31.\",\"BUGS.md has no fixture cleanup entry. INDEX.md's desktop-smoke-supervisor-precedes-cleanup-record.md was read in full: interruption before ownership publication is a separate pre-existing cause, not an alias or refutation of every cleanup concern. Active TRIAGE_OUTCOMES.md's browser-helper ownership entry is likewise distinct. FILTER.md is not used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing tmux liveness or kill-server branches might misdiagnose or leave this smoke run's terminals behind. The withdrawal does not certify pre-existing supervisor-stop races, descendants, every failure path, or user programs that start their own tmux.\"; \"No legacy tmux fixture requiring the removed branches was found in these fresh current-version paths.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-062",
+          "key": "g094/c3",
+          "latest_line": 9,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "desktop-smoke-removed-tmux-branches-needed-by-current-fixtures",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The affected smoke fixtures start fresh state with the current binary, whose terminals run in terminal hosts. Their cleanup still targets those hosts. Removing retired tmux-specific branches does not establish a new dependency or leak.",
+          "checks": [
+            "d751ff1633bb479c7bf53920f2e4ea4ba932a1c2:scripts/desktop-smoke.sh:130-162 creates private fresh state; :645-673 selects current build output; :1786-1817 starts the answering fixture and its real terminal host using that binary.",
+            "The same script:464-479 retains stop_terminal_hosts; :558-563 runs it after recorded-supervisor cleanup; :424-443 runs it for the answering fixture; :584-586 retains state after uncertain host cleanup. Its exact remaining teardown semantics are not certified by this check.",
+            "Reviewed SPEC_impl.md:2784-2791 says every terminal runs in a host and no old tmux driver remains. A targeted same-revision executable-path search found no tmux invocation in the changed smoke script. No execution."
+          ],
+          "coverage_checked": [
+            "SPEC.md:2998-3013 and SPEC_impl.md:2588-2603,2784-2791 establish terminal hosts and their retained cleanup path; they do not authorize cleanup leaks.",
+            "TODO.md Planned is empty. Matching plans/queue removal criteria concern retiring tmux paths; those plans already landed per REPORTS.md:29-31.",
+            "BUGS.md has no fixture cleanup entry. INDEX.md's desktop-smoke-supervisor-precedes-cleanup-record.md was read in full: interruption before ownership publication is a separate pre-existing cause, not an alias or refutation of every cleanup concern. Active TRIAGE_OUTCOMES.md's browser-helper ownership entry is likewise distinct. FILTER.md is not used."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No legacy tmux fixture requiring the removed branches was found in these fresh current-version paths.",
+          "original_stronger_consequence": "Removing tmux liveness or kill-server branches might misdiagnose or leave this smoke run's terminals behind. The withdrawal does not certify pre-existing supervisor-stop races, descendants, every failure path, or user programs that start their own tmux.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Bounded source refutation of the removed legacy dependency. This is confined to maintainer fixture cleanup; no loss of unrelated user-owned work or catastrophic tooling harm is established."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "desktop-smoke-removed-tmux-branches-needed-by-current-fixtures",
+        "destination": null
+      }
+    },
+    {
+      "key": "g094/c4",
+      "owner": "g094",
+      "id": "c4",
+      "domain": "local-test-lifecycle",
+      "purpose": "local-test-lifecycle: scripts/devbuild-mac.sh, deflake/bin/deflake, scripts/check-tmux-cutover.py, scripts/desktop-smoke.sh; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Deleted cutover probe has no remaining production boundary to validate",
+            "location": "scripts/check-tmux-cutover.py:1 (deleted)",
+            "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. TLDR: considered whether deleting the tmux replay/live compatibility probe removes coverage still required by the shipped terminal path or breaks a tooling caller. The full deleted file was read, including run_trial's capture-pane/refresh-client boundary and failure-group assertion. Source checks: git grep at this revision for check-tmux-cutover, build-pinned-tmux-ci, TmuxDriver, refresh-client and capture-pane across .github, scripts, deflake, e2e and the three production crates found no executable caller or production use of the removed boundary; capture-pane matches were comments about retained screen fixtures and historical rendering. Contract: SPEC_impl.md, Terminal substrate: private tmux server, states \"The running supervisor runs no tmux at all, and its driver of the old terminals is gone: what remains is the startup step that ends them\"; Testing states that terminal-host real-pty, framing, snapshot, emulator and grid suites cover the replacement. Suggested bucket: other. Confidence: confirmed by source for removal implications, no execution. proposed_drop: the compatibility probe targets a removed driver; no current caller remains in searched executable paths. possible_cover: none. Could-be-highest: no established security or user-work-loss route from removing this retired dependency probe. Caveat: this does not independently review every test in the replacement's suites or any retired implementation defect."
+          }
+        }
+      ],
+      "latest": {
+        "line": 4,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c4",
+          "state": "open",
+          "summary": "Deleted cutover probe has no remaining production boundary to validate",
+          "location": "scripts/check-tmux-cutover.py:1 (deleted)",
+          "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. TLDR: considered whether deleting the tmux replay/live compatibility probe removes coverage still required by the shipped terminal path or breaks a tooling caller. The full deleted file was read, including run_trial's capture-pane/refresh-client boundary and failure-group assertion. Source checks: git grep at this revision for check-tmux-cutover, build-pinned-tmux-ci, TmuxDriver, refresh-client and capture-pane across .github, scripts, deflake, e2e and the three production crates found no executable caller or production use of the removed boundary; capture-pane matches were comments about retained screen fixtures and historical rendering. Contract: SPEC_impl.md, Terminal substrate: private tmux server, states \"The running supervisor runs no tmux at all, and its driver of the old terminals is gone: what remains is the startup step that ends them\"; Testing states that terminal-host real-pty, framing, snapshot, emulator and grid suites cover the replacement. Suggested bucket: other. Confidence: confirmed by source for removal implications, no execution. proposed_drop: the compatibility probe targets a removed driver; no current caller remains in searched executable paths. possible_cover: none. Could-be-highest: no established security or user-work-loss route from removing this retired dependency probe. Caveat: this does not independently review every test in the replacement's suites or any retired implementation defect."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g094/findings.jsonl",
+        "id": "c4",
+        "line": 4,
+        "disposition": "excluded",
+        "group": "deleted-tmux-cutover-probe-still-needed-by-production",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-062 after inspecting it. The deleted probe checks the retired tmux capture/refresh control-mode boundary. No executable caller or shipped use of that boundary remains in the checked production and tooling paths. Source refutation limited to removing a probe for a removed driver, without a current caller. Checked source/results: [\"d751ff1633bb479c7bf53920f2e4ea4ba932a1c2^:scripts/check-tmux-cutover.py:1-14,188-211,278-293 identifies the snapshot/live sequence and failed-capture command-group oracle.\",\"git grep at d751ff1633bb479c7bf53920f2e4ea4ba932a1c2 for check-tmux-cutover, build-pinned-tmux-ci, TmuxDriver, refresh-client and capture-pane across .github/scripts/deflake/e2e and the production crates found retained comments, not an executable caller or production boundary.\",\"Reviewed SPEC_impl.md:2784-2791 removes the old driver; :8198-8207 names real-host/pty, protocol, emulator, snapshot and grid testing of its replacement. This does not independently establish those suites' completeness. No execution.\"] Current coverage/results: [\"SPEC.md:2998-3013 and SPEC_impl.md:2784-2791 accept removing the old running terminal path, while keeping startup shutdown. The shutdown does not use this control-mode replay/live sequence.\",\"TODO.md Planned is empty. plans/queue/tmux-drop-from-tooling.md:61-68 calls for this probe's removal and is already landed per REPORTS.md:31. The docs plan's later audit does not restore this removed production dependency.\",\"BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact remaining-caller or cutover-coverage defect. FILTER.md is not used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Deleting the compatibility probe might remove required current-path coverage or break a tooling caller. The check does not review all replacement tests or old implementation defects.\"; \"No remaining shipped consumer of the probe's old capture/refresh boundary, or executable tooling caller, was found.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g094/c4",
+        "line": 4,
+        "disposition": "excluded",
+        "group": "deleted-tmux-cutover-probe-still-needed-by-production",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-062 after inspecting it. The deleted probe checks the retired tmux capture/refresh control-mode boundary. No executable caller or shipped use of that boundary remains in the checked production and tooling paths. Source refutation limited to removing a probe for a removed driver, without a current caller. Checked source/results: [\"d751ff1633bb479c7bf53920f2e4ea4ba932a1c2^:scripts/check-tmux-cutover.py:1-14,188-211,278-293 identifies the snapshot/live sequence and failed-capture command-group oracle.\",\"git grep at d751ff1633bb479c7bf53920f2e4ea4ba932a1c2 for check-tmux-cutover, build-pinned-tmux-ci, TmuxDriver, refresh-client and capture-pane across .github/scripts/deflake/e2e and the production crates found retained comments, not an executable caller or production boundary.\",\"Reviewed SPEC_impl.md:2784-2791 removes the old driver; :8198-8207 names real-host/pty, protocol, emulator, snapshot and grid testing of its replacement. This does not independently establish those suites' completeness. No execution.\"] Current coverage/results: [\"SPEC.md:2998-3013 and SPEC_impl.md:2784-2791 accept removing the old running terminal path, while keeping startup shutdown. The shutdown does not use this control-mode replay/live sequence.\",\"TODO.md Planned is empty. plans/queue/tmux-drop-from-tooling.md:61-68 calls for this probe's removal and is already landed per REPORTS.md:31. The docs plan's later audit does not restore this removed production dependency.\",\"BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact remaining-caller or cutover-coverage defect. FILTER.md is not used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Deleting the compatibility probe might remove required current-path coverage or break a tooling caller. The check does not review all replacement tests or old implementation defects.\"; \"No remaining shipped consumer of the probe's old capture/refresh boundary, or executable tooling caller, was found.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-062",
+          "key": "g094/c4",
+          "latest_line": 4,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "deleted-tmux-cutover-probe-still-needed-by-production",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The deleted probe checks the retired tmux capture/refresh control-mode boundary. No executable caller or shipped use of that boundary remains in the checked production and tooling paths.",
+          "checks": [
+            "d751ff1633bb479c7bf53920f2e4ea4ba932a1c2^:scripts/check-tmux-cutover.py:1-14,188-211,278-293 identifies the snapshot/live sequence and failed-capture command-group oracle.",
+            "git grep at d751ff1633bb479c7bf53920f2e4ea4ba932a1c2 for check-tmux-cutover, build-pinned-tmux-ci, TmuxDriver, refresh-client and capture-pane across .github/scripts/deflake/e2e and the production crates found retained comments, not an executable caller or production boundary.",
+            "Reviewed SPEC_impl.md:2784-2791 removes the old driver; :8198-8207 names real-host/pty, protocol, emulator, snapshot and grid testing of its replacement. This does not independently establish those suites' completeness. No execution."
+          ],
+          "coverage_checked": [
+            "SPEC.md:2998-3013 and SPEC_impl.md:2784-2791 accept removing the old running terminal path, while keeping startup shutdown. The shutdown does not use this control-mode replay/live sequence.",
+            "TODO.md Planned is empty. plans/queue/tmux-drop-from-tooling.md:61-68 calls for this probe's removal and is already landed per REPORTS.md:31. The docs plan's later audit does not restore this removed production dependency.",
+            "BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact remaining-caller or cutover-coverage defect. FILTER.md is not used."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No remaining shipped consumer of the probe's old capture/refresh boundary, or executable tooling caller, was found.",
+          "original_stronger_consequence": "Deleting the compatibility probe might remove required current-path coverage or break a tooling caller. The check does not review all replacement tests or old implementation defects.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation limited to removing a probe for a removed driver, without a current caller."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "deleted-tmux-cutover-probe-still-needed-by-production",
+        "destination": null
+      }
+    },
+    {
+      "key": "g094/c5",
+      "owner": "g094",
+      "id": "c5",
+      "domain": "local-test-lifecycle",
+      "purpose": "local-test-lifecycle: scripts/devbuild-mac.sh, deflake/bin/deflake, scripts/check-tmux-cutover.py, scripts/desktop-smoke.sh; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c5",
+            "state": "open",
+            "summary": "Deflake still requires tmux before running batteries that would otherwise skip it",
+            "location": "deflake/bin/deflake:1230",
+            "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. TLDR: considered whether replacing the pinned tmux build with a system tmux version probe would let a sweep silently omit legacy-server cleanup tests. Source refutation: deflake/bin/deflake:1230-1248 runs tmux -V during prepare and fails preparation for a nonzero result, before any test phase; 1250-1258 prepends only the nextest installer directory. The phase child environment at 814-838 inherits PATH with that prefix; it does not select a removed pinned-tmux directory. The test lookup in crates/farhelm-teststate/src/tmux.rs:218-239 resolves machine tmux from PATH and skips only when none resolves, with no pinned-version floor; guard.rs:30-53 and 121-155 use the same PATH lookup. Suggested bucket: other. Confidence: confirmed by source, no execution. proposed_drop: missing tmux cannot produce a green full sweep through this preparation path; the changed prerequisite matches the test helper's machine-tmux contract. possible_cover: none. Could-be-highest: no; the suspected consequence is omitted maintainer test coverage. Caveat: a broken or incompatible installed tmux can still fail tests; this check establishes presence and successful -V, not every tmux command's semantics."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c5",
+            "state": "open",
+            "summary": "Deflake still requires tmux before running batteries that would otherwise skip it",
+            "location": "deflake/bin/deflake:1230",
+            "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. TLDR: considered whether replacing the pinned tmux build with a system tmux version probe would let a sweep silently omit legacy-server cleanup tests. Source refutation: deflake/bin/deflake:1230-1248 runs tmux -V during prepare and fails preparation for a nonzero result, before any test phase; 1250-1258 prepends only the nextest installer directory. The phase child environment at 814-838 inherits PATH with that prefix; it does not select a removed pinned-tmux directory. The test lookup in crates/farhelm-teststate/src/tmux.rs:218-239 resolves machine tmux from PATH and skips only when none resolves, with no pinned-version floor; guard.rs:30-53 and 121-155 use the same PATH lookup. Suggested bucket: other. Confidence: confirmed by source, no execution. proposed_drop: missing tmux cannot produce a green full sweep through this preparation path; the changed prerequisite matches the test helper's machine-tmux contract. possible_cover: none. Could-be-highest: no; the suspected consequence is omitted maintainer test coverage. Caveat: a broken or incompatible installed tmux can still fail tests; this check establishes presence and successful -V, not every tmux command's semantics.\n\nSynthesis revision, turn 2: c5 is limited to batteries that resolve tmux through inherited PATH. Lead l1 checked the stock user's-tmux test: session_lifecycle.rs:4231-4238 and 4317-4324 separately require /usr/bin/tmux with systemd linkage and can SKIPPED-return even when prepare's PATH probe succeeds. The parent revision has the same fixed-path/linkage gates, and its pinned harness build did not satisfy them either. Therefore the change does not newly remove stock-test coverage, but c5 must not be read as a blanket assertion that every tmux-dependent test executes. The original suspected omission of PATH-based legacy-server coverage remains source-refuted. No execution was performed."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c5",
+            "state": "open",
+            "summary": "Deflake still requires tmux before running batteries that would otherwise skip it",
+            "location": "deflake/bin/deflake:1230",
+            "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. TLDR: considered whether replacing the pinned tmux build with a system tmux version probe would let a sweep silently omit legacy-server cleanup tests. Source refutation: deflake/bin/deflake:1230-1248 runs tmux -V during prepare and fails preparation for a nonzero result, before any test phase; 1250-1258 prepends only the nextest installer directory. The phase child environment at 814-838 inherits PATH with that prefix; it does not select a removed pinned-tmux directory. The test lookup in crates/farhelm-teststate/src/tmux.rs:218-239 resolves machine tmux from PATH and skips only when none resolves, with no pinned-version floor; guard.rs:30-53 and 121-155 use the same PATH lookup. Suggested bucket: other. Confidence: confirmed by source, no execution. proposed_drop: missing tmux cannot produce a green full sweep through this preparation path; the changed prerequisite matches the test helper's machine-tmux contract. possible_cover: none. Could-be-highest: no; the suspected consequence is omitted maintainer test coverage. Caveat: a broken or incompatible installed tmux can still fail tests; this check establishes presence and successful -V, not every tmux command's semantics.\n\nSynthesis revision, turn 2: c5 is limited to batteries that resolve tmux through inherited PATH. Lead l1 checked the stock user's-tmux test: session_lifecycle.rs:4231-4238 and 4317-4324 separately require /usr/bin/tmux with systemd linkage and can SKIPPED-return even when prepare's PATH probe succeeds. The parent revision has the same fixed-path/linkage gates, and its pinned harness build did not satisfy them either. Therefore the change does not newly remove stock-test coverage, but c5 must not be read as a blanket assertion that every tmux-dependent test executes. The original suspected omission of PATH-based legacy-server coverage remains source-refuted. No execution was performed.\n\nAdditional synthesis source check: prepare at deflake/bin/deflake:1191-1260 checks out and owns the selected workspace, installs/prepends nextest, probes machine tmux, then builds cargo/dx and installs browser dependencies; prepare_and_sweep:1027-1054 cannot start phases if preparation fails. record-test-run.py:1166-1174 and 1801 preserve PATH while scrubbing unrequested FARHELM_ values; test_run_nextest.py:115-175 removes only NEXTEST_ settings and resolves nextest without rewriting PATH. Thus the tmux presence probe and PATH-based test lookup retain the same search environment through the recorder. This does not pin the executable against external replacement and does not settle fixed-path or systemd substrate skips (l1)."
+          }
+        }
+      ],
+      "latest": {
+        "line": 12,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c5",
+          "state": "open",
+          "summary": "Deflake still requires tmux before running batteries that would otherwise skip it",
+          "location": "deflake/bin/deflake:1230",
+          "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. TLDR: considered whether replacing the pinned tmux build with a system tmux version probe would let a sweep silently omit legacy-server cleanup tests. Source refutation: deflake/bin/deflake:1230-1248 runs tmux -V during prepare and fails preparation for a nonzero result, before any test phase; 1250-1258 prepends only the nextest installer directory. The phase child environment at 814-838 inherits PATH with that prefix; it does not select a removed pinned-tmux directory. The test lookup in crates/farhelm-teststate/src/tmux.rs:218-239 resolves machine tmux from PATH and skips only when none resolves, with no pinned-version floor; guard.rs:30-53 and 121-155 use the same PATH lookup. Suggested bucket: other. Confidence: confirmed by source, no execution. proposed_drop: missing tmux cannot produce a green full sweep through this preparation path; the changed prerequisite matches the test helper's machine-tmux contract. possible_cover: none. Could-be-highest: no; the suspected consequence is omitted maintainer test coverage. Caveat: a broken or incompatible installed tmux can still fail tests; this check establishes presence and successful -V, not every tmux command's semantics.\n\nSynthesis revision, turn 2: c5 is limited to batteries that resolve tmux through inherited PATH. Lead l1 checked the stock user's-tmux test: session_lifecycle.rs:4231-4238 and 4317-4324 separately require /usr/bin/tmux with systemd linkage and can SKIPPED-return even when prepare's PATH probe succeeds. The parent revision has the same fixed-path/linkage gates, and its pinned harness build did not satisfy them either. Therefore the change does not newly remove stock-test coverage, but c5 must not be read as a blanket assertion that every tmux-dependent test executes. The original suspected omission of PATH-based legacy-server coverage remains source-refuted. No execution was performed.\n\nAdditional synthesis source check: prepare at deflake/bin/deflake:1191-1260 checks out and owns the selected workspace, installs/prepends nextest, probes machine tmux, then builds cargo/dx and installs browser dependencies; prepare_and_sweep:1027-1054 cannot start phases if preparation fails. record-test-run.py:1166-1174 and 1801 preserve PATH while scrubbing unrequested FARHELM_ values; test_run_nextest.py:115-175 removes only NEXTEST_ settings and resolves nextest without rewriting PATH. Thus the tmux presence probe and PATH-based test lookup retain the same search environment through the recorder. This does not pin the executable against external replacement and does not settle fixed-path or systemd substrate skips (l1)."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g094/findings.jsonl",
+        "id": "c5",
+        "line": 12,
+        "disposition": "excluded",
+        "group": "deflake-missing-path-tmux-silently-skips-current-legacy-cleanup-tests",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-062 after inspecting it. For the current revision's tests that resolve tmux through PATH, preparation refuses a missing or nonworking tmux before any battery runs. This does not establish the fixed /usr/bin or libsystemd substrate and does not settle historical bases. Refute only the missing-PATH-tmux route for current tests. Do not read this as an all-tests-executed verdict. Checked source/results: [\"d751ff1633bb479c7bf53920f2e4ea4ba932a1c2:deflake/bin/deflake:1230-1248 probes tmux -V and returns preparation failure on nonzero status; :1250-1258 only prepends nextest's installer directory; :814-838 preserves inherited PATH with that prefix.\",\"The same revision's farhelm-teststate/src/tmux.rs:218-239 resolves machine tmux through PATH and skips when resolution fails. record-test-run.py:1166-1174,1801 preserves PATH while removing unrequested FARHELM_ settings. The reviewed nextest adapter preserves config and rewrites NEXTEST_ settings rather than PATH.\",\"session_lifecycle.rs:4231-4238,4317-4324 separately gates the stock-tmux test on /usr/bin/tmux and libsystemd. Those checks predate the range (l1). No version-semantics or executable-replacement guarantee is inferred. No execution.\"] Current coverage/results: [\"SPEC.md/SPEC_impl.md searches found no promise that a successful version probe proves every tmux-dependent test ran. SPEC_impl.md's test contracts and root skip-evidence rule retain the distinction.\",\"TODO.md Planned is empty. plans/queue/tmux-drop-from-tooling.md:37-45 requires real tmux and visible substrate skips, and is landed per REPORTS.md:31; it is context, not coverage of a new defect.\",\"BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact new PATH-presence omission. FILTER.md is not used; g094/l1 and l2 are separate scoped records.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing the pinned prerequisite might produce a green sweep that silently omits legacy-server cleanup coverage. The reviewer later bounded its refutation to PATH-resolving tests after discovering the fixed-path stock-tmux exception; that exception and historical-base policy remain separately preserved.\"; \"A route past preparation with no resolvable tmux in the same inherited PATH was not established. Broken/incompatible installed tmux semantics can still fail tests.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g094/c5",
+        "line": 12,
+        "disposition": "excluded",
+        "group": "deflake-missing-path-tmux-silently-skips-current-legacy-cleanup-tests",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-062 after inspecting it. For the current revision's tests that resolve tmux through PATH, preparation refuses a missing or nonworking tmux before any battery runs. This does not establish the fixed /usr/bin or libsystemd substrate and does not settle historical bases. Refute only the missing-PATH-tmux route for current tests. Do not read this as an all-tests-executed verdict. Checked source/results: [\"d751ff1633bb479c7bf53920f2e4ea4ba932a1c2:deflake/bin/deflake:1230-1248 probes tmux -V and returns preparation failure on nonzero status; :1250-1258 only prepends nextest's installer directory; :814-838 preserves inherited PATH with that prefix.\",\"The same revision's farhelm-teststate/src/tmux.rs:218-239 resolves machine tmux through PATH and skips when resolution fails. record-test-run.py:1166-1174,1801 preserves PATH while removing unrequested FARHELM_ settings. The reviewed nextest adapter preserves config and rewrites NEXTEST_ settings rather than PATH.\",\"session_lifecycle.rs:4231-4238,4317-4324 separately gates the stock-tmux test on /usr/bin/tmux and libsystemd. Those checks predate the range (l1). No version-semantics or executable-replacement guarantee is inferred. No execution.\"] Current coverage/results: [\"SPEC.md/SPEC_impl.md searches found no promise that a successful version probe proves every tmux-dependent test ran. SPEC_impl.md's test contracts and root skip-evidence rule retain the distinction.\",\"TODO.md Planned is empty. plans/queue/tmux-drop-from-tooling.md:37-45 requires real tmux and visible substrate skips, and is landed per REPORTS.md:31; it is context, not coverage of a new defect.\",\"BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact new PATH-presence omission. FILTER.md is not used; g094/l1 and l2 are separate scoped records.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing the pinned prerequisite might produce a green sweep that silently omits legacy-server cleanup coverage. The reviewer later bounded its refutation to PATH-resolving tests after discovering the fixed-path stock-tmux exception; that exception and historical-base policy remain separately preserved.\"; \"A route past preparation with no resolvable tmux in the same inherited PATH was not established. Broken/incompatible installed tmux semantics can still fail tests.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-062",
+          "key": "g094/c5",
+          "latest_line": 12,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "deflake-missing-path-tmux-silently-skips-current-legacy-cleanup-tests",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "For the current revision's tests that resolve tmux through PATH, preparation refuses a missing or nonworking tmux before any battery runs. This does not establish the fixed /usr/bin or libsystemd substrate and does not settle historical bases.",
+          "checks": [
+            "d751ff1633bb479c7bf53920f2e4ea4ba932a1c2:deflake/bin/deflake:1230-1248 probes tmux -V and returns preparation failure on nonzero status; :1250-1258 only prepends nextest's installer directory; :814-838 preserves inherited PATH with that prefix.",
+            "The same revision's farhelm-teststate/src/tmux.rs:218-239 resolves machine tmux through PATH and skips when resolution fails. record-test-run.py:1166-1174,1801 preserves PATH while removing unrequested FARHELM_ settings. The reviewed nextest adapter preserves config and rewrites NEXTEST_ settings rather than PATH.",
+            "session_lifecycle.rs:4231-4238,4317-4324 separately gates the stock-tmux test on /usr/bin/tmux and libsystemd. Those checks predate the range (l1). No version-semantics or executable-replacement guarantee is inferred. No execution."
+          ],
+          "coverage_checked": [
+            "SPEC.md/SPEC_impl.md searches found no promise that a successful version probe proves every tmux-dependent test ran. SPEC_impl.md's test contracts and root skip-evidence rule retain the distinction.",
+            "TODO.md Planned is empty. plans/queue/tmux-drop-from-tooling.md:37-45 requires real tmux and visible substrate skips, and is landed per REPORTS.md:31; it is context, not coverage of a new defect.",
+            "BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact new PATH-presence omission. FILTER.md is not used; g094/l1 and l2 are separate scoped records."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "A route past preparation with no resolvable tmux in the same inherited PATH was not established. Broken/incompatible installed tmux semantics can still fail tests.",
+          "original_stronger_consequence": "Removing the pinned prerequisite might produce a green sweep that silently omits legacy-server cleanup coverage. The reviewer later bounded its refutation to PATH-resolving tests after discovering the fixed-path stock-tmux exception; that exception and historical-base policy remain separately preserved.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Refute only the missing-PATH-tmux route for current tests. Do not read this as an all-tests-executed verdict."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "deflake-missing-path-tmux-silently-skips-current-legacy-cleanup-tests",
+        "destination": null
+      }
+    },
+    {
+      "key": "g094/c6",
+      "owner": "g094",
+      "id": "c6",
+      "domain": "local-test-lifecycle",
+      "purpose": "local-test-lifecycle: scripts/devbuild-mac.sh, deflake/bin/deflake, scripts/check-tmux-cutover.py, scripts/desktop-smoke.sh; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c6",
+            "state": "open",
+            "summary": "Devbuild no longer needs the deleted tmux payload or its checksum verifier",
+            "location": "scripts/devbuild-mac.sh:533",
+            "detail": "Reviewed commit: cb762a313abbe6da03ae0bf041f07486c4ed4df9. TLDR: considered whether removing signed tmux downloads would break remote Update or remove verification from an asset the devbuild still installs. Source refutation: scripts/devbuild-mac.sh:467-473 builds native/current Linux farhelm binaries and 504-531 stages their archives. At the same revision crates/farhelm-helm/src/provisioning/assets.rs:43-85 enumerates only farhelm/farhelm-desktop archives; payloads.rs:80-82 and 251-285 exposes one target-specific farhelm archive; installation.rs:13-44 resolves only that one payload. No tmux reference remains in the devbuild script or these payload-source/installation paths except removal commentary. Contract: SPEC_impl.md, provisioning payload paragraphs at 8050-8062, says the host is sent only farhelm and operator-selected local payloads are trusted without verification; Terminal substrate says provisioning no longer inspects, downloads, uploads or installs tmux. Suggested bucket: other. Confidence: confirmed by source, no execution. proposed_drop: no shipped consumer still requests the removed asset, and the deleted signature check authenticated only a download that was also removed. possible_cover: none. Could-be-highest: no established security route; no downloaded executable remains on this deleted verification path. Caveat: this does not review the pre-existing trust policy for operator-staged farhelm payloads or independently certify provisioning as a whole."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c6",
+            "state": "open",
+            "summary": "Devbuild no longer needs the deleted tmux payload or its checksum verifier",
+            "location": "scripts/devbuild-mac.sh:533",
+            "detail": "Reviewed commit: cb762a313abbe6da03ae0bf041f07486c4ed4df9. TLDR: considered whether removing signed tmux downloads would break remote Update or remove verification from an asset the devbuild still installs. Source refutation: scripts/devbuild-mac.sh:467-473 builds native/current Linux farhelm binaries and 504-531 stages their archives. At the same revision crates/farhelm-helm/src/provisioning/assets.rs:43-85 enumerates only farhelm/farhelm-desktop archives; payloads.rs:80-82 and 251-285 exposes one target-specific farhelm archive; installation.rs:13-44 resolves only that one payload. No tmux reference remains in the devbuild script or these payload-source/installation paths except removal commentary. Contract: SPEC_impl.md, provisioning payload paragraphs at 8050-8062, says the host is sent only farhelm and operator-selected local payloads are trusted without verification; Terminal substrate says provisioning no longer inspects, downloads, uploads or installs tmux. Suggested bucket: other. Confidence: confirmed by source, no execution. proposed_drop: no shipped consumer still requests the removed asset, and the deleted signature check authenticated only a download that was also removed. possible_cover: none. Could-be-highest: no established security route; no downloaded executable remains on this deleted verification path. Caveat: this does not review the pre-existing trust policy for operator-staged farhelm payloads or independently certify provisioning as a whole.\n\nSynthesis revision, turn 2: parent reports independent confirmation by g090/l1 that this caller's signed tmux download and its verifier were removed together. This reinforces only the former scripts/devbuild-mac.sh download path: no remaining unauthenticated tmux download was found there. It is not a finding about all verification paths, release metadata or operator-trusted local binaries. Original consequence considered and disposition are unchanged; parent has accepted no drop."
+          }
+        },
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c6",
+            "state": "open",
+            "summary": "Devbuild no longer needs the deleted tmux payload or its checksum verifier",
+            "location": "scripts/devbuild-mac.sh:533",
+            "detail": "Reviewed commit: cb762a313abbe6da03ae0bf041f07486c4ed4df9. TLDR: considered whether removing signed tmux downloads would break remote Update or remove verification from an asset the devbuild still installs. Source refutation: scripts/devbuild-mac.sh:467-473 builds native/current Linux farhelm binaries and 504-531 stages their archives. At the same revision crates/farhelm-helm/src/provisioning/assets.rs:43-85 enumerates only farhelm/farhelm-desktop archives; payloads.rs:80-82 and 251-285 exposes one target-specific farhelm archive; installation.rs:13-44 resolves only that one payload. No tmux reference remains in the devbuild script or these payload-source/installation paths except removal commentary. Contract: SPEC_impl.md, provisioning payload paragraphs at 8050-8062, says the host is sent only farhelm and operator-selected local payloads are trusted without verification; Terminal substrate says provisioning no longer inspects, downloads, uploads or installs tmux. Suggested bucket: other. Confidence: confirmed by source, no execution. proposed_drop: no shipped consumer still requests the removed asset, and the deleted signature check authenticated only a download that was also removed. possible_cover: none. Could-be-highest: no established security route; no downloaded executable remains on this deleted verification path. Caveat: this does not review the pre-existing trust policy for operator-staged farhelm payloads or independently certify provisioning as a whole.\n\nSynthesis revision, turn 2: parent reports independent confirmation by g090/l1 that this caller's signed tmux download and its verifier were removed together. This reinforces only the former scripts/devbuild-mac.sh download path: no remaining unauthenticated tmux download was found there. It is not a finding about all verification paths, release metadata or operator-trusted local binaries. Original consequence considered and disposition are unchanged; parent has accepted no drop.\n\nAdditional synthesis source check: the same commit's provisioning/assets.rs patch deletes tmux_name and removes both tmux entries from sums_members while retaining farhelm_archive_for. Its release_payloads.rs patch folds archive_member into PayloadSource::path, selecting assets::farhelm_archive_for(target), requiring the signed sums entry and calling download_verified before extraction. This corroborates that removal of devbuild's tmux staging matches the same revision's payload inventory and existing one-farhelm consumer. It does not establish anything about unrelated download paths; the bounded security refutation remains the former devbuild tmux caller only."
+          }
+        }
+      ],
+      "latest": {
+        "line": 13,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c6",
+          "state": "open",
+          "summary": "Devbuild no longer needs the deleted tmux payload or its checksum verifier",
+          "location": "scripts/devbuild-mac.sh:533",
+          "detail": "Reviewed commit: cb762a313abbe6da03ae0bf041f07486c4ed4df9. TLDR: considered whether removing signed tmux downloads would break remote Update or remove verification from an asset the devbuild still installs. Source refutation: scripts/devbuild-mac.sh:467-473 builds native/current Linux farhelm binaries and 504-531 stages their archives. At the same revision crates/farhelm-helm/src/provisioning/assets.rs:43-85 enumerates only farhelm/farhelm-desktop archives; payloads.rs:80-82 and 251-285 exposes one target-specific farhelm archive; installation.rs:13-44 resolves only that one payload. No tmux reference remains in the devbuild script or these payload-source/installation paths except removal commentary. Contract: SPEC_impl.md, provisioning payload paragraphs at 8050-8062, says the host is sent only farhelm and operator-selected local payloads are trusted without verification; Terminal substrate says provisioning no longer inspects, downloads, uploads or installs tmux. Suggested bucket: other. Confidence: confirmed by source, no execution. proposed_drop: no shipped consumer still requests the removed asset, and the deleted signature check authenticated only a download that was also removed. possible_cover: none. Could-be-highest: no established security route; no downloaded executable remains on this deleted verification path. Caveat: this does not review the pre-existing trust policy for operator-staged farhelm payloads or independently certify provisioning as a whole.\n\nSynthesis revision, turn 2: parent reports independent confirmation by g090/l1 that this caller's signed tmux download and its verifier were removed together. This reinforces only the former scripts/devbuild-mac.sh download path: no remaining unauthenticated tmux download was found there. It is not a finding about all verification paths, release metadata or operator-trusted local binaries. Original consequence considered and disposition are unchanged; parent has accepted no drop.\n\nAdditional synthesis source check: the same commit's provisioning/assets.rs patch deletes tmux_name and removes both tmux entries from sums_members while retaining farhelm_archive_for. Its release_payloads.rs patch folds archive_member into PayloadSource::path, selecting assets::farhelm_archive_for(target), requiring the signed sums entry and calling download_verified before extraction. This corroborates that removal of devbuild's tmux staging matches the same revision's payload inventory and existing one-farhelm consumer. It does not establish anything about unrelated download paths; the bounded security refutation remains the former devbuild tmux caller only."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g094/findings.jsonl",
+        "id": "c6",
+        "line": 13,
+        "disposition": "under-investigation",
+        "group": "g094-c6",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-062",
+          "key": "g094/c6",
+          "latest_line": 13,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "devbuild-tmux-download-authentication-removed-with-live-consumer",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The removed signature/hash verifier authenticated only the tmux download that the same patch removes. Current provisioning selects a single farhelm archive, and its release download path still verifies its signed checksum. This is a bounded security refutation, not a general provisioning audit.",
+          "checks": [
+            "cb762a313abbe6da03ae0bf041f07486c4ed4df9:scripts/devbuild-mac.sh patch deletes the entire tmux cache/download/signed-sums verification/copy block. Remaining :467-473 and :504-531 build and stage working-copy farhelm archives.",
+            "The same revision's provisioning/assets.rs:43-85 enumerates only current archives, removes tmux_name and removes both tmux sums members. provisioning/installation.rs:13-44 resolves one farhelm payload.",
+            "The same revision's provisioning/release_payloads.rs:804-830 selects farhelm_archive_for, requires its signed sums entry and calls download_verified before extracting. Operator-selected local payload trust remains a pre-existing explicit policy. No execution."
+          ],
+          "coverage_checked": [
+            "SPEC.md:181-187 and SPEC_impl.md:7996-8014,8038-8082 describe the removed tmux provisioning path, operator-trusted local payloads, and the continuing release signature/checksum chain.",
+            "TODO.md Planned is empty. plans/queue/tmux-drop-from-install.md:77-80 calls for removing the devbuild tmux staging and verifier if unused; REPORTS.md:30 confirms it landed. This supports bounded intent, not a permission to leave an unauthenticated download.",
+            "BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md searches found no current exact removed-verifier/live-download route. The named histories mention prior devbuild authentication findings, but they are not present as current exact queue coverage. FILTER.md is not used."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No still-downloaded tmux executable on the deleted verifier's devbuild path was found. Other download paths, release metadata and operator-trusted local binaries are outside this conclusion.",
+          "original_stronger_consequence": "Removing signed tmux downloads/checks might break remote Update or leave a downloaded installed asset unauthenticated. The reviewer withdrew that security concern only for the former devbuild tmux caller because download and verifier disappear together.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Source refutation of the named devbuild path. Independent drop check remains necessary because the candidate concerns executable authentication, regardless of the latest other bucket."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-062.json",
+          "key": "g094/c6",
+          "proposal": "claim-checks/claims-062/result.json",
+          "parent_proposal": "source-refuted-devbuild-download-authentication-removal-with-dead-consumer",
+          "final_independent_gate": "required-before-highest-executable-authentication-drop",
+          "reason": "Full062 same patch removes entire tmux cache/download/signature/hash/copy caller and verifier; remaining devbuild builds checkout farhelm archives. Current one-archive provisioning cold release chain still requires signed entry and verified download before extraction, while explicitly selected local payloads stay operator-trusted. Refute former devbuild downloaded-executable route only, not all release metadata/downloads/external publication. Preserve original unsafeinstalledasset/brokenUpdate concern for fresh gate; removing a verifier alone is not general permission."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "devbuild-tmux-download-authentication-removed-with-live-consumer",
+        "destination": null
+      }
+    },
+    {
+      "key": "g094/l1",
+      "owner": "g094",
+      "id": "l1",
+      "domain": "local-test-lifecycle",
+      "purpose": "local-test-lifecycle: scripts/devbuild-mac.sh, deflake/bin/deflake, scripts/check-tmux-cutover.py, scripts/desktop-smoke.sh; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Check whether deflake's PATH tmux preflight covers the fixed-path user-tmux test",
+            "location": "deflake/bin/deflake:1236",
+            "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. TLDR: deflake now checks tmux -V through PATH, while this commit's rationale says the user's-tmux test still requires /usr/bin/tmux. A machine with tmux only in another PATH directory might pass preparation but skip that test. Source basis: previously read deflake/bin/deflake:1230-1248 and current commit rationale. Suggested bucket: other, if confirmed (maintainer coverage only). Confidence: unresolved source check, not behavior observed in execution. proposed_drop: false pending source/contract analysis. possible_cover: none. Could-be-highest: no; no established product security or loss-of-work consequence. Next checks: locate the fixed-path test, its skip conditions, the sweep's handling of SKIPPED results and the declared gate requirement. Missing premise: whether this particular phase is required to cover that fixed-path substrate or explicitly permits the skip. No reproduction requested or planned."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "The fixed-path user-tmux skip predates the deflake prerequisite change",
+            "location": "deflake/bin/deflake:1236",
+            "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. TLDR: a sweep on a machine with tmux only outside /usr/bin can still skip the user-tmux pane-migration test despite passing tmux -V. The change under review did not introduce this gap. Source checks: crates/farhelm/tests/e2e/session_lifecycle.rs:4231-4238 requires /usr/bin/tmux and returns SKIPPED when absent; 4317-4324 also skips a distribution tmux without libsystemd. Both conditions are identical in the parent revision; the commit changes only wording and comments in that test. Parent deflake/bin/deflake:1230-1253 built and prepended the pinned harness tmux, which likewise did not supply /usr/bin/tmux or systemd linkage. Current deflake/bin/deflake:1290-1315 proceeds after zero-status phases, so this is a real pre-existing limitation, not proof the stock test executed. Suggested bucket: other. Confidence: confirmed by source comparison, no execution. proposed_drop: outside this change's causal scope; removing the pinned build does not remove a substrate it previously supplied to this fixed-path test. possible_cover: none. Could-be-highest: no; the suspected consequence is omitted maintainer test coverage. Caveat: c5's no-silent-omission conclusion must remain limited to tests resolving tmux through PATH. This record does not assert all tests execute or that the broader pre-existing coverage gap is desirable. Lead l1 is resolved to candidate after source checks; no missing premise remains for the change-attribution conclusion."
+          }
+        },
+        {
+          "line": 14,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Recheck whole-range attribution of the stock-tmux coverage gap",
+            "location": "deflake/bin/deflake:1236",
+            "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. TLDR: a sweep on a machine with tmux only outside /usr/bin can still skip the user-tmux pane-migration test despite passing tmux -V. The change under review did not introduce this gap. Source checks: crates/farhelm/tests/e2e/session_lifecycle.rs:4231-4238 requires /usr/bin/tmux and returns SKIPPED when absent; 4317-4324 also skips a distribution tmux without libsystemd. Both conditions are identical in the parent revision; the commit changes only wording and comments in that test. Parent deflake/bin/deflake:1230-1253 built and prepended the pinned harness tmux, which likewise did not supply /usr/bin/tmux or systemd linkage. Current deflake/bin/deflake:1290-1315 proceeds after zero-status phases, so this is a real pre-existing limitation, not proof the stock test executed. Suggested bucket: other. Confidence: confirmed by source comparison, no execution. proposed_drop: outside this change's causal scope; removing the pinned build does not remove a substrate it previously supplied to this fixed-path test. possible_cover: none. Could-be-highest: no; the suspected consequence is omitted maintainer test coverage. Caveat: c5's no-silent-omission conclusion must remain limited to tests resolving tmux through PATH. This record does not assert all tests execute or that the broader pre-existing coverage gap is desirable. Lead l1 is resolved to candidate after source checks; no missing premise remains for the change-attribution conclusion.\n\nDiscovery turn 3: reopened as a lead for whole-range attribution. The prior comparison established only that the fixed-path coverage gap predates d751ff16, not that it predates the review range beginning after 6e423e30068b62c6cfa276c6d720ee35bb70387a. Preserve the original consequence: PATH-only tmux can satisfy prepare while the stock pane-migration test skips. Next check: compare the base's stock-test substrate and deflake preparation, and locate introduction within the pinned range. The removal-causality refutation remains useful but does not alone dispose of a distinct test-oracle or comment-contract concern. Confidence remains source-confirmed for the skip route, unresolved for whole-range attribution. proposed_drop is pending that check; no parent drop accepted."
+          }
+        },
+        {
+          "line": 16,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "The stock-tmux substrate skip predates the entire pinned range",
+            "location": "deflake/bin/deflake:1236",
+            "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. TLDR: a sweep on a machine with tmux only outside /usr/bin can still skip the user-tmux pane-migration test despite passing tmux -V. The change under review did not introduce this gap. Source checks: crates/farhelm/tests/e2e/session_lifecycle.rs:4231-4238 requires /usr/bin/tmux and returns SKIPPED when absent; 4317-4324 also skips a distribution tmux without libsystemd. Both conditions are identical in the parent revision; the commit changes only wording and comments in that test. Parent deflake/bin/deflake:1230-1253 built and prepended the pinned harness tmux, which likewise did not supply /usr/bin/tmux or systemd linkage. Current deflake/bin/deflake:1290-1315 proceeds after zero-status phases, so this is a real pre-existing limitation, not proof the stock test executed. Suggested bucket: other. Confidence: confirmed by source comparison, no execution. proposed_drop: outside this change's causal scope; removing the pinned build does not remove a substrate it previously supplied to this fixed-path test. possible_cover: none. Could-be-highest: no; the suspected consequence is omitted maintainer test coverage. Caveat: c5's no-silent-omission conclusion must remain limited to tests resolving tmux through PATH. This record does not assert all tests execute or that the broader pre-existing coverage gap is desirable. Lead l1 is resolved to candidate after source checks; no missing premise remains for the change-attribution conclusion.\n\nDiscovery turn 3: reopened as a lead for whole-range attribution. The prior comparison established only that the fixed-path coverage gap predates d751ff16, not that it predates the review range beginning after 6e423e30068b62c6cfa276c6d720ee35bb70387a. Preserve the original consequence: PATH-only tmux can satisfy prepare while the stock pane-migration test skips. Next check: compare the base's stock-test substrate and deflake preparation, and locate introduction within the pinned range. The removal-causality refutation remains useful but does not alone dispose of a distinct test-oracle or comment-contract concern. Confidence remains source-confirmed for the skip route, unresolved for whole-range attribution. proposed_drop is pending that check; no parent drop accepted.\n\nDiscovery turn 3 whole-range check: the exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a already contains the stock test at session_lifecycle.rs:5868-5875 requiring /usr/bin/tmux and at 5955-5961 skipping without libsystemd. Its deflake/bin/deflake:1233 builds pinned harness tmux and :1246-1255 prepends that directory, not a distribution tmux installation. Thus the fixed-path/linkage omission route predates the entire pinned range, not merely d751ff16. The two in-range deflake commits are 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 and d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. Resolution: candidate again; proposed_drop remains outside range/change attribution for this pre-existing coverage gap. The potentially misleading breadth of the new setup comment is not certified by this comparison and is considered separately if it yields a concrete defect. Original consequence is preserved; no claim of all-test coverage or accepted parent drop. Source-only, no execution."
+          }
+        }
+      ],
+      "latest": {
+        "line": 16,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l1",
+          "state": "open",
+          "summary": "The stock-tmux substrate skip predates the entire pinned range",
+          "location": "deflake/bin/deflake:1236",
+          "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. TLDR: a sweep on a machine with tmux only outside /usr/bin can still skip the user-tmux pane-migration test despite passing tmux -V. The change under review did not introduce this gap. Source checks: crates/farhelm/tests/e2e/session_lifecycle.rs:4231-4238 requires /usr/bin/tmux and returns SKIPPED when absent; 4317-4324 also skips a distribution tmux without libsystemd. Both conditions are identical in the parent revision; the commit changes only wording and comments in that test. Parent deflake/bin/deflake:1230-1253 built and prepended the pinned harness tmux, which likewise did not supply /usr/bin/tmux or systemd linkage. Current deflake/bin/deflake:1290-1315 proceeds after zero-status phases, so this is a real pre-existing limitation, not proof the stock test executed. Suggested bucket: other. Confidence: confirmed by source comparison, no execution. proposed_drop: outside this change's causal scope; removing the pinned build does not remove a substrate it previously supplied to this fixed-path test. possible_cover: none. Could-be-highest: no; the suspected consequence is omitted maintainer test coverage. Caveat: c5's no-silent-omission conclusion must remain limited to tests resolving tmux through PATH. This record does not assert all tests execute or that the broader pre-existing coverage gap is desirable. Lead l1 is resolved to candidate after source checks; no missing premise remains for the change-attribution conclusion.\n\nDiscovery turn 3: reopened as a lead for whole-range attribution. The prior comparison established only that the fixed-path coverage gap predates d751ff16, not that it predates the review range beginning after 6e423e30068b62c6cfa276c6d720ee35bb70387a. Preserve the original consequence: PATH-only tmux can satisfy prepare while the stock pane-migration test skips. Next check: compare the base's stock-test substrate and deflake preparation, and locate introduction within the pinned range. The removal-causality refutation remains useful but does not alone dispose of a distinct test-oracle or comment-contract concern. Confidence remains source-confirmed for the skip route, unresolved for whole-range attribution. proposed_drop is pending that check; no parent drop accepted.\n\nDiscovery turn 3 whole-range check: the exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a already contains the stock test at session_lifecycle.rs:5868-5875 requiring /usr/bin/tmux and at 5955-5961 skipping without libsystemd. Its deflake/bin/deflake:1233 builds pinned harness tmux and :1246-1255 prepends that directory, not a distribution tmux installation. Thus the fixed-path/linkage omission route predates the entire pinned range, not merely d751ff16. The two in-range deflake commits are 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 and d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. Resolution: candidate again; proposed_drop remains outside range/change attribution for this pre-existing coverage gap. The potentially misleading breadth of the new setup comment is not certified by this comparison and is considered separately if it yields a concrete defect. Original consequence is preserved; no claim of all-test coverage or accepted parent drop. Source-only, no execution."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g094/findings.jsonl",
+        "id": "l1",
+        "line": 16,
+        "disposition": "excluded",
+        "group": "deflake-stock-tmux-fixed-path-and-systemd-gates-not-provisioned",
+        "reason": "Parent explicitly accepted named out-of-range proposal from claims-062 after inspecting it. The fixed-path/linkage coverage limitation is real in source, but it already exists at the exclusive review base. The pinned harness build never supplied that stock substrate. This does not validate the breadth of the new preparation comment. Outside range for the named fixed-path/linkage omission route, not source refutation of the limitation itself. Checked source/results: [\"6e423e30068b62c6cfa276c6d720ee35bb70387a:crates/farhelm/tests/e2e/session_lifecycle.rs:5868-5875 requires /usr/bin/tmux; :5954-5961 skips when that server lacks libsystemd. The same base's deflake/bin/deflake:1231-1255 builds/prepends the private pinned tmux rather than installing stock /usr/bin/tmux.\",\"d751ff1633bb479c7bf53920f2e4ea4ba932a1c2 retains the test's same gates at :4231-4238,4317-4324. Its prepare probe at deflake/bin/deflake:1236 does not satisfy them either.\",\"In-range deflake history has only 647f0227 and d751ff16. The proposed omission route predates both. No runtime test or observed skip.\"] Current coverage/results: [\"SPEC.md:2084-2085 and SPEC_impl.md testing context distinguish the user's stock tmux from Farhelm terminals, but do not establish this test executed. Searches of both specifications found no acceptance of a false all-tests-run claim.\",\"TODO.md Planned is empty. plans/queue/tmux-drop-from-tooling.md:37-45 preserves the stock-tmux test and visible skips; REPORTS.md:31 confirms the plan landed. No pending plan was found that specifically supplies this fixed-path/systemd substrate.\",\"BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact stock-test substrate coverage entry. FILTER.md is not needed for the pre-range attribution conclusion.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A sweep can pass PATH-based tmux preparation yet skip the stock user's-tmux pane-migration test. The reviewer first withdrew attribution to d751ff16, reopened it to check whole-range attribution, and then withdrew range attribution after checking 6e423e30. No all-test coverage claim follows from c5.\"; \"None for whole-range attribution. The new comment's 'Any working tmux will do' wording is broader than the fixed-path/linkage test substrate; the original record explicitly leaves a separate comment-contract concern unsettled, and this check does not certify it.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g094/l1",
+        "line": 16,
+        "disposition": "excluded",
+        "group": "deflake-stock-tmux-fixed-path-and-systemd-gates-not-provisioned",
+        "bucket": "other",
+        "recording": "out-of-range",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named out-of-range proposal from claims-062 after inspecting it. The fixed-path/linkage coverage limitation is real in source, but it already exists at the exclusive review base. The pinned harness build never supplied that stock substrate. This does not validate the breadth of the new preparation comment. Outside range for the named fixed-path/linkage omission route, not source refutation of the limitation itself. Checked source/results: [\"6e423e30068b62c6cfa276c6d720ee35bb70387a:crates/farhelm/tests/e2e/session_lifecycle.rs:5868-5875 requires /usr/bin/tmux; :5954-5961 skips when that server lacks libsystemd. The same base's deflake/bin/deflake:1231-1255 builds/prepends the private pinned tmux rather than installing stock /usr/bin/tmux.\",\"d751ff1633bb479c7bf53920f2e4ea4ba932a1c2 retains the test's same gates at :4231-4238,4317-4324. Its prepare probe at deflake/bin/deflake:1236 does not satisfy them either.\",\"In-range deflake history has only 647f0227 and d751ff16. The proposed omission route predates both. No runtime test or observed skip.\"] Current coverage/results: [\"SPEC.md:2084-2085 and SPEC_impl.md testing context distinguish the user's stock tmux from Farhelm terminals, but do not establish this test executed. Searches of both specifications found no acceptance of a false all-tests-run claim.\",\"TODO.md Planned is empty. plans/queue/tmux-drop-from-tooling.md:37-45 preserves the stock-tmux test and visible skips; REPORTS.md:31 confirms the plan landed. No pending plan was found that specifically supplies this fixed-path/systemd substrate.\",\"BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact stock-test substrate coverage entry. FILTER.md is not needed for the pre-range attribution conclusion.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A sweep can pass PATH-based tmux preparation yet skip the stock user's-tmux pane-migration test. The reviewer first withdrew attribution to d751ff16, reopened it to check whole-range attribution, and then withdrew range attribution after checking 6e423e30. No all-test coverage claim follows from c5.\"; \"None for whole-range attribution. The new comment's 'Any working tmux will do' wording is broader than the fixed-path/linkage test substrate; the original record explicitly leaves a separate comment-contract concern unsettled, and this check does not certify it.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-062",
+          "key": "g094/l1",
+          "latest_line": 16,
+          "recommendation": "out-of-range",
+          "bucket": "other",
+          "underlying_key": "deflake-stock-tmux-fixed-path-and-systemd-gates-not-provisioned",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The fixed-path/linkage coverage limitation is real in source, but it already exists at the exclusive review base. The pinned harness build never supplied that stock substrate. This does not validate the breadth of the new preparation comment.",
+          "checks": [
+            "6e423e30068b62c6cfa276c6d720ee35bb70387a:crates/farhelm/tests/e2e/session_lifecycle.rs:5868-5875 requires /usr/bin/tmux; :5954-5961 skips when that server lacks libsystemd. The same base's deflake/bin/deflake:1231-1255 builds/prepends the private pinned tmux rather than installing stock /usr/bin/tmux.",
+            "d751ff1633bb479c7bf53920f2e4ea4ba932a1c2 retains the test's same gates at :4231-4238,4317-4324. Its prepare probe at deflake/bin/deflake:1236 does not satisfy them either.",
+            "In-range deflake history has only 647f0227 and d751ff16. The proposed omission route predates both. No runtime test or observed skip."
+          ],
+          "coverage_checked": [
+            "SPEC.md:2084-2085 and SPEC_impl.md testing context distinguish the user's stock tmux from Farhelm terminals, but do not establish this test executed. Searches of both specifications found no acceptance of a false all-tests-run claim.",
+            "TODO.md Planned is empty. plans/queue/tmux-drop-from-tooling.md:37-45 preserves the stock-tmux test and visible skips; REPORTS.md:31 confirms the plan landed. No pending plan was found that specifically supplies this fixed-path/systemd substrate.",
+            "BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact stock-test substrate coverage entry. FILTER.md is not needed for the pre-range attribution conclusion."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "None for whole-range attribution. The new comment's 'Any working tmux will do' wording is broader than the fixed-path/linkage test substrate; the original record explicitly leaves a separate comment-contract concern unsettled, and this check does not certify it.",
+          "original_stronger_consequence": "A sweep can pass PATH-based tmux preparation yet skip the stock user's-tmux pane-migration test. The reviewer first withdrew attribution to d751ff16, reopened it to check whole-range attribution, and then withdrew range attribution after checking 6e423e30. No all-test coverage claim follows from c5.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Outside range for the named fixed-path/linkage omission route, not source refutation of the limitation itself."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "deflake-stock-tmux-fixed-path-and-systemd-gates-not-provisioned",
+        "destination": null
+      }
+    },
+    {
+      "key": "g094/l2",
+      "owner": "g094",
+      "id": "l2",
+      "domain": "local-test-lifecycle",
+      "purpose": "local-test-lifecycle: scripts/devbuild-mac.sh, deflake/bin/deflake, scripts/check-tmux-cutover.py, scripts/desktop-smoke.sh; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 15,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l2",
+            "state": "open",
+            "summary": "Check deflake compatibility with an older selected base's recorder",
+            "location": "deflake/bin/deflake:924",
+            "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. TLDR: the current driver checks out a selectable base into its workspace and invokes that workspace's recorder, while its own phase model no longer passes --tmux or builds the pinned tmux. An older selected base may still require those inputs. Source basis: deflake/bin/deflake:924-930 chooses self.workspace/scripts/record-test-run.py; prepare:1191-1218 resolves and checks out self.base; patch removes phase.tmux and the pinned prerequisite. Suggested bucket: other if a supported historical base can no longer run. Confidence: unresolved source check, no execution. proposed_drop: false pending checks. possible_cover: none. Could-be-highest: no; maintainer sweep startup/coverage only. Missing premise: older recorder parser defaults and setup requirements, plus the supported base-selection contract. Next checks: parent/base parser, command startup options and environment/tool checks. No reproduction planned."
+          }
+        },
+        {
+          "line": 17,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l2",
+            "state": "open",
+            "summary": "Historical-base deflake runs lose their selected revision's required tmux check",
+            "location": "deflake/bin/deflake:924",
+            "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. TLDR: starting the updated sweep against an older --base can run that revision's tests without the pinned tmux prerequisite and required substrate check that its sweep previously enforced. The older recorder prints a mismatch warning, but the updated driver lets the battery run on a different tmux and can report it finished; this weakens the evidence for historical-base flake investigations. Source route: current deflake/bin/deflake:1624 accepts --base REV without limiting its age; :1454-1457 launches the current checkout's driver, :1191-1218 checks the selected base into a separate workspace, and :925 invokes that workspace's recorder. The changed :1236 merely runs machine tmux -V instead of building the selected workspace's pinned tmux, and :926-927 no longer passes --tmux required. At the immediate prior base d751ff16^, record-test-run.py:230 defaults an omitted --tmux to warn; :1193-1227 compares against the selected checkout's pin and .ci-tmux/tmux, while :1981-1992 only refuses mismatches for required mode. Thus with a clean sweep workspace and any runnable non-pinned machine tmux, new prepare succeeds, the old recorder detects the missing pinned binary/version or hash mismatch, prints it, then continues rather than refusing. Parent deflake/bin/deflake:1231-1253 instead built and prepended that selected revision's pinned tool, and its phase/recorder code supplied required for the affected Rust/browser phases (the assigned patch shows the removed field and arguments). The pinned range begins with the same required substrate model, so this regression is introduced by the assigned commit rather than inherited from the range base. Contract: the public CLI and prepare documentation promise the sweep runs against a selected jj revision; prerequisite setup and the recorder contract come from that revision. Suggested bucket: other (maintainer tooling/evidence correctness; no catastrophic consequence established). Confidence: confirmed conditional source route, no runtime observation. proposed_drop: false. possible_cover: none; no prohibited coverage search. Could-be-highest: no established security, user-work-loss or catastrophic tooling route. Caveats: default runs with a base at or after this commit have no old tmux gate and are not affected; cached pinned artifacts may mask the missing build; a mismatched test may fail visibly, and the older recorder does emit a warning, so no claim of universally green tests or hidden diagnostics. The defect is lost required-substrate enforcement for supported historical base selection, not a claim that current host terminals require tmux. A fix can align preparation/phase policy with the selected revision or explicitly reject incompatible historical bases before a sweep starts. Lead l2 is resolved to a finding after checking launcher ownership, selected recorder defaults, refusal logic and preparation ordering. No reproduction or runtime test performed."
+          }
+        },
+        {
+          "line": 19,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l2",
+            "state": "open",
+            "summary": "Historical-base deflake runs lose their selected revision's required tmux check",
+            "location": "deflake/bin/deflake:924",
+            "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. TLDR: starting the updated sweep against an older --base can run that revision's tests without the pinned tmux prerequisite and required substrate check that its sweep previously enforced. The older recorder prints a mismatch warning, but the updated driver lets the battery run on a different tmux and can report it finished; this weakens the evidence for historical-base flake investigations. Source route: current deflake/bin/deflake:1624 accepts --base REV without limiting its age; :1454-1457 launches the current checkout's driver, :1191-1218 checks the selected base into a separate workspace, and :925 invokes that workspace's recorder. The changed :1236 merely runs machine tmux -V instead of building the selected workspace's pinned tmux, and :926-927 no longer passes --tmux required. At the immediate prior base d751ff16^, record-test-run.py:230 defaults an omitted --tmux to warn; :1193-1227 compares against the selected checkout's pin and .ci-tmux/tmux, while :1981-1992 only refuses mismatches for required mode. Thus with a clean sweep workspace and any runnable non-pinned machine tmux, new prepare succeeds, the old recorder detects the missing pinned binary/version or hash mismatch, prints it, then continues rather than refusing. Parent deflake/bin/deflake:1231-1253 instead built and prepended that selected revision's pinned tool, and its phase/recorder code supplied required for the affected Rust/browser phases (the assigned patch shows the removed field and arguments). The pinned range begins with the same required substrate model, so this regression is introduced by the assigned commit rather than inherited from the range base. Contract: the public CLI and prepare documentation promise the sweep runs against a selected jj revision; prerequisite setup and the recorder contract come from that revision. Suggested bucket: other (maintainer tooling/evidence correctness; no catastrophic consequence established). Confidence: confirmed conditional source route, no runtime observation. proposed_drop: false. possible_cover: none; no prohibited coverage search. Could-be-highest: no established security, user-work-loss or catastrophic tooling route. Caveats: default runs with a base at or after this commit have no old tmux gate and are not affected; cached pinned artifacts may mask the missing build; a mismatched test may fail visibly, and the older recorder does emit a warning, so no claim of universally green tests or hidden diagnostics. The defect is lost required-substrate enforcement for supported historical base selection, not a claim that current host terminals require tmux. A fix can align preparation/phase policy with the selected revision or explicitly reject incompatible historical bases before a sweep starts. Lead l2 is resolved to a finding after checking launcher ownership, selected recorder defaults, refusal logic and preparation ordering. No reproduction or runtime test performed.\n\nEndpoint check during discovery: git log d751ff16..00de0b6c -- deflake/bin/deflake contains no later change. Pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db retains recorder_argv:924-930 without --tmux, the machine probe at :1236, current-driver launch at :1454-1457 and unrestricted --base option at :1624. The historical-base evidence-policy mismatch therefore remains at the pinned tip; it is not merely an intermediate state. Parent phase source was also read at d751ff16^:591-615 and :925-931 and range-base :927-933, confirming the former required flag for Rust/browser/doctest/desktop-smoke phases. No execution."
+          }
+        }
+      ],
+      "latest": {
+        "line": 19,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l2",
+          "state": "open",
+          "summary": "Historical-base deflake runs lose their selected revision's required tmux check",
+          "location": "deflake/bin/deflake:924",
+          "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. TLDR: starting the updated sweep against an older --base can run that revision's tests without the pinned tmux prerequisite and required substrate check that its sweep previously enforced. The older recorder prints a mismatch warning, but the updated driver lets the battery run on a different tmux and can report it finished; this weakens the evidence for historical-base flake investigations. Source route: current deflake/bin/deflake:1624 accepts --base REV without limiting its age; :1454-1457 launches the current checkout's driver, :1191-1218 checks the selected base into a separate workspace, and :925 invokes that workspace's recorder. The changed :1236 merely runs machine tmux -V instead of building the selected workspace's pinned tmux, and :926-927 no longer passes --tmux required. At the immediate prior base d751ff16^, record-test-run.py:230 defaults an omitted --tmux to warn; :1193-1227 compares against the selected checkout's pin and .ci-tmux/tmux, while :1981-1992 only refuses mismatches for required mode. Thus with a clean sweep workspace and any runnable non-pinned machine tmux, new prepare succeeds, the old recorder detects the missing pinned binary/version or hash mismatch, prints it, then continues rather than refusing. Parent deflake/bin/deflake:1231-1253 instead built and prepended that selected revision's pinned tool, and its phase/recorder code supplied required for the affected Rust/browser phases (the assigned patch shows the removed field and arguments). The pinned range begins with the same required substrate model, so this regression is introduced by the assigned commit rather than inherited from the range base. Contract: the public CLI and prepare documentation promise the sweep runs against a selected jj revision; prerequisite setup and the recorder contract come from that revision. Suggested bucket: other (maintainer tooling/evidence correctness; no catastrophic consequence established). Confidence: confirmed conditional source route, no runtime observation. proposed_drop: false. possible_cover: none; no prohibited coverage search. Could-be-highest: no established security, user-work-loss or catastrophic tooling route. Caveats: default runs with a base at or after this commit have no old tmux gate and are not affected; cached pinned artifacts may mask the missing build; a mismatched test may fail visibly, and the older recorder does emit a warning, so no claim of universally green tests or hidden diagnostics. The defect is lost required-substrate enforcement for supported historical base selection, not a claim that current host terminals require tmux. A fix can align preparation/phase policy with the selected revision or explicitly reject incompatible historical bases before a sweep starts. Lead l2 is resolved to a finding after checking launcher ownership, selected recorder defaults, refusal logic and preparation ordering. No reproduction or runtime test performed.\n\nEndpoint check during discovery: git log d751ff16..00de0b6c -- deflake/bin/deflake contains no later change. Pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db retains recorder_argv:924-930 without --tmux, the machine probe at :1236, current-driver launch at :1454-1457 and unrestricted --base option at :1624. The historical-base evidence-policy mismatch therefore remains at the pinned tip; it is not merely an intermediate state. Parent phase source was also read at d751ff16^:591-615 and :925-931 and range-base :927-933, confirming the former required flag for Rust/browser/doctest/desktop-smoke phases. No execution."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g094/findings.jsonl",
+        "id": "l2",
+        "line": 19,
+        "disposition": "verified",
+        "group": "deflake-current-driver-downgrades-historical-recorder-required-tmux-policy",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-062 after inspecting it. Selecting an older source revision retains the new controller but invokes the old recorder. The controller no longer builds that revision's pinned tmux or passes its required mode, so the old recorder warns and continues instead of enforcing the selected revision's former gate. This weakens historical-base test evidence under the stated conditions. Retain as other for the verified conditional source-policy mismatch. Preserve the historical-support ambiguity and runtime caveats in the queued record. Checked source/results: [\"d751ff1633bb479c7bf53920f2e4ea4ba932a1c2:deflake/bin/deflake:1454-1457 launches this checkout's controller, :1191-1218 checks out self.base, :924-930 invokes that workspace's recorder without --tmux, :1236 only probes machine tmux, and :1624 accepts --base as a jj revision without an age limit.\",\"d751ff1633bb479c7bf53920f2e4ea4ba932a1c2^:scripts/record-test-run.py:230 defaults omitted --tmux to warn; :1193-1227 compares machine version/hash with selected checkout pin/.ci-tmux/tmux; :1981-1992 emits mismatch diagnostics but refuses only required mode.\",\"The parent controller's phases at :591-615 require tmux for the affected Rust/browser/doctest/desktop-smoke phases; :925-931 passes that mode; :1231-1253 builds and prepends the selected revision's pinned tmux. The exclusive range base has the same older prerequisite arrangement at :1231-1255.\",\"00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db retains the new recorder command, machine probe, current-controller launch and unrestricted --base at the same lines. No later in-range deflake change repairs this path. No runtime reproduction.\"] Current coverage/results: [\"SPEC.md and SPEC_impl.md searches found no explicit historical-base compatibility cutoff or acceptance of weakening an older selected revision's recorder policy. SPEC_impl.md:8216-8229 single-user/one-command assumptions do not settle cross-revision prerequisite behavior.\",\"TODO.md Planned is empty. plans/queue searches for historical/older base, selected recorder, deflake and pinned tmux found no pending repair. The landed tmux-drop-from-tooling plan:37-55 intentionally removes current pinning and mode, but does not explicitly reject old bases or address their retained required-mode contract. That broad removal intent is not an exact historical-base acceptance.\",\"BUGS.md has no deflake entry. INDEX.md and active TRIAGE_OUTCOMES.md searches found only unrelated deflake exclusion/parent-directory items; none matches this cross-revision trigger and evidence-policy consequence.\",\"FILTER.md does not match: selecting an older source base is not an installed-release upgrade plus a rare condition, and lost required-substrate enforcement is not wholly a rare transient diagnostic or safe retry failure.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Initial lead asked whether an older supported base could no longer run. The established consequence is weaker evidence: missing pin preparation and required enforcement, while a mismatch warning remains visible and tests may fail anyway. Default bases at/after the removal are unaffected; cached pinned artifacts may mask it. No security, user-owned-work loss, catastrophic tooling harm or universal green result is established.\"; \"None for the conditional loss of required enforcement. No explicit promise to support every arbitrarily old base was found; the unrestricted CLI and immediate-parent example make retention appropriate rather than inventing a cutoff. Runtime frequency and green historical sweeps were not observed.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g094/l2",
+        "line": 19,
+        "disposition": "verified",
+        "group": "deflake-current-driver-downgrades-historical-recorder-required-tmux-policy",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-062 after inspecting it. Selecting an older source revision retains the new controller but invokes the old recorder. The controller no longer builds that revision's pinned tmux or passes its required mode, so the old recorder warns and continues instead of enforcing the selected revision's former gate. This weakens historical-base test evidence under the stated conditions. Retain as other for the verified conditional source-policy mismatch. Preserve the historical-support ambiguity and runtime caveats in the queued record. Checked source/results: [\"d751ff1633bb479c7bf53920f2e4ea4ba932a1c2:deflake/bin/deflake:1454-1457 launches this checkout's controller, :1191-1218 checks out self.base, :924-930 invokes that workspace's recorder without --tmux, :1236 only probes machine tmux, and :1624 accepts --base as a jj revision without an age limit.\",\"d751ff1633bb479c7bf53920f2e4ea4ba932a1c2^:scripts/record-test-run.py:230 defaults omitted --tmux to warn; :1193-1227 compares machine version/hash with selected checkout pin/.ci-tmux/tmux; :1981-1992 emits mismatch diagnostics but refuses only required mode.\",\"The parent controller's phases at :591-615 require tmux for the affected Rust/browser/doctest/desktop-smoke phases; :925-931 passes that mode; :1231-1253 builds and prepends the selected revision's pinned tmux. The exclusive range base has the same older prerequisite arrangement at :1231-1255.\",\"00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db retains the new recorder command, machine probe, current-controller launch and unrestricted --base at the same lines. No later in-range deflake change repairs this path. No runtime reproduction.\"] Current coverage/results: [\"SPEC.md and SPEC_impl.md searches found no explicit historical-base compatibility cutoff or acceptance of weakening an older selected revision's recorder policy. SPEC_impl.md:8216-8229 single-user/one-command assumptions do not settle cross-revision prerequisite behavior.\",\"TODO.md Planned is empty. plans/queue searches for historical/older base, selected recorder, deflake and pinned tmux found no pending repair. The landed tmux-drop-from-tooling plan:37-55 intentionally removes current pinning and mode, but does not explicitly reject old bases or address their retained required-mode contract. That broad removal intent is not an exact historical-base acceptance.\",\"BUGS.md has no deflake entry. INDEX.md and active TRIAGE_OUTCOMES.md searches found only unrelated deflake exclusion/parent-directory items; none matches this cross-revision trigger and evidence-policy consequence.\",\"FILTER.md does not match: selecting an older source base is not an installed-release upgrade plus a rare condition, and lost required-substrate enforcement is not wholly a rare transient diagnostic or safe retry failure.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Initial lead asked whether an older supported base could no longer run. The established consequence is weaker evidence: missing pin preparation and required enforcement, while a mismatch warning remains visible and tests may fail anyway. Default bases at/after the removal are unaffected; cached pinned artifacts may mask it. No security, user-owned-work loss, catastrophic tooling harm or universal green result is established.\"; \"None for the conditional loss of required enforcement. No explicit promise to support every arbitrarily old base was found; the unrestricted CLI and immediate-parent example make retention appropriate rather than inventing a cutoff. Runtime frequency and green historical sweeps were not observed.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-062",
+          "key": "g094/l2",
+          "latest_line": 19,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "deflake-current-driver-downgrades-historical-recorder-required-tmux-policy",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Selecting an older source revision retains the new controller but invokes the old recorder. The controller no longer builds that revision's pinned tmux or passes its required mode, so the old recorder warns and continues instead of enforcing the selected revision's former gate. This weakens historical-base test evidence under the stated conditions.",
+          "checks": [
+            "d751ff1633bb479c7bf53920f2e4ea4ba932a1c2:deflake/bin/deflake:1454-1457 launches this checkout's controller, :1191-1218 checks out self.base, :924-930 invokes that workspace's recorder without --tmux, :1236 only probes machine tmux, and :1624 accepts --base as a jj revision without an age limit.",
+            "d751ff1633bb479c7bf53920f2e4ea4ba932a1c2^:scripts/record-test-run.py:230 defaults omitted --tmux to warn; :1193-1227 compares machine version/hash with selected checkout pin/.ci-tmux/tmux; :1981-1992 emits mismatch diagnostics but refuses only required mode.",
+            "The parent controller's phases at :591-615 require tmux for the affected Rust/browser/doctest/desktop-smoke phases; :925-931 passes that mode; :1231-1253 builds and prepends the selected revision's pinned tmux. The exclusive range base has the same older prerequisite arrangement at :1231-1255.",
+            "00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db retains the new recorder command, machine probe, current-controller launch and unrestricted --base at the same lines. No later in-range deflake change repairs this path. No runtime reproduction."
+          ],
+          "coverage_checked": [
+            "SPEC.md and SPEC_impl.md searches found no explicit historical-base compatibility cutoff or acceptance of weakening an older selected revision's recorder policy. SPEC_impl.md:8216-8229 single-user/one-command assumptions do not settle cross-revision prerequisite behavior.",
+            "TODO.md Planned is empty. plans/queue searches for historical/older base, selected recorder, deflake and pinned tmux found no pending repair. The landed tmux-drop-from-tooling plan:37-55 intentionally removes current pinning and mode, but does not explicitly reject old bases or address their retained required-mode contract. That broad removal intent is not an exact historical-base acceptance.",
+            "BUGS.md has no deflake entry. INDEX.md and active TRIAGE_OUTCOMES.md searches found only unrelated deflake exclusion/parent-directory items; none matches this cross-revision trigger and evidence-policy consequence.",
+            "FILTER.md does not match: selecting an older source base is not an installed-release upgrade plus a rare condition, and lost required-substrate enforcement is not wholly a rare transient diagnostic or safe retry failure."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "None for the conditional loss of required enforcement. No explicit promise to support every arbitrarily old base was found; the unrestricted CLI and immediate-parent example make retention appropriate rather than inventing a cutoff. Runtime frequency and green historical sweeps were not observed.",
+          "original_stronger_consequence": "Initial lead asked whether an older supported base could no longer run. The established consequence is weaker evidence: missing pin preparation and required enforcement, while a mismatch warning remains visible and tests may fail anyway. Default bases at/after the removal are unaffected; cached pinned artifacts may mask it. No security, user-owned-work loss, catastrophic tooling harm or universal green result is established.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain as other for the verified conditional source-policy mismatch. Preserve the historical-support ambiguity and runtime caveats in the queued record."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "deflake-current-driver-downgrades-historical-recorder-required-tmux-policy",
+        "destination": "trailing-deflake-current-driver-downgrades-historical-recorder-required-tmux-policy.md"
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete: all four assigned patches reviewed at their recorded revisions.\n\nNo reportable findings or open leads. Six ruled-out candidates are recorded in [findings.jsonl]([private-run]/g094/findings.jsonl). Progress and coverage are updated. No tests or reproductions run."
+    },
+    {
+      "turn": 2,
+      "reply": "Synthesis complete; no new reportable findings.\n\n- Revised c3 and c6 with bounded cross-group evidence.\n- Revised c5 after confirming setup ordering and PATH preservation.\n- Resolved l1 to candidate: the `/usr/bin/tmux` coverage gap predates this change.\n\nUnresolved lead IDs: none. All conclusions are source-based; no runtime execution."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 complete. Something new was found.\n\n- **New verified ID: l2** — historical `--base` sweeps omit the selected revision’s pinned tmux setup and required check. Its older recorder warns and continues. Source-confirmed; unchanged at the pinned tip.\n- Checked driver selection, recorder defaults, refusal logic, setup ordering, and remaining shell/caller references.\n- Rechecked l1 against the range base; its substrate gap predates the entire range. Narrowed c2 accordingly.\n- **New unverified IDs:** none.\n- **Open leads:** none.\n\nLogs and progress updated. No runtime execution."
+    },
+    {
+      "turn": 4,
+      "reply": "Discovery pass 2 complete. Nothing new found.\n\nChecked preparation failure and lock handling, devbuild staging and stamp ordering, desktop cleanup retention, and deleted-probe references at deletion and tip.\n\n- New verified IDs: none.\n- New unverified IDs: none.\n- Open leads: none.\n\nProgress updated. Source-only; no runtime execution."
+    }
+  ],
+  "progress": "# g094 progress\nInitial review, turn 1 complete. Discovery passes: 0 (initial review only; no later-turn synthesis or discovery performed).\nState: all assigned patch ranges delivered through evidence read and reviewed. No reportable findings; six source-refuted candidates recorded immediately as c1-c6. No open leads or unverified findings.\nScope: scripts/devbuild-mac.sh at cb762a313abbe6da03ae0bf041f07486c4ed4df9; deflake/bin/deflake, scripts/check-tmux-cutover.py, scripts/desktop-smoke.sh at d751ff1633bb479c7bf53920f2e4ea4ba932a1c2.\nInterface assumptions: source-only; caller owns coverage matching. No runtime tests or reproductions.\nUnread assigned material: none. New verified findings: none. New unverified findings: none. Candidate IDs: c1-c6.\n\nMandatory patch coverage:\n\n- 01339-000.patch: 1-168 (devbuild at cb762a313abbe6da03ae0bf041f07486c4ed4df9).\n- 01405-000.patch: 1-161 (deflake at d751ff1633bb479c7bf53920f2e4ea4ba932a1c2).\n- 01416-000.patch: 1-170 and 171-313 (entire deleted cutover probe at d751ff1633bb479c7bf53920f2e4ea4ba932a1c2).\n- 01417-000.patch: 1-178 (desktop smoke at d751ff1633bb479c7bf53920f2e4ea4ba932a1c2).\n\nAll inventory commits were read from the commits field only. No excluded coverage metadata or coverage queues were read.\n\nSource and interface checks:\n\n- cb762a313abbe6da03ae0bf041f07486c4ed4df9: scripts/devbuild-mac.sh 70-200, 425-554; provisioning/assets.rs 1-210; provisioning/payloads.rs 1-230, 240-302; provisioning/installation.rs 1-119. The payload consumer requires one farhelm archive, while devbuild recreates the staging directory and builds those archives. The deleted tmux download no longer supplies any consumer.\n- d751ff1633bb479c7bf53920f2e4ea4ba932a1c2: deflake/bin/deflake 520-630, 760-905, 900-947, 943-1038, 1170-1290; scripts/desktop-smoke.sh 90-120, 120-173, 213-265, 399-610, 610-709, 1624-1715, 1774-1820; crates/farhelm-teststate/src/tmux/guard.rs 1-200 and tmux.rs 200-330. Deflake constructor and recorder argv changes match the parser; preparation still fails if machine tmux cannot run. Smoke fixtures are fresh and use the current binary, including replacement and answering-supervisor legs; terminal-host cleanup remains in place.\n- Pinned targeted searches: record-test-run.py argument parser 232-246; remaining tmux lookup sites in crates and deflake; executable callers of the deleted cutover/build-pinned probes and tmux control commands across .github, scripts, deflake, e2e and production crate paths. No executable cutover caller or production capture/refresh driver remained.\n- Governing pinned contracts: SPEC_impl.md Terminal substrate: private tmux server (2784-2875 at both commits); terminal-host stop contract (1957-1993) and test-harness cleanup paragraph (2592-2604), Testing (8177-8242) at d751ff; provisioning payload and verification paragraphs (8045-8119) at cb762a; SPEC.md terminal retirement bullet (3009-3026), Supported user environments (5264-5342) at d751ff, relevant topology (175-195) and supported-environment/terminal-retirement paragraphs at cb762a. Answers bind to what was drawn read at d751ff 1069-1098; no GUI handler changes in scope.\n\nConclusions are source-based, not observed runtime behavior. No tests, builds, reproductions, live-install operations or checkout mutations performed. Root agent instructions and recording/priority rules were read; test checklist from brief applied to lifecycle/oracle implications.\n\nOperational note: first candidate append was rejected because state was written as closed; it was corrected to open and successfully recorded before further source analysis. All current records use valid open state; the findings helper reports active=0, open_candidates=6, open_leads=0. A private event-file patch attempt and a JavaScript syntax error did not append anything; both were corrected immediately.\n\n## Synthesis, turn 2\n\nTurn 2 complete. Discovery passes: 0; this was the requested synthesis, not a discovery pass. No new verified or unverified findings. Lead l1 was opened immediately and resolved to a candidate after comparing the current and parent source. Unresolved leads: none. No assigned material unread.\n\nRevised c3 and c6 with the parent's cross-group evidence and explicit scope limits. g090/l1 confirms removal of the signed tmux download together with its verifier; this refutes only the former devbuild caller's suspected unauthenticated-download route. g091/c3 agrees fresh browser stacks create only hosts; neither that evidence nor c3 certifies all teardown paths. No parent drop has been accepted.\n\nAdditional source checks:\n\n- cb762a313abbe6da03ae0bf041f07486c4ed4df9: complete assets.rs patch and release_payloads.rs patch through 180 output lines. The same commit deletes the tmux asset-name/inventory entries; the remaining payload source selects farhelm archives and retains signed-sums and download_verified checks.\n- d751ff1633bb479c7bf53920f2e4ea4ba932a1c2: deflake/bin/deflake 1021-1067, 1191-1260, 1290-1380; record-test-run.py 1160-1185, 1793-1805, 1858-1888; test_run_nextest.py 115-180. Preparation checks out the selected workspace, prepends nextest, probes tmux, then builds; phase execution is conditional on successful prepare. The recorder and nextest preparation preserve PATH.\n- Current and parent session_lifecycle.rs 4197-4251, 4301-4337, plus its complete commit patch: the stock user-tmux test already required /usr/bin/tmux and libsystemd before this change. The former pinned build did not supply those premises. Current and parent deflake setup were compared (parent 1225-1263). Resolved l1 records that a PATH-only tmux still permits this test's early return, but the assigned change did not introduce that coverage gap. Revised c5 limits its original refutation to tests resolving tmux through PATH.\n\nAll conclusions remain source-based. No runtime tests, builds or reproductions. Next action: await the caller's next turn. Parent owns delivery audit, coverage matching and independent drop decisions.\n\n## Discovery, turn 3\n\nDiscovery-pass count: 1. Turn complete. New verified finding: l2 (historical-base deflake runs lose the selected revision's required/pinned tmux enforcement). New unverified-after-investigation IDs: none. Open leads: none. Something new was found. No assigned material unread.\n\nRead discovery-neighbours.json in full (122 lines, 30,929 bytes; delivered without clipping). Named pending questions were empty. Neighbour findings were used only for interfaces/novelty: no attempt to re-review their production cleanup routes, payload-producer mismatch or guard-lifetime defects. No prohibited coverage sources were read.\n\nDiscovery checks beyond earlier same-revision confirmations:\n\n- Reopened l1 to check attribution against the entire range. The range base already contains the fixed-path stock-tmux test and libsystemd skip (session_lifecycle.rs:5868-5881, 5953-5965) and a driver that builds only the harness tmux. Resolved l1 back to candidate with this stronger attribution evidence; the coverage limitation predates the range, not merely the assigned commit.\n- Traced --base selection through current driver launch (deflake/bin/deflake:1427-1476), workspace checkout, workspace recorder dispatch, parent recorder parser default (record-test-run.py:228-270), actual pin comparison (:1181-1245) and conditional refusal (:1955-1998). New l2 was recorded first as a lead, then as a source-confirmed finding after these checks: the current driver with an older selected recorder omits --tmux required and never builds/prepends that older base's pinned binary. The older recorder warns and continues on mismatch. Read parent phases/dispatch (deflake:537-544, 588-620, 925-935), base dispatch (925-935), and tip dispatch/setup/launch/options. No later deflake commit repairs this through the pinned tip.\n- Revised c2 under its existing ID to bound the compatibility refutation to a driver and recorder from the same revision; it does not refute l2's cross-revision case.\n- Checked remaining shell preflight/run-only/staging edges in devbuild-mac.sh:290-425 and targeted tmux/sha256/curl/payload/stamp references; checked desktop-smoke liveness/host-kind/cleanup callsites and the remaining Phase constructors/field consumers. No additional substantive candidate or reportable issue emerged from those checks. The retired cutover probe's lack of a live executable caller remained unchanged from the initial pass.\n\nAll results are source-based. No runtime tests, builds, reproductions or live-install actions. No checkout writes. Next action: parent synthesis of l2 and any requested later discovery; the new finding has not shortened this completed pass.\n\n## Discovery, turn 4\n\nDiscovery-pass count: 2. Turn complete. New verified findings: none. New unverified-after-investigation IDs: none. Open leads: none. Nothing new found. Existing records and proposed-drop bases unchanged. No assigned material unread.\n\nRefreshed discovery-neighbours.json, now 149 lines and 38,276 bytes, with bounded reads 1-55, 56-105 and 106-149. Additional g093 and g147 findings were novelty context only; their earlier-script documentation and archive-packer defects were not re-reported or reviewed outside this assignment. There were no named pending questions.\n\nUseful source checks this pass:\n\n- d751ff16 deflake/bin/deflake:125-168, 187-225, 1120-1174, 1220-1260, 840-876, 1021-1054, plus the preparation patch tail. Checked that replacing the builder with the version probe does not add directory-output parsing or change command-lock inheritance, and that the same-revision preparation failure path still prevents sweep entry. No additional issue beyond existing historical-base l2 emerged.\n- cb762a31 scripts/devbuild-mac.sh:210-289, 475-554. Checked the running-build refusal, staging stamp lifecycle, payload-directory reset and completed-build publication after removing downloads. No new changed failure or ownership edge was found; this does not certify all pre-existing concurrency behavior.\n- d751ff16 scripts/desktop-smoke.sh:414-489, 532-605, 1841-1875. Revisited failure retention, group stop followed by host cleanup, and the planted answering-state host's own final assertion. The assigned removal retains host cleanup and retention checks; no new substantive consequence attributable to the removed tmux branches was established. No blanket teardown certification.\n- Searched executable/documentation paths for the deleted cutover probe at its deletion revision and at pinned tip: scripts, .github, deflake, e2e, docs, .agents, SPEC.md and SPEC_impl.md. Both separate searches found no reference. The first combined command stopped after the deletion-revision grep's no-match exit, so the tip search was issued separately; no unexecuted endpoint check is claimed.\n\nNo new substantive lead or ruled-out candidate was identified, so no finding events were fabricated for this empty discovery pass. Conclusions remain source-based. No runtime tests, reproductions, live-install actions, prohibited coverage reads or checkout mutations. Next action: await caller instructions.\n"
+}

@@ -1,0 +1,844 @@
+{
+  "group": {
+    "id": "g071",
+    "domain": "installation-provisioning",
+    "purpose": "installation-provisioning: crates/farhelm-helm/src/provisioning/uninstall_refusal.rs, scripts/install.sh, scripts/test-install-sh.sh, crates/farhelm/src/setup.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g001",
+      "g002",
+      "g004",
+      "g005",
+      "g007",
+      "g008",
+      "g009",
+      "g012",
+      "g061",
+      "g062",
+      "g063",
+      "g072",
+      "g149",
+      "g150",
+      "g159",
+      "g160",
+      "g161",
+      "g162",
+      "g163",
+      "g164",
+      "g165",
+      "g166",
+      "g167",
+      "g168",
+      "g169",
+      "g170",
+      "g171",
+      "g172",
+      "g173",
+      "g198",
+      "g199"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00155-000.patch",
+        "ranges": [
+          [
+            1,
+            14
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/provisioning/uninstall_refusal.rs",
+        "commit": "04ffdbb35773cef36e73eb798c005ddbeb9a9de6",
+        "notes": "patch header; patch character offsets [0,1031)",
+        "lines": 14,
+        "bytes": 1031,
+        "start": 0,
+        "end": 1031,
+        "original": "[private-run]/prep/originals/00155.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00891-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "scripts/install.sh",
+        "commit": "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4",
+        "notes": "patch header; patch character offsets [0,606)",
+        "lines": 13,
+        "bytes": 610,
+        "start": 0,
+        "end": 606,
+        "original": "[private-run]/prep/originals/00891.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00892-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "scripts/test-install-sh.sh",
+        "commit": "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4",
+        "notes": "patch header; patch character offsets [0,522)",
+        "lines": 13,
+        "bytes": 526,
+        "start": 0,
+        "end": 522,
+        "original": "[private-run]/prep/originals/00892.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00968-000.patch",
+        "ranges": [
+          [
+            1,
+            16
+          ]
+        ],
+        "original_path": "crates/farhelm/src/setup.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,706)",
+        "lines": 16,
+        "bytes": 712,
+        "start": 0,
+        "end": 706,
+        "original": "[private-run]/prep/originals/00968.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01220-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "scripts/install.sh",
+        "commit": "78e9d68a95119db8452ee139efde13d38546f648",
+        "notes": "patch header; patch character offsets [0,606)",
+        "lines": 13,
+        "bytes": 610,
+        "start": 0,
+        "end": 606,
+        "original": "[private-run]/prep/originals/01220.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01221-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "scripts/test-install-sh.sh",
+        "commit": "78e9d68a95119db8452ee139efde13d38546f648",
+        "notes": "patch header; patch character offsets [0,522)",
+        "lines": 13,
+        "bytes": 526,
+        "start": 0,
+        "end": 522,
+        "original": "[private-run]/prep/originals/01221.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01243-000.patch",
+        "ranges": [
+          [
+            1,
+            1154
+          ]
+        ],
+        "original_path": "crates/farhelm/src/setup.rs",
+        "commit": "17a3fe858c5511a24b7403af15dd41c93bf69fd7",
+        "notes": "patch header; patch character offsets [0,54952)",
+        "lines": 1154,
+        "bytes": 55000,
+        "start": 0,
+        "end": 54952,
+        "original": "[private-run]/prep/originals/01243.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01251-000.patch",
+        "ranges": [
+          [
+            1,
+            105
+          ]
+        ],
+        "original_path": "scripts/install.sh",
+        "commit": "17a3fe858c5511a24b7403af15dd41c93bf69fd7",
+        "notes": "patch header; patch character offsets [0,4924)",
+        "lines": 105,
+        "bytes": 4934,
+        "start": 0,
+        "end": 4924,
+        "original": "[private-run]/prep/originals/01251.patch"
+      }
+    ],
+    "lines": 1341,
+    "bytes": 63949
+  },
+  "records": [
+    {
+      "key": "g071/c1",
+      "owner": "g071",
+      "id": "c1",
+      "domain": "installation-provisioning",
+      "purpose": "installation-provisioning: crates/farhelm-helm/src/provisioning/uninstall_refusal.rs, scripts/install.sh, scripts/test-install-sh.sh, crates/farhelm/src/setup.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Installer report tests were updated with the removed tmux advice",
+            "location": "scripts/install.sh:1242",
+            "detail": "Reviewed commit: 17a3fe858c5511a24b7403af15dd41c93bf69fd7. TLDR: considered whether removing the tmux warning leaves installer output acceptance tests expecting obsolete wording. Source refutation: the same commit changes scripts/test-install-sh.sh; assert_closing_message_contract at lines 1875-1913 expects unconditional fresh-install launch advice and no tmux warning, and the PTY expected output at lines 2010 onward matches it. The selected install.sh patch is a deletion of reporting-only tmux inspection, not the test's full companion patch. Suggested bucket: other if real; confidence: confirmed refutation from source, no execution. proposed_drop: source refutation, test expectation changed in the same commit. possible_cover: none. Could-be-highest: no; this candidate concerns maintainer output tests, with no established security or loss-of-work consequence."
+          }
+        },
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Installer report tests were updated with the removed tmux advice",
+            "location": "scripts/install.sh:1242",
+            "detail": "Reviewed commit: 17a3fe858c5511a24b7403af15dd41c93bf69fd7. TLDR: considered whether removing the tmux warning leaves installer output acceptance tests expecting obsolete wording. Source refutation: the same commit changes scripts/test-install-sh.sh; assert_closing_message_contract at lines 1875-1913 expects unconditional fresh-install launch advice and no tmux warning, and the PTY expected output at lines 2010 onward matches it. The selected install.sh patch is a deletion of reporting-only tmux inspection, not the test's full companion patch. Suggested bucket: other if real; confidence: confirmed refutation from source, no execution. proposed_drop: source refutation, test expectation changed in the same commit. possible_cover: none. Could-be-highest: no; this candidate concerns maintainer output tests, with no established security or loss-of-work consequence. Late interface synthesis clarification: this candidate refutes only a mismatch between the changed script and its companion exact-output expectations. It does not establish that the common output is correct for every FARHELM_VERSION target. Parent-supplied g072/c1 now has the concrete v0.35.0 above-floor tmux-dependent target, validated here as f5. The current script keeps owning its closing report for that target because its HANDOFF_FLOOR=0.31.1-dev.0 delegates only older locked-install-incompatible targets. A test matching unconditional current-target output does not refute the distinct missing legacy prerequisite guidance. Original c1 consequence and source-refutation basis remain unchanged and narrow; no parent drop accepted. No standalone additional test-oracle defect is asserted beyond that coverage limit, and no runtime test was run."
+          }
+        }
+      ],
+      "latest": {
+        "line": 13,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Installer report tests were updated with the removed tmux advice",
+          "location": "scripts/install.sh:1242",
+          "detail": "Reviewed commit: 17a3fe858c5511a24b7403af15dd41c93bf69fd7. TLDR: considered whether removing the tmux warning leaves installer output acceptance tests expecting obsolete wording. Source refutation: the same commit changes scripts/test-install-sh.sh; assert_closing_message_contract at lines 1875-1913 expects unconditional fresh-install launch advice and no tmux warning, and the PTY expected output at lines 2010 onward matches it. The selected install.sh patch is a deletion of reporting-only tmux inspection, not the test's full companion patch. Suggested bucket: other if real; confidence: confirmed refutation from source, no execution. proposed_drop: source refutation, test expectation changed in the same commit. possible_cover: none. Could-be-highest: no; this candidate concerns maintainer output tests, with no established security or loss-of-work consequence. Late interface synthesis clarification: this candidate refutes only a mismatch between the changed script and its companion exact-output expectations. It does not establish that the common output is correct for every FARHELM_VERSION target. Parent-supplied g072/c1 now has the concrete v0.35.0 above-floor tmux-dependent target, validated here as f5. The current script keeps owning its closing report for that target because its HANDOFF_FLOOR=0.31.1-dev.0 delegates only older locked-install-incompatible targets. A test matching unconditional current-target output does not refute the distinct missing legacy prerequisite guidance. Original c1 consequence and source-refutation basis remain unchanged and narrow; no parent drop accepted. No standalone additional test-oracle defect is asserted beyond that coverage limit, and no runtime test was run."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g071/findings.jsonl",
+        "id": "c1",
+        "line": 13,
+        "disposition": "excluded",
+        "group": "installer-tmux-removal-stale-exact-output-expectations",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-126 after inspecting it. Refuted only as the original script/test mismatch claim. The same commit changes both plain and PTY expected reports. Matching those expectations does not establish correct advice for every selected older release; retain that separate issue through g071/f5 and g072/c1. Source refutation confined to outdated companion expectations; no standalone broader correctness verdict and no parent drop inferred. Checked source/results: [\"17a3fe858c5511a24b7403af15dd41c93bf69fd7:scripts/install.sh:1242-1263 removes tmux reporting and prints unconditional fresh-install launch advice.\",\"At that same revision scripts/test-install-sh.sh:1875-1910 expects the unconditional fresh report, and :2015-2027 expects the same PTY report without the old warning. The companion diff removes the old floor/absent/old variants and Homebrew hyperlink assertions. Thus obsolete exact-output expectations are not left behind.\",\"Path-limited history after 17a3fe85 through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db is empty; comparing these two paths with recording main 24bc058066fd57848e788b465719b0e6da2f98f7 also gives no diff. No runtime test was run.\"] Current coverage/results: [\"Current SPEC.md Installation and updates (:681-827), Supported user environments (:5247-5258), and SPEC_impl.md Native app packaging / Side-by-side versions (:7193-7535) searched and relevant sections read. These do not turn matching output into proof of older-target correctness.\",\"TODO.md Planned (:25-26) is empty. Installer simplification (:740-755) is Maybe later, not coverage of a stale test expectation.\",\"plans/queue searched for installer, tmux, prerequisites and selected-target terms. The matching tmux removal plans are recorded as landed at plans/REPORTS.md:29-32. No unlanded plan states work fixing stale exact-output expectations.\",\"BUGS.md read: only the SSH-helper transfer hang, unrelated. INDEX.md read in full and matching installer prerequisite/recovery files read; they concern distinct guards or stale locks. Active TRIAGE_OUTCOMES.md matching sections (:231-251, :347-372, :793-913) concern those distinct issues and pre-0.31.1 installers. No exact queue or ledger coverage found; archive not read.\",\"FILTER.md read in full. No filter is needed for this direct source refutation.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Original line 1 considered installer acceptance tests retaining obsolete tmux-warning wording. It alleged no security or user-work-loss route. Latest line 13 preserves this narrow refutation and explicitly excludes the selected-older-target advice issue. References to other IDs' process-loss concerns do not withdraw or lower those other claims here.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g071/c1",
+        "line": 13,
+        "disposition": "excluded",
+        "group": "installer-tmux-removal-stale-exact-output-expectations",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-126 after inspecting it. Refuted only as the original script/test mismatch claim. The same commit changes both plain and PTY expected reports. Matching those expectations does not establish correct advice for every selected older release; retain that separate issue through g071/f5 and g072/c1. Source refutation confined to outdated companion expectations; no standalone broader correctness verdict and no parent drop inferred. Checked source/results: [\"17a3fe858c5511a24b7403af15dd41c93bf69fd7:scripts/install.sh:1242-1263 removes tmux reporting and prints unconditional fresh-install launch advice.\",\"At that same revision scripts/test-install-sh.sh:1875-1910 expects the unconditional fresh report, and :2015-2027 expects the same PTY report without the old warning. The companion diff removes the old floor/absent/old variants and Homebrew hyperlink assertions. Thus obsolete exact-output expectations are not left behind.\",\"Path-limited history after 17a3fe85 through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db is empty; comparing these two paths with recording main 24bc058066fd57848e788b465719b0e6da2f98f7 also gives no diff. No runtime test was run.\"] Current coverage/results: [\"Current SPEC.md Installation and updates (:681-827), Supported user environments (:5247-5258), and SPEC_impl.md Native app packaging / Side-by-side versions (:7193-7535) searched and relevant sections read. These do not turn matching output into proof of older-target correctness.\",\"TODO.md Planned (:25-26) is empty. Installer simplification (:740-755) is Maybe later, not coverage of a stale test expectation.\",\"plans/queue searched for installer, tmux, prerequisites and selected-target terms. The matching tmux removal plans are recorded as landed at plans/REPORTS.md:29-32. No unlanded plan states work fixing stale exact-output expectations.\",\"BUGS.md read: only the SSH-helper transfer hang, unrelated. INDEX.md read in full and matching installer prerequisite/recovery files read; they concern distinct guards or stale locks. Active TRIAGE_OUTCOMES.md matching sections (:231-251, :347-372, :793-913) concern those distinct issues and pre-0.31.1 installers. No exact queue or ledger coverage found; archive not read.\",\"FILTER.md read in full. No filter is needed for this direct source refutation.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Original line 1 considered installer acceptance tests retaining obsolete tmux-warning wording. It alleged no security or user-work-loss route. Latest line 13 preserves this narrow refutation and explicitly excludes the selected-older-target advice issue. References to other IDs' process-loss concerns do not withdraw or lower those other claims here.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-046",
+          "key": "g071/c1",
+          "latest_line": 1,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "installer-tmux-advice-companion-report-tests",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The companion tests change with the installer. The suspected obsolete expectation is absent.",
+          "checks": [
+            "17a3fe858c5511a24b7403af15dd41c93bf69fd7:scripts/test-install-sh.sh:1875-1910 expects unconditional fresh-install launch advice and retains the update assurance; 2015-2027 expects the same fresh report through a PTY.",
+            "17a3fe858c5511a24b7403af15dd41c93bf69fd7:scripts/install.sh:1242-1263 prints those reports without tmux advice. No installer/test diff from this revision through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. Source-only checks; no execution."
+          ],
+          "coverage_checked": {
+            "SPEC.md and SPEC_impl.md": "Current tmux prerequisites and provisioning sections accept removing tmux requirements; no separate stale-report-test acceptance is needed for this source refutation.",
+            "TODO.md Planned": "Empty at recording-time main.",
+            "plans/queue": "INDEX.md contains no unlanded plans. The tmux installation/tooling/docs plans are listed landed in plans/REPORTS.md:29-32.",
+            "BUGS.md": "Only the SSH transfer-output hang is recorded; unrelated.",
+            "queue and active ledger": "Searched installer, closing-message, prerequisite, tmux and assurance terms. installer-prerequisite-test-conflates-two-guards.md and its active outcome concern brick-test setup guards, not report assertions; read and excluded. No exact cover or extension."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Removing tmux advice might leave acceptance tests expecting obsolete output and failing. No security or user-work-loss consequence was alleged.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation of this test expectation suspicion only; it does not dispose of g071/f2 or the older-target omission in g072/c1."
+        },
+        {
+          "batch": "claims-126",
+          "key": "g071/c1",
+          "latest_line": 13,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "installer-tmux-removal-stale-exact-output-expectations",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Refuted only as the original script/test mismatch claim. The same commit changes both plain and PTY expected reports. Matching those expectations does not establish correct advice for every selected older release; retain that separate issue through g071/f5 and g072/c1.",
+          "checks": [
+            "17a3fe858c5511a24b7403af15dd41c93bf69fd7:scripts/install.sh:1242-1263 removes tmux reporting and prints unconditional fresh-install launch advice.",
+            "At that same revision scripts/test-install-sh.sh:1875-1910 expects the unconditional fresh report, and :2015-2027 expects the same PTY report without the old warning. The companion diff removes the old floor/absent/old variants and Homebrew hyperlink assertions. Thus obsolete exact-output expectations are not left behind.",
+            "Path-limited history after 17a3fe85 through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db is empty; comparing these two paths with recording main 24bc058066fd57848e788b465719b0e6da2f98f7 also gives no diff. No runtime test was run."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md Installation and updates (:681-827), Supported user environments (:5247-5258), and SPEC_impl.md Native app packaging / Side-by-side versions (:7193-7535) searched and relevant sections read. These do not turn matching output into proof of older-target correctness.",
+            "TODO.md Planned (:25-26) is empty. Installer simplification (:740-755) is Maybe later, not coverage of a stale test expectation.",
+            "plans/queue searched for installer, tmux, prerequisites and selected-target terms. The matching tmux removal plans are recorded as landed at plans/REPORTS.md:29-32. No unlanded plan states work fixing stale exact-output expectations.",
+            "BUGS.md read: only the SSH-helper transfer hang, unrelated. INDEX.md read in full and matching installer prerequisite/recovery files read; they concern distinct guards or stale locks. Active TRIAGE_OUTCOMES.md matching sections (:231-251, :347-372, :793-913) concern those distinct issues and pre-0.31.1 installers. No exact queue or ledger coverage found; archive not read.",
+            "FILTER.md read in full. No filter is needed for this direct source refutation."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Original line 1 considered installer acceptance tests retaining obsolete tmux-warning wording. It alleged no security or user-work-loss route. Latest line 13 preserves this narrow refutation and explicitly excludes the selected-older-target advice issue. References to other IDs' process-loss concerns do not withdraw or lower those other claims here.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation confined to outdated companion expectations; no standalone broader correctness verdict and no parent drop inferred."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "installer-tmux-removal-stale-exact-output-expectations",
+        "destination": null
+      }
+    },
+    {
+      "key": "g071/f2",
+      "owner": "g071",
+      "id": "f2",
+      "domain": "installation-provisioning",
+      "purpose": "installation-provisioning: crates/farhelm-helm/src/provisioning/uninstall_refusal.rs, scripts/install.sh, scripts/test-install-sh.sh, crates/farhelm/src/setup.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "f2",
+            "state": "open",
+            "summary": "Restored installer promise also applies to the old-terminal migration",
+            "location": "scripts/install.sh:1287",
+            "detail": "Reviewed commit: 78e9d68a95119db8452ee139efde13d38546f648. TLDR: the restored update message says sessions keep running even when reopening starts a supervisor that ends old tmux terminals. Source basis: selected patch restores the unconditional sentence; SPEC_impl.md at 17a3fe858c5511a24b7403af15dd41c93bf69fd7, Terminal substrate: private tmux server, lines 2786-2833 describes termination and interruption of old agents. Commit 78e9d68 explicitly calls this a one-time migration and accepts printing the promise then, but the exact governing specification acceptance has not yet been read. Next check: read pinned 78e9d68 and dbfc697 SPEC/SPEC_impl migration and installer text, then resolve whether this is an explicitly accepted exception. Suggested bucket: other for a misleading completion diagnostic; could-be-highest: yes pending assessment because the wording relates to termination of user processes, although this patch itself changes no termination behavior. Confidence: unverified lead. proposed_drop: false pending exact spec check. possible_cover: none; no excluded sources read. No behavior observed during execution."
+          }
+        },
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f2",
+            "state": "open",
+            "summary": "Installer promises session survival during the accepted old-terminal migration",
+            "location": "scripts/install.sh:1287",
+            "detail": "Reviewed commit: 78e9d68a95119db8452ee139efde13d38546f648. TLDR: an update completion message promises that sessions keep running even for the one update whose new supervisor terminates old tmux agents and tabs. Details: scripts/install.sh:1287 unconditionally prints 'Quit and reopen Farhelm to finish updating. Your sessions keep running.' The source-backed consequence is misleading update guidance; old terminal processes end on reopening, as explicitly required by SPEC.md:3001-3015, Terminal experience. No termination reproduction was run, and this reporting patch does not introduce the underlying termination. Suggested bucket: other for the diagnostic itself; could-be-highest: yes for independent review because it is guidance about an update that ends user processes. Confidence: confirmed source/spec mismatch in the general message, with deliberate contract exception. proposed_drop: explicitly accepted one-time migration and deliberate general update wording. Exact spec text at this revision: SPEC.md, Terminal experience: 'This release ends them: the first time a host’s supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.' [The source uses an ASCII apostrophe in host's.] Same section: 'A session whose agent or tabs already run in terminal hosts keeps them.' SPEC.md:763, Installation and updates, deliberately restores '(sessions keep running, as they do across any quit)'. SPEC_impl.md:7781, The desktop app's updater, deliberately restores '; sessions keep running.' The reviewed commit's own rationale explicitly says 'Every other update keeps sessions running, so the general statement comes back without the caveat, accepting that the installer prints it during that one update too.' Thus this is a proposed drop requiring the caller's independent check rather than a requested code fix. Checks: read both selected installer/test patches, git show of this commit's SPEC.md and SPEC_impl.md diffs, full Terminal experience migration paragraph at the pinned revision, and the later pinned terminal-substrate implementation contract. possible_cover: none; no queue/ledger/filter/plan searches. Caveat: the exact exception for printing this sentence is stated most directly in the reviewed commit rationale; the spec separately accepts both termination and the general survival wording."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f2",
+            "state": "open",
+            "summary": "Installer promises session survival during the accepted old-terminal migration",
+            "location": "scripts/install.sh:1287",
+            "detail": "Reviewed commit: 78e9d68a95119db8452ee139efde13d38546f648. TLDR: an update completion message promises that sessions keep running even for the one update whose new supervisor terminates old tmux agents and tabs. Details: scripts/install.sh:1287 unconditionally prints 'Quit and reopen Farhelm to finish updating. Your sessions keep running.' The source-backed consequence is misleading update guidance; old terminal processes end on reopening, as explicitly required by SPEC.md:3001-3015, Terminal experience. No termination reproduction was run, and this reporting patch does not introduce the underlying termination. Suggested bucket: other for the diagnostic itself; could-be-highest: yes for independent review because it is guidance about an update that ends user processes. Confidence: confirmed source/spec mismatch in the general message, with deliberate contract exception. proposed_drop: explicitly accepted one-time migration and deliberate general update wording. Exact spec text at this revision: SPEC.md, Terminal experience: 'This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.' [The source uses an ASCII apostrophe in host's.] Same section: 'A session whose agent or tabs already run in terminal hosts keeps them.' SPEC.md:763, Installation and updates, deliberately restores '(sessions keep running, as they do across any quit)'. SPEC_impl.md:7781, The desktop app's updater, deliberately restores '; sessions keep running.' The reviewed commit's own rationale explicitly says 'Every other update keeps sessions running, so the general statement comes back without the caveat, accepting that the installer prints it during that one update too.' Thus this is a proposed drop requiring the caller's independent check rather than a requested code fix. Checks: read both selected installer/test patches, git show of this commit's SPEC.md and SPEC_impl.md diffs, full Terminal experience migration paragraph at the pinned revision, and the later pinned terminal-substrate implementation contract. possible_cover: none; no queue/ledger/filter/plan searches. Caveat: the exact exception for printing this sentence is stated most directly in the reviewed commit rationale; the spec separately accepts both termination and the general survival wording."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f2",
+            "state": "open",
+            "summary": "Installer survival assurance can lead users to leave work in terminals this update ends",
+            "location": "scripts/install.sh:1287",
+            "detail": "Reviewed commit: 78e9d68a95119db8452ee139efde13d38546f648. TLDR: someone relying on 'Your sessions keep running' may reopen after updating with work still running in an old terminal, and the new supervisor deliberately terminates that work. Original concern preserved: the installer promises session survival during the one update that ends old tmux agents and tabs. This is a process-loss guidance concern, not merely cosmetic completion wording; the prior suggested 'other for the diagnostic itself' did not resolve that consequence and no lowering has parent acceptance. Suggested bucket: potentially highest/security or loss of work, pending the parent's independent judgment; could-be-highest: yes. Confidence: confirmed source-level misleading general assurance alongside intended terminal termination; actual user reliance and execution have not been observed. Source references: scripts/install.sh:1287 restores 'Quit and reopen Farhelm to finish updating. Your sessions keep running.' SPEC.md:3001-3016 and SPEC_impl.md:2784-2834 describe the separately intended retirement. Exact termination acceptance in SPEC.md: 'This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.' Acceptance of retirement alone does not settle inaccurate survival guidance. The narrower separate proposed wording acceptance is the reviewed commit rationale: 'Every other update keeps sessions running, so the general statement comes back without the caveat, accepting that the installer prints it during that one update too.' proposed_drop: retain that explicit commit-level wording decision for the parent's independent check; no drop accepted, and no claim that the retirement specification alone authorizes the assurance. possible_cover: parent-supplied g002/f1 and g004/f1 concern this same restored promise on implementation/specification surfaces; g053/f1 intentional retirement is a distinct claim, and g033 omitted-warning/cleanup-failure residual is separate. No queue, ledger, filters or plans searched. Checks this synthesis so far: read own complete six-event log/progress and g004/f1's latest revision; reconcile attribution and caveats without a new finding ID. Next checks: direct pinned installer report, startup caller and termination helper to verify the path and distinguish source from execution. These are readily checkable source premises, not a new unresolved lead."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f2",
+            "state": "open",
+            "summary": "Installer survival assurance can lead users to leave work in terminals this update ends",
+            "location": "scripts/install.sh:1287",
+            "detail": "Reviewed commit: 78e9d68a95119db8452ee139efde13d38546f648. TLDR: someone relying on 'Your sessions keep running' may reopen after updating with work still running in an old terminal, and the new supervisor deliberately terminates that work. Original concern preserved: the installer promises session survival during the one update that ends old tmux agents and tabs. This is a process-loss guidance concern, not merely cosmetic completion wording; the prior suggested 'other for the diagnostic itself' did not resolve that consequence and no lowering has parent acceptance. Suggested bucket: potentially highest/security or loss of work, pending the parent's independent judgment; could-be-highest: yes. Confidence: confirmed source-level misleading general assurance alongside intended terminal termination; actual user reliance and execution have not been observed. Source references: scripts/install.sh:1287 restores 'Quit and reopen Farhelm to finish updating. Your sessions keep running.' SPEC.md:3001-3016 and SPEC_impl.md:2784-2834 describe the separately intended retirement. Exact termination acceptance in SPEC.md: 'This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.' Acceptance of retirement alone does not settle inaccurate survival guidance. The narrower separate proposed wording acceptance is the reviewed commit rationale: 'Every other update keeps sessions running, so the general statement comes back without the caveat, accepting that the installer prints it during that one update too.' proposed_drop: retain that explicit commit-level wording decision for the parent's independent check; no drop accepted, and no claim that the retirement specification alone authorizes the assurance. possible_cover: parent-supplied g002/f1 and g004/f1 concern this same restored promise on implementation/specification surfaces; g053/f1 intentional retirement is a distinct claim, and g033 omitted-warning/cleanup-failure residual is separate. No queue, ledger, filters or plans searched. Checks this synthesis so far: read own complete six-event log/progress and g004/f1's latest revision; reconcile attribution and caveats without a new finding ID. Next checks: direct pinned installer report, startup caller and termination helper to verify the path and distinguish source from execution. These are readily checkable source premises, not a new unresolved lead. Direct checks at 78e9d68a95119db8452ee139efde13d38546f648 now confirm: install.sh:1228-1232 derives updated_installation only from the install result; 1285-1287 prints the survival sentence for every update, with no old-terminal condition. core.rs:6112-6117 opens and checks the database first, then 6142-6151 invokes OldTerminals::end_private_server for the state-directory owner before reloading sessions. old_terminals.rs:176-232 connects to the old socket, verifies same-user peer identity, snapshots pane descendants and calls terminate_process_within with the server socket predicate and TERM/KILL grace; 247-251 handles Terminated/Killed as successful retirement. The commit message was re-read directly and contains the exact narrower wording decision quoted above. This establishes termination as source behavior rather than an observed run, and preserves the possibility of checks failing or a nonmatching process being left alone. No new finding or new discovery is claimed."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f2",
+            "state": "open",
+            "summary": "Installer survival assurance can lead users to leave work in terminals this update ends",
+            "location": "scripts/install.sh:1287",
+            "detail": "Reviewed commit: 78e9d68a95119db8452ee139efde13d38546f648. TLDR: someone relying on 'Your sessions keep running' may reopen after updating with work still running in an old terminal, and the new supervisor deliberately terminates that work. Original concern preserved: the installer promises session survival during the one update that ends old tmux agents and tabs. This is a process-loss guidance concern, not merely cosmetic completion wording; the prior suggested 'other for the diagnostic itself' did not resolve that consequence and no lowering has parent acceptance. Suggested bucket: potentially highest/security or loss of work, pending the parent's independent judgment; could-be-highest: yes. Confidence: confirmed source-level misleading general assurance alongside intended terminal termination; actual user reliance and execution have not been observed. Source references: scripts/install.sh:1287 restores 'Quit and reopen Farhelm to finish updating. Your sessions keep running.' SPEC.md:3001-3016 and SPEC_impl.md:2784-2834 describe the separately intended retirement. Exact termination acceptance in SPEC.md: 'This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.' Acceptance of retirement alone does not settle inaccurate survival guidance. The narrower separate proposed wording acceptance is the reviewed commit rationale: 'Every other update keeps sessions running, so the general statement comes back without the caveat, accepting that the installer prints it during that one update too.' proposed_drop: retain that explicit commit-level wording decision for the parent's independent check; no drop accepted, and no claim that the retirement specification alone authorizes the assurance. possible_cover: parent-supplied g002/f1 and g004/f1 concern this same restored promise on implementation/specification surfaces; g053/f1 intentional retirement is a distinct claim, and g033 omitted-warning/cleanup-failure residual is separate. No queue, ledger, filters or plans searched. Checks this synthesis so far: read own complete six-event log/progress and g004/f1's latest revision; reconcile attribution and caveats without a new finding ID. Next checks: direct pinned installer report, startup caller and termination helper to verify the path and distinguish source from execution. These are readily checkable source premises, not a new unresolved lead. Direct checks at 78e9d68a95119db8452ee139efde13d38546f648 now confirm: install.sh:1228-1232 derives updated_installation only from the install result; 1285-1287 prints the survival sentence for every update, with no old-terminal condition. core.rs:6112-6117 opens and checks the database first, then 6142-6151 invokes OldTerminals::end_private_server for the state-directory owner before reloading sessions. old_terminals.rs:176-232 connects to the old socket, verifies same-user peer identity, snapshots pane descendants and calls terminate_process_within with the server socket predicate and TERM/KILL grace; 247-251 handles Terminated/Killed as successful retirement. The commit message was re-read directly and contains the exact narrower wording decision quoted above. This establishes termination as source behavior rather than an observed run, and preserves the possibility of checks failing or a nonmatching process being left alone. No new finding or new discovery is claimed. Remaining direct source checks completed at the reviewed revision: desktop.rs:537-586 computes whether the recorded supervisor started from the current program; plan_local_supervisor at 835-842 selects Replace with wait_first=false when the program differs. Desktop startup stops that managed predecessor and spawns the new supervisor (585-586), whose command at 1232-1238 is the selected farhelm supervisor run --state-dir for the same state directory. stop_own_supervisor at 1055-1083 refuses if the predecessor cannot be confirmed stopped. Thus reopening an ordinary updated managed installation reaches the startup retirement code; a manually started answering supervisor without a matching record is reused (835-838), a prerequisite failure can refuse before replacement, and failed verification/termination can leave processes running. hosts/process.rs:476-506 confirms real SIGTERM, SIGCONT and SIGKILL calls after identity checks. SPEC.md:3001-3016 was re-read at this revision and expressly distinguishes old terminals from terminal-host sessions. These source caveats do not erase the ordinary supported route or the original potential work-loss guidance concern. The exact installer-sentence acceptance remains the separately quoted commit rationale, not an inference from terminal retirement being specified. All readily checkable premises for this guidance claim are settled by source; human reliance is a hypothetical consequence, not an observed event or a premise requiring reproduction. No open lead remains, and f2 stays an open potentially-highest finding with a proposed drop awaiting independent parent checking. Cross-batch checks also confirm 17a3fe8 retains the reassurance while deleting only tmux advice; its companion output test still explicitly expects the reassurance. c1 remains source-refuted and c3 remains specification-accepted; the setup ownership lock and same-state rendering are unchanged. No new finding IDs or discoveries this synthesis."
+          }
+        }
+      ],
+      "latest": {
+        "line": 9,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "f2",
+          "state": "open",
+          "summary": "Installer survival assurance can lead users to leave work in terminals this update ends",
+          "location": "scripts/install.sh:1287",
+          "detail": "Reviewed commit: 78e9d68a95119db8452ee139efde13d38546f648. TLDR: someone relying on 'Your sessions keep running' may reopen after updating with work still running in an old terminal, and the new supervisor deliberately terminates that work. Original concern preserved: the installer promises session survival during the one update that ends old tmux agents and tabs. This is a process-loss guidance concern, not merely cosmetic completion wording; the prior suggested 'other for the diagnostic itself' did not resolve that consequence and no lowering has parent acceptance. Suggested bucket: potentially highest/security or loss of work, pending the parent's independent judgment; could-be-highest: yes. Confidence: confirmed source-level misleading general assurance alongside intended terminal termination; actual user reliance and execution have not been observed. Source references: scripts/install.sh:1287 restores 'Quit and reopen Farhelm to finish updating. Your sessions keep running.' SPEC.md:3001-3016 and SPEC_impl.md:2784-2834 describe the separately intended retirement. Exact termination acceptance in SPEC.md: 'This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.' Acceptance of retirement alone does not settle inaccurate survival guidance. The narrower separate proposed wording acceptance is the reviewed commit rationale: 'Every other update keeps sessions running, so the general statement comes back without the caveat, accepting that the installer prints it during that one update too.' proposed_drop: retain that explicit commit-level wording decision for the parent's independent check; no drop accepted, and no claim that the retirement specification alone authorizes the assurance. possible_cover: parent-supplied g002/f1 and g004/f1 concern this same restored promise on implementation/specification surfaces; g053/f1 intentional retirement is a distinct claim, and g033 omitted-warning/cleanup-failure residual is separate. No queue, ledger, filters or plans searched. Checks this synthesis so far: read own complete six-event log/progress and g004/f1's latest revision; reconcile attribution and caveats without a new finding ID. Next checks: direct pinned installer report, startup caller and termination helper to verify the path and distinguish source from execution. These are readily checkable source premises, not a new unresolved lead. Direct checks at 78e9d68a95119db8452ee139efde13d38546f648 now confirm: install.sh:1228-1232 derives updated_installation only from the install result; 1285-1287 prints the survival sentence for every update, with no old-terminal condition. core.rs:6112-6117 opens and checks the database first, then 6142-6151 invokes OldTerminals::end_private_server for the state-directory owner before reloading sessions. old_terminals.rs:176-232 connects to the old socket, verifies same-user peer identity, snapshots pane descendants and calls terminate_process_within with the server socket predicate and TERM/KILL grace; 247-251 handles Terminated/Killed as successful retirement. The commit message was re-read directly and contains the exact narrower wording decision quoted above. This establishes termination as source behavior rather than an observed run, and preserves the possibility of checks failing or a nonmatching process being left alone. No new finding or new discovery is claimed. Remaining direct source checks completed at the reviewed revision: desktop.rs:537-586 computes whether the recorded supervisor started from the current program; plan_local_supervisor at 835-842 selects Replace with wait_first=false when the program differs. Desktop startup stops that managed predecessor and spawns the new supervisor (585-586), whose command at 1232-1238 is the selected farhelm supervisor run --state-dir for the same state directory. stop_own_supervisor at 1055-1083 refuses if the predecessor cannot be confirmed stopped. Thus reopening an ordinary updated managed installation reaches the startup retirement code; a manually started answering supervisor without a matching record is reused (835-838), a prerequisite failure can refuse before replacement, and failed verification/termination can leave processes running. hosts/process.rs:476-506 confirms real SIGTERM, SIGCONT and SIGKILL calls after identity checks. SPEC.md:3001-3016 was re-read at this revision and expressly distinguishes old terminals from terminal-host sessions. These source caveats do not erase the ordinary supported route or the original potential work-loss guidance concern. The exact installer-sentence acceptance remains the separately quoted commit rationale, not an inference from terminal retirement being specified. All readily checkable premises for this guidance claim are settled by source; human reliance is a hypothetical consequence, not an observed event or a premise requiring reproduction. No open lead remains, and f2 stays an open potentially-highest finding with a proposed drop awaiting independent parent checking. Cross-batch checks also confirm 17a3fe8 retains the reassurance while deleting only tmux advice; its companion output test still explicitly expects the reassurance. c1 remains source-refuted and c3 remains specification-accepted; the setup ownership lock and same-state rendering are unchanged. No new finding IDs or discoveries this synthesis."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g071/findings.jsonl",
+        "id": "f2",
+        "line": 9,
+        "disposition": "under-investigation",
+        "group": "g071-f2",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-046",
+          "key": "g071/f2",
+          "latest_line": 9,
+          "recommendation": "retain-verified",
+          "bucket": "highest",
+          "underlying_key": "old-terminal-migration-unconditional-session-survival-assurance",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Source establishes an ordinary supported update/reopen path from the survival assurance to intentional termination of still-running old terminals. Human reliance is hypothetical, not a runtime observation. The commit deliberately accepts this exact wording; that proposed drop needs independent judgment and must not be replaced by acceptance of termination alone.",
+          "checks": [
+            "78e9d68a95119db8452ee139efde13d38546f648:scripts/install.sh:1228-1232 classifies updates from install-result; 1285-1287 prints the unconditional assurance. 17a3fe858c5511a24b7403af15dd41c93bf69fd7 retains it at 1246-1248 and pins it in test-install-sh.sh:1886-1889.",
+            "78e9d68a95119db8452ee139efde13d38546f648:crates/farhelm-ui/src/desktop.rs:537-586,835-842 replaces a recorded supervisor running the preceding program; prerequisite checks may refuse first, and unrecorded answering supervisors can be reused.",
+            "Same revision: crates/farhelm-supervisor/src/service/core.rs:6112-6117,6142-6151 opens the database before invoking old-terminal shutdown for the state-directory owner; service/core/old_terminals.rs:176-232,247-251 identifies the same-user socket peer and attempts bounded termination. Missing/failed identity checks or termination can leave processes running.",
+            "The reviewed commit message explicitly accepts printing the general statement during this one migration. Its SPEC.md and SPEC_impl.md diff deliberately removes the migration caveats. No run or user reliance was observed."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "Current Installation and updates:768 retains general session survival; Terminal experience:2998-3010 explicitly ends old terminals while preserving terminal-host sessions. Retirement acceptance alone does not settle misleading guidance.",
+            "SPEC_impl.md": "Current updater:7720-7727 retains general survival wording; Ending the old private tmux server:2780 onward explicitly describes retirement. The reviewed commit supplies the narrower wording decision.",
+            "TODO.md Planned": "Empty. The phase-3 Near term/Mid term cleanup text is not Planned and does not correct this assurance.",
+            "plans/queue": "No unlanded plan in INDEX.md. Landed tmux-end-old-terminals criterion 10 originally required removing the assurance, then the reviewed commit deliberately restored it; this historical plan is not future fix coverage.",
+            "BUGS.md": "Unrelated SSH transfer hang only.",
+            "queue and active ledger": "Searched tmux, old-terminal, survival, assurance, sessions keep running, installer and closing-message terms. No exact queued item or active decision covers this reassurance. Other survival items concern feedback sending or test liveness and are not aliases."
+          },
+          "exact_cover_quotes": [
+            "78e9d68a95119db8452ee139efde13d38546f648 commit rationale: 'Every other update keeps sessions running, so the general statement comes back without the caveat, accepting that the installer prints it during that one update too.'",
+            "Current SPEC.md:768: '(sessions keep running, as they do across any quit)'",
+            "Current SPEC.md:3000-3002: 'A supervisor that finds that tmux server when it starts ends it, and with it everything that still ran in an old terminal, without needing a tmux program.'"
+          ],
+          "missing_premise": "No missing source premise for the conditional guidance-to-process-loss route. Actual reliance and execution were not observed. Whether the explicit commit-level wording decision is sufficient acceptance to drop the guidance claim remains for the independent disposition.",
+          "original_stronger_consequence": "Users relying on 'Your sessions keep running' can leave work running in old terminals and reopen after updating; the new supervisor intentionally ends those processes. Earlier 'other for the diagnostic itself' wording did not dispose of this work-loss guidance consequence.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Retain the highest consequence pending the parent's independent check of the precise wording acceptance. No filter matches: this is ordinary migration/update guidance, not an additional rare interruption or harmless diagnostic. Parent-supplied g002/f1 and g004/f1 may share this root, but they are outside this batch and were not independently checked as aliases."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-046.json",
+          "key": "g071/f2",
+          "proposal": "claim-checks/claims-046/result.json",
+          "parent_proposal": "retain-highest-survival-assurance-pending-precise-wording-acceptance",
+          "final_independent_gate": "required-before-any-guidance-highest-drop-or-lowering",
+          "reason": "Parent read full046 flagged output. Actual supported installer update prints unconditional survival assurance and reopen can replace recorded prior supervisor, whose new startup intentionally terminates old terminal work. Prerequisite refusal/unrecorded supervisor reuse and bounded shutdown failures mean conditional, not every update; actual human reliance unobserved. Retirement acceptance alone does not accept misleading guidance. Exact78e9 commit deliberately restores statement, removes SPEC caveats and explicitly accepts printing during this migration: preserve that precise decision for independent coverage judgment, rather than silently discard or treat a commit rationale as automatically one of the listed coverage sources. Related002/004 histories need canonical reconciliation. Original highest work-loss guidance consequence stays pending gate, no rarity/harmless diagnostic filter."
+        }
+      ],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "old-terminal-migration-unconditional-session-survival-assurance",
+        "destination": "trailing-old-terminal-migration-unconditional-session-survival-assurance.md"
+      }
+    },
+    {
+      "key": "g071/c3",
+      "owner": "g071",
+      "id": "c3",
+      "domain": "installation-provisioning",
+      "purpose": "installation-provisioning: crates/farhelm-helm/src/provisioning/uninstall_refusal.rs, scripts/install.sh, scripts/test-install-sh.sh, crates/farhelm/src/setup.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Setup intentionally removes the selected tmux directory from service PATH",
+            "location": "crates/farhelm/src/setup.rs:651",
+            "detail": "Reviewed commit: 17a3fe858c5511a24b7403af15dd41c93bf69fd7. TLDR: considered whether removing tmux selection makes a Linuxbrew-only tmux or other program disappear from new sessions. Source: setup.rs:651-659 now renders SupervisorUnitInputs without tmux; units.rs:133-161 constructs PATH from the installed executable directory and /usr/local/bin:/usr/bin:/bin. Login-shell startup can add the user's other directories, but setup no longer adds the chosen tmux's directory. This is the specified replacement contract rather than a regression to report. Exact acceptance: SPEC_impl.md, CLI, lines 7111-7113: 'It neither needs nor looks for tmux: the supervisor unit names none and its `PATH` is the installed `farhelm`’s directory plus a fixed base (\"Terminal substrate: private tmux server\").' [Source apostrophe in farhelm's is ASCII.] SPEC_impl.md, Terminal substrate: private tmux server, lines 2788-2789: 'Neither the desktop app nor `farhelm helm setup` requires, looks for or names a tmux, and neither does the installer.' The commit rationale also explicitly calls out tmux disappearing from PATH unless the login shell adds its directory. Suggested bucket: high if the removed-directory consequence were unintended; confidence: confirmed source/contract analysis only. proposed_drop: explicitly accepted PATH contract quoted above. possible_cover: none. Could-be-highest: no established security or work-loss route; consequence considered is program discovery failure in newly launched sessions, not termination or deletion of existing work."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Setup intentionally removes the selected tmux directory from service PATH",
+            "location": "crates/farhelm/src/setup.rs:651",
+            "detail": "Reviewed commit: 17a3fe858c5511a24b7403af15dd41c93bf69fd7. TLDR: considered whether removing tmux selection makes a Linuxbrew-only tmux or other program disappear from new sessions. Source: setup.rs:651-659 now renders SupervisorUnitInputs without tmux; units.rs:133-161 constructs PATH from the installed executable directory and /usr/local/bin:/usr/bin:/bin. Login-shell startup can add the user's other directories, but setup no longer adds the chosen tmux's directory. This is the specified replacement contract rather than a regression to report. Exact acceptance: SPEC_impl.md, CLI, lines 7111-7113: 'It neither needs nor looks for tmux: the supervisor unit names none and its `PATH` is the installed `farhelm`'s directory plus a fixed base (\"Terminal substrate: private tmux server\").' [Source apostrophe in farhelm's is ASCII.] SPEC_impl.md, Terminal substrate: private tmux server, lines 2788-2789: 'Neither the desktop app nor `farhelm helm setup` requires, looks for or names a tmux, and neither does the installer.' The commit rationale also explicitly calls out tmux disappearing from PATH unless the login shell adds its directory. Suggested bucket: high if the removed-directory consequence were unintended; confidence: confirmed source/contract analysis only. proposed_drop: explicitly accepted PATH contract quoted above. possible_cover: none. Could-be-highest: no established security or work-loss route; consequence considered is program discovery failure in newly launched sessions, not termination or deletion of existing work."
+          }
+        }
+      ],
+      "latest": {
+        "line": 5,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Setup intentionally removes the selected tmux directory from service PATH",
+          "location": "crates/farhelm/src/setup.rs:651",
+          "detail": "Reviewed commit: 17a3fe858c5511a24b7403af15dd41c93bf69fd7. TLDR: considered whether removing tmux selection makes a Linuxbrew-only tmux or other program disappear from new sessions. Source: setup.rs:651-659 now renders SupervisorUnitInputs without tmux; units.rs:133-161 constructs PATH from the installed executable directory and /usr/local/bin:/usr/bin:/bin. Login-shell startup can add the user's other directories, but setup no longer adds the chosen tmux's directory. This is the specified replacement contract rather than a regression to report. Exact acceptance: SPEC_impl.md, CLI, lines 7111-7113: 'It neither needs nor looks for tmux: the supervisor unit names none and its `PATH` is the installed `farhelm`'s directory plus a fixed base (\"Terminal substrate: private tmux server\").' [Source apostrophe in farhelm's is ASCII.] SPEC_impl.md, Terminal substrate: private tmux server, lines 2788-2789: 'Neither the desktop app nor `farhelm helm setup` requires, looks for or names a tmux, and neither does the installer.' The commit rationale also explicitly calls out tmux disappearing from PATH unless the login shell adds its directory. Suggested bucket: high if the removed-directory consequence were unintended; confidence: confirmed source/contract analysis only. proposed_drop: explicitly accepted PATH contract quoted above. possible_cover: none. Could-be-highest: no established security or work-loss route; consequence considered is program discovery failure in newly launched sessions, not termination or deletion of existing work."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g071/findings.jsonl",
+        "id": "c3",
+        "line": 5,
+        "disposition": "excluded",
+        "group": "supervisor-unit-path-drops-selected-tmux-directory",
+        "reason": "Parent explicitly accepted named covered proposal from claims-046 after inspecting it. The removed directory follows the explicit unit PATH contract. The claim concerns discovery of programs in new sessions, not deletion or termination of existing work. Exact specification acceptance, not a rarity filter. 'Other' here labels a covered candidate with no remaining defect; preserve the historical high-if-unintended assessment. Checked source/results: [\"17a3fe858c5511a24b7403af15dd41c93bf69fd7:crates/farhelm/src/setup.rs:651-659 passes only farhelm and state_dir; crates/farhelm-helm/src/units.rs:129-154 constructs PATH from the farhelm parent and BASE_PATH.\",\"Current SPEC_impl.md:7996-8001 explicitly says no tmux directory is added and gives the exact base. This matches the reviewed contract quoted in history. Source-only; no launch observed.\"] Current coverage/results: {\"SPEC.md\":\"Current remote Linux prerequisites:181-188 removes the bundled tmux; no contradictory service-PATH guarantee found.\",\"SPEC_impl.md\":\"Exact coverage at 7996-8001, Provisioning.\",\"TODO.md Planned\":\"Empty.\",\"plans/queue\":\"No unlanded plans; landed tmux-drop-from-install:144-146 explicitly anticipated loss of the selected tmux directory and login-shell PATH behavior.\",\"BUGS.md\":\"No match.\",\"queue and active ledger\":\"Searched tmux/PATH/program discovery and installer prerequisite terms; no exact open item or decision. No useful extension.\"} Exact cited cover: [\"SPEC_impl.md:7996-7998: 'The supervisor unit, whether provisioning or `farhelm helm setup` renders it, names no tmux and puts no tmux directory on `PATH`: its `PATH` is the directory of the Farhelm program it runs, then `/usr/local/bin:/usr/bin:/bin`'\"] Original stronger consequence and missing premise remain preserved: \"A Linuxbrew-only tmux or another program in the previously selected directory may no longer be found in newly launched sessions. History suggested high if unintended, with no work-loss or security route.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g071/c3",
+        "line": 5,
+        "disposition": "excluded",
+        "group": "supervisor-unit-path-drops-selected-tmux-directory",
+        "bucket": "other",
+        "recording": "covered",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named covered proposal from claims-046 after inspecting it. The removed directory follows the explicit unit PATH contract. The claim concerns discovery of programs in new sessions, not deletion or termination of existing work. Exact specification acceptance, not a rarity filter. 'Other' here labels a covered candidate with no remaining defect; preserve the historical high-if-unintended assessment. Checked source/results: [\"17a3fe858c5511a24b7403af15dd41c93bf69fd7:crates/farhelm/src/setup.rs:651-659 passes only farhelm and state_dir; crates/farhelm-helm/src/units.rs:129-154 constructs PATH from the farhelm parent and BASE_PATH.\",\"Current SPEC_impl.md:7996-8001 explicitly says no tmux directory is added and gives the exact base. This matches the reviewed contract quoted in history. Source-only; no launch observed.\"] Current coverage/results: {\"SPEC.md\":\"Current remote Linux prerequisites:181-188 removes the bundled tmux; no contradictory service-PATH guarantee found.\",\"SPEC_impl.md\":\"Exact coverage at 7996-8001, Provisioning.\",\"TODO.md Planned\":\"Empty.\",\"plans/queue\":\"No unlanded plans; landed tmux-drop-from-install:144-146 explicitly anticipated loss of the selected tmux directory and login-shell PATH behavior.\",\"BUGS.md\":\"No match.\",\"queue and active ledger\":\"Searched tmux/PATH/program discovery and installer prerequisite terms; no exact open item or decision. No useful extension.\"} Exact cited cover: [\"SPEC_impl.md:7996-7998: 'The supervisor unit, whether provisioning or `farhelm helm setup` renders it, names no tmux and puts no tmux directory on `PATH`: its `PATH` is the directory of the Farhelm program it runs, then `/usr/local/bin:/usr/bin:/bin`'\"] Original stronger consequence and missing premise remain preserved: \"A Linuxbrew-only tmux or another program in the previously selected directory may no longer be found in newly launched sessions. History suggested high if unintended, with no work-loss or security route.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-046",
+          "key": "g071/c3",
+          "latest_line": 5,
+          "recommendation": "covered",
+          "bucket": "other",
+          "underlying_key": "supervisor-unit-path-drops-selected-tmux-directory",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The removed directory follows the explicit unit PATH contract. The claim concerns discovery of programs in new sessions, not deletion or termination of existing work.",
+          "checks": [
+            "17a3fe858c5511a24b7403af15dd41c93bf69fd7:crates/farhelm/src/setup.rs:651-659 passes only farhelm and state_dir; crates/farhelm-helm/src/units.rs:129-154 constructs PATH from the farhelm parent and BASE_PATH.",
+            "Current SPEC_impl.md:7996-8001 explicitly says no tmux directory is added and gives the exact base. This matches the reviewed contract quoted in history. Source-only; no launch observed."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "Current remote Linux prerequisites:181-188 removes the bundled tmux; no contradictory service-PATH guarantee found.",
+            "SPEC_impl.md": "Exact coverage at 7996-8001, Provisioning.",
+            "TODO.md Planned": "Empty.",
+            "plans/queue": "No unlanded plans; landed tmux-drop-from-install:144-146 explicitly anticipated loss of the selected tmux directory and login-shell PATH behavior.",
+            "BUGS.md": "No match.",
+            "queue and active ledger": "Searched tmux/PATH/program discovery and installer prerequisite terms; no exact open item or decision. No useful extension."
+          },
+          "exact_cover_quotes": [
+            "SPEC_impl.md:7996-7998: 'The supervisor unit, whether provisioning or `farhelm helm setup` renders it, names no tmux and puts no tmux directory on `PATH`: its `PATH` is the directory of the Farhelm program it runs, then `/usr/local/bin:/usr/bin:/bin`'"
+          ],
+          "missing_premise": null,
+          "original_stronger_consequence": "A Linuxbrew-only tmux or another program in the previously selected directory may no longer be found in newly launched sessions. History suggested high if unintended, with no work-loss or security route.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Exact specification acceptance, not a rarity filter. 'Other' here labels a covered candidate with no remaining defect; preserve the historical high-if-unintended assessment."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "supervisor-unit-path-drops-selected-tmux-directory",
+        "destination": null
+      }
+    },
+    {
+      "key": "g071/c4",
+      "owner": "g071",
+      "id": "c4",
+      "domain": "installation-provisioning",
+      "purpose": "installation-provisioning: crates/farhelm-helm/src/provisioning/uninstall_refusal.rs, scripts/install.sh, scripts/test-install-sh.sh, crates/farhelm/src/setup.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Container duplicate refusal retains a usable display name",
+            "location": "crates/farhelm-helm/src/provisioning/uninstall_refusal.rs:108",
+            "detail": "Reviewed commit: 04ffdbb35773cef36e73eb798c005ddbeb9a9de6. TLDR: considered whether the newly added container advice can refer to an empty container name, leaving users unable to identify which entry to delete. Source refutation: the caller at provisioning/service.rs:1745-1766 supplies aggregate::host_display_name for the matching twin row. aggregate.rs:119-139 uses an alias when present, otherwise strips podman: from the stored destination. store/podman.rs:249-267 validates the reserved container name and writes destination as podman:<name>; validate_identity at :150-156 requires a nonempty suffix after farhelm-sess- and restricts its characters. Thus a normally registered container has a usable fallback name; a hand-corrupted destination is not an established route from this new message. uninstall_refusal.rs:84-94 still applies peer_text to the supplied display name; manager.rs:759-780 bounds and escapes that text before interpolation. Suggested bucket: other if an empty-label route existed. Confidence: confirmed source refutation of the considered normal-registration diagnostic failure; no execution. proposed_drop: source refutation based on registration and display-name construction, not specification retirement acceptance. possible_cover: none; supplied neighbour records contain no identical diagnostic claim, and no prohibited coverage sources were searched. Could-be-highest: no security or loss-of-work route alleged; this candidate concerns identifying a refused operation, and this helper grants no deletion authority. Discovery pass 1 considered-candidate record; no new verified or unverified defect established."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c4",
+          "state": "open",
+          "summary": "Container duplicate refusal retains a usable display name",
+          "location": "crates/farhelm-helm/src/provisioning/uninstall_refusal.rs:108",
+          "detail": "Reviewed commit: 04ffdbb35773cef36e73eb798c005ddbeb9a9de6. TLDR: considered whether the newly added container advice can refer to an empty container name, leaving users unable to identify which entry to delete. Source refutation: the caller at provisioning/service.rs:1745-1766 supplies aggregate::host_display_name for the matching twin row. aggregate.rs:119-139 uses an alias when present, otherwise strips podman: from the stored destination. store/podman.rs:249-267 validates the reserved container name and writes destination as podman:<name>; validate_identity at :150-156 requires a nonempty suffix after farhelm-sess- and restricts its characters. Thus a normally registered container has a usable fallback name; a hand-corrupted destination is not an established route from this new message. uninstall_refusal.rs:84-94 still applies peer_text to the supplied display name; manager.rs:759-780 bounds and escapes that text before interpolation. Suggested bucket: other if an empty-label route existed. Confidence: confirmed source refutation of the considered normal-registration diagnostic failure; no execution. proposed_drop: source refutation based on registration and display-name construction, not specification retirement acceptance. possible_cover: none; supplied neighbour records contain no identical diagnostic claim, and no prohibited coverage sources were searched. Could-be-highest: no security or loss-of-work route alleged; this candidate concerns identifying a refused operation, and this helper grants no deletion authority. Discovery pass 1 considered-candidate record; no new verified or unverified defect established."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g071/findings.jsonl",
+        "id": "c4",
+        "line": 10,
+        "disposition": "excluded",
+        "group": "container-duplicate-refusal-empty-display-name",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-046 after inspecting it. Normal registration provides a nonempty reserved container name, which supplies the fallback display name. The refusal does not grant deletion authority. Source refutation within normal registration. No claim about arbitrary hand-corrupted database contents. Checked source/results: [\"04ffdbb35773cef36e73eb798c005ddbeb9a9de6:crates/farhelm-helm/src/provisioning/service.rs:1745-1766 obtains host_display_name from the matching registry row; aggregate.rs:119-139 uses the alias or strips podman: from its destination.\",\"Same revision: store/podman.rs:149-156,249-267 validates a reserved name with a nonempty suffix and records podman:<name>; uninstall_refusal.rs:83-126 interpolates that name or an absent-twin fallback and returns a refusal.\",\"Current SPEC_impl.md:5262-5271 requires trimming aliases and clearing empty ones. Hand-corrupted registry values are not an established normal-registration premise. Source-only, no execution.\"] Current coverage/results: {\"SPEC.md\":\"Container ownership:4824 onward records the reserved name before creation; no empty-label allowance needed.\",\"SPEC_impl.md\":\"Host alias normalization:5262-5271 and duplicate state:5330-5345 support the normal naming/refusal context.\",\"TODO.md Planned\":\"Empty.\",\"plans/queue\":\"No unlanded plans in INDEX.md.\",\"BUGS.md\":\"No match.\",\"queue and active ledger\":\"Searched container duplicate, display name, empty alias and uninstall refusal terms. uninstall-refusal-missing-identity-wording-source-gap concerns installation identity wording, not container naming; no exact cover or extension.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Container duplicate advice might omit the container's usable name, preventing identification of the entry to delete. No wrong deletion or security consequence was claimed.\"; \"A shipped path recording an empty container destination or alias was not established; the inspected normal registration excludes it.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g071/c4",
+        "line": 10,
+        "disposition": "excluded",
+        "group": "container-duplicate-refusal-empty-display-name",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-046 after inspecting it. Normal registration provides a nonempty reserved container name, which supplies the fallback display name. The refusal does not grant deletion authority. Source refutation within normal registration. No claim about arbitrary hand-corrupted database contents. Checked source/results: [\"04ffdbb35773cef36e73eb798c005ddbeb9a9de6:crates/farhelm-helm/src/provisioning/service.rs:1745-1766 obtains host_display_name from the matching registry row; aggregate.rs:119-139 uses the alias or strips podman: from its destination.\",\"Same revision: store/podman.rs:149-156,249-267 validates a reserved name with a nonempty suffix and records podman:<name>; uninstall_refusal.rs:83-126 interpolates that name or an absent-twin fallback and returns a refusal.\",\"Current SPEC_impl.md:5262-5271 requires trimming aliases and clearing empty ones. Hand-corrupted registry values are not an established normal-registration premise. Source-only, no execution.\"] Current coverage/results: {\"SPEC.md\":\"Container ownership:4824 onward records the reserved name before creation; no empty-label allowance needed.\",\"SPEC_impl.md\":\"Host alias normalization:5262-5271 and duplicate state:5330-5345 support the normal naming/refusal context.\",\"TODO.md Planned\":\"Empty.\",\"plans/queue\":\"No unlanded plans in INDEX.md.\",\"BUGS.md\":\"No match.\",\"queue and active ledger\":\"Searched container duplicate, display name, empty alias and uninstall refusal terms. uninstall-refusal-missing-identity-wording-source-gap concerns installation identity wording, not container naming; no exact cover or extension.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Container duplicate advice might omit the container's usable name, preventing identification of the entry to delete. No wrong deletion or security consequence was claimed.\"; \"A shipped path recording an empty container destination or alias was not established; the inspected normal registration excludes it.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-046",
+          "key": "g071/c4",
+          "latest_line": 10,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "container-duplicate-refusal-empty-display-name",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Normal registration provides a nonempty reserved container name, which supplies the fallback display name. The refusal does not grant deletion authority.",
+          "checks": [
+            "04ffdbb35773cef36e73eb798c005ddbeb9a9de6:crates/farhelm-helm/src/provisioning/service.rs:1745-1766 obtains host_display_name from the matching registry row; aggregate.rs:119-139 uses the alias or strips podman: from its destination.",
+            "Same revision: store/podman.rs:149-156,249-267 validates a reserved name with a nonempty suffix and records podman:<name>; uninstall_refusal.rs:83-126 interpolates that name or an absent-twin fallback and returns a refusal.",
+            "Current SPEC_impl.md:5262-5271 requires trimming aliases and clearing empty ones. Hand-corrupted registry values are not an established normal-registration premise. Source-only, no execution."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "Container ownership:4824 onward records the reserved name before creation; no empty-label allowance needed.",
+            "SPEC_impl.md": "Host alias normalization:5262-5271 and duplicate state:5330-5345 support the normal naming/refusal context.",
+            "TODO.md Planned": "Empty.",
+            "plans/queue": "No unlanded plans in INDEX.md.",
+            "BUGS.md": "No match.",
+            "queue and active ledger": "Searched container duplicate, display name, empty alias and uninstall refusal terms. uninstall-refusal-missing-identity-wording-source-gap concerns installation identity wording, not container naming; no exact cover or extension."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "A shipped path recording an empty container destination or alias was not established; the inspected normal registration excludes it.",
+          "original_stronger_consequence": "Container duplicate advice might omit the container's usable name, preventing identification of the entry to delete. No wrong deletion or security consequence was claimed.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation within normal registration. No claim about arbitrary hand-corrupted database contents."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "container-duplicate-refusal-empty-display-name",
+        "destination": null
+      }
+    },
+    {
+      "key": "g071/f5",
+      "owner": "g071",
+      "id": "f5",
+      "domain": "installation-provisioning",
+      "purpose": "installation-provisioning: crates/farhelm-helm/src/provisioning/uninstall_refusal.rs, scripts/install.sh, scripts/test-install-sh.sh, crates/farhelm/src/setup.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "f5",
+            "state": "open",
+            "summary": "Selected older releases may still need the tmux advice removed from the installer",
+            "location": "scripts/install.sh:1242",
+            "detail": "Reviewed commit: 17a3fe858c5511a24b7403af15dd41c93bf69fd7. TLDR: selecting an older release with FARHELM_VERSION may now print unconditional launch advice without its still-required tmux prerequisite. Parent-supplied g072/c1 interface evidence identifies concrete v0.35.0 at ee6957b5f0aa10bd4d36834f633b122cf2ec4695, whose desktop still runs tmux preflight and whose original installer warned about tmux 3.7c. This version is above the reviewed installer's HANDOFF_FLOOR=0.31.1-dev.0; the floor is described as locked-install capability, not a tmux requirement boundary. Source checks pending this synthesis: inspect reviewed version selection/handoff/report and the concrete target's preflight/installer, to settle whether the new report installs that old target itself or delegates to its prerequisite-aware script. Suggested bucket: other for missing guidance if established; could-be-highest: no security or loss-of-work route presently alleged, since the target's preflight may refuse startup. Confidence: concrete source lead from parent-verified evidence, not yet independently checked here; no runtime observation. proposed_drop: false pending source checks. possible_cover: g072/c1 is the named interface concern, not an independent new discovery; no forbidden coverage sources searched. Preserve c1's earlier exact-output-test source refutation, c3's current setup PATH acceptance and f2's original process-loss assurance consequence separately: this lead concerns selecting an older target, not whether the current release requires tmux. No parent drop or lowering is accepted."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f5",
+            "state": "open",
+            "summary": "Installer omits tmux prerequisite advice for supported older targets",
+            "location": "scripts/install.sh:1251",
+            "detail": "Reviewed commit: 17a3fe858c5511a24b7403af15dd41c93bf69fd7. TLDR: installing a selected older Farhelm such as v0.35.0 on a Mac without supported tmux now says to open the app without warning that this target still needs tmux. The selected app can then refuse to start. This is missing prerequisite/remedy guidance, not an installation-file corruption or loss-of-work claim. Source route: scripts/install.sh:817-819 accepts FARHELM_VERSION; :881-884 pins the selected target and release URL. HANDOFF_FLOOR at :91-101 is 0.31.1-dev.0 and exists only for farhelm internal install capability. The exact below-floor condition at :936 delegates to that target's verified own installer and exits at :970-971; that proof remains valid for targets below the floor only. v0.35.0 is above it, so it follows the current script, which checks selected payload version at :1094-1098, calls the selected farhelm internal install at :1202 and, on success, unconditionally prints Open Farhelm at :1250-1251. The deleted report no longer inspects tmux or prints its prerequisite warning/remedy for this path. Concrete target source ee6957b5f0aa10bd4d36834f633b122cf2ec4695: desktop.rs:1205-1214 still calls run_tmux_preflight_or_exit before supervisor startup; its original installer at :1305-1316 warns that tmux 3.7c or newer is needed, gives brew install/upgrade advice and defers launch until afterward. The new installer installs old targets itself unless they are below its locked-install floor; it does not universally execute each target's old report. Suggested bucket: other, selected-old-target prerequisite diagnostics/compatibility; could-be-highest: no established security or loss-of-work route, and preflight is a startup refusal. Confidence: confirmed source route for omitted advice and target preflight; no installed run, download or refusal was observed. proposed_drop: false; current-release no-tmux correctness and a below-floor handoff do not refute this above-floor older-target guidance defect. possible_cover: parent-supplied g072/c1 is the same older-target interface concern; preserve its ID for the parent to consolidate, not count this as fresh discovery. Original f5 suspected launch-refusal/missing-remedy consequence retained. Existing c1's changed exact-output expectations remain factually consistent with the new script but do not prove older-target prerequisite guidance. c3 remains a current setup PATH claim; f2's process-loss reassurance and all proposed-drop bases are unchanged. No parent drop or lowering accepted. Checked only selected version routing, report and concrete target startup prerequisites; no separate installer audit or runtime reproduction. Remaining readily accessible source checks in this synthesis will confirm target version/locked interface and the governing selected-release contract, rather than defer them as uncertainty."
+          }
+        },
+        {
+          "line": 14,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f5",
+            "state": "open",
+            "summary": "Installer omits tmux prerequisite advice for supported older targets",
+            "location": "scripts/install.sh:1251",
+            "detail": "Reviewed commit: 17a3fe858c5511a24b7403af15dd41c93bf69fd7. TLDR: selecting an older release such as v0.35.0 on a Mac without supported tmux now prints launch advice without warning that this target still needs tmux. The installed app can then refuse to start. Original consequence retained: loss of advance prerequisite/remedy guidance for a selected older target, not file corruption, silent failure or loss of work. Suggested bucket: other (selected-old-target prerequisite diagnostics/compatibility). Could-be-highest: no established security or loss-of-work route; target preflight refuses startup. Confidence: confirmed source route, no installed run or refusal observed. proposed_drop: false. possible_cover: parent-supplied g072/c1 is the same older-target interface claim for consolidation, not independent discovery; no prohibited coverage sources searched.\n\nSource routing: reviewed install.sh:817-819 takes FARHELM_VERSION and :881-884 pins the selected target and URL. HANDOFF_FLOOR at :91-101 is 0.31.1-dev.0, explicitly the first locked-install-capable release. The exact below-floor branch at :936 downloads/verifies the target's own installer and exits after running it at :970-971. Preserve that proof only for below-floor targets. v0.35.0 is above it and continues through selected payload version validation at :1094-1098, direct selected farhelm internal install at :1202, success/result checks at :1213-1228, and unconditional fresh-install Open Farhelm advice at :1250-1251. Removing the tmux report deletes its prerequisite warning and Homebrew remedy from this path. SPEC.md:686-688 supports selecting a specific release; SPEC_impl.md:7354-7368 ties handoff to locked-install capability and otherwise has the selected CLI perform locked work while this script owns reporting.\n\nConcrete target checks: local tag v0.35.0 points to ee6957b5f0aa10bd4d36834f633b122cf2ec4695, whose Cargo.toml:86 declares 0.35.0. Its main.rs:1511-1533 accepts the current handover flags, and :1544-1573 invokes locked install then writes the expected install-result format. A targeted search of its installation module found no tmux inspection that replaces the missing report. Its desktop Spawn branch :550-553 calls check_prerequisites; :1205-1214 calls run_tmux_preflight_or_exit. tmux_preflight.rs:342-378 probes/classifies then calls refuse_and_exit for a missing/below-floor tmux. The original target installer :1305-1316 warned that tmux 3.7c was required and printed brew install/upgrade advice before launch. Thus a supported concrete target exists above the floor; a universal old-target handoff exclusion is source-refuted. No runtime install, download, build or reproduction.\n\nCaveats and disposition: current-release removal of its unused tmux requirement remains correct. The old app itself still supplies an actionable refusal: tmux_preflight.rs:226-279 describes the concrete diagnosis/remedy; desktop.rs:1772-1802 also requests a native Mac alert and exits 1. The finding is missing advance installer advice, not an assertion that the user cannot recover or receives no later explanation. Applicable prerequisites, owned layout and release assets are assumed as for any otherwise successful install. No later installer/test change was found in path history from this commit through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. All readily checkable premises settled; f5's lead is closed as this retained finding. This is synthesis of the named late interface input, not a discovery pass. c1 remains narrowly source-refuted as an exact-output expectation mismatch; matching expected output does not prove older-target prerequisite correctness. c3's setup PATH acceptance and f2's original potentially-highest process-loss assurance consequence/proposed-drop bases are unchanged. No parent drop or lowering accepted. If retained, a remedy should condition legacy advice on the selected target or deliberately hand off applicable old targets without restoring a tmux requirement for the current release."
+          }
+        },
+        {
+          "line": 15,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f5",
+            "state": "open",
+            "summary": "Older-target prerequisite omission has explicit competing installer policy",
+            "location": "scripts/install.sh:1251",
+            "detail": "Reviewed commit: 17a3fe858c5511a24b7403af15dd41c93bf69fd7. Original TLDR and consequence preserved: selecting an older release such as v0.35.0 on a Mac without supported tmux prints launch advice without its still-required tmux warning; opening that app can refuse startup. This remains a confirmed conditional source mechanism and lost advance prerequisite/remedy guidance, not file corruption, silent failure, unrecoverable install failure or loss of user work. Suggested bucket remains other; could-be-highest: no established security or loss-of-work route. No execution, install, download or reproduction observed.\n\nLate named-clause synthesis changes the proposed disposition, not the mechanism. Exact reviewed SPEC_impl.md:2787-2789: 'This release ends them at startup (below); every terminal runs in a terminal host (\"Terminal host\"). Neither the desktop app nor `farhelm helm setup` requires, looks for or names a tmux, and neither does the installer.' This explicitly names the installer and says it does not look for or name tmux; it is stronger than the current-app capability statement alone. Parent supplies already-landed tmux-drop-from-install criterion4 as context only: 'The installer gives no tmux advice', requiring install.sh to lose probe/floor/Homebrew advice/launch-advice ordering and test-install-sh.sh to lose matching cases. I did not open/search plans or coverage metadata. The reviewed patch implements that uniform report policy; its installer clause contains no selected-target exception. Best source/contract reading is that the current installer deliberately supplies no tmux advice, including when its supported selection mechanism installs an older payload. Selecting a specific release does not itself promise that the current installer reproduces every historical prerequisite report. The supplied plan criterion reinforces that intended uniform omission. Proposed_drop: explicit no-tmux-advice policy for the installer, with the exact specification and parent-supplied decision above, for parent judgment only; no parent drop or lowering is accepted here. This supersedes the earlier proposed_drop:false to that limited policy basis. It does not revive the false universal-handoff argument or refute the omitted-guidance source facts.\n\nExact competing selection/handoff facts retained: SPEC.md:686-688 permits FARHELM_VERSION selecting a specific release. SPEC_impl.md:7354-7368 delegates a target only when too old for the locked-install interface. Reviewed install.sh:91-101 sets HANDOFF_FLOOR=0.31.1-dev.0; :936 and :970-971 run a verified target-owned installer and exit only below that floor. v0.35.0 is above it, so :817-819/:881-884 selects it, :1094-1098 validates its binary version, :1202 calls its farhelm internal install, and :1213-1228/:1250-1251 prints the current script's successful fresh-launch report without tmux advice. The below-floor proof remains valid for below-floor targets only. No target-version exception or tmux-capability test was found in the named installer policy. This is not a claim that older target capabilities changed.\n\nConcrete target proof retained: local tag v0.35.0 is ee6957b5f0aa10bd4d36834f633b122cf2ec4695, Cargo.toml:86 version 0.35.0. Its main.rs:1511-1533 accepts the current handover flags; :1544-1573 writes the expected locked-install result. Its desktop.rs:550-553 calls prerequisites for a fresh Spawn; :1205-1214 calls tmux preflight; desktop/tmux_preflight.rs:342-378 can refuse/exit when no supported tmux exists. Its original installer :1305-1316 supplied the removed advance warning/Homebrew remedy. Its own startup still gives an actionable diagnostic and native Mac alert (tmux_preflight.rs:226-279, desktop.rs:1772-1802), so the omission does not establish loss of recovery guidance everywhere. Installer/test path history has no later repair through endpoint 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db.\n\nConfidence: confirmed source behavior; likely explicit acceptance of the uniform no-advice reporting policy, inferred from the installer-specific wording without a target exception and the exact supplied criterion. There is no remaining readily checkable source premise, and no normative conflict requiring old-target warnings is established by specific-release selection alone. Parent decides whether that acceptance covers the conditional older-target consequence. possible_cover: exact SPEC_impl.md:2787-2789 plus the parent-supplied criterion4 quoted above; g072/c1 is the same older-target interface concern. Preserve all earlier correction history for consolidation. This is named-input synthesis, not a new discovery. c1's narrow exact-output-test consistency conclusion, c3's current setup PATH contract, c4's refusal label refutation, and f2's original potentially-highest process-loss assurance concern and exact proposed-drop bases are unchanged. The plan's deletion of test cases concerns the explicit reporting policy; product correctness is not being used to dismiss a separate test-oracle or documentation defect. No new independent test defect is asserted or disposed of here. All scoped source checks are complete; no open lead remains."
+          }
+        }
+      ],
+      "latest": {
+        "line": 15,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "f5",
+          "state": "open",
+          "summary": "Older-target prerequisite omission has explicit competing installer policy",
+          "location": "scripts/install.sh:1251",
+          "detail": "Reviewed commit: 17a3fe858c5511a24b7403af15dd41c93bf69fd7. Original TLDR and consequence preserved: selecting an older release such as v0.35.0 on a Mac without supported tmux prints launch advice without its still-required tmux warning; opening that app can refuse startup. This remains a confirmed conditional source mechanism and lost advance prerequisite/remedy guidance, not file corruption, silent failure, unrecoverable install failure or loss of user work. Suggested bucket remains other; could-be-highest: no established security or loss-of-work route. No execution, install, download or reproduction observed.\n\nLate named-clause synthesis changes the proposed disposition, not the mechanism. Exact reviewed SPEC_impl.md:2787-2789: 'This release ends them at startup (below); every terminal runs in a terminal host (\"Terminal host\"). Neither the desktop app nor `farhelm helm setup` requires, looks for or names a tmux, and neither does the installer.' This explicitly names the installer and says it does not look for or name tmux; it is stronger than the current-app capability statement alone. Parent supplies already-landed tmux-drop-from-install criterion4 as context only: 'The installer gives no tmux advice', requiring install.sh to lose probe/floor/Homebrew advice/launch-advice ordering and test-install-sh.sh to lose matching cases. I did not open/search plans or coverage metadata. The reviewed patch implements that uniform report policy; its installer clause contains no selected-target exception. Best source/contract reading is that the current installer deliberately supplies no tmux advice, including when its supported selection mechanism installs an older payload. Selecting a specific release does not itself promise that the current installer reproduces every historical prerequisite report. The supplied plan criterion reinforces that intended uniform omission. Proposed_drop: explicit no-tmux-advice policy for the installer, with the exact specification and parent-supplied decision above, for parent judgment only; no parent drop or lowering is accepted here. This supersedes the earlier proposed_drop:false to that limited policy basis. It does not revive the false universal-handoff argument or refute the omitted-guidance source facts.\n\nExact competing selection/handoff facts retained: SPEC.md:686-688 permits FARHELM_VERSION selecting a specific release. SPEC_impl.md:7354-7368 delegates a target only when too old for the locked-install interface. Reviewed install.sh:91-101 sets HANDOFF_FLOOR=0.31.1-dev.0; :936 and :970-971 run a verified target-owned installer and exit only below that floor. v0.35.0 is above it, so :817-819/:881-884 selects it, :1094-1098 validates its binary version, :1202 calls its farhelm internal install, and :1213-1228/:1250-1251 prints the current script's successful fresh-launch report without tmux advice. The below-floor proof remains valid for below-floor targets only. No target-version exception or tmux-capability test was found in the named installer policy. This is not a claim that older target capabilities changed.\n\nConcrete target proof retained: local tag v0.35.0 is ee6957b5f0aa10bd4d36834f633b122cf2ec4695, Cargo.toml:86 version 0.35.0. Its main.rs:1511-1533 accepts the current handover flags; :1544-1573 writes the expected locked-install result. Its desktop.rs:550-553 calls prerequisites for a fresh Spawn; :1205-1214 calls tmux preflight; desktop/tmux_preflight.rs:342-378 can refuse/exit when no supported tmux exists. Its original installer :1305-1316 supplied the removed advance warning/Homebrew remedy. Its own startup still gives an actionable diagnostic and native Mac alert (tmux_preflight.rs:226-279, desktop.rs:1772-1802), so the omission does not establish loss of recovery guidance everywhere. Installer/test path history has no later repair through endpoint 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db.\n\nConfidence: confirmed source behavior; likely explicit acceptance of the uniform no-advice reporting policy, inferred from the installer-specific wording without a target exception and the exact supplied criterion. There is no remaining readily checkable source premise, and no normative conflict requiring old-target warnings is established by specific-release selection alone. Parent decides whether that acceptance covers the conditional older-target consequence. possible_cover: exact SPEC_impl.md:2787-2789 plus the parent-supplied criterion4 quoted above; g072/c1 is the same older-target interface concern. Preserve all earlier correction history for consolidation. This is named-input synthesis, not a new discovery. c1's narrow exact-output-test consistency conclusion, c3's current setup PATH contract, c4's refusal label refutation, and f2's original potentially-highest process-loss assurance concern and exact proposed-drop bases are unchanged. The plan's deletion of test cases concerns the explicit reporting policy; product correctness is not being used to dismiss a separate test-oracle or documentation defect. No new independent test defect is asserted or disposed of here. All scoped source checks are complete; no open lead remains."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g071/findings.jsonl",
+        "id": "f5",
+        "line": 15,
+        "disposition": "rejected",
+        "group": "selected-above-handoff-floor-legacy-target-missing-tmux-launch-advice",
+        "reason": "Parent read full126 then actualowner071event15/072event19. Confirmed current script can directly install above-handoff-floorv0.35.0 and print OpenFarhelm without still-neededtmux warning; oldapp laterrefuseswithactionablediagnosis/remedy. Preserveconditionalroute, removedadvanceguidance, falseuniversalhandoffcorrection, noinstallfailure/bricking/workloss. ExactreviewedSPEC_impl2787-2789 expressly says installer neitherrequires/looksfor/names tmux; suppliedlanded criterion explicitly 'installer gives no tmux advice' and removesmatchingcases. Parentacceptsthatunqualifiedcomponentreportingpolicy across selected-targetpath: supportforspecificrelease/lockedinstallcapability promises no targetaware external-prerequisite advice. Policyacceptance of omission, not falseclaimoldtargetneednotmux, not rarityfilter or laterrepair. Matchingreporttests assertonlyspecifiednewreport and donotclaimoldbinarylaunches. Noindependenttestoracledefectremaining; separatehighestprocess-survivalassurance071f2unaffected. Keep proposedbases/history in complete dropregister."
+      },
+      "accepted_parent_decision": {
+        "key": "g071/f5",
+        "line": 15,
+        "disposition": "rejected",
+        "group": "selected-above-handoff-floor-legacy-target-missing-tmux-launch-advice",
+        "bucket": "other",
+        "recording": "explicit-installer-policy",
+        "needs_independent_drop_check": false,
+        "reason": "Parent read full126 then actualowner071event15/072event19. Confirmed current script can directly install above-handoff-floorv0.35.0 and print OpenFarhelm without still-neededtmux warning; oldapp laterrefuseswithactionablediagnosis/remedy. Preserveconditionalroute, removedadvanceguidance, falseuniversalhandoffcorrection, noinstallfailure/bricking/workloss. ExactreviewedSPEC_impl2787-2789 expressly says installer neitherrequires/looksfor/names tmux; suppliedlanded criterion explicitly 'installer gives no tmux advice' and removesmatchingcases. Parentacceptsthatunqualifiedcomponentreportingpolicy across selected-targetpath: supportforspecificrelease/lockedinstallcapability promises no targetaware external-prerequisite advice. Policyacceptance of omission, not falseclaimoldtargetneednotmux, not rarityfilter or laterrepair. Matchingreporttests assertonlyspecifiednewreport and donotclaimoldbinarylaunches. Noindependenttestoracledefectremaining; separatehighestprocess-survivalassurance071f2unaffected. Keep proposedbases/history in complete dropregister."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-126",
+          "key": "g071/f5",
+          "latest_line": 14,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "selected-above-handoff-floor-legacy-target-missing-tmux-launch-advice",
+          "aliases": [
+            "g072/c1"
+          ],
+          "target_queue_file": null,
+          "why": "The conditional source route is established: the newest script can install v0.35.0 itself and advise opening it without its tmux prerequisite; a fresh desktop start then refuses when usable tmux is absent. Retain the source-confirmed guidance issue with the explicit acceptance ambiguity below. This is avoidable failed launch and missing advance advice, not failed installation, missing later diagnostics, bricking or work loss.",
+          "checks": [
+            "17a3fe858c5511a24b7403af15dd41c93bf69fd7:scripts/install.sh:91-101 defines HANDOFF_FLOOR=0.31.1-dev.0 for locked-install capability. :817-819 and :881-884 select FARHELM_VERSION; :936-971 delegates only below-floor targets. 0.35.0 is above that floor.",
+            "Reviewed install.sh:1091-1119 validates version, icon and side-by-side marker; :1172-1202 invokes the selected CLI with its handover flags; :1213-1228 accepts its install-result; :1250-1251 prints Open Farhelm unconditionally for fresh installs. The reviewed diff deletes the predecessor's prerequisite warning and Homebrew remedy, establishing in-range introduction.",
+            "Local v0.35.0 resolves ee6957b5f0aa10bd4d36834f633b122cf2ec4695; Cargo.toml:86 declares 0.35.0. Its desktop/bundle.rs:350 has the required marker; packaging/farhelm-desktop/dist.toml declares version 0.35.0 and Farhelm.icns, and dist-workspace.toml:229 names the Apple-silicon target. main.rs:1505,1511-1533 supports the selected CLI and fresh-run flags; :1544-1584 implements the expected result shape. Targeted installation-module search finds no tmux replacement warning.",
+            "At ee6957b5, desktop.rs:835-848 chooses Spawn for absent supervisor/no owner; :548-553 checks prerequisites; :1205-1214 invokes tmux preflight. desktop/tmux_preflight.rs:148-169 classifies missing executable/below-floor tmux as refusal and :342-378 calls refuse_and_exit. :271-306 supplies diagnosis and Homebrew remedy; desktop.rs:1772-1802 prints it, requests native Mac alert/Console output, and exits 1. Its original installer :1285-1317 warns before fresh launch when tmux is unusable.",
+            "No installer/test-path commit follows 17a3fe85 through endpoint 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db; those paths also have no diff against recording main 24bc058066fd57848e788b465719b0e6da2f98f7. No download, installed run, startup refusal or runtime test was observed."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:681-827 explicitly permits FARHELM_VERSION (:694-700) and describes below-floor handoff (:812-814). SPEC_impl.md:7193-7535 ties handoff to locked-work capability (:7317-7332), not tmux dependency. Neither excludes the named fresh above-floor target.",
+            "Acceptance ambiguity preserved: current SPEC.md:5257-5258 says 'Farhelm neither requires nor looks for one on any machine.' At reviewed 17a3fe85, SPEC_impl.md:2786-2792 explicitly says 'Neither the desktop app nor `farhelm helm setup` requires, looks for or names a tmux, and neither does the installer.' These are stronger than merely saying the new binary needs no tmux. They may intentionally rule out installer prerequisite advice altogether, but do not expressly discuss choosing a still-tmux-dependent older binary or accepting its avoidable failed launch. Current packaging/selected-version contracts retain that selection. Do not silently resolve this scope ambiguity as either exact acceptance or a nonexistent policy.",
+            "TODO.md Planned (:25-26) empty. Maybe later rollback (:712-720) concerns database downgrade safety; installer simplification (:740-755) concerns transactional mechanics. Neither covers this prerequisite report.",
+            "plans/queue searched for installer, tmux, prerequisite, FARHELM_VERSION and selected/older-target terms. tmux-drop-from-install.md:63-66 expressly says 'The installer gives no tmux advice' and deletes matching cases; :180-191 permits retaining genuinely needed tmux-shaped behavior with explanation. This broad instruction is relevant intent, not ignored. It is already landed (plans/REPORTS.md:30), so it is not unlanded work that will fix this issue, and it does not explicitly discuss the above-floor older-target counterexample. The other matching removal plans are also landed (:29-32); remaining matched provisioning/sandbox plans do not prescribe an older-target report remedy.",
+            "BUGS.md read: only SSH transfer hang, no prerequisite-advice acceptance. INDEX.md read in full and exact-term queue search finds no older-selected-target tmux advice item. installer-rerun-advice-omits-stale-lock-prerequisite.md is a different stale-lock recovery promise; installer-prerequisite-test-conflates-two-guards.md is a different Mac-VM setup oracle. older-handoff-reports-success-for-directory-program.md concerns a malformed destination and v0.27.0, not a prerequisite warning. No exact coverage or useful extension to those existing files.",
+            "Active TRIAGE_OUTCOMES.md searched and matching sections read: :231-251 is the independent VM-guard test; :347-372 is CLI expectation parsing; :793-913 discards old-generation installer problems, expressly prior to 0.31.1. This case uses modern reporting and v0.35.0, so that decision does not exactly cover it. Archive not read.",
+            "FILTER.md read in full. Rare diagnostic filter (:28-42) needs a rare timing/fault/unshipped-input trigger, not merely explicit older-version selection on a Mac without tmux; neither rarity nor retry self-correction is established. Older-release upgrade filter needs carried-across state plus another rare condition; the counterexample is a fresh install. No full filter boundary matches."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No missing source premise for the conditional advice/refusal route. Successful retrieval of the release's matching assets and otherwise ordinary installation prerequisites are assumed; those assets were not downloaded. Whether the broad no-tmux installer policy intentionally accepts omitting advice for selected legacy binaries remains a product-contract interpretation, not a runtime premise.",
+          "original_stronger_consequence": "Line 11 suspected loss of prerequisite/remedy advice for selected older releases. Lines 12 and 14 confirm an avoidable refusal on launch while explicitly preserving the old app's later diagnosis/remedy. No original security, process-loss, file-corruption or other user-work-loss consequence was alleged for f5. c1's exact-output refutation and other IDs' potentially highest consequences remain separate.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain one conditional source-confirmed OTHER record, carrying the conflicting breadth of no-tmux wording for triage. Consolidate the named same-root g072/c1 without losing its selected-older-target regression-test responsibility. Do not use universal old-target handoff or current-release no-tmux capability as a complete refutation.",
+          "new_interface_evidence": "The corrected histories quote current-release no-tmux capability and below-floor handoff, but reviewed SPEC_impl.md:2788-2789 additionally says the installer itself neither requires, looks for nor names tmux. Landed tmux-drop-from-install.md:63-66 explicitly prohibits tmux advice. Both are concrete possible acceptance context whose selected-older-target scope remains ambiguous."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "selected-above-handoff-floor-legacy-target-missing-tmux-launch-advice",
+        "destination": "trailing-selected-above-handoff-floor-legacy-target-missing-tmux-launch-advice.md"
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete: all 8 assigned patches read; no unread scope.\n\nLogged `f2` for independent drop review: session-survival wording during the accepted old-terminal migration. Recorded source-refuted or specification-accepted candidates `c1` and `c3`. No open leads or other actionable findings.\n\nUpdated `findings.jsonl` and `progress.md`. No tests or reproductions run."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised `f2` with direct source checks establishing the desktop update → supervisor replacement → old-terminal termination path. Preserved the potential process-loss guidance consequence and the commit’s explicit wording acceptance as a proposed drop only; no drop or lowering accepted.\n\nCross-batch checks leave `c1` and `c3` unchanged. No new findings.\n\nUnresolved lead IDs: none."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass complete. Checked constructor coverage, stale installer references, setup restart/no-supervisor behavior, test assertions, and container refusal naming.\n\nRecorded source-refuted candidate `c4`. No new defects found.\n\n- New verified IDs: none.\n- New unverified-after-investigation IDs: none.\n- Open leads: none.\n\nProgress updated. No runtime tests or reproductions run."
+    },
+    {
+      "turn": 4,
+      "reply": "Confirmed `f5`: the current installer handles `v0.35.0` without handoff but omits its still-required tmux advice. The older app provides an actionable startup refusal, limiting this to missing advance guidance.\n\nClarified `c1`: matching output expectations do not establish older-target correctness.\n\nUnresolved lead IDs: none."
+    },
+    {
+      "turn": 5,
+      "reply": "Discovery pass 2 found nothing new. Checked removed-option callers, surviving test assertions, installer variable references, and refusal-message context.\n\n- New verified IDs: none.\n- New unverified-after-investigation IDs: none.\n- Open leads: none.\n\nProgress updated; no runtime tests or reproductions run."
+    },
+    {
+      "turn": 6,
+      "reply": "Revised `f5` with the exact installer-specific policy and supplied “no tmux advice” criterion. It now proposes a policy-based drop for parent judgment, while preserving the confirmed older-target consequence and corrected handoff scope. No drop accepted.\n\nUnresolved lead IDs: none."
+    },
+    {
+      "turn": 7,
+      "reply": "Discovery pass 3 found nothing new. Checked retained uninstall, retry, broken-output, and ownership test assertions, plus installer report branches.\n\n- New verified IDs: none.\n- New unverified-after-investigation IDs: none.\n- Open leads: none.\n\nProgress updated. No runtime tests or reproductions run."
+    }
+  ],
+  "progress": "# g071 initial review\n\nGroup: installation-provisioning. Turn 1, initial review complete. Discovery-pass count: 0. Next action: await the caller's later synthesis/discovery prompt; do not treat this initial pass as the later-turn protocol.\n\nRead the full brief and the complete inventory commits field. No excluded inventory metadata or coverage sources were read. Verified findings.jsonl existed before source review. All writes were confined to this group's private directory. No helpers, runtime tests, reproductions, builds, or live-install operations were used.\n\nAll assigned evidence was delivered through the absolute evidence command, with each packet in its own shell invocation:\n\n- 00155-000.patch: 1-14.\n- 00891-000.patch: 1-13.\n- 00892-000.patch: 1-13.\n- 00968-000.patch: 1-16.\n- 01220-000.patch: 1-13.\n- 01221-000.patch: 1-13.\n- 01243-000.patch: 1-190, 191-380, 381-570, 571-760, 761-950, 951-1150, 1151-1154.\n- 01251-000.patch: 1-105.\n\nUnread assigned scope: none (8 patches, 1,341 lines). Context outside the assigned functional group was read only to validate interfaces and contracts; this is not a claim to have reviewed those other groups.\n\nInterface assumptions checked: the duplicate-host helper changes refusal wording only and does not authorize deletion; the service caller still returns RemoveInstead before planning any mutation, and Podman itself refuses ordinary uninstall. The shared supervisor unit renderer and main's SetupContext capture change together with setup's tmux removal. Removal leaves setup's unit ownership, state-directory resolution, locking, restart obligations and no-supervisor behavior in place. Installer reporting changes have companion expectation updates.\n\nPrincipal source context read at pinned revisions:\n\n- 04ffdbb35773cef36e73eb798c005ddbeb9a9de6: uninstall_refusal.rs 1-235; provisioning/service.rs 1580-1640 and 1730-1790; store.rs 830-877; SPEC.md 195-310 and 4735-4815; SPEC_impl.md 8084-8470 (complete Provisioning section).\n- dbfc69751215dbf15e1d31d5bed73c3754c4ebc4: install.sh 1228-1335; SPEC.md 672-705. The later pinned Installation and updates contract and the intervening SPEC diff were also read.\n- 1ed482dde220452e424973faf38a5e1318986333: setup.rs 1495-1585; tmux.rs 550-606; SPEC_impl.md 7211-7241. The comment's precedence matches the installation resolver and existing setup implementation.\n- 78e9d68a95119db8452ee139efde13d38546f648: complete SPEC/SPEC_impl commit diff and rationale; SPEC.md 2990-3021; targeted specification searches.\n- 17a3fe858c5511a24b7403af15dd41c93bf69fd7: setup.rs 1-160, 540-820, 1608-1820, 3263-3310, 3906-3970; units.rs 1-210; test-install-sh.sh 1870-2030; complete main.rs and supervisor template patch; installer output-variable reference search; SPEC.md 662-1010 and 5336-5370; SPEC_impl.md 177-230, 1069-1095, 2784-2843, 6947-7145, 7247-7321; targeted heading/contract searches. Read intervening SPEC.md diff dbfc697..17a3fe8 lines 1-200.\n\nRecords appended/revised this turn: c1 (source-refuted installer-test mismatch), f2 (source-confirmed misleading survival wording, proposed drop because the one-time migration and general wording were deliberately accepted), c3 (specified PATH removal). f2 is explicitly marked could-be-highest for the caller's independent drop check, with its original consequence and exact specification/commit acceptance retained. New verified IDs: f2; new unverified IDs: none. Open lead IDs: none. No actionable finding without a proposed drop was established.\n\nThe evidence recorder rejected one invalid candidate state and one malformed JSON event. Both were corrected and successfully appended before further source analysis. These failed record attempts certify no coverage; the successful evidence reads above are unaffected.\n\n# Turn 2 synthesis\n\nLater-turn synthesis complete; turn count 2, discovery-pass count still 0. All 1,341 assigned mandatory lines remain covered; unread assigned scope: none. Read the caller-supplied g004 log for its f1 comparison. No excluded coverage sources, tests or reproductions were used.\n\nRevised f2 under its original ID to preserve the process-loss guidance concern and distinguish two separate facts: the specification intends old-terminal termination, while the reviewed commit rationale separately explicitly accepts printing the survival reassurance during that migration. The latter is the precise proposed-drop basis for the independent parent check. No drop or consequence lowering has parent acceptance; the earlier diagnostic-only bucket suggestion does not settle the potential loss-of-work consequence. The revised record treats f2 as potentially highest and preserves actual user reliance as hypothetical, not observed.\n\nRead directly at 78e9d68a95119db8452ee139efde13d38546f648: install.sh 1218-1324; core.rs 6110-6176; old_terminals.rs 130-260; hosts/process.rs 459-512; desktop.rs 460-594, 787-855, 1018-1098, 1218-1270; SPEC.md 2999-3018; complete reviewed commit rationale. An initial search under the nonexistent desktop directory returned no matches; the follow-up broader search located desktop.rs. These checks establish the ordinary managed desktop replacement route to startup retirement, actual signal calls after identity checks, unconditional installer reporting, and refusal/ownership caveats. No missing readily checkable source premise remains for f2.\n\nCross-batch checks at 17a3fe858c5511a24b7403af15dd41c93bf69fd7: installer/test patch searches confirm the reassurance survives the later removal of tmux advice; test-install-sh.sh 1870-1918 explicitly expects it; setup.rs 646-701 and units.rs 132-167 retain same-state rendering and ownership preflight; SPEC_impl.md 7103-7118 explicitly accepts the revised PATH. c1 and c3 retain their original dispositions, with no new findings. Rechecked 04ffdbb provisioning/service.rs 1739-1772: the duplicate-host message remains a refusal rather than deletion authority.\n\nRelated claims supplied by the caller: g002/f1 and g004/f1 are the same promise-versus-migration issue across surfaces; g053/f1 deliberate retirement is distinct; g033 omitted-warning/cleanup-failure residual is separate. No restatement is counted as a discovery.\n\nIDs appended/revised this turn: f2 only (three append-only revisions). New verified IDs: none. New unverified IDs: none. Unresolved lead IDs: none. f2 remains open pending independent drop checking, not pending investigation. Next action: await the caller's next discovery or synthesis instruction.\n\n# Turn 3 discovery pass 1\n\nSeparate discovery pass complete. Turn count 3; discovery-pass count 1. Result: no new verified defect and no new unverified-after-investigation defect. Open lead IDs: none. Existing findings and proposed-drop bases were not changed. c4 is a newly recorded, source-refuted diagnostic candidate, not a new defect.\n\nRead the complete supplied discovery-neighbours.json first, in bounded line chunks 1-120, 121-200, 201-280, 281-360 and 361-468. Compared interface records for context/novelty without opening prohibited coverage sources. Named pending questions were empty; no additional in-group premise required synthesis before searching. Known retirement, reassurance, replacement cleanup and neighbour claims were not recounted as discoveries or used to expand the assigned scope.\n\nUseful new search/checks:\n\n- Queried path history over the entire pinned range for all four assigned original paths. The same five assigned commits account for their changes; no later path change requires a new attribution theory.\n- At 04ffdbb35773cef36e73eb798c005ddbeb9a9de6, checked uninstall_refusal.rs 225-284, aggregate.rs 110-165, store/podman.rs 1-110, 150-188 and 225-292, plus manager.rs 738-800. The added Podman duplicate remedy gets the twin's alias or its reserved container-name destination; normal registration validates a nonempty reserved name. The message still uses bounded escaped peer text. Recorded c4 immediately once the considered empty-name diagnostic route was refuted. No destructive authority is added by the diagnostic.\n- At 17a3fe858c5511a24b7403af15dd41c93bf69fd7, searched all SetupContext construction sites under crates/scripts/e2e: only main's capture and the fixture build it. Read main.rs 2580-2615; removed PATH/tmux fields have no missed constructor. Searched setup for stale tmux/environment references; remaining tmux mentions are assertions/comments for the intentionally rejected flag. Read setup.rs 1938-2000, 3490-3575 and 705-795: no-supervisor still excludes the foreign unit; changed-unit and durable restart-marker loops remain; retry tests still distinguish owed from settled restarts. These are source and oracle checks, not test execution.\n- At the same revision, read install.sh 205-265 and all output-variable uses. Deleted warning/link variables have no surviving use; stdout/stderr styling gates remain separate. Read test-install-sh.sh 2000-2045: surviving PTY assertions independently require stream styling/progress, redirected escape absence, exact report text and NO_COLOR behavior. The two earlier one-line test patches were inspected separately at dbfc6975 and 78e9d68; they change only their corresponding exact expected completion sentence. No distinct weakened-oracle defect found.\n- Rechecked the comment-only patch at 1ed482dde220452e424973faf38a5e1318986333, setup.rs 1517-1540: the clarified installation precedence still matches the adjacent selection logic. No behavior change or separate documentation defect established.\n\nAppended this turn: c4 only. New verified IDs: none. New unverified-after-investigation IDs: none. Remaining lead IDs: none. Nothing new found beyond that source-refuted candidate. Assigned unread scope remains none; audited mandatory delivery is unchanged. No runtime tests, reproductions, builds, checkout edits, live-install actions, helper agents or prohibited coverage searches. Next action: await the caller's instruction.\n\n# Turn 4 late-interface synthesis\n\nReopened identity for the named g072/c1 input only. Read the complete ten-event own findings history before revising. Synthesis complete; turn count 4, discovery-pass count remains 1. This turn did not perform the separate post-audit discovery search. No excluded coverage sources or runtime actions.\n\nConcrete source result: v0.35.0 is tmux-dependent yet above HANDOFF_FLOOR=0.31.1-dev.0, which exists for locked-install capability. It is therefore installed by the current script using the selected release's CLI and receives the current script's report. Removing all tmux advice loses the advance prerequisite warning for that selected target. Below-floor targets still receive exactly their own verified installer and its report; current-release no-tmux correctness remains intact. The old app supplies its own startup refusal/error/remedy, so this is installer prerequisite guidance rather than a silent/unrecoverable install failure or a process-loss claim.\n\nRecorded f5 immediately as a concrete lead, then retained it as a source-confirmed finding under that same ID. Parent-supplied g072/c1 is the same interface concern for consolidation, not an independent discovery. Revised c1 to clarify its narrow earlier refutation: companion expectations match the new report, but that does not prove the report is suitable for every selected older target. c3's current setup PATH acceptance, c4's diagnostic-name refutation and f2's original potentially-highest process-loss assurance concern and exact proposed-drop bases are unchanged. No parent drops or lowerings accepted.\n\nPinned source checks at 17a3fe858c5511a24b7403af15dd41c93bf69fd7: install.sh 70-120, 152-190, 810-888, 928-976, 1080-1126, 1164-1266 plus selected-routing searches; SPEC.md 673-700; SPEC_impl.md 7350-7373. Handoff is solely the version_below selected target/floor branch at 936 with exit after the delegated installer, while the higher target continues to the direct install and unconditional report. No later installer or companion test changes through pinned tip were found in path history.\n\nConcrete target checks at ee6957b5f0aa10bd4d36834f633b122cf2ec4695: local v0.35.0 tag and Cargo.toml version at 86; desktop.rs 537-566, 1180-1228 and 1750-1806; desktop/tmux_preflight.rs 226-279 and 330-400; main.rs 1505-1585; old install.sh 1280-1324. The target accepts the direct locked-install arguments and writes the expected result file; its Spawn calls prerequisites and tmux preflight can exit with its own concrete diagnostic. Search of its installation module found no separate tmux inspection that would supply the lost report before launch.\n\nIDs appended/revised this turn: f5 (lead, finding, completed source-check revision), c1 (scope clarification). New verified ID: f5. New unverified-after-investigation IDs: none. Unresolved lead IDs: none. Assigned unread scope: none; original mandatory delivery remains audited. No downloads, installs, builds, tests, reproductions, helper agents, live actions or checkout changes. Next action: return synthesis delta and await parent audit/separate discovery instruction.\n\nRecording note for turn 4: a shell-quoting failure prevented the first f5 completion amendment from executing, and a literal-newline JSON event was rejected by the recorder. Corrected the private event and successfully appended the full f5 completion revision; no analysis proceeded while that completion record was pending. The c1 scope clarification and progress write succeeded. These record failures certify no source delivery and affect no previously audited evidence.\n\n# Turn 5 discovery pass 2\n\nSeparate post-synthesis discovery complete. Turn count 5; discovery-pass count 2. Result: empty beyond known records. New verified IDs: none. New unverified-after-investigation IDs: none. Open lead IDs: none. No finding/candidate revisions or new IDs were warranted; original consequences and proposed-drop bases remain untouched. Assigned unread scope: none.\n\nRead the complete refreshed discovery-neighbours.json (615 lines, 202,191 bytes) before the new source search: chunks 1-80, 81-160, 161-240, 241-320, 321-400, 401-480, 481-560 and 561-615. Named pending questions were empty. The supplied exact g072/c1 agrees with the already recorded older-target interface result; it was not counted as another discovery. Other neighbour records remained context/novelty input, not authority to broaden this assigned group.\n\nNew checks/results, all source-only at the recorded revisions:\n\n- At 17a3fe858c5511a24b7403af15dd41c93bf69fd7, searched allowed crates/scripts/e2e/docs/SPEC/README paths for setup invocations carrying --tmux, removed choose_tmux/TmuxDecision names, and removed context fields. A second literal --tmux search handled multiline invocation concerns: the surviving setup occurrence is its explicit rejection test. Other matching flags are independent recorder/checker interfaces; no stale setup invocation was found. The surviving tmux_env field belongs to an independent supervisor test's child environment, not SetupContext. Read host_processes.rs 470-521 to establish that distinction; its recorder has an explicit invocation premise and child-environment check.\n- Read setup.rs 1994-2078 and 2822-2872: surviving flag tests inspect the rendered state directory in both units and port in the helm; build-tree dry run asserts no mutating manager command; mismatched-manager uninstall asserts the real unit still exists and no false absent report. These specific assertions survive fixture simplification; no independent lost oracle was established. Examined all added doc/comment/assert/context lines in the assigned setup patch for stale contracts, rather than inferring their accuracy from product correctness.\n- At the same revision searched both installer files for all removed report-state/style names (FARHELM_TMUX, OUT_YELLOW, BREW_LINK, tmux_present, tmux_have, meets_floor): no remaining reference. This checks missing-variable consumers independently of the known older-target guidance issue.\n- At 04ffdbb35773cef36e73eb798c005ddbeb9a9de6, re-read uninstall_refusal.rs 83-132 around the new Podman arm: interpolation goes through the existing escaped display-name value; no plan/mutation authority is added, and removed-twin advice stays in its separate None branch. No new diagnostic/caller inconsistency arose from this patch.\n\nNo runtime tests, reproductions, builds, install/download operations, live actions, checkout edits, helper agents or prohibited coverage searches. All useful source checks for this pass completed without an unresolved premise. Next action: return empty discovery delta and await caller instruction.\n\n# Turn 6 installer-policy synthesis\n\nNamed late input only; synthesis complete. Turn count 6; discovery-pass count remains 2. Read complete own findings history before revision: all fourteen events, in chunks 1-6, 7-10 and 11-14. No discovery search this turn. Assigned unread scope remains none.\n\nRevised f5 under its original ID, retaining its concrete conditional older-target launch refusal and all earlier above-floor/below-floor corrections. The exact installer-specific SPEC_impl.md:2787-2789 clause says the installer neither looks for nor names tmux, and supplies no selected-target exception. The parent-supplied criterion4, The installer gives no tmux advice, reinforces the uniform reporting choice. Specific-release selection by itself does not require the current script to reproduce historical prerequisite advice. Best contract reading is likely deliberate acceptance of uniform omission, not an established conflicting requirement to warn for older selections.\n\nAccordingly f5 now has a proposed specification/decision-based drop for parent judgment, not an accepted drop, retraction of the mechanism, consequence lowering or revival of universal handoff. Source behavior remains confirmed; acceptance scope is the stated interpretation. Stored exact competing selection/handoff text and criterion as possible_cover. Existing c1/c3/c4 and f2 original consequences and proposed-drop bases are unchanged. No independent test-oracle or documentation defect was dismissed by production correctness.\n\nSource checks at 17a3fe858c5511a24b7403af15dd41c93bf69fd7: SPEC_impl.md 2784-2796 for the exact installer clause, SPEC.md 2996-3017 for current-release capability scope, SPEC_impl.md 1-17 for precedence, and the first 160 lines of its scoped SPEC/installer/test commit diff for the new wording and motivation. Retained all prior source proof of the v0.35.0 payload, selected CLI compatibility, preflight failure and later actionable diagnosis. No new implementation premise requires further checking. Parent supplied the plan criterion; I did not open or search plans or prohibited coverage metadata.\n\nIDs revised this turn: f5 only. New verified IDs: none. New unverified-after-investigation IDs: none. Unresolved lead IDs: none. The remaining decision is parent acceptance of the exact proposed cover, not an uninvestigated source lead. No tests, builds, downloads, installs, reproductions, helper agents, live actions or checkout changes.\n\nRecording note: one private event was rejected for unescaped embedded quotation marks; corrected it and successfully appended f5 before further analysis. No evidence delivery was attempted or claimed by that rejected record. Next action: return synthesis delta and await parent audit/separate discovery instruction.\n\n# Turn 7 discovery pass 3\n\nSeparate post-synthesis discovery complete. Turn count 7; discovery-pass count 3. Result: empty beyond known records. New verified IDs: none. New unverified-after-investigation IDs: none. Open lead IDs: none. No new or revised finding/candidate event was warranted; existing consequences and proposed-drop bases are preserved. Assigned unread scope: none.\n\nRead the complete refreshed discovery-neighbours.json first (605 lines, 195,642 bytes; snapshot at 2026-11-13T19:46:34.624Z), in bounded chunks 1-60, 61-140, 141-220, 221-300, 301-380, 381-460, 461-540 and 541-605. Named pending questions were empty. Supplied interface results were used for context/novelty only; no known neighbour issue was recounted as a discovery or used to widen the group.\n\nAdditional source/oracle checks at 17a3fe858c5511a24b7403af15dd41c93bf69fd7:\n\n- setup.rs 2180-2315: fixture simplification still leaves concrete disable/reload ordering, retained drop-in file checks, refusal-before-disable checks and dry-run no-manager-mutation assertions. These are actual retained test assertions, not an inference of test adequacy from production behavior.\n- setup.rs 3640-3734: failed post-deletion reload explicitly establishes that both files were removed before retry; retry asserts the required reload. Broken-writer handling separately checks both written files and the full enable/reload sequence despite report failure. Removal of tmux fixture spawning does not remove these contract-distinguishing observations.\n- setup.rs 3750-3856: symlink-to-marked-content test checks the symlink and unchanged external target; foreign second target checks the first remains untouched and no mutation commands run, both for install and uninstall. Checked these changed-fixture tests for unintended loss of their setup premises or observable assertions; no new gap established from the assigned changes.\n- install.sh 1224-1266: walked the retained report through fresh/update branches, kept-file notices and the final uninstall command. Deleting the tmux parser also deletes its positional-argument rewriting, but no subsequent report path consumes those parameters; there is no new dropped kept-file/uninstall notice or unfinished report branch. Known assurance and selected-old-target questions were not recounted as discoveries.\n\nAll checks were source-only. No runtime tests, reproductions, builds, installs/downloads, live actions, checkout edits, nested agents or prohibited coverage searches. No concrete unresolved premise emerged. Next action: return empty discovery result and await caller instruction.\n"
+}

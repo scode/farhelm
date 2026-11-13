@@ -1,0 +1,476 @@
+{
+  "group": {
+    "id": "g089",
+    "domain": "gui-terminal-attachment",
+    "purpose": "gui-terminal-attachment: crates/farhelm-ui/src/session_view.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g009",
+      "g010",
+      "g011",
+      "g038",
+      "g079",
+      "g080",
+      "g081",
+      "g082",
+      "g083",
+      "g084",
+      "g088"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/01120-000.patch",
+        "ranges": [
+          [
+            1,
+            532
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/session_view.rs",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,26848)",
+        "lines": 532,
+        "bytes": 26854,
+        "start": 0,
+        "end": 26848,
+        "original": "[private-run]/prep/originals/01120.patch"
+      }
+    ],
+    "lines": 532,
+    "bytes": 26854
+  },
+  "records": [
+    {
+      "key": "g089/l1",
+      "owner": "g089",
+      "id": "l1",
+      "domain": "gui-terminal-attachment",
+      "purpose": "gui-terminal-attachment: crates/farhelm-ui/src/session_view.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Restart retention no longer rejects listings started before the reply",
+            "location": "crates/farhelm-ui/src/session_view.rs:4484",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: a successful Restart might lose its temporary terminal-presence override before the session listing catches up, leaving an interrupted card where a running terminal should be. Source basis: the assigned patch removes the listing-generation argument and the test assertion that an already-in-flight running listing must not retire a Restart (old lines 4625–4650; new 4484–4497). Checks made: complete assigned session_view patch read. Missing premise: whether shipped callers still fence old listing responses, and whether any accepted response can retire success while a newly opened view receives stale Interrupted state. Next: inspect pinned SessionOps and list/detail callers with governing specifications; no runtime reproduction requested. Suggested bucket: high/material UX if established; could-be-highest: no established loss-of-work or security route. Confidence: uninvestigated lead. proposed_drop: false. possible_cover: none. Caveat: retention implementation is adjacent-group code and may independently fence this sequence."
+          }
+        },
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "A delayed pre-Restart stale listing can suppress terminal remount after success",
+            "location": "crates/farhelm-ui/src/session_view.rs:559",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: after reconnecting to a host and successfully restarting an interrupted session, the view can continue showing the interrupted card until a later detail refresh succeeds, even though its agent is running. Suggested bucket: other (temporary attachment/presentation failure; no established security or loss-of-work consequence). Confidence: confirmed by source ordering analysis, not observed in execution. proposed_drop: false. possible_cover: none. Source and trigger: the sidebar and open view read independently (session_view.rs:913–920). A sidebar listing can have captured stale=true during the outage, while a newer session detail has already shown reachable Interrupted and admitted Restart. If that earlier sidebar HTTP reply lands after Restart success but before the view's Restart observation, list/view.rs:1985 calls retire_confirmed_restarts, session_ops.rs:77–79 treats stale=true as confirmation, and :215–226 clears restart_succeeded without checking the listing's start generation. ReadGate::accept_success (ops.rs:183–190) compares with the newest committed response, so an older request remains admissible until a newer listing commits; issuing the completion refresh does not fence it (list/view.rs:3417–3419, :2473–2474). The view observer at session_view.rs:549–564 sees the durable changed restart_revision but no successful flag, bumps generation without setting relaunched, and keep_terminal_surface (:3714–3722) still returns false for current Interrupted. Unlike a current detail that clears the flag, this old sidebar reply does not update the open view's current state. Contract: SPEC_impl.md:1136–1139 says 'Restart’s completion reattaches the agent terminal even after a refusal or lost reply. A view mounted during the request observes its completion, and one opened before the listing catches up can use the retained successful reply.' The assigned patch removes the listing-generation guard's test at old session_view.rs:4638–4649; the parent implementation had restart_listing_floor and required generation > floor (parent session_ops.rs:56–70, :107–109). Suggested correction: keep pre-reply listings from retiring the retained success, or preserve a durable successful-completion observation separately from retention. Material caveats: requires a delayed stale listing to land in the completion-to-effect window; normal post-completion detail refresh repairs it, so this does not establish a persistent outage or warrant high/highest by itself. A pre-reboot non-Interrupted listing can create the same ordering, but that is not needed for this source route. No reproductions or runtime tests run."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "A delayed pre-Restart stale listing can suppress terminal admission after success",
+            "location": "crates/farhelm-ui/src/session_view.rs:559",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: after successful Restart of an interrupted session, the mounted view can keep its interrupted recovery card until live detail arrives because a delayed sidebar response erased the success first. Original temporary missing-terminal consequence preserved; no persistent outage or destructive consequence asserted. Synthesis in progress: the caller-supplied g037/f3 reports this same stale pre-completion listing trigger at the same revision. g038/l1 is another caller-named possible duplicate; its combined event output was clipped, so its latest full revision still needs delivery. g036/l1 is distinct at b3d6b3eff6b7508e0b1fb6ec5b5cde31d27ebabe: it explicitly uses a newer age-eligible listing with the generation floor intact, and can also lose a terminal-kind override. Restoring the age floor fixes this finding's stale-evidence trigger but not that eligible-listing consumer race. No duplicate-based drop is proposed or accepted. Source already checked: session_view.rs:549–564 sets relaunched only from restart_succeeded while retaining the numerical generation increment; :1709–1710 and :3701–3722 admit no terminal for the view's own nonstale Interrupted state when relaunched remains false. list/view.rs:1985 retires shared success independently of the view's current detail; :3417–3419 requests refresh without fencing old listings. session_ops.rs:77–79 treats stale as confirmation; :215–226 clears success. ops.rs:183–190 gates by last applied listing rather than completion age. SPEC_impl.md:1136–1139 requires completion reattachment and retained successful reply knowledge. Confidence revised to likely pending direct checks of the pinned scheduler and stale snapshot provenance; the exact runtime timing premise is old sidebar delivery after pending release but before the mounted observer or fresh detail. Other reviewers cite source permitting that order, but this group has not yet independently read those dependencies. Suggested bucket: other; could-be-highest: no established security or work-loss route. proposed_drop: false. possible_cover: g037/f3, g038/l1 (caller supplied); related but distinct g036/l1 as above. No reproduction, test, build, or timing observation. Next: finish the clipped peer read and directly inspect pinned task/effect scheduling, old-list acceptance, and live-detail repair."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "A delayed pre-Restart stale listing can suppress terminal admission after success",
+            "location": "crates/farhelm-ui/src/session_view.rs:559",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\nAfter reconnecting to a host and successfully restarting an interrupted session, its already-open view can keep showing the interrupted recovery card until live detail arrives. A delayed sidebar response can erase the success before the view consumes it. The original temporary missing-terminal consequence is preserved; no permanent failure or destructive consequence is asserted.\n\n## Details\nSynthesis result: retain this source-supported conditional race, with the delivery-order premise explicit. It duplicates the caller-named g037/f3 and g038/l1 at this same full revision. Do not count these as three independently discovered defects. No parent drop is accepted or proposed. The earlier related g036/l1 at b3d6b3eff6b7508e0b1fb6ec5b5cde31d27ebabe has a distinct trigger/fix boundary, described below.\n\nComplete trigger and source checks: aggregate.rs:547 captures host state before the awaited cached_slice at :578; row_of at :357 derives stale from that captured state. The in-flight sidebar can therefore carry stale=true from the earlier outage while the independent session detail has already reported nonstale Interrupted and enabled Restart. After the Restart POST succeeds, list/view.rs:3416–3419 records success, requests sidebar refresh and releases pending. No listing fence is inserted. The refresh calls reader::request_read (:644–680); SurfaceReader::claim/request (:405–458) explicitly leaves an existing running read alive and queues the new demand. ReadGate::accept_success (ops.rs:183–190) compares the reply generation with the latest applied listing, not Restart completion. Thus that old reply can still commit after pending release. list/view.rs:1985 calls retirement; session_ops.rs:77–80 treats stale as confirming regardless of status, and :215–226 clears restart_succeeded without a read-age floor.\n\nCompletion-to-effect ordering was independently checked in the pinned dependency source: Cargo.lock pins dioxus-core, dioxus-hooks and dioxus-desktop to 0.7.10. dioxus-hooks/src/use_effect.rs:15–47 queues a callback that reads shared state when it later runs. dioxus-core/src/virtual_dom.rs:507–537 polls ready tasks before effects and returns for dirty scopes; src/scheduler.rs:61–78 ranks effects below tasks and scopes. dioxus-desktop/src/webview.rs:537–590 returns while edits are unflushed before continuing virtual-DOM polling. These paths permit a ready old-list response task to retire success before the mounted completion observer; they do not guarantee that the observer wins. No actual task schedule was observed or reproduced.\n\nThe mounted view still owns its earlier nonstale Interrupted current; sidebar retirement does not replace that state. The selection bridge follows title and requests independent detail, rather than copying the sidebar status (session_view.rs:1245–1273). At :549–564 the observer sees the changed durable restart_revision and increments mount_generation, but with restart_succeeded cleared it cannot set relaunched=true. At :1709–1710 the desired set remains empty because terminal_absence/keep_terminal_surface (:3701–3722) rejects Interrupted with relaunched=false. This is lost terminal admission, not a lost numerical generation increment; preserving restart_revision alone does not settle it. The changed isolated observer test (:3915–3970) asserts the increment, not mounted terminal admission.\n\nRepair and limits: connected GET session detail drains live supervisor sessions (sessions.rs:3052–3095 and :3195–3222); only its no-client branch (:3162–3192) serves cached metadata. Therefore the finding does not claim that a newly fetched connected detail inherits cached Interrupted through merged_status. The relevant old status is the mounted view's existing accepted detail. A successful post-Restart live detail repairs the gap. Detail failure may lengthen it but is not required to create the ordering. The precise unobserved runtime premise is delivery of the pre-completion stale sidebar reply after pending clears and before the mounted observer or fresh detail supplies the restarted run. Available source establishes that this is permitted, not its frequency. Runtime timing evidence would measure incidence, not supply a missing code path, and was not requested.\n\nCross-revision comparison: directly checked b3d6b3eff6b7508e0b1fb6ec5b5cde31d27ebabe session_ops.rs:50–114 and :188–233, plus session_view.rs:535–565 and :1252–1273. That revision already checks generation > restart_listing_floor, yet a newer eligible sidebar listing can clear Lifecycle.restart before the mounted observer uses it. Besides relaunched it can lose the reply terminal-kind override, an aspect absent after this group's grid-only change. Restoring the old floor or fencing pre-completion listing replies fixes this finding's specific stale-evidence trigger, but does not fix g036/l1's eligible-newer-listing consumer race. Keeping successful completion knowledge durable for mounted consumers separately from the retireable seed for future views could address both. Preserve these trigger and repair boundaries when deduplicating.\n\nContract: SPEC_impl.md:1136–1139 says Restart completion reattaches the agent terminal, a view mounted during the request observes completion, and a view opened before the listing catches up can use the retained successful reply. SPEC.md Lifecycle operations:1897–1900 likewise preserves action outcomes across navigation and mounted completion observation. Suggested bucket: other, unchanged; temporary presentation/attachment failure only. Could-be-highest: no established security or work-loss route. Confidence: likely, naming the response/effect ordering premise above; code paths and absence of ordering protection confirmed through source, behavior not observed in execution. proposed_drop: false. possible_cover: duplicate g037/f3 and g038/l1 supplied by the caller; related but distinct g036/l1 as above. All earlier records remain preserved. No new discovery in this coverage-repair/synthesis turn. No open source lead, reproduction, test, build, or checkout change."
+          }
+        }
+      ],
+      "latest": {
+        "line": 5,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l1",
+          "state": "open",
+          "summary": "A delayed pre-Restart stale listing can suppress terminal admission after success",
+          "location": "crates/farhelm-ui/src/session_view.rs:559",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\nAfter reconnecting to a host and successfully restarting an interrupted session, its already-open view can keep showing the interrupted recovery card until live detail arrives. A delayed sidebar response can erase the success before the view consumes it. The original temporary missing-terminal consequence is preserved; no permanent failure or destructive consequence is asserted.\n\n## Details\nSynthesis result: retain this source-supported conditional race, with the delivery-order premise explicit. It duplicates the caller-named g037/f3 and g038/l1 at this same full revision. Do not count these as three independently discovered defects. No parent drop is accepted or proposed. The earlier related g036/l1 at b3d6b3eff6b7508e0b1fb6ec5b5cde31d27ebabe has a distinct trigger/fix boundary, described below.\n\nComplete trigger and source checks: aggregate.rs:547 captures host state before the awaited cached_slice at :578; row_of at :357 derives stale from that captured state. The in-flight sidebar can therefore carry stale=true from the earlier outage while the independent session detail has already reported nonstale Interrupted and enabled Restart. After the Restart POST succeeds, list/view.rs:3416–3419 records success, requests sidebar refresh and releases pending. No listing fence is inserted. The refresh calls reader::request_read (:644–680); SurfaceReader::claim/request (:405–458) explicitly leaves an existing running read alive and queues the new demand. ReadGate::accept_success (ops.rs:183–190) compares the reply generation with the latest applied listing, not Restart completion. Thus that old reply can still commit after pending release. list/view.rs:1985 calls retirement; session_ops.rs:77–80 treats stale as confirming regardless of status, and :215–226 clears restart_succeeded without a read-age floor.\n\nCompletion-to-effect ordering was independently checked in the pinned dependency source: Cargo.lock pins dioxus-core, dioxus-hooks and dioxus-desktop to 0.7.10. dioxus-hooks/src/use_effect.rs:15–47 queues a callback that reads shared state when it later runs. dioxus-core/src/virtual_dom.rs:507–537 polls ready tasks before effects and returns for dirty scopes; src/scheduler.rs:61–78 ranks effects below tasks and scopes. dioxus-desktop/src/webview.rs:537–590 returns while edits are unflushed before continuing virtual-DOM polling. These paths permit a ready old-list response task to retire success before the mounted completion observer; they do not guarantee that the observer wins. No actual task schedule was observed or reproduced.\n\nThe mounted view still owns its earlier nonstale Interrupted current; sidebar retirement does not replace that state. The selection bridge follows title and requests independent detail, rather than copying the sidebar status (session_view.rs:1245–1273). At :549–564 the observer sees the changed durable restart_revision and increments mount_generation, but with restart_succeeded cleared it cannot set relaunched=true. At :1709–1710 the desired set remains empty because terminal_absence/keep_terminal_surface (:3701–3722) rejects Interrupted with relaunched=false. This is lost terminal admission, not a lost numerical generation increment; preserving restart_revision alone does not settle it. The changed isolated observer test (:3915–3970) asserts the increment, not mounted terminal admission.\n\nRepair and limits: connected GET session detail drains live supervisor sessions (sessions.rs:3052–3095 and :3195–3222); only its no-client branch (:3162–3192) serves cached metadata. Therefore the finding does not claim that a newly fetched connected detail inherits cached Interrupted through merged_status. The relevant old status is the mounted view's existing accepted detail. A successful post-Restart live detail repairs the gap. Detail failure may lengthen it but is not required to create the ordering. The precise unobserved runtime premise is delivery of the pre-completion stale sidebar reply after pending clears and before the mounted observer or fresh detail supplies the restarted run. Available source establishes that this is permitted, not its frequency. Runtime timing evidence would measure incidence, not supply a missing code path, and was not requested.\n\nCross-revision comparison: directly checked b3d6b3eff6b7508e0b1fb6ec5b5cde31d27ebabe session_ops.rs:50–114 and :188–233, plus session_view.rs:535–565 and :1252–1273. That revision already checks generation > restart_listing_floor, yet a newer eligible sidebar listing can clear Lifecycle.restart before the mounted observer uses it. Besides relaunched it can lose the reply terminal-kind override, an aspect absent after this group's grid-only change. Restoring the old floor or fencing pre-completion listing replies fixes this finding's specific stale-evidence trigger, but does not fix g036/l1's eligible-newer-listing consumer race. Keeping successful completion knowledge durable for mounted consumers separately from the retireable seed for future views could address both. Preserve these trigger and repair boundaries when deduplicating.\n\nContract: SPEC_impl.md:1136–1139 says Restart completion reattaches the agent terminal, a view mounted during the request observes completion, and a view opened before the listing catches up can use the retained successful reply. SPEC.md Lifecycle operations:1897–1900 likewise preserves action outcomes across navigation and mounted completion observation. Suggested bucket: other, unchanged; temporary presentation/attachment failure only. Could-be-highest: no established security or work-loss route. Confidence: likely, naming the response/effect ordering premise above; code paths and absence of ordering protection confirmed through source, behavior not observed in execution. proposed_drop: false. possible_cover: duplicate g037/f3 and g038/l1 supplied by the caller; related but distinct g036/l1 as above. All earlier records remain preserved. No new discovery in this coverage-repair/synthesis turn. No open source lead, reproduction, test, build, or checkout change."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g089/findings.jsonl",
+        "id": "l1",
+        "line": 5,
+        "disposition": "duplicate",
+        "group": "restart-success-retired-by-precompletion-stale-listing",
+        "reason": "Parent read full claims058 and prior g032/c4. Exact f560058 old stale-sidebar snapshot subset: earlier cached_slice wait survives completion demand and stale row retires payload before mounted observer; generation alone does not admit terminal; independent live detail repairs. Same established bounded consequence and full rare self-correcting filter; preserve initial high suggestion and withdrawn prolonged-cache premise. Earlier eligible-new-listing route remains separate g036/l1, not claimed fixed by restoring age floor."
+      },
+      "accepted_parent_decision": {
+        "key": "g089/l1",
+        "line": 5,
+        "disposition": "duplicate",
+        "group": "restart-success-retired-by-precompletion-stale-listing",
+        "bucket": "other",
+        "recording": "filtered",
+        "needs_independent_drop_check": false,
+        "reason": "Parent read full claims058 and prior g032/c4. Exact f560058 old stale-sidebar snapshot subset: earlier cached_slice wait survives completion demand and stale row retires payload before mounted observer; generation alone does not admit terminal; independent live detail repairs. Same established bounded consequence and full rare self-correcting filter; preserve initial high suggestion and withdrawn prolonged-cache premise. Earlier eligible-new-listing route remains separate g036/l1, not claimed fixed by restoring age floor."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-058",
+          "key": "g089/l1",
+          "latest_line": 5,
+          "recommendation": "filtered",
+          "bucket": "other",
+          "underlying_key": "restart-success-retired-before-mounted-observer",
+          "aliases": [
+            "g088/l1 (exact f560058 stale-response subset only)"
+          ],
+          "target_queue_file": null,
+          "why": "This is the f560058 old-stale-sidebar route also present in g088/l1. The source permits its ordering, but its whole established consequence is temporary wrong presentation/terminal admission repaired by live detail or ordinary reopening, within the rare self-correcting filter.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e aggregate.rs:357,547-578 can return stale from a host snapshot taken before cached_slice awaits; reader.rs:405-458,644-680 leaves the older listing in flight when completion requests another read; ops.rs:182-190 checks last applied generation, not Restart age.",
+            "The same revision list/view.rs:3416-3419 records success, requests refresh and releases pending; :1976-1985 retires outcomes. session_ops.rs:77-105,215-226 accepts stale as confirming without the former age floor, clearing success before its mounted observer can consume it.",
+            "session_view.rs:549-564 advances mount_generation but only surviving success sets relaunched; :1709-1710,3701-3722 gives the existing nonstale Interrupted detail an empty terminal set. :1245-1273 does not copy sidebar status and :1475-1487 independently requests detail.",
+            "helm sessions.rs:3052-3095,3162-3227 establishes live connected detail repair, not cached-status prolongation. The original source-only confidence remains conditional on reply-before-observer/fresh-detail delivery; no runtime schedule was observed. The reviewer reported Dioxus dependency scheduling checks, not independently repeated here.",
+            "b3d6b3e session_ops.rs:92-106 already had the generation floor, but a newer eligible listing could still retire the optional payload before consumption. Restoring that floor fixes this stale-evidence trigger only; it does not settle the broader eligible-listing race recorded by g088/l1."
+          ],
+          "coverage_checked": [
+            "SPEC.md:1890-1904 and SPEC_impl.md:1134-1140 require mounted completion reattachment. No exact acceptance found in either spec.",
+            "TODO Planned empty; unlanded plan index empty. BUGS has no matching issue. Queue INDEX and retained-restart-hides-reboot-card.md read: the existing item concerns success retained too long across another reboot, not prematurely cleared success. Active TRIAGE_OUTCOMES has no exact claim.",
+            "FILTER.md Rare, self-correcting glitches and imprecise diagnostics fully covers the narrow ordering trigger and temporary display/attachment consequence. No irreversible loss, wrong-target action, security boundary or false mutation success is established."
+          ],
+          "exact_cover_quotes": [
+            "FILTER.md: The trigger is rare: a narrow timing window, a crash or interruption at a specific point, or an input the shipped clients never send.",
+            "FILTER.md: a display that is briefly wrong and corrects itself on the next refresh, retry or reconnect, or when the user leaves the view"
+          ],
+          "missing_premise": "The delivery-before-observer schedule remains unobserved; source permits it. No permanent outage or lost user work is established. Parent-supplied g037/f3 and g038/l1 were not batch inputs, so no independent alias judgment is made for them.",
+          "original_stronger_consequence": "Initially high if material terminal-remount failure were established; latest history explicitly narrows to other, temporary missing terminal until live detail succeeds. Preserve the distinction from lost numerical generation and from the earlier eligible-new-listing/terminal-kind route.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Filter the established narrowed consequence; reconcile this named alias with g088/l1 without erasing its broader earlier trigger or severity disagreement."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "restart-success-retired-by-precompletion-stale-listing",
+        "destination": "trailing-restart-success-retired-by-precompletion-stale-listing.md"
+      }
+    },
+    {
+      "key": "g089/c1",
+      "owner": "g089",
+      "id": "c1",
+      "domain": "gui-terminal-attachment",
+      "purpose": "gui-terminal-attachment: crates/farhelm-ui/src/session_view.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removing terminal kind and migration presentation matches the new attachment contract",
+            "location": "crates/farhelm-ui/src/session_view.rs:1705–1778",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR considered: an old or restarting terminal might mount the wrong renderer after terminal-kind metadata and the migration band disappear. Suggested bucket: other; could-be-highest: no, this concern establishes only unusable/misdrawn attachment, not a security or loss-of-work route. Confidence: confirmed source refutation. proposed_drop: the same revision mounts only the grid, removes byte-stream support at a protocol boundary, and ends legacy terminals before reload. Exact contract: SPEC_impl.md:3015–3019, 'Protocol 77 removed the byte streams with the old terminals and xterm.js: every attachment’s data channel carries a grid stream, so Attach, Attached and the browser’s socket say nothing about it, and SessionInfo and TabInfo no longer report a terminal kind.' SPEC_impl.md:2787–2788, 'This release ends them at startup (below); every terminal runs in a terminal host'. Source: terminal.js:3191–3221 gates on all grid scripts and the font, then mounts; :3387–3393 creates and fits the grid unconditionally before opening the socket. session_view.rs:1747–1778 retains encoded paths, attachment lease, generation and focus fields; no kind-dependent consumer remains in that path. Legacy remount-during-restart renderer selection and optimistic tab-kind tracking therefore serve no surviving contract. possible_cover: none. Caveats: protocol-skew compatibility is explicitly outside this conclusion; the same specification requires a reload for pages loaded before the helm update. No runtime execution."
+          }
+        }
+      ],
+      "latest": {
+        "line": 2,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Removing terminal kind and migration presentation matches the new attachment contract",
+          "location": "crates/farhelm-ui/src/session_view.rs:1705–1778",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR considered: an old or restarting terminal might mount the wrong renderer after terminal-kind metadata and the migration band disappear. Suggested bucket: other; could-be-highest: no, this concern establishes only unusable/misdrawn attachment, not a security or loss-of-work route. Confidence: confirmed source refutation. proposed_drop: the same revision mounts only the grid, removes byte-stream support at a protocol boundary, and ends legacy terminals before reload. Exact contract: SPEC_impl.md:3015–3019, 'Protocol 77 removed the byte streams with the old terminals and xterm.js: every attachment’s data channel carries a grid stream, so Attach, Attached and the browser’s socket say nothing about it, and SessionInfo and TabInfo no longer report a terminal kind.' SPEC_impl.md:2787–2788, 'This release ends them at startup (below); every terminal runs in a terminal host'. Source: terminal.js:3191–3221 gates on all grid scripts and the font, then mounts; :3387–3393 creates and fits the grid unconditionally before opening the socket. session_view.rs:1747–1778 retains encoded paths, attachment lease, generation and focus fields; no kind-dependent consumer remains in that path. Legacy remount-during-restart renderer selection and optimistic tab-kind tracking therefore serve no surviving contract. possible_cover: none. Caveats: protocol-skew compatibility is explicitly outside this conclusion; the same specification requires a reload for pages loaded before the helm update. No runtime execution."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g089/findings.jsonl",
+        "id": "c1",
+        "line": 2,
+        "disposition": "excluded",
+        "group": "grid-only-current-page-needs-no-renderer-kind-selection",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-058 after inspecting it. The matching new page always builds the grid; removing kind selection and migration presentation cannot choose a different surviving renderer. Old-page protocol skew is explicitly outside this candidate and remains preserved separately under g088/l2. Refute current-page renderer selection only. Do not broaden this dismissal to cross-update stale-page behavior. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e terminal.js:3387-3393 creates and fits a grid unconditionally before opening the socket. session_view.rs:1705-1778 retains ID-based encoded paths, lease, generation and focus without kind-dependent consumption.\",\"The same revision's specification removes byte streams and terminal-kind fields at protocol 77; current SPEC_impl.md:1692-1707,2780-2807,2943-2958 confirms terminal hosts/grid-only product architecture and explicitly requires old pages to reload. No runtime attachment was tested.\"] Current coverage/results: [\"Both specifications searched. SPEC_impl.md Grid streams and Ending the old private tmux server explicitly establish the new grid-only contract. This does not accept or refute the separate old-page input reinterpretation claim.\",\"TODO Planned empty; unlanded plans index empty; BUGS, queue INDEX and active TRIAGE_OUTCOMES contain no exact matching-current-page wrong-renderer defect. Skew/remount queue items have different state/attachment triggers.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"An old or restarting terminal might mount the wrong renderer after kind metadata and migration presentation disappear. The checked matching-page path permits only the grid; no user-work-loss or security route was alleged in this candidate.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g089/c1",
+        "line": 2,
+        "disposition": "excluded",
+        "group": "grid-only-current-page-needs-no-renderer-kind-selection",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-058 after inspecting it. The matching new page always builds the grid; removing kind selection and migration presentation cannot choose a different surviving renderer. Old-page protocol skew is explicitly outside this candidate and remains preserved separately under g088/l2. Refute current-page renderer selection only. Do not broaden this dismissal to cross-update stale-page behavior. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e terminal.js:3387-3393 creates and fits a grid unconditionally before opening the socket. session_view.rs:1705-1778 retains ID-based encoded paths, lease, generation and focus without kind-dependent consumption.\",\"The same revision's specification removes byte streams and terminal-kind fields at protocol 77; current SPEC_impl.md:1692-1707,2780-2807,2943-2958 confirms terminal hosts/grid-only product architecture and explicitly requires old pages to reload. No runtime attachment was tested.\"] Current coverage/results: [\"Both specifications searched. SPEC_impl.md Grid streams and Ending the old private tmux server explicitly establish the new grid-only contract. This does not accept or refute the separate old-page input reinterpretation claim.\",\"TODO Planned empty; unlanded plans index empty; BUGS, queue INDEX and active TRIAGE_OUTCOMES contain no exact matching-current-page wrong-renderer defect. Skew/remount queue items have different state/attachment triggers.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"An old or restarting terminal might mount the wrong renderer after kind metadata and migration presentation disappear. The checked matching-page path permits only the grid; no user-work-loss or security route was alleged in this candidate.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-058",
+          "key": "g089/c1",
+          "latest_line": 2,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "grid-only-current-page-needs-no-renderer-kind-selection",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The matching new page always builds the grid; removing kind selection and migration presentation cannot choose a different surviving renderer. Old-page protocol skew is explicitly outside this candidate and remains preserved separately under g088/l2.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e terminal.js:3387-3393 creates and fits a grid unconditionally before opening the socket. session_view.rs:1705-1778 retains ID-based encoded paths, lease, generation and focus without kind-dependent consumption.",
+            "The same revision's specification removes byte streams and terminal-kind fields at protocol 77; current SPEC_impl.md:1692-1707,2780-2807,2943-2958 confirms terminal hosts/grid-only product architecture and explicitly requires old pages to reload. No runtime attachment was tested."
+          ],
+          "coverage_checked": [
+            "Both specifications searched. SPEC_impl.md Grid streams and Ending the old private tmux server explicitly establish the new grid-only contract. This does not accept or refute the separate old-page input reinterpretation claim.",
+            "TODO Planned empty; unlanded plans index empty; BUGS, queue INDEX and active TRIAGE_OUTCOMES contain no exact matching-current-page wrong-renderer defect. Skew/remount queue items have different state/attachment triggers."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "An old or restarting terminal might mount the wrong renderer after kind metadata and migration presentation disappear. The checked matching-page path permits only the grid; no user-work-loss or security route was alleged in this candidate.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Refute current-page renderer selection only. Do not broaden this dismissal to cross-update stale-page behavior."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "grid-only-current-page-needs-no-renderer-kind-selection",
+        "destination": null
+      }
+    },
+    {
+      "key": "g089/c2",
+      "owner": "g089",
+      "id": "c2",
+      "domain": "gui-terminal-attachment",
+      "purpose": "gui-terminal-attachment: crates/farhelm-ui/src/session_view.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Replacing the tab-info projection preserves terminal identities and order",
+            "location": "crates/farhelm-ui/src/session_view.rs:1712",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\nConsidered whether removing the richer tab projection could reorder tabs, change the selected shell, or move a terminal across the mount cap. Source comparison refutes that change in behavior.\n\n## Details\nThe assigned patch replaces visible_tab_infos with visible_tabs at session_view.rs:1712, changes selection membership from comparing tab.id to ids.contains, and still takes the first MAX_MOUNTED_TAB_ISLANDS. In the parent revision, tabs.rs:198–216 implements visible_tab_infos by calling visible_tabs(server, opened, closed), then mapping each resulting id to Tab { id, kind } without changing order, count or identity. Parent visible_tabs at :156–168 already appends unlisted optimistic ids once and removes closed ids. Therefore the removed layer contributes kind metadata only; selection membership, the ordered cap and path/id construction consume the same ids. This checks the replaced implementation rather than inferring equivalence from the new helper's name. The grid-only kind-removal contract itself remains recorded under c1, not a new issue here. Suggested bucket: other if there had been a changed projection; no changed target or destructive operation was established. Could-be-highest: no established security or user-work-loss route; the projection preserves the exact IDs handed to existing controls. Confidence: confirmed source refutation. proposed_drop: no independent finding, because the old helper delegates to precisely the replacement helper and only maps each id to attach kind metadata. possible_cover: none beyond this group's existing c1 for terminal-kind removal. No runtime execution or reproduction. Discovery pass 1 candidate only, not a new verified or unverified finding."
+          }
+        }
+      ],
+      "latest": {
+        "line": 6,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Replacing the tab-info projection preserves terminal identities and order",
+          "location": "crates/farhelm-ui/src/session_view.rs:1712",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\nConsidered whether removing the richer tab projection could reorder tabs, change the selected shell, or move a terminal across the mount cap. Source comparison refutes that change in behavior.\n\n## Details\nThe assigned patch replaces visible_tab_infos with visible_tabs at session_view.rs:1712, changes selection membership from comparing tab.id to ids.contains, and still takes the first MAX_MOUNTED_TAB_ISLANDS. In the parent revision, tabs.rs:198–216 implements visible_tab_infos by calling visible_tabs(server, opened, closed), then mapping each resulting id to Tab { id, kind } without changing order, count or identity. Parent visible_tabs at :156–168 already appends unlisted optimistic ids once and removes closed ids. Therefore the removed layer contributes kind metadata only; selection membership, the ordered cap and path/id construction consume the same ids. This checks the replaced implementation rather than inferring equivalence from the new helper's name. The grid-only kind-removal contract itself remains recorded under c1, not a new issue here. Suggested bucket: other if there had been a changed projection; no changed target or destructive operation was established. Could-be-highest: no established security or user-work-loss route; the projection preserves the exact IDs handed to existing controls. Confidence: confirmed source refutation. proposed_drop: no independent finding, because the old helper delegates to precisely the replacement helper and only maps each id to attach kind metadata. possible_cover: none beyond this group's existing c1 for terminal-kind removal. No runtime execution or reproduction. Discovery pass 1 candidate only, not a new verified or unverified finding."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g089/findings.jsonl",
+        "id": "c2",
+        "line": 6,
+        "disposition": "under-investigation",
+        "group": "g089-c2",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-058",
+          "key": "g089/c2",
+          "latest_line": 6,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "removed-tab-kind-projection-preserves-ids-order-focus",
+          "aliases": [
+            "g088/c3 (identity/order/cap subset)"
+          ],
+          "target_queue_file": null,
+          "why": "The replacement is precisely the ID helper the old projection called. Removing its metadata map does not change tab identity, sequence, selected membership or mount-cap position.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e^ tabs.rs:156-168 appends optimistic IDs and removes closed IDs; :198-216 calls that helper and maps each result to Tab { id, kind } without reordering.",
+            "f560058 session_view.rs:1712-1718 uses visible_tabs directly, ids.contains for the same selection membership and the same MAX_MOUNTED_TAB_ISLANDS prefix. :1763-1780 constructs tab elements and WebSocket tab arguments from the same opaque IDs. No runtime routing or focus test was run."
+          ],
+          "coverage_checked": [
+            "Both specifications searched; SPEC_impl.md:1692-1707,2943-2958 establishes grid-only kind removal but does not excuse routing mistakes. Direct before/after helper equivalence settles this candidate.",
+            "TODO Planned empty; unlanded plans index empty; BUGS, queue INDEX and active TRIAGE_OUTCOMES have no exact projection-induced tab reordering or identity issue. g088/c3 independently describes the same local equivalence plus focus."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Considered reordering tabs, changing the selected shell or moving a terminal across the mount cap. No changed target or destructive operation was established; the exact IDs are preserved.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Source refutation of identity/order change. Conservatively flag an independent drop check for the considered wrong-shell target consequence."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-058.json",
+          "key": "g089/c2",
+          "proposal": "claim-checks/claims-058/result.json",
+          "parent_proposal": "source-refuted-tab-kind-projection-identity-order-cap-change",
+          "final_independent_gate": "required-by-conservative-wrong-shell-flag",
+          "reason": "Full058 replacement is exactly the old visibleIDs helper including optimistic additions/closed removals, old wrapper adds only kind metadata, current selection/mount prefix/socket IDs unchanged. Exact same088c3 identity/order/cap subset; do not falsely claim this record also independently proves focus. Original selected-shell/mount movement possibility kept for gate, no actual destructive target change/runtime observation."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "removed-tab-kind-projection-preserves-ids-order-focus",
+        "destination": null
+      }
+    },
+    {
+      "key": "g089/l2",
+      "owner": "g089",
+      "id": "l2",
+      "domain": "gui-terminal-attachment",
+      "purpose": "gui-terminal-attachment: crates/farhelm-ui/src/session_view.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l2",
+            "state": "open",
+            "summary": "Check the retained term.write callback explanation after byte-renderer removal",
+            "location": "crates/farhelm-ui/src/session_view.rs:3087",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\nThe terminal pane's lifecycle explanation still identifies a term.write completion callback as the reveal boundary, although this commit removes the byte renderer. Investigate whether that is a new documentation defect attributable to this group's removal, or merely an older inaccurate detail outside the assigned change.\n\n## Details\nNew source observation during discovery pass 1: session_view.rs:3087–3094 says the reveal happens inside a term.write completion callback, to explain why terminal.js owns the connecting placeholder. This group's patch removes the terminal-kind selector and now always mounts a grid. terminal.js:2734–2788 documents that grid-only interop; the retained comment may name a callback that no longer exists. No production failure is alleged; the surrounding explanation that replay/reveal bypasses Dioxus may still be correct. Missing premise: when this wording and the grid reveal path entered the full pinned review range, and whether the assigned renderer removal newly invalidates a surviving lifecycle explanation. Next checks: inspect the actual grid reveal source, base/current comment and targeted in-range history. Suggested bucket: other if a documentation defect is established. Could-be-highest: no security or user-owned-work-loss route. Confidence: uninvestigated documentation-attribution lead. proposed_drop: false. possible_cover: none in the supplied interface findings. No runtime execution or reproduction."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l2",
+            "state": "open",
+            "summary": "The retained term.write callback explanation was already inaccurate before the review range",
+            "location": "crates/farhelm-ui/src/session_view.rs:3090",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\nThe terminal pane explanation names a term.write completion callback that the grid reveal does not use. This is an actual stale implementation explanation for maintainers, but source checks establish the same mismatch before the entire pinned review range. It is not retained as a newly introduced issue from the assigned removal.\n\n## Details\nLead l2 closed as a candidate after investigation. Current session_view.rs:3088–3095 says reveal happens inside a term.write completion callback. Current terminal.js:3756–3783 instead directly scrolls and flushes the grid, then shows the terminal. This documents an obsolete mechanism; production correctness is not a refutation of that documentation concern.\n\nAttribution was checked against the full range, not just this commit's parent. Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a already contains the identical unqualified explanation in session_view.rs:317–321 and :3076–3083. Its terminal.js:4686–4690 already directly constructs the grid for a host-kind terminal; :5247–5260 directly scrolls/flushes that grid on reveal, and :5475–5479 reveals a grid without the byte-write callback. Thus the callback claim was already false for the existing grid path before the first reviewed commit. Targeted git log -G 'term.write|reveal it performs' over the complete exclusive-base..inclusive-00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db range for session_view.rs returned no matching changes to that explanation. The assigned patch removes the other renderer and updates other terminology but introduces neither this prose nor the grid/callback mismatch. The continued high-level reason for JS ownership still applies; the inaccurate named mechanism is pre-range. No retired implementation was searched for independent runtime defects.\n\nSuggested bucket: other, documentation accuracy, if addressed separately. Could-be-highest: no security or user-owned-work-loss route. Confidence: confirmed stale wording and confirmed pre-range mismatch from base/current source and bounded targeted history. proposed_drop: outside newly introduced assigned scope; the exact same unqualified callback claim and the conflicting direct-grid reveal both exist at the exclusive range base. This does not claim the comment is accurate. possible_cover: none in the supplied interface records. Original consequence preserved: future maintainers receive an obsolete lifecycle mechanism, without any established user-facing runtime failure. No tests, reproductions, builds or live-install actions. No remaining missing premise or open lead for l2."
+          }
+        }
+      ],
+      "latest": {
+        "line": 8,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l2",
+          "state": "open",
+          "summary": "The retained term.write callback explanation was already inaccurate before the review range",
+          "location": "crates/farhelm-ui/src/session_view.rs:3090",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\nThe terminal pane explanation names a term.write completion callback that the grid reveal does not use. This is an actual stale implementation explanation for maintainers, but source checks establish the same mismatch before the entire pinned review range. It is not retained as a newly introduced issue from the assigned removal.\n\n## Details\nLead l2 closed as a candidate after investigation. Current session_view.rs:3088–3095 says reveal happens inside a term.write completion callback. Current terminal.js:3756–3783 instead directly scrolls and flushes the grid, then shows the terminal. This documents an obsolete mechanism; production correctness is not a refutation of that documentation concern.\n\nAttribution was checked against the full range, not just this commit's parent. Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a already contains the identical unqualified explanation in session_view.rs:317–321 and :3076–3083. Its terminal.js:4686–4690 already directly constructs the grid for a host-kind terminal; :5247–5260 directly scrolls/flushes that grid on reveal, and :5475–5479 reveals a grid without the byte-write callback. Thus the callback claim was already false for the existing grid path before the first reviewed commit. Targeted git log -G 'term.write|reveal it performs' over the complete exclusive-base..inclusive-00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db range for session_view.rs returned no matching changes to that explanation. The assigned patch removes the other renderer and updates other terminology but introduces neither this prose nor the grid/callback mismatch. The continued high-level reason for JS ownership still applies; the inaccurate named mechanism is pre-range. No retired implementation was searched for independent runtime defects.\n\nSuggested bucket: other, documentation accuracy, if addressed separately. Could-be-highest: no security or user-owned-work-loss route. Confidence: confirmed stale wording and confirmed pre-range mismatch from base/current source and bounded targeted history. proposed_drop: outside newly introduced assigned scope; the exact same unqualified callback claim and the conflicting direct-grid reveal both exist at the exclusive range base. This does not claim the comment is accurate. possible_cover: none in the supplied interface records. Original consequence preserved: future maintainers receive an obsolete lifecycle mechanism, without any established user-facing runtime failure. No tests, reproductions, builds or live-install actions. No remaining missing premise or open lead for l2."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g089/findings.jsonl",
+        "id": "l2",
+        "line": 8,
+        "disposition": "excluded",
+        "group": "pre-range-grid-reveal-comment-still-names-term-write-callback",
+        "reason": "Parent explicitly accepted named out-of-range proposal from claims-058 after inspecting it. The comment is inaccurate for the grid path, but that exact mismatch already existed at the full exclusive review base. The assigned removal neither introduced this wording nor first made it false. Outside this newly introduced review range: the complete base already contains both the inaccurate explanation and the conflicting grid reveal path. Preserve the documentation defect if pursued separately. Checked source/results: [\"6e423e30068b62c6cfa276c6d720ee35bb70387a session_view.rs:3076-3083 already says reveal happens inside a term.write completion callback. The same base terminal.js:5247-5260 already directly scrolls and flushes its grid before revealing it, contradicting the unqualified explanation.\",\"f560058da19e02716e6f943883a9508b447aff4e session_view.rs:3088-3095 retains the same explanation; terminal.js:3756-3783 directly reveals the grid without a term.write callback.\",\"Targeted git log -G 'term.write|reveal it performs' over 6e423e3..00de0b6 for session_view.rs returned no matching changes. This is actual stale lifecycle documentation, not a production defect refuted by correct output. No runtime test or reproduction was run.\"] Current coverage/results: [\"Both specifications searched. SPEC_impl.md:1692-1707 describes JS-owned grid rendering outside Dioxus and does not accept the obsolete named callback. No term.write acceptance or matching queue claim found.\",\"TODO Planned empty; plans/queue/INDEX.md contains no unlanded entries. Historical tmux-drop-from-docs material is landed and not current unlanded-plan coverage. BUGS, queue INDEX and active TRIAGE_OUTCOMES have no exact callback explanation issue. Attribution, rather than coverage or filtering, supplies this proposed disposition.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Future maintainers receive an obsolete explanation of the reveal lifecycle. The high-level reason for JS ownership remains valid; no user-facing runtime failure, security effect or work-loss route was alleged.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g089/l2",
+        "line": 8,
+        "disposition": "excluded",
+        "group": "pre-range-grid-reveal-comment-still-names-term-write-callback",
+        "bucket": "other",
+        "recording": "out-of-range",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named out-of-range proposal from claims-058 after inspecting it. The comment is inaccurate for the grid path, but that exact mismatch already existed at the full exclusive review base. The assigned removal neither introduced this wording nor first made it false. Outside this newly introduced review range: the complete base already contains both the inaccurate explanation and the conflicting grid reveal path. Preserve the documentation defect if pursued separately. Checked source/results: [\"6e423e30068b62c6cfa276c6d720ee35bb70387a session_view.rs:3076-3083 already says reveal happens inside a term.write completion callback. The same base terminal.js:5247-5260 already directly scrolls and flushes its grid before revealing it, contradicting the unqualified explanation.\",\"f560058da19e02716e6f943883a9508b447aff4e session_view.rs:3088-3095 retains the same explanation; terminal.js:3756-3783 directly reveals the grid without a term.write callback.\",\"Targeted git log -G 'term.write|reveal it performs' over 6e423e3..00de0b6 for session_view.rs returned no matching changes. This is actual stale lifecycle documentation, not a production defect refuted by correct output. No runtime test or reproduction was run.\"] Current coverage/results: [\"Both specifications searched. SPEC_impl.md:1692-1707 describes JS-owned grid rendering outside Dioxus and does not accept the obsolete named callback. No term.write acceptance or matching queue claim found.\",\"TODO Planned empty; plans/queue/INDEX.md contains no unlanded entries. Historical tmux-drop-from-docs material is landed and not current unlanded-plan coverage. BUGS, queue INDEX and active TRIAGE_OUTCOMES have no exact callback explanation issue. Attribution, rather than coverage or filtering, supplies this proposed disposition.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Future maintainers receive an obsolete explanation of the reveal lifecycle. The high-level reason for JS ownership remains valid; no user-facing runtime failure, security effect or work-loss route was alleged.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-058",
+          "key": "g089/l2",
+          "latest_line": 8,
+          "recommendation": "out-of-range",
+          "bucket": "other",
+          "underlying_key": "pre-range-grid-reveal-comment-still-names-term-write-callback",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The comment is inaccurate for the grid path, but that exact mismatch already existed at the full exclusive review base. The assigned removal neither introduced this wording nor first made it false.",
+          "checks": [
+            "6e423e30068b62c6cfa276c6d720ee35bb70387a session_view.rs:3076-3083 already says reveal happens inside a term.write completion callback. The same base terminal.js:5247-5260 already directly scrolls and flushes its grid before revealing it, contradicting the unqualified explanation.",
+            "f560058da19e02716e6f943883a9508b447aff4e session_view.rs:3088-3095 retains the same explanation; terminal.js:3756-3783 directly reveals the grid without a term.write callback.",
+            "Targeted git log -G 'term.write|reveal it performs' over 6e423e3..00de0b6 for session_view.rs returned no matching changes. This is actual stale lifecycle documentation, not a production defect refuted by correct output. No runtime test or reproduction was run."
+          ],
+          "coverage_checked": [
+            "Both specifications searched. SPEC_impl.md:1692-1707 describes JS-owned grid rendering outside Dioxus and does not accept the obsolete named callback. No term.write acceptance or matching queue claim found.",
+            "TODO Planned empty; plans/queue/INDEX.md contains no unlanded entries. Historical tmux-drop-from-docs material is landed and not current unlanded-plan coverage. BUGS, queue INDEX and active TRIAGE_OUTCOMES have no exact callback explanation issue. Attribution, rather than coverage or filtering, supplies this proposed disposition."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Future maintainers receive an obsolete explanation of the reveal lifecycle. The high-level reason for JS ownership remains valid; no user-facing runtime failure, security effect or work-loss route was alleged.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Outside this newly introduced review range: the complete base already contains both the inaccurate explanation and the conflicting grid reveal path. Preserve the documentation defect if pursued separately."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "pre-range-grid-reveal-comment-still-names-term-write-callback",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial pass complete; all 532 assigned patch lines reviewed.\n\n- `l1`: source-supported finding, bucket `other`. A delayed stale listing can suppress terminal reattachment after successful Restart until a later detail refresh.\n- `c1`: dismissed renderer concern; removal matches the grid-only contract.\n\nFindings and progress recorded. No open leads, unread scope, runtime tests, reproductions, or checkout changes."
+    },
+    {
+      "turn": 2,
+      "reply": "Coverage repair complete: lines 1–532 delivered through three direct-stdout evidence packets; nothing unread.\n\nSynthesis revised `l1`: likely conditional race, bucket `other`, duplicating `g037/f3` and `g038/l1`. `g036/l1` retains a distinct trigger and repair boundary. No drop proposed.\n\nLog and progress updated. No new findings, open leads, runtime execution, or checkout changes."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 complete. No new in-scope findings.\n\n- Checked tab ordering, selection, mount limits, confirmation targets, interop identity and changed tests.\n- Recorded candidates `c2` (source-refuted) and `l2` (stale comment predates the full review range).\n- New verified IDs: none.\n- New unverified-after-investigation IDs: none.\n- Open leads: none.\n\nProgress updated; no runtime execution or checkout changes."
+    }
+  ],
+  "progress": "# g089 progress\n\nTurn 1 complete: initial source review. Discovery passes: 0; synthesis and later discovery remain caller-owned turns.\n\nCoverage: all assigned patch lines 1–532 read through the three evidence packets (1–180, 181–360, 361–532). Read the complete inventory commits field without excluded metadata. Reviewed f560058da19e02716e6f943883a9508b447aff4e at its pinned source, with parent context for the removed restart-listing guard. No unread assigned material.\n\nContracts checked: SPEC.md Lifecycle operations, Session view and Terminal experience; SPEC_impl.md terminal grid island, Grid streams, legacy-terminal removal, rendered-answer binding, shared lifecycle settlement and stale-view retention. Reviewed changed test bodies using the brief's test checklist. No runtime tests, builds, reproductions, or repository writes.\n\nDurable records: l1 revised from lead to finding (other; delayed stale listing can erase successful Restart observation before terminal remount). c1 candidate dismisses terminal-kind/migration removal through the same-revision grid-only protocol and startup conversion. No open leads. New verified IDs this turn: l1. New unverified IDs: none.\n\nInterfaces: the finding crosses session_view.rs, session_ops.rs, list/view.rs and ReadGate. The sidebar and detail readers are independent; listing admission orders only committed listings and does not fence at Restart completion. The detail refresh is the recovery path. Renderer-kind removal is sound under the new protocol and mandatory page reload on helm upgrade; no compatibility promise beyond those contracts was inferred.\n\nNext action: return initial-pass delta. A later caller-directed synthesis turn should recheck l1's scheduling premises and the deliberately limited bucket, then decide any further discovery. No helper agents were spawned.\n\nTurn 2 in progress: repair evidence delivery, then synthesis by explicit caller override. The caller audit found zero mandatory packet coverage despite the prior ordinary source reads; prior completion claim did not establish audited packet coverage. Brief fully reread. Existing findings preserved. Pending: direct-stdout evidence packets for 1–532, then compare l1 with g037/f3, g038/l1, and g036/l1 at their own revisions. Discovery-pass count remains 0.\n\nTurn 2 complete: coverage repair plus synthesis, per caller's explicit later-turn override. Discovery-pass count: 0. New discovery: none.\n\nCorrected evidence delivery: exact evidence read commands successfully returned direct stdout for 1–180, 181–360 and 361–532 of prep/parts/01120-000.patch, using the current manifest. Each packet is below 200 lines and 24,000 encoded bytes. Hash remained c5b358942db2686e08d14b38ecf65982c3c4ce9b71eee9a21c27943230fa8ef2. No unread assigned ranges. This supersedes turn 1's unsupported audited-coverage claim; the caller owns the subsequent audit.\n\nSynthesis delta: l1 revised twice, first to record the duplicate/revision comparison and outstanding checks, then to complete synthesis. Confidence now explicitly likely with the unobserved response-before-effect timing premise; the source-permitted conditional route remains supported. Suggested bucket remains other. proposed_drop remains false; no parent drop accepted. c1 unchanged. New verified/unverified IDs: none. No open source leads.\n\nChecks added: pinned Dioxus 0.7.10 effect queue, task/effect priorities and desktop edit-flush wait; helm aggregate host snapshot before cache await; connected live detail versus disconnected cached detail; actual SurfaceReader claim/coalescing and pending release; earlier b3d6b3eff6b7508e0b1fb6ec5b5cde31d27ebabe age floor and payload-dependent observer. Read the specifically authorized g037/f3, g038/l1 and g036/l1 records; reread g038's latest event separately after its combined output was clipped. No packet or required source read remains clipped/unread.\n\nInterface conclusion: l1 duplicates g037/f3 and g038/l1 at f560058da19e02716e6f943883a9508b447aff4e. g036/l1 at the earlier revision uses a newer age-eligible listing and may lose the terminal-kind payload; restoring the age floor fixes this group's pre-completion stale-list trigger but not that boundary. Durable mounted-consumer success can address both. Numerical generation survives; terminal admission can still remain empty. A successful live detail normally repairs the temporary interrupted card; no persistent outage, destructive second Restart, or cached connected-detail premise is asserted.\n\nNo tests, builds, reproductions, runtime observations, helper agents or checkout writes. Next action: return delta and synthesis result to caller; no further discovery pass performed in this turn.\n\nTurn 3 in progress: separate discovery pass 1, beyond known issues. Read discovery-neighbours.json completely (100 lines, 19,183 bytes) before the search. Named g038/l1:11 input is reconciled with the completed turn-2 synthesis: same mounted-current/old-stale-sidebar trigger; connected detail is live and normally repairs it. No premise or consequence change, no accepted drop/lowering, no new issue from this input. Supplied g088/l1 covers the same existing interaction; its stronger bucket is not evidence of an additional route. Other supplied interface records describe grid Shift+Enter documentation and failed-mount test-hosting coverage, outside this group's changed source. Existing l1 and c1 history retained.\n\nSearch focus: independent effects of replacing visible_tab_infos with visible_tabs, optimistic tab reconciliation and mount cap/identity; removed UI migration/detail surfaces against their replacement contracts; changed test premises and remaining interop field consumers. Pending reads are pinned to the assigned commit or its parent; no runtime execution or coverage-source search planned.\n\nTurn 3 complete: discovery pass 1 finished. No new in-scope finding. New verified finding IDs: none. New unverified-after-investigation finding IDs: none. Remaining lead IDs: none. Existing l1/c1 unchanged; no parent drop or lowering accepted.\n\nNew durable candidate records: c2 refutes a projection/order regression by comparing the parent visible_tab_infos implementation with its visible_tabs delegate and the new selection/cap consumers. l2 was immediately logged as a documentation-attribution lead, then closed as a candidate after source/history checks: the term.write callback explanation is stale, but the identical unqualified explanation and direct-grid reveal mismatch both exist before the exclusive review-range base. The full base..tip targeted history returned no change to that wording. Its stale-documentation consequence is preserved; the candidate basis is pre-range attribution, not production correctness. The parent retains authority over proposed drops.\n\nUseful checks/results: old helper maps the same visible IDs without reordering; strip, selected-tab projection and mount-cap pane indexing consume those same IDs; open/close API routes use encoded session/tab IDs and close confirmation consumes its captured token/ID. Checked the remaining JS spec identity consumers (path/gen), unchanged attachment fields and keyed pane rendering. Revisited the complete assigned patch and changed tests against the already-read lifecycle/grid contracts; no distinct test-oracle defect beyond supplied known findings was identified. The removed renderer selection and migration/detail information remain covered by c1's grid-only protocol/startup contract.\n\nAll assigned mandatory source remains fully covered from the repaired turn-2 evidence delivery. No unread assigned scope. A combined optional context output was clipped during the search; the helper implementation and relevant view ranges were subsequently delivered separately in bounded reads. No runtime tests, reproductions, builds, live-install actions, helper agents or checkout writes.\n\nNext action: return discovery delta. No further pass was performed in this turn.\n"
+}

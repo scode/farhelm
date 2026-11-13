@@ -87,3 +87,80 @@ append-only events, revisions, withdrawals and independent judgments are retaine
 refer to the named reviewed revisions; the original revision context is ca9b0a19856dc136f63ad2d14f1076027edce1eb;
 introduced in assigned patch 4ed000fb454cebd9c22a88f358a93e15566b8c9e at e2e/tests/terminal-migration.spec.ts:137-139..
 This was a source-only review; runtime occurrence and frequency were not measured.
+
+## Abbreviated review through 00de0b6c
+
+Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes after the pinned tip.
+
+Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket does not approve any proposed lowering.
+
+Contributing records: `g026/f6`, `g069/l1`.
+
+### g026/f6
+
+Confidence: Unverified collection; recording proposals and any disagreement remain unresolved.
+
+Latest reviewer record, event 27 (finding, open):
+
+Reviewed commit: 086d4ff96efb13bdb51accaa1ce0a0a6f7d5ca5b
+
+## TLDR
+If route setup fails after this test creates its source session, the test exits without deleting that session. Later tests on the shared stack can inherit the extra session and agent. This affects maintainer test isolation, not a user's installation.
+
+## Details
+The assigned new test creates session at :461, awaits drainedRoute at :468 and :489, and enters try only at :493. Its only cleanupSession call is inside the finally at :512. drained-route.ts:36 awaits page.route and propagates failure before returning a stop function, so registration failure after the successful real create bypasses this finally. createSession in helpers/fleet.ts:408-438 posts a real /api/sessions request using FAKE_AGENT by default and returns the durable session ID; browser/page disposal is not that session's lifetime. helpers/evidence.ts:46-112 tears down timeline, observational premise tracking and browser context but never deletes sessions. This spec has no enclosing per-test owned-session sweep. The configured stack is long-lived and shared across serial tests and files (playwright.config.ts:119-134,160-169). Thus a rejected/cancelled route registration, including test timeout while setup awaits it, can leave the created session past this test's cleanup boundary. The enclosing stack eventually ends; no indefinite user-process leak or catastrophic tooling harm is claimed.
+
+Move ownership acquisition and all later fallible setup under the existing try/finally, registering the returned ID immediately. A clean normal run and assertion failures after :493 already clean up; the gap is specifically the pre-try setup window. The test-authoring contract requires owned fixture lifetime/failure paths to remain established. Suggested bucket: other. Could-be-highest: false. Confidence: confirmed source-level failure path, not an observed failure. proposed_drop: false. possible_cover: neighbour g069/l1 describes the same cleanup-ownership pattern in podman-environments.spec.ts; this record identifies the separately assigned newly added caller and may be grouped with that common remediation by the parent. It is distinct from g026/f5's raw wait inside an entered try. No runtime tests, reproductions or live-install interaction.
+
+Discovery continuation checked the pinned endpoint 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db: the same test still creates its session at :476, awaits the two route registrations at :483 and :504, and enters try only at :508. The pre-try ownership gap therefore persists; the later UI/terminal changes do not move cleanup admission. No runtime observation added.
+
+Citation correction after numbered helper read: the awaited page.route call is drained-route.ts:38, not :36. Its propagation/ownership conclusion is unchanged.
+
+Reopened synthesis turn 5: supplied g024/l5 does not remove this separate pre-try cleanup obligation. ownedHost chooses a real connected ordinary SSH host and rewrites its browser-visible ownership/state; the created source is an ordinary real session, not a real stopped Podman actor. The shared stack is intentionally alive across tests, with no per-test manager drop to trigger either the documented manager fallback or this newly supplied resource-retention path. Ordinary global teardown later ending the stack does not undo the missing cleanup before subsequent tests run. Original pre-try consequence, other bucket, possible-cover note and proposed_drop:false unchanged. No new production or runtime claim.
+
+Returned proposal (claims-015, event 21): **retain-verified**, suggested bucket **other**.
+
+A rejected route registration after the real session create bypasses the only session cleanup. This is a conditional per-test isolation defect, not an observed leak or product failure.
+
+Original stronger consequence: No highest consequence was asserted: extra test-owned session/agent may survive this test until broader stack cleanup. No indefinite user-process leak or catastrophic tooling harm.
+
+Unresolved premise or limitation: Actual leftover work requires route-registration rejection/cancellation after create succeeds; incidence and downstream failures were not observed.
+
+Proposed basis: Record the conditional setup ownership gap, preserving its bounded maintainer-test scope. Parent-supplied g069/l1 is related provenance only; its source/history was not assigned here.
+
+Existing parent disposition (event 21): duplicate. Parent revises consolidation only after reading claims043 g069/l1 and the complete existing acquisition-before-guard item. Previously verified g026/f6 remains source-confirmed:00de:tensorlake-sandbox-sessions474-508 acquires source before awaited route registration can reject and before try; cleanup523-528 cannot run. Same root as g069/l1's newly checked Podman callers, with full independent provenance retained. Extend the existing item with both scopes instead of creating another acquisition-before-guard record. Not a refutation, confidence lowering, existing exact cover or discard of caller evidence; bounded test-stack contamination only.
+
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g026 record](records/review-through-00de0b6c/groups/g026.json). Record ID: `f6`.
+
+### g069/l1
+
+Confidence: Source-confirmed by an existing parent decision; not runtime reproduced.
+
+Latest reviewer record, event 7 (finding, open):
+
+Reviewed commit: 350a4b33b6d4476f4a78e43cea124bc2b828f462
+
+## TLDR
+If setup fails after creating the source session, this browser test leaves its fixture session in the shared test stack. Later tests can inherit the extra session and its agent instead of a restored fixture. A saved-template fixture has the same cleanup gap. This affects test isolation, not a user's installation.
+
+## Details
+The active-placement test creates source at lines 111-114, then awaits a listing and asserts its success, source presence and host at lines 115-119. Its try/finally begins only at line 245; cleanupSession(source.id) is inside that finally at line 292. A refused listing, missing source row or failed route registration between creation and line 245 bypasses cleanup entirely. The same pre-try ownership gap occurs for source creation at lines 501 and 555. The quick-launch test likewise saves its real template at lines 689-702 but does not enter try until line 741, after more awaited route registration.
+
+The source-session consequence is supported by e2e/tests/helpers/fleet.ts:408-441 (real API create) and 576-589 (explicit stop/delete cleanup). Its FAKE_AGENT definition at lines 165-175 selects the basic fixture; crates/farhelm-fixtures/src/fake_agent.rs:1675-1697 shows the fixture waiting for stdin until quit, rather than exiting at browser disposal. e2e/tests/helpers/evidence.ts:46-112 tears down timelines, premise observation and browser contexts without deleting API sessions. e2e/playwright.config.ts:119-134 describes a long-lived shared stack, and lines 160-169 require specs that disturb shared stack state to put it back. A failed browser worker/context is therefore not an owned-session cleanup boundary. Put session/template creation and every later setup operation inside the existing try/finally, recording each owned identity immediately after creation succeeds.
+
+Suggested bucket: other; the established consequence is failure-path contamination of maintainer test tooling. Confidence: confirmed from source and fixture lifecycle contracts; no runtime execution or reproduction. proposed_drop: false. Could-be-highest: false; only the harness's owned fixtures are affected, and no catastrophic tooling consequence is established. possible_cover: none. Caveats: a setup failure is required; normal success and failures inside the existing try clean up. The enclosing stack eventually shuts down. No cascade or indefinite process leak beyond stack shutdown was observed. This revision corrects the cleanup line reference, confirms the fake-agent lifetime from implementation, and includes the saved-template instance of the same ownership gap. The original suspected lingering-agent and later-test contamination consequences are retained.
+
+Returned proposal (claims-043, event 7): **retain-verified**, suggested bucket **other**.
+
+Conditional setup failure can bypass all local cleanup after a real session or template has already been acquired. Shared browser/worker teardown does not delete these API-owned fixtures. This is useful additional scope for the existing acquired-before-guard item, not exact coverage of these tests.
+
+Original stronger consequence: Setup failure can leave a fixture agent running and contaminate later tests. Latest history adds the saved-template fixture. Normal success and failures after guard entry clean up; wider stack reset/shutdown eventually reclaims fixtures. No user installation, security or catastrophic tooling impact is claimed.
+
+Unresolved premise or limitation: Actual failure incidence, survivor lifetime until a later suite reset, and downstream test failures were not measured. They are not required for the conditional ownership gap.
+
+Proposed basis: Retain all source/session/template instances and caveats. Extend the acquired-before-guard queue item with this separately named scope, or keep a dedicated item if its expanded title would be misleading. Do not mark the new scope covered merely because other tests have the same ownership mistake.
+
+Existing parent disposition (event 7): verified. Parent read full claims043 and existing acquired-before-guard item. New Podman tests at350a4b33:111-119,501,555,689-702 acquire real session/template state before fallible assertions or route setup and before their cleanup guards. This is useful additional caller scope for the same ownership gap. Existing item covers quick-switcher/migration only, so extend it; not an accepted dismissal. Real API agents outlive browser disposal, later stack reset bounds residue, no actual incidence or user-work loss claimed. Current coverage searches found no acceptance/pending repair. Reconcile g026/f6's same pre-guard acquisition mechanism here, preserving each caller and distinct fallible setup.
+
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g069 record](records/review-through-00de0b6c/groups/g069.json). Record ID: `l1`.
+

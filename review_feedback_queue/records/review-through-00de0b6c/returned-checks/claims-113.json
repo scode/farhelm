@@ -1,0 +1,92 @@
+[
+  {
+    "key": "g182/c1",
+    "latest_line": 14,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "hidden-grid-test-no-measurement-two-column-rationale",
+    "aliases": [],
+    "target_queue_file": "review_feedback_queue/hidden-grid-fit-rationale.md",
+    "why": "The newly written test comment gives a false explanation of grid sizing. This is an in-range test-documentation defect; the independent pixel-geometry assertions remain effective. No product sizing failure or false pass was established.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e:e2e/tests/terminal-tabs.spec.ts:1305-1315 says an unmeasured fit leaves size unchanged, then incorrectly says it lands at two columns. The commit diff replaces the xterm minimum rationale with that grid-specific claim.",
+      "f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/assets/grid-terminal.js:159-161,404-407 initializes fitted size to 80x24. fit at 473-496 returns without replacing fitted when font measurement is unavailable or pane dimensions are non-finite. Thus failure to propose a fit need not produce two columns.",
+      "The introduction revision's SPEC_impl.md:1835-1887, The grid client, specifies measurement-based proposals. This supports the correction; it does not accept inaccurate test commentary.",
+      "f560058da19e02716e6f943883a9508b447aff4e:e2e/tests/terminal-tabs.spec.ts:1310-1311 independently requires positive actual element dimensions; 1317-1320 checks shell usability after reveal. Those guards refute the implied stronger geometry-oracle failure.",
+      "git merge-base --is-ancestor succeeded for exclusive base -> f560058 and f560058 -> inclusive tip. The same erroneous comment remains at 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:e2e/tests/terminal-tabs.spec.ts:1313-1314. Earlier assigned-patch scope exclusions are superseded, not silently discarded.",
+      "Source inspection only; no runtime reproduction or test was performed."
+    ],
+    "coverage_checked": [
+      "SPEC.md searched for hidden panes, fitting and geometry; no acceptance of this explanation. SPEC_impl.md, The grid client (1836-1888), read in full: fit formula is context, not coverage of the false comment.",
+      "Current TODO.md Planned bucket is empty (25-27). BUGS.md's sole SSH-transfer hang entry does not match.",
+      "plans/queue searched for fitting, hidden geometry and terminal-tabs; tmux-drop-from-docs criteria 3/5 concern removal of stale xterm rationales, but plans/REPORTS.md:32 says it landed on 2026-11-13. It supplies no unlanded-plan coverage, and the new grid-only error survives it. Other geometry hits concern different tests or UI geometry.",
+      "INDEX.md read in full and queue text searched for the exact no-measurement/two-column claim and terminal-tabs source. No exact item found. Existing switch-geometry and font-measurement items concern different triggers and assertions, not this rationale.",
+      "Active TRIAGE_OUTCOMES.md searched for the actual claim, hidden panes, fitting and terminal-tabs; no matching decision. Archive not read.",
+      "FILTER.md read in full: no filter covers an unconditional inaccurate test explanation. The rare-diagnostic filter requires a rare trigger, which this claim lacks."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Earlier records considered an implied weakened geometry oracle, then explicitly refuted it with positive bounding-rectangle assertions and the later shell witness. The retained consequence is misleading test documentation only. Earlier immediate-parent scope drops were superseded by whole-range attribution; no drop was accepted.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain the narrow verified explanation defect. Bucket other: harm is confined to maintainer understanding of a test, with no security or user-work-loss route."
+  },
+  {
+    "key": "g182/c2",
+    "latest_line": 6,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "phantom-tab-test-known-gone-refusal-equivalence",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "For a terminal host known gone, the real old tab selector and the invented selector reach the same refusal. The test's synthetic listing therefore does not establish the proposed coverage defect. An unavailable host is a different state and remains outside this conclusion.",
+    "checks": [
+      "61e632323dbc6b4a35ed27bf5b9833102ffd5a4e:crates/farhelm-supervisor/src/hosts/terminal.rs:835-849 maps Gone to Absent and Unavailable to Unattributed.",
+      "At the same revision, service/core/host_tabs.rs:175-186 marks Absent finished and Unattributed unfinished; 265-275 excludes finished tabs from normal listings.",
+      "At the same revision, service/terminals.rs:211-220,242-247 sends finished tabs on LiveOnly lookup and unknown tab IDs through the identical no_such_tab NotFound response.",
+      "At the same revision, crates/farhelm-helm/src/terminal.rs:390-394,615-635 maps tab NotFound to TabClosed and relays the refusal. e2e/tests/terminal-tabs.spec.ts:1978-1986 explicitly describes known-gone hosts; 2010-2021 replaces only the listing; 2042-2056 observes the real refusal, empty terminal and no retries.",
+      "Source inspection only; no execution or reproduction."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md, Session view (2132-2174), and SPEC_impl.md, Tabs in hosts (2234-2269), read: exited tabs disappear and host-ended tabs are hidden. These explain the contract, but the proposed disposition rests on source refutation rather than treating a defect as accepted.",
+      "Current TODO.md Planned bucket empty; BUGS.md sole SSH-transfer entry unrelated. plans/queue searches for phantom/made-up/missing or gone tab refusal found no matching unlanded work.",
+      "INDEX.md read in full; matching queue text searched for phantom tabs, no_such_tab, and terminal-tabs. No exact finding or useful extension found. Tab-survival and close-process warnings concern different behavior.",
+      "Active TRIAGE_OUTCOMES.md searched for this trigger and refusal consequence; no matching decision. Archive not read.",
+      "FILTER.md read; no filter is needed or claimed for this source-refuted concern."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Original concern: an invented tab ID might exercise a different refusal from a vanished terminal host, leaving that user-facing refusal path untested. Both history entries reject it by source. Unavailable hosts that may still run remain listed and recoverable; that separate state was never established as a defect here.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Dismiss only the named test-coverage/commentary concern for a known-gone host. No security or user-work-loss consequence was claimed or established."
+  },
+  {
+    "key": "g182/c3",
+    "latest_line": 13,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "stop-browser-test-asynchronous-exit-status-witness",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The updated explanation preserves a meaningful external ended-state witness. Stop commits its outcome before replying, but a live owned terminal still presents a live status until its asynchronous exit evidence arrives. A subsequent exited listing is therefore not redundant with the durable outcome write.",
+    "checks": [
+      "61e632323dbc6b4a35ed27bf5b9833102ffd5a4e:e2e/tests/terminal.spec.ts:1252-1268 first checks Stop's successful reply, then polls state exited. Its comment attributes asynchronous reporting to child reaping; it does not say the durable outcome waits for the poll.",
+      "At the same revision, service/sweep.rs:1977-2000,2016-2053 establishes StopRequested -> process cleanup -> StopCompleted before return and explicitly allows the host exit record/code to lag cleanup. service/handlers.rs:1150-1156 replies only afterward.",
+      "At the same revision, crates/terminal-host/src/host.rs:454-485 reaps the child and journals its exit after draining output. crates/farhelm-supervisor/src/hosts/terminal.rs:835-849 exposes Running as dead=false until exit processing.",
+      "Additional decisive check: 61e632:crates/farhelm-supervisor/src/service/status.rs:192-249, especially 215-229, lets owned live evidence override the committed stopped outcome and only then presents Exited for dead evidence. Thus merely recording StopCompleted does not satisfy the test's ordinary owned-terminal status predicate.",
+      "The listing is an external status witness, not a complete independent proof of every process-tree termination mechanism. No new kill bug, timing incident or runtime reproduction was established."
+    ],
+    "coverage_checked": [
+      "Both specifications searched for Stop, asynchronous exit reporting and status. Current SPEC.md Lifecycle operations (1888 onward, Stop clause) and Status (2650-2680), and reviewed SPEC_impl.md launch/exit discussion (2620-2667), support the distinction between operation completion and observed terminal exit. No accepted defect is used as a drop basis.",
+      "Current TODO.md Planned bucket empty; BUGS.md sole SSH-transfer entry unrelated. plans/queue searches found no unlanded work for this browser-test explanation. tmux-drop-from-docs mentions the related stop-annotation item but is already landed per plans/REPORTS.md:32.",
+      "INDEX.md read in full and queue searched for Stop response/poll and terminal.spec.ts. stop-annotation-exit-witness.md read in full: it concerns an immediate Rust-test annotation assertion, not this bounded browser poll. It is context, not exact coverage or an alias.",
+      "Active TRIAGE_OUTCOMES.md searched for Stop polling and this browser test/comment; no matching decision. Archive not read.",
+      "FILTER.md read; no filter is needed or claimed for this refuted comment concern."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Considered concern: the new asynchronous child-exit explanation might imply Stop replies before recording an ended outcome and make the later status test misleading. Source rejects that implication. Preserve the caveat that a status poll alone cannot independently certify the implementation's complete kill mechanism.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Dismiss the named inaccurate-explanation hypothesis only. This is a test-commentary concern with no established security or user-work-loss route.",
+    "new_interface_evidence": "The source-level distinction is explicit at 61e632:service/status.rs:215-229: owned live evidence masks a committed stopped outcome. This strengthens the stated reason for retaining the browser test's external exited-status poll and is consistent with the existing stop-annotation-exit-witness item."
+  }
+]

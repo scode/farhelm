@@ -1,0 +1,163 @@
+[
+  {
+    "key": "g053/c4",
+    "latest_line": 13,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "host-terminal-capability-false-at-outgoing-reply",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The suspected loss of migration guidance through false internal defaults is source-refuted. Both outgoing reply boundaries replace the internal default, and the later protocol change removes the field and its current-client consumers together. No user-visible degradation is established; the original hypothetical high consequence is preserved below.",
+    "checks": [
+      "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:service/status.rs:600-614 sets supervisor_creates_host_terminals=true unconditionally; service/listing.rs:193-213 applies it to every listed row, including held rows; service/core.rs:12285-12299 applies it to single-session replies.",
+      "f560058da19e02716e6f943883a9508b447aff4e diff removes report_new_terminals and its listing projection together. git grep finds no field reference in helm/UI/supervisor source at that revision; remaining proto matches are compatibility tests about removed fields.",
+      "f560058da19e02716e6f943883a9508b447aff4e:assets/terminal.js:3387-3428 creates, installs and fits the grid before opening the socket. Current pages do not await the removed capability report.",
+      "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:SPEC.md:3013-3038 describes the then-required migration band. This is separate from intentional retirement and from already-loaded old pages; neither is refuted here. No runtime execution."
+    ],
+    "coverage_checked": [
+      "SPEC.md Terminal experience and SPEC_impl.md Grid streams now describe retirement and a single terminal kind; their acceptance is not needed for this source refutation.",
+      "TODO.md Planned is empty. Searches of BUGS.md, active TRIAGE_OUTCOMES.md, plans/queue and the full INDEX.md found no exact false-capability/missing-band item.",
+      "plans/queue/tmux-end-old-terminals.md names field/band removal, but plans/REPORTS.md:29 records it landed; it is not unlanded coverage. The full FILTER.md supplies no matching boundary."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No outgoing reply that preserves the false internal default was established.",
+    "original_stronger_consequence": "Lost migration warning, potentially material UX degradation. The record expressly keeps intentional retirement/process-content loss and an old page's compatibility behavior as separate concerns.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutation limited to the capability's outgoing projection and the current client's coordinated removal. Do not use it to dismiss retirement or stale-page claims."
+  },
+  {
+    "key": "g053/c5",
+    "latest_line": 14,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "grid-input-cap-substitution-changes-message-admission",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The removed constant and replacement both equal 64 * 1024. The grid producers count escaped JSON size, and the grid/host boundaries enforce their own bounds. The claimed numerical/framing regression is refuted; this does not certify arbitrary input-pump races.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e^:proto/lib.rs:496 defines MAX_TERMINAL_DATA_LEN as 64 * 1024. f560:proto/grid.rs:424 defines GRID_MAX_INPUT_MESSAGE as the same value; grid.rs:1648-1664 checks it at decode and encode.",
+      "f560:assets/grid-input.js:390-488 counts JSON escaping, including six-byte control/lone-surrogate escapes, and splits text/paste on both raw and encoded budgets. client.rs:4111-4133 refuses oversize grid messages per attachment and forwards one accepted message as one frame.",
+      "f560:service/grid_stream.rs:1064-1095 decodes each message once, encodes it, and queues the resulting bytes. hosts/terminal.rs:3273-3300 chunks requests at MAX_INPUT; hosts/client.rs:835-861 rejects empty or over-MAX_INPUT host requests. These are distinct JSON-grid and raw-host boundaries.",
+      "f560:SPEC_impl.md:3029-3040 retains one message per frame, 1 MiB output and 64 KiB input. No runtime execution or malicious-input audit."
+    ],
+    "coverage_checked": [
+      "SPEC.md Terminal experience and SPEC_impl.md Grid streams supply the terminal/forwarding contract; unchanged admission arithmetic refutes the specific claim.",
+      "TODO.md Planned is empty. BUGS.md, active TRIAGE_OUTCOMES.md, plans/queue and the full INDEX.md searches found no exact changed-cap/escaped-paste-refusal entry. Indexed paste receipt and oversized-paste tests concern different boundaries, not coverage of this substitution.",
+      "The tmux removal plan is recorded landed in plans/REPORTS.md:29. FILTER.md has no whole-boundary match; no filter is needed."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No changed numeric bound or escaped-message producer exceeding the unchanged bound was shown.",
+    "original_stronger_consequence": "Refused pastes or attachment failure, suggested high/material UX; no established security or user-work-loss route in the original constant-substitution claim.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Refute only the claimed cap/framing substitution and escaped-paste overflow. Preserve the record's exclusion of unchanged pump races, host-wire correctness generally, and arbitrary hostile payloads."
+  },
+  {
+    "key": "g053/l1",
+    "latest_line": 12,
+    "recommendation": "out-of-range",
+    "bucket": "other",
+    "underlying_key": "primary-selection-notice-filter-misses-drag-copy-suppression",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The proposed per-commit attribution was too narrow, but a check against the actual exclusive base supports the outside-range conclusion. Both primary-notice filtering and the primary-write suppression promise already exist there. This does not refute the underlying pre-existing mismatch.",
+    "checks": [
+      "6e423e30068b62c6cfa276c6d720ee35bb70387a:hosts/terminal.rs:3207-3222 already forwards only ClipboardTarget::Clipboard; 08399d092d20815ced6619c26df2391944ae2b4a:hosts/terminal.rs:3303-3322 has the same filter. The full-range diff has no deliver_notices/ClipboardTarget/notices.send change.",
+      "Exclusive-base SPEC.md:3048-3061 already promises that any completed program clipboard write, including primary selection, suppresses guidance. Exclusive-base SPEC_impl.md:1830-1839 already says the grid counts both onClipboard targets. The potential implementation/contract discrepancy therefore predates the review range, rather than merely predating one cleanup patch.",
+      "Current SPEC_impl.md:2067-2069 also explicitly says primary-selection notices are not sent, while :1746-1752 describes counting primary callbacks. No runtime observation, new defect search, or correctness verdict about the older mismatch."
+    ],
+    "coverage_checked": [
+      "SPEC.md:3053-3073 and SPEC_impl.md:1746-1755,2067-2071 describe the exact competing contracts; they do not clearly accept the wrong guidance.",
+      "TODO.md Planned is empty. BUGS.md, active TRIAGE_OUTCOMES.md and plans/queue searches found no exact primary-notice/guidance item. The tmux plans are recorded landed at plans/REPORTS.md:29,32.",
+      "Read matching queue files detached-grid-retains-program-drag-guidance.md and drag-copy-guidance-gap-stays-stale-after-text-size-change.md: their triggers are takeover and metric changes, not a primary write filtered upstream. They are neither duplicates nor exact coverage. FILTER.md rare-diagnostic filtering would require an established rare trigger, which this record does not supply."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No introduction or relevant new guarantee within the pinned range was found; both sides exist at the exclusive base.",
+    "original_stronger_consequence": "Drag-copy guidance may appear after a program handles primary-selection copying. Other/diagnostic UX; primary is intentionally not written to the system clipboard, and no security or user-work-loss route is claimed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Outside the whole pinned range, established from exclusive-base implementation and contract rather than only assigned-patch ancestry. Preserve the pre-existing discrepancy rather than calling it source-refuted."
+  },
+  {
+    "key": "g053/l2",
+    "latest_line": 19,
+    "recommendation": "needs-parent",
+    "bucket": "highest",
+    "underlying_key": "old-page-raw-json-paste-reinterpreted-as-grid-text",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Retain this conditional input-authority/work-loss concern. The protocol-side route is corroborated: valid literal JSON can become decoded Text bytes with control characters, bypassing Paste encoding. The record says it was incorporated into g053/c1 and g196/l1; those records are outside this batch, so the parent must verify consolidation rather than silently close this record.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e^:assets/terminal.js:3799-3821 builds xterm for unknown kind; :5884-5930 treats missing stream notice as bytes. :4158-4196 sends onData chunks as one UTF-8 binary WebSocket message; :4626-4634 inserts via term.paste. term-bytes.js:48-59 removes literal ESC/end markers, not JSON backslash escapes.",
+      "The parent revision's vendored xterm.js (minified line 1) defaults bracketedPasteMode=false, applies the wrapper only when enabled, and emits the prepared paste through one triggerDataEvent. The stated no-legacy-wrapper premise matters.",
+      "f560:client.rs:4111-4133 forwards accepted browser bytes unchanged. proto/grid.rs:1550-1702 uses serde-tagged JSON, decodes Text, and validates its length without stripping control characters. grid_input.rs:151-190 returns Text bytes directly while only Paste uses encode_paste; service/grid_stream.rs:1064-1095 queues that one-off input.",
+      "This is source corroboration of a conditional route, not reproduced command execution or observed loss. Global old-page interlocks and the final alias record are not independently verified in this batch. Ordinary non-JSON keystrokes generally detach; the concern needs valid small one-line Text JSON and an old unknown-kind xterm surface."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md:2938-2955 explicitly accepts old-page misdrawing and malformed-input detach, but successful JSON reinterpretation is a distinct consequence. SPEC.md Terminal experience describes intentional delivery of pasted content, and its security discussion at :4983-4987 distinguishes that from broader authority.",
+      "TODO.md Planned is empty. BUGS.md, active TRIAGE_OUTCOMES.md, plans/queue and the full INDEX.md searches found no exact stale-page raw-JSON reinterpretation item. Read take-control-skips-recovery-terminals.md: it concerns omitted reconnections and expressly establishes no work loss, so it is not coverage.",
+      "The older-release-plus-rare-condition filter expressly excludes a security or trust-boundary consequence. Neither that filter nor generic retry/display acceptance justifies closing this claimed input-authority route. No filter applied."
+    ],
+    "exact_cover_quotes": [
+      "SPEC_impl.md:2950-2955: 'A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.'",
+      "Same paragraph: 'what is typed into it ends the attachment as malformed input' and 'a reload is the whole remedy.' These statements describe malformed refusal, not successful input reinterpretation."
+    ],
+    "missing_premise": "Parent must reconcile the supplied claims that global old-page interlocks permit the route and that g053/c1/g196/l1 retain the full highest concern. Those named external records were not supplied to this batch. No actual executed command or loss is observed.",
+    "original_stronger_consequence": "A literal small JSON document pasted through an old page is decoded as GridInput::Text; escaped Enter/control characters become unbracketed program input, with possible command execution, input-authority violation and loss of user work. Preserve old page, fresh unknown-kind xterm surface, valid small one-line Text JSON, and no already-enabled legacy paste wrapper caveats.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Retain highest and consolidate only after checking the destination record preserves this route and every caveat. This is not an independent drop verdict. General old-page reload acceptance does not establish coverage of the stronger consequence.",
+    "new_interface_evidence": "Source corroboration for the originating g196/l1: the old sanitization removes literal ESC only, whereas serde Text decoding restores JSON-escaped control characters and grid_input writes them directly. No new interface search was performed."
+  },
+  {
+    "key": "g054/c1",
+    "latest_line": 6,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "interrupted-doc-defines-only-reboot-attribution-after-retirement",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The protocol docstring explains Interrupted in terms of a changed boot ID after the same docstring adds startup retirement as a second route. The new route entered within the pinned range. Retain the documentation inconsistency; do not turn it into a claim that retirement behavior is incorrect.",
+    "checks": [
+      "08399d092d20815ced6619c26df2391944ae2b4a:proto/lib.rs:849-859 includes private-server retirement, then says Interrupted means asked via the reboot detector/changed stored boot ID. Current lib.rs:855 retains that wording.",
+      "6e423e30068b62c6cfa276c6d720ee35bb70387a:proto/lib.rs:842-852 describes only reboot. dbfc69751215dbf15e1d31d5bed73c3754c4ebc4's proto/lib.rs patch adds update-ended terminals while leaving the reboot-only explanatory clause.",
+      "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:service/core.rs:7097-7114 queues Transition::TerminalEnded for old-kind Launching/Running/StopRequested without a boot-ID-change condition. Current SPEC_impl.md:2799-2803 explicitly describes this second conversion. No runtime malfunction or reproduction."
+    ],
+    "coverage_checked": [
+      "SPEC.md:2665-2668 and :2998-3011, SPEC_impl.md Ending the old private tmux server accept retirement as an interruption route. That accepted executable behavior does not cover a contradictory explanation in protocol source.",
+      "SPEC_impl.md Runtime state:4111-4136 retains a boot-ID explanation, but does not explicitly authorize the protocol docstring's implication that all interruptions take that route. It supplies context, not exact acceptance.",
+      "TODO.md Planned is empty. BUGS.md, active TRIAGE_OUTCOMES.md, plans/queue and the full INDEX.md contain no exact boot-ID-only Interrupted docstring item. plans/REPORTS.md:32 records the broad tmux documentation cleanup landed; it is not an unlanded plan to fix this residual wording.",
+      "No FILTER.md boundary fits an ordinary source-contract explanation error. It is not an emitted rare diagnostic."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Misleading internal explanation only; no operational instruction, observed runtime defect, or established security/data-loss route. The initial outside-assigned-patch drop was expressly withdrawn after range-history checks showed dbfc introduced the second route inside the range.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain as other for documentation accuracy. The earlier outside-range rationale is refuted; pre-existing at the final cleanup commit is not pre-existing at the range base."
+  },
+  {
+    "key": "g054/c2",
+    "latest_line": 7,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "status-doc-fresh-liveness-confused-with-cached-classification",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Fresh terminal liveness and cached activity classification are different inputs. The protocol wording explicitly describes both, and the supervisor's provisional status lets the helm retain its previous classification. The considered cache contradiction is refuted.",
+    "checks": [
+      "08399d092d20815ced6619c26df2391944ae2b4a:proto/lib.rs:757-763 says list/rename ask current terminal liveness and read cached classification; it does not promise fresh screen sampling on each reply.",
+      "At that revision service/status.rs:140-252 uses terminal evidence plus the durable outcome, selects live_status for a living terminal, and distinguishes durable LastOutcome::Running from wire classification.",
+      "service/status.rs:255-310 returns the current activity reading, with startup_provisional yielding Unknown except recognized Waiting. Its docstring explicitly says a reloaded terminal reports Unknown while the helm retains the preceding cached status. No runtime execution."
+    ],
+    "coverage_checked": [
+      "SPEC.md:2676-2680 and SPEC_impl.md Status heuristics:4162-4186 explicitly require cached status through the fresh-screen-evidence gap, consistent with the inspected code.",
+      "TODO.md Planned is empty. BUGS.md, active TRIAGE_OUTCOMES.md, plans/queue and the full INDEX.md searches found no exact fresh-liveness/cached-classification documentation concern. Other restart-status issues have different consequences and are not aliases.",
+      "FILTER.md need not apply: the specific concern is source-refuted and the cache is explicitly specified."
+    ],
+    "exact_cover_quotes": [
+      "SPEC.md:2676-2677: 'After a supervisor restart, a live terminal keeps its last cached status while the supervisor gathers new screen evidence.'",
+      "SPEC_impl.md:4177-4182: 'The helm retains the prior status from its per-host cache for an `unknown` reply, if it has one, and replaces the rest of the row as usual.'"
+    ],
+    "missing_premise": "No promise of newly sampled activity classification on every reply was established.",
+    "original_stronger_consequence": "Possible internal status-contract wording inconsistency; other. No established security or user-work-loss consequence. The original clipped broad search supplies no negative evidence and is not relied on here.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Refute only the claim that cached classification contradicts fresh host-backed liveness projection. Do not infer that all caches are absent or that every neighboring sentence is correct."
+  }
+]

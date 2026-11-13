@@ -1,0 +1,1159 @@
+{
+  "group": {
+    "id": "g027",
+    "domain": "environment-host-lifecycle",
+    "purpose": "environment-host-lifecycle: e2e/tests/tensorlake-lifecycle.spec.ts, crates/farhelm-helm/src/sessions.rs, crates/farhelm-helm/src/hosts.rs, crates/farhelm-helm/src/manager.rs, crates/farhelm-helm/src/sessions_tests.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g001",
+      "g004",
+      "g009",
+      "g010",
+      "g011",
+      "g018",
+      "g019",
+      "g020",
+      "g021",
+      "g022",
+      "g023",
+      "g024",
+      "g025",
+      "g026",
+      "g028",
+      "g031",
+      "g035",
+      "g036",
+      "g037",
+      "g038",
+      "g043",
+      "g044",
+      "g045",
+      "g046",
+      "g047",
+      "g048",
+      "g049",
+      "g050",
+      "g051",
+      "g055",
+      "g056",
+      "g057",
+      "g064",
+      "g065",
+      "g066",
+      "g067",
+      "g068",
+      "g069",
+      "g070",
+      "g085",
+      "g086",
+      "g087"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00620-000.patch",
+        "ranges": [
+          [
+            1,
+            179
+          ]
+        ],
+        "original_path": "e2e/tests/tensorlake-lifecycle.spec.ts",
+        "commit": "533169cf19571d34af3a8497eaceb8d2d7b7c852",
+        "notes": "patch header; patch character offsets [0,10204)",
+        "lines": 179,
+        "bytes": 10204,
+        "start": 0,
+        "end": 10204,
+        "original": "[private-run]/prep/originals/00620.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00655-000.patch",
+        "ranges": [
+          [
+            1,
+            287
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/sessions.rs",
+        "commit": "190d844e58c96cf197aa838d0b0eea8062f48435",
+        "notes": "patch header; patch character offsets [0,12963)",
+        "lines": 287,
+        "bytes": 12963,
+        "start": 0,
+        "end": 12963,
+        "original": "[private-run]/prep/originals/00655.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00693-000.patch",
+        "ranges": [
+          [
+            1,
+            130
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/hosts.rs",
+        "commit": "222bf6253bcd168db04bcbb1df20180c88306998",
+        "notes": "patch header; patch character offsets [0,5378)",
+        "lines": 130,
+        "bytes": 5378,
+        "start": 0,
+        "end": 5378,
+        "original": "[private-run]/prep/originals/00693.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00695-000.patch",
+        "ranges": [
+          [
+            1,
+            365
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/manager.rs",
+        "commit": "222bf6253bcd168db04bcbb1df20180c88306998",
+        "notes": "patch header; patch character offsets [0,17385)",
+        "lines": 365,
+        "bytes": 17387,
+        "start": 0,
+        "end": 17385,
+        "original": "[private-run]/prep/originals/00695.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00699-000.patch",
+        "ranges": [
+          [
+            1,
+            129
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/sessions.rs",
+        "commit": "222bf6253bcd168db04bcbb1df20180c88306998",
+        "notes": "patch header; patch character offsets [0,6915)",
+        "lines": 129,
+        "bytes": 6921,
+        "start": 0,
+        "end": 6915,
+        "original": "[private-run]/prep/originals/00699.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01037-000.patch",
+        "ranges": [
+          [
+            1,
+            203
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/sessions_tests.rs",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,8985)",
+        "lines": 203,
+        "bytes": 8985,
+        "start": 0,
+        "end": 8985,
+        "original": "[private-run]/prep/originals/01037.patch"
+      }
+    ],
+    "lines": 1293,
+    "bytes": 61838
+  },
+  "records": [
+    {
+      "key": "g027/c1",
+      "owner": "g027",
+      "id": "c1",
+      "domain": "environment-host-lifecycle",
+      "purpose": "environment-host-lifecycle: e2e/tests/tensorlake-lifecycle.spec.ts, crates/farhelm-helm/src/sessions.rs, crates/farhelm-helm/src/hosts.rs, crates/farhelm-helm/src/manager.rs, crates/farhelm-helm/src/sessions_tests.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Approved agent launches retain their command and trust",
+            "location": "crates/farhelm-helm/src/sessions.rs:1848",
+            "detail": "Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435\n\nTLDR: Considered whether an agent-requested environment could run a different launch after the user approves it, or claim the agent's choices as the user's defaults. The assigned change preserves the approved launch instead.\n\nDetails: AgentEnvironmentCreate (sessions.rs:1159-1169) stores TrustResolvedLaunch privately with serde(skip). for_agent_environment carries it and origin() chooses CreateOrigin::Agent. create_session_request:1848-1864 extracts that launch and passes it as FreshCreateContext.resolved_mode for a checkout, or uses it directly at 1877-1887 for a home-folder launch. create_fresh_session_resolved:2501-2506 uses the supplied mode without resolving trust again; its explicit_selection:2454-2464 is None for agent origin. The caller agent_requests.rs:4471-4493 resolves trust before the card and the same request is sent after approval at 4542. The browser cannot supply this private authority. Contract: SPEC_impl.md, Agent requests and environments, requires the card's direct Allow; SPEC.md, Agents and environments, says each environment launch always shows its own card with Allow and Deny only.\n\nSuggested bucket: highest if an approved launch could silently change its security policy; that route is refuted here. Could-be-highest: yes, assessed explicitly. Confidence: confirmed by source, no execution. proposed_drop: source refutation above, not specification acceptance. possible_cover: none. Caveat: this is a review of the assigned sessions.rs change and its immediate caller, not a separate audit of every approval-card renderer."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Approved agent launches retain their command and trust",
+            "location": "crates/farhelm-helm/src/sessions.rs:1848",
+            "detail": "Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435\n\nTLDR: Considered whether a new environment could run a different command or security policy after the user approves an agent's launch, or remember the agent's choices as the user's defaults. Source checks continue to refute those routes.\n\nDetails: for_agent_environment stores the TrustResolvedLaunch in private serde-skipped AgentEnvironmentCreate; origin() chooses Agent. The caller agent_requests.rs:4471-4493 decides trust before displaying the direct-Allow card, then sends the same request at 4542. create_session_request:1848-1887 extracts that launch: fresh checkouts receive FreshCreateContext.resolved_mode, home launches use it directly. create_fresh_session_resolved:2501-2506 does not re-resolve supplied trust, and explicit_selection:2454-2464 is None for agent origin. do_create_session_with_environment:2014-2047 applies the agent approval/wrapper checks and passes approved wrapper facts into checkout admission; its explicit-selection branch:2056-2060 excludes agent origin. JSON cannot claim this authority.\n\nSynthesis checked the full provisioning handoff rather than assuming serde(skip) survives a serialized task: provisioning/tensorlake_add.rs start_session_environment:346-487 moves the request through with_environment_target, SessionLaunch and a spawned owned task; finish_session_launch:1007-1013 moves launch.request directly into create_in_session_sandbox. That helper (sessions.rs:1755-1793) updates host, home/checkout preview, title and incarnation but leaves the private agent launch intact before create_session_request. There is no JSON round trip that drops the authority. Contract: SPEC.md Agents and environments requires the user's own Allow on every environment-launch card; the checked chain preserves the card's resolved launch and agent origin.\n\nSuggested bucket: highest if the approved command/security choice could silently change, but this route is refuted. Could-be-highest: yes. Confidence: confirmed by source only, no execution. proposed_drop: source refutation of the considered authority-loss/recomposition paths, not specification acceptance. possible_cover: none. Caveats: current checkout allocation configuration is intentionally resolved on the new host, separately from the fixed launch/trust; this does not independently audit every approval-card renderer. Revision: added source checks proving the serde-skipped field survives the complete in-memory provisioning handoff; original possible consequence retained."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Approved command authority is preserved; history refutation was too broad",
+            "location": "crates/farhelm-helm/src/sessions.rs:1848",
+            "detail": "Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435\n\nTLDR: The agent's approved command and trust survive provisioning. The earlier claim that agent origin prevents all effects on remembered GUI choices was too broad: NULL explicit_selection alone does not establish that, and parent-supplied canonical g050/l1 with independent g024/c3 identifies environment-target history effects.\n\nDetails: Preserve the command/trust authority refutation: the private TrustResolvedLaunch travels in memory through SessionLaunch and create_in_session_sandbox into create_session_request; agent origin bypasses launch recompilation/trust resolution and prevents explicit GUI selection admission. Original possible highest consequence was a changed approved command/security policy, which those source paths refute. Separately, explicit_selection None is only one history input. The earlier original consequence that agent launches can affect remembered GUI choices is NOT refuted by it. Parent supplied canonical g050/l1:8 and independent g024/c3:13: the independent environment_target still records last_container_host and evicts GUI recents for agent-origin launches. That is the same provenance defect, not a new discovery or new local ID. Neighbour details and source checks will refine this revision before the discovery pass ends.\n\nSuggested bucket: highest for the refuted approved-command/security-policy route; the history consequence follows canonical g050/l1 rather than being dropped here. Could-be-highest: yes for the original authority concern, with source refutation limited to that concern; no new highest route is asserted for remembered choices. Confidence: command/trust source checks confirmed; history cross-input supplied by parent and awaiting this turn's detailed checks. proposed_drop: source refutation ONLY for command/trust mutation; withdraw the broader GUI-default-history refutation. possible_cover: canonical g050/l1 and independent g024/c3, supplied by parent, same environment-target provenance defect. No parent drop/lowering accepted. Caveat: source correctness of command authority does not refute distinct history, documentation or test-oracle defects."
+          }
+        },
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Approved command authority is preserved; agent history effects are confirmed elsewhere",
+            "location": "crates/farhelm-helm/src/sessions.rs:1848",
+            "detail": "Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435\n\nTLDR: The agent's approved command and trust survive provisioning. Agent-created environments nevertheless change the GUI's container-host default and age its recent setups; the earlier broad default-history refutation was incorrect. This history defect is canonical g050/l1, independently identified by g024/c3, rather than a new discovery here.\n\nDetails: Preserve the command/trust authority refutation: private TrustResolvedLaunch moves in memory through SessionLaunch and create_in_session_sandbox into create_session_request; agent origin avoids launch recompilation/trust resolution and records no explicit GUI launch selection. The original possible highest consequence, silently changing an approved command/security policy, is refuted by those checked paths. That does not prove absence of GUI history effects. Direct source checks this turn confirm record_created_history (sessions.rs:2174-2242) destructures environment_target independently of explicit_selection and sends both to record_create_history_with_environment_if_current. Its current-claim closure admits a session-owned host when an environment target is present. store/environment_history.rs:49-99 requires only target, admits NULL selection, writes preferences.last_container_host for every novel container target and evicts older entries from the shared bounded window. The reader at 111-114 hides NULL-selection rows but cannot undo their eviction effects. Agent origin does not reach that storage function. This matches the complete parent-supplied g050/l1 record and preserves its attribution to integrating commit 190d844e over the earlier history API at 52cc5d7250d262f93b730d91a07c240d33c2ea5f.\n\nContract: SPEC.md:5158-5163 at this revision excludes anything an agent creates from GUI future defaults/suggestions and names recent setups. The per-launch Allow is not explicit GUI launch-choice provenance. Suggested bucket: highest for the separately source-refuted command/trust mutation route; other for the confirmed history effects as canonical g050/l1 recommends. Could-be-highest: yes for the original authority concern, refuted only on that precise basis; no new highest route established for remembered choices. Confidence: confirmed source checks for both command authority preservation and the distinct history defect, no execution. proposed_drop: source refutation ONLY of changed approved command/trust; the broader GUI-default-history refutation is withdrawn. History effects are linked as a duplicate of canonical g050/l1 and independent g024/c3, not rejected. possible_cover: those exact parent-supplied IDs, no prohibited coverage search. Caveat: correctness of command authority does not refute distinct history, documentation or test-oracle defects. Revision: completed direct source validation of the caller/storage provenance mismatch; no new local finding ID or new-discovery credit claimed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 13,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Approved command authority is preserved; agent history effects are confirmed elsewhere",
+          "location": "crates/farhelm-helm/src/sessions.rs:1848",
+          "detail": "Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435\n\nTLDR: The agent's approved command and trust survive provisioning. Agent-created environments nevertheless change the GUI's container-host default and age its recent setups; the earlier broad default-history refutation was incorrect. This history defect is canonical g050/l1, independently identified by g024/c3, rather than a new discovery here.\n\nDetails: Preserve the command/trust authority refutation: private TrustResolvedLaunch moves in memory through SessionLaunch and create_in_session_sandbox into create_session_request; agent origin avoids launch recompilation/trust resolution and records no explicit GUI launch selection. The original possible highest consequence, silently changing an approved command/security policy, is refuted by those checked paths. That does not prove absence of GUI history effects. Direct source checks this turn confirm record_created_history (sessions.rs:2174-2242) destructures environment_target independently of explicit_selection and sends both to record_create_history_with_environment_if_current. Its current-claim closure admits a session-owned host when an environment target is present. store/environment_history.rs:49-99 requires only target, admits NULL selection, writes preferences.last_container_host for every novel container target and evicts older entries from the shared bounded window. The reader at 111-114 hides NULL-selection rows but cannot undo their eviction effects. Agent origin does not reach that storage function. This matches the complete parent-supplied g050/l1 record and preserves its attribution to integrating commit 190d844e over the earlier history API at 52cc5d7250d262f93b730d91a07c240d33c2ea5f.\n\nContract: SPEC.md:5158-5163 at this revision excludes anything an agent creates from GUI future defaults/suggestions and names recent setups. The per-launch Allow is not explicit GUI launch-choice provenance. Suggested bucket: highest for the separately source-refuted command/trust mutation route; other for the confirmed history effects as canonical g050/l1 recommends. Could-be-highest: yes for the original authority concern, refuted only on that precise basis; no new highest route established for remembered choices. Confidence: confirmed source checks for both command authority preservation and the distinct history defect, no execution. proposed_drop: source refutation ONLY of changed approved command/trust; the broader GUI-default-history refutation is withdrawn. History effects are linked as a duplicate of canonical g050/l1 and independent g024/c3, not rejected. possible_cover: those exact parent-supplied IDs, no prohibited coverage search. Caveat: correctness of command authority does not refute distinct history, documentation or test-oracle defects. Revision: completed direct source validation of the caller/storage provenance mismatch; no new local finding ID or new-discovery credit claimed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g027/findings.jsonl",
+        "id": "c1",
+        "line": 13,
+        "disposition": "under-investigation",
+        "group": "g027-c1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-015",
+          "key": "g027/c1",
+          "latest_line": 13,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "agent-environment-target-history-admission-lacks-origin",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Approved command/trust survives the in-memory handoff, while an agent-origin environment target independently reaches GUI-history storage. Retain the confirmed history effect and preserve the separate proposed security-consequence refutation for independent checking.",
+          "checks": [
+            "190d844e58c96cf197aa838d0b0eea8062f48435:agent_requests.rs:4471-4483 fixes trust and creates the request before displaying ApprovalAction::LaunchEnvironment at 4493-4515; :4542-4548 passes that request into provisioning after approval.",
+            "Same revision:provisioning/tensorlake_add.rs:357-361 attaches environment_target; :465-485 moves the request into SessionLaunch and its owned task; :1007-1013 moves it directly to create_in_session_sandbox. sessions.rs:1756-1794 changes placement/preview fields, not private agent authority.",
+            "sessions.rs:1848-1863 supplies the private approved launch as resolved_mode; :1879-1885 uses it directly for home launches; :2501-2506 does not re-resolve supplied trust. explicit_selection is None for agent origin at :2454-2463.",
+            "sessions.rs:2174-2235 passes environment_target independently of explicit_selection and admits session-owned hosts when environment is present. store/environment_history.rs:49-99 accepts NULL selection, updates last_container_host for novel container targets and ages the shared bounded window; :111-114 merely hides NULL selections from returned setups.",
+            "The history storage file has no diff between this revision and 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. No runtime observation was made."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:5122-5127 excludes anything an agent creates from GUI defaults/suggestions. SPEC.md Agents and environments and SPEC_impl.md Agent requests and environments require per-launch approval, not GUI-choice provenance. Approval does not cover the history mutation.",
+            "TODO Planned is empty. BUGS.md, active TRIAGE_OUTCOMES.md, plans/queue and INDEX.md searched for agent environment history/defaults/recents/last_container_host: no exact existing record or pending repair established. environment-agent-operations.md describes the feature, not origin-gated history storage.",
+            "FILTER.md: no full match. Ordinary successful agent environment launches can trigger this; no rare extra condition is needed. Convenience history is other, but that alone is not a filter.",
+            "The supplied history names canonical g050/l1 and independent g024/c3. They are outside this batch and not existing queue items found by this check; preserve them for parent reconciliation without independently asserting exact aliases."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No missing source premise for the history-storage effect. Actual loss of a visible recent setup requires enough novel launches to age it out. No changed approved command/security-policy route is established by this handoff.",
+          "original_stronger_consequence": "Originally considered a silently changed approved command/security policy (highest), and treating agent choices as GUI defaults. Later records correctly withdraw the broad history refutation while retaining a narrow command/trust refutation.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Record/consolidate the history defect under its shared origin-admission root. Independently check only the proposed rejection of command/trust substitution; do not let that rejection erase the confirmed history effect."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-015.json",
+          "key": "g027/c1",
+          "proposal": "claim-checks/claims-015/result.json",
+          "parent_proposal": "retain-agent-origin-history-with-narrow-command-trust-refutation",
+          "final_independent_gate": "required-for-original-highest-command-substitution",
+          "reason": "Parent read full015. Approved resolved command/trust is fixed before card and moved unchanged through environment-target handoff, home and supplied resolved-mode paths, refuting only proposed silently changed approved launch. Independent NULL GUI-selection does not prevent target-history admission, last-container place update or bounded-recents aging. Same retained020l5 canonical environment-history-admits-agent-origin and050l1 alias; preserve027/024 supporting paths. Ordinary successful current approved agent creates contradict SPEC explicit agent exclusion, no rarity filter. Original highest command/security possibility still needs fresh narrow source-refutation verdict; do not let it erase history defect or merge with reminted connection claim."
+        }
+      ],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "agent-environment-target-history-admission-lacks-origin",
+        "destination": "trailing-agent-environment-target-history-admission-lacks-origin.md"
+      }
+    },
+    {
+      "key": "g027/c2",
+      "owner": "g027",
+      "id": "c2",
+      "domain": "environment-host-lifecycle",
+      "purpose": "environment-host-lifecycle: e2e/tests/tensorlake-lifecycle.spec.ts, crates/farhelm-helm/src/sessions.rs, crates/farhelm-helm/src/hosts.rs, crates/farhelm-helm/src/manager.rs, crates/farhelm-helm/src/sessions_tests.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Fixture field removals preserve test assertions",
+            "location": "crates/farhelm-helm/src/sessions_tests.rs:5278",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\nTLDR: Considered whether removing terminal metadata from the session-test fixtures weakens the tests or makes them represent the wrong terminal type. The patch removes only fields removed from the protocol and leaves the assertions and session/tab identities intact.\n\nDetails: All assigned sessions_tests.rs hunks remove SessionInfo.agent_terminal, SessionInfo.supervisor_creates_host_terminals, or TabInfo.kind: None from fixture literals. The tabs list at 5278 retains tab-1 and tab-2, the rename fixture retains its session and tab identities, and the TabOpened fixture at 6640 retains tab-1. No readiness, cleanup, or behavioral assertion is removed. SPEC_impl.md:3012-3020, Grid streams, explicitly describes protocol 77: 'every attachment’s data channel carries a grid stream' (typographic apostrophe normalized here) and says SessionInfo and TabInfo no longer report a terminal kind. This contract explains why the removed fields have no current fixture role.\n\nSuggested bucket: other if fixture coverage were weakened; no defect established. Could-be-highest: no; this concern is confined to non-catastrophic test coverage. Confidence: confirmed by source, no execution. proposed_drop: the source patch preserves the assertions and the removed fields no longer exist in the current protocol; no user-impacting behavior is being accepted away. possible_cover: none. Caveat: this does not independently review the terminal-substrate removal outside the assigned test file."
+          }
+        }
+      ],
+      "latest": {
+        "line": 2,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Fixture field removals preserve test assertions",
+          "location": "crates/farhelm-helm/src/sessions_tests.rs:5278",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\nTLDR: Considered whether removing terminal metadata from the session-test fixtures weakens the tests or makes them represent the wrong terminal type. The patch removes only fields removed from the protocol and leaves the assertions and session/tab identities intact.\n\nDetails: All assigned sessions_tests.rs hunks remove SessionInfo.agent_terminal, SessionInfo.supervisor_creates_host_terminals, or TabInfo.kind: None from fixture literals. The tabs list at 5278 retains tab-1 and tab-2, the rename fixture retains its session and tab identities, and the TabOpened fixture at 6640 retains tab-1. No readiness, cleanup, or behavioral assertion is removed. SPEC_impl.md:3012-3020, Grid streams, explicitly describes protocol 77: 'every attachment’s data channel carries a grid stream' (typographic apostrophe normalized here) and says SessionInfo and TabInfo no longer report a terminal kind. This contract explains why the removed fields have no current fixture role.\n\nSuggested bucket: other if fixture coverage were weakened; no defect established. Could-be-highest: no; this concern is confined to non-catastrophic test coverage. Confidence: confirmed by source, no execution. proposed_drop: the source patch preserves the assertions and the removed fields no longer exist in the current protocol; no user-impacting behavior is being accepted away. possible_cover: none. Caveat: this does not independently review the terminal-substrate removal outside the assigned test file."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g027/findings.jsonl",
+        "id": "c2",
+        "line": 2,
+        "disposition": "excluded",
+        "group": "removed-terminal-kind-fixture-fields-no-oracle-loss",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-015 after inspecting it. The assigned test diff removes obsolete protocol fields and preserves the session/tab identities and assertions. No test-oracle defect is established by those removals. Dismiss only the named fixture-field-removal concern; this does not certify the rest of terminal-substrate removal. Checked source/results: [\"Complete f560058da19e02716e6f943883a9508b447aff4e parent-to-commit diff for crates/farhelm-helm/src/sessions_tests.rs inspected: changes remove agent_terminal, supervisor_creates_host_terminals and TabInfo.kind fixture fields only. The tabs remain tab-1/tab-2 at :5278; rename and TabOpened retain tab-1. No behavioral/readiness/cleanup assertion is deleted.\",\"Current SPEC_impl.md:2937-2951 Grid streams explicitly describes protocol 77's universal grid stream and removal of terminal-kind fields from SessionInfo/TabInfo. This explains fixture shape; it does not excuse unrelated substrate/test defects. No runtime check ran.\"] Current coverage/results: [\"Both specifications searched for terminal-kind/grid-stream and fixture behavior; Grid streams provides the positive protocol contract. No product specification requires the removed fields in current fixtures.\",\"TODO Planned is empty. BUGS.md, active TRIAGE_OUTCOMES.md, INDEX.md and plans/queue searched for terminal-kind fixture assertion loss: no exact queued defect or pending repair. tmux-removal plans describe the broader migration, not evidence of a defect in these literals.\",\"No FILTER.md rule is used: this is source refutation of a test-weakening claim.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Possible weakened maintainer tests or wrong terminal fixture type; no highest consequence was claimed.\"; \"A removed assertion or remaining semantic role for the deleted protocol fields was not shown.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g027/c2",
+        "line": 2,
+        "disposition": "excluded",
+        "group": "removed-terminal-kind-fixture-fields-no-oracle-loss",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-015 after inspecting it. The assigned test diff removes obsolete protocol fields and preserves the session/tab identities and assertions. No test-oracle defect is established by those removals. Dismiss only the named fixture-field-removal concern; this does not certify the rest of terminal-substrate removal. Checked source/results: [\"Complete f560058da19e02716e6f943883a9508b447aff4e parent-to-commit diff for crates/farhelm-helm/src/sessions_tests.rs inspected: changes remove agent_terminal, supervisor_creates_host_terminals and TabInfo.kind fixture fields only. The tabs remain tab-1/tab-2 at :5278; rename and TabOpened retain tab-1. No behavioral/readiness/cleanup assertion is deleted.\",\"Current SPEC_impl.md:2937-2951 Grid streams explicitly describes protocol 77's universal grid stream and removal of terminal-kind fields from SessionInfo/TabInfo. This explains fixture shape; it does not excuse unrelated substrate/test defects. No runtime check ran.\"] Current coverage/results: [\"Both specifications searched for terminal-kind/grid-stream and fixture behavior; Grid streams provides the positive protocol contract. No product specification requires the removed fields in current fixtures.\",\"TODO Planned is empty. BUGS.md, active TRIAGE_OUTCOMES.md, INDEX.md and plans/queue searched for terminal-kind fixture assertion loss: no exact queued defect or pending repair. tmux-removal plans describe the broader migration, not evidence of a defect in these literals.\",\"No FILTER.md rule is used: this is source refutation of a test-weakening claim.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Possible weakened maintainer tests or wrong terminal fixture type; no highest consequence was claimed.\"; \"A removed assertion or remaining semantic role for the deleted protocol fields was not shown.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-015",
+          "key": "g027/c2",
+          "latest_line": 2,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "removed-terminal-kind-fixture-fields-no-oracle-loss",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The assigned test diff removes obsolete protocol fields and preserves the session/tab identities and assertions. No test-oracle defect is established by those removals.",
+          "checks": [
+            "Complete f560058da19e02716e6f943883a9508b447aff4e parent-to-commit diff for crates/farhelm-helm/src/sessions_tests.rs inspected: changes remove agent_terminal, supervisor_creates_host_terminals and TabInfo.kind fixture fields only. The tabs remain tab-1/tab-2 at :5278; rename and TabOpened retain tab-1. No behavioral/readiness/cleanup assertion is deleted.",
+            "Current SPEC_impl.md:2937-2951 Grid streams explicitly describes protocol 77's universal grid stream and removal of terminal-kind fields from SessionInfo/TabInfo. This explains fixture shape; it does not excuse unrelated substrate/test defects. No runtime check ran."
+          ],
+          "coverage_checked": [
+            "Both specifications searched for terminal-kind/grid-stream and fixture behavior; Grid streams provides the positive protocol contract. No product specification requires the removed fields in current fixtures.",
+            "TODO Planned is empty. BUGS.md, active TRIAGE_OUTCOMES.md, INDEX.md and plans/queue searched for terminal-kind fixture assertion loss: no exact queued defect or pending repair. tmux-removal plans describe the broader migration, not evidence of a defect in these literals.",
+            "No FILTER.md rule is used: this is source refutation of a test-weakening claim."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "A removed assertion or remaining semantic role for the deleted protocol fields was not shown.",
+          "original_stronger_consequence": "Possible weakened maintainer tests or wrong terminal fixture type; no highest consequence was claimed.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Dismiss only the named fixture-field-removal concern; this does not certify the rest of terminal-substrate removal."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "removed-terminal-kind-fixture-fields-no-oracle-loss",
+        "destination": null
+      }
+    },
+    {
+      "key": "g027/l3",
+      "owner": "g027",
+      "id": "l3",
+      "domain": "environment-host-lifecycle",
+      "purpose": "environment-host-lifecycle: e2e/tests/tensorlake-lifecycle.spec.ts, crates/farhelm-helm/src/sessions.rs, crates/farhelm-helm/src/hosts.rs, crates/farhelm-helm/src/manager.rs, crates/farhelm-helm/src/sessions_tests.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l3",
+            "state": "open",
+            "summary": "Check whether a stale listing can authorize environment destruction",
+            "location": "crates/farhelm-helm/src/manager.rs:5117",
+            "detail": "Reviewed commit: 222bf6253bcd168db04bcbb1df20180c88306998\n\nTLDR: A sealed listing authorizes destruction of a session-owned machine. I am checking whether a listing from an obsolete connection can affect a different current installation or resource.\n\nDetails: refresh_once records note_sealed at manager.rs:5117-5119 before its subsequent identity/cache validation. seal_is_actionable checks the current actor row only for session ownership and machine-deleting kind. hosts::finish_sealed_environment:1451-1471 re-reads those same two properties under the provisioning lock, but does not compare listing identity/incarnation. Available evidence has not yet established a shipped path where that row can name another resource or installation while such a refresh is in flight. Next checks: environment retarget/adoption policy, actor retirement/cancellation, and resource binding immutability. Contract: SPEC_impl.md Environment Delete and the seal authorizes destruction when a connection publishes a sealed listing for a session-owned machine-deleting host.\n\nSuggested bucket: highest only if stale evidence can destroy unrelated current files/processes. Could-be-highest: yes, missing premise explicit. Confidence: unresolved lead, no execution. proposed_drop: false. possible_cover: none. Missing premise: an allowed resource/identity transition surviving the actor's stale-read cancellation. The concern is not complete until those source checks settle it."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l3",
+            "state": "open",
+            "summary": "Environment rows cannot be retargeted under a sealed listing",
+            "location": "crates/farhelm-helm/src/manager.rs:5117",
+            "detail": "Reviewed commit: 222bf6253bcd168db04bcbb1df20180c88306998\n\nTLDR: Investigated whether an obsolete connection's sealed listing could authorize destroying a different current environment. The available shipped transitions do not establish that route.\n\nDetails: Original concern: refresh_once:5117-5119 records the seal before cache identity validation, and seal_is_actionable plus hosts::finish_sealed_environment recheck host kind/ownership rather than listing identity. Follow-up source checks: store.rs:7521-7567 decodes the full kind/provider discriminator and update_ssh_destination rejects both Tensorlake and Podman with DestinationManaged. Thus an environment cannot be redirected onto a different resource through the host-edit route. manager.rs:2914-2937 admits adoption only in IdentityMismatch, whereas refresh_once runs in the connected serve loop (4822-4831); adoption cannot commit on that same actor while it serves this listing. Adoption also retires any withdrawn client and advances its incarnation (2975-3000). hosts::finish_sealed_environment:1451-1474 re-reads the resource row under the provisioning lock; forget_host_locked destroys its recorded binding before removing the row. No source premise was found for exchanging the environment binding in place underneath this connected refresh. Retrying a connection to the same sealed resource does not invalidate its permanent seal.\n\nSuggested bucket: highest if unrelated files/processes could be destroyed; the original possible consequence is preserved here, but no shipped route was established. Could-be-highest: yes. Confidence: confirmed source refutation of the retarget/adoption routes considered, no execution. proposed_drop: source refutation above; not relying on a specification acceptance of destructive stale targeting. possible_cover: none. Caveat: an external operator replacing or resetting the resource is outside the transitions checked; no claim is made about a hypothetical future binding-replacement API."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l3",
+            "state": "open",
+            "summary": "Environment rows cannot be retargeted under a sealed listing",
+            "location": "crates/farhelm-helm/src/manager.rs:5117",
+            "detail": "Reviewed commit: 222bf6253bcd168db04bcbb1df20180c88306998\n\nTLDR: Investigated whether a sealed listing from an obsolete connection could authorize destroying a different current environment. The shipped retarget/adoption/resource-binding paths checked do not establish that route.\n\nDetails: Original concern: refresh_once:5117-5119 notes a seal before cache identity validation; seal_is_actionable and hosts::finish_sealed_environment recheck ownership/kind rather than listing identity. update_ssh_destination (store.rs:7521-7567) rejects Tensorlake and Podman, so host editing cannot redirect an environment. manager.adopt:2914-2937 requires IdentityMismatch; the same actor cannot simultaneously be in its connected listing serve loop. Adoption retires withdrawn clients and advances incarnation (2975-3000). Final destruction re-reads the row under its provisioning lock and targets its recorded binding.\n\nSynthesis narrowed the binding premise: Podman store/podman.rs:415-433 admits a canonical container ID only if NULL or equal to the saved ID, so that provider enforces immutability in SQL. Tensorlake's set_tensorlake_sandbox_id (store.rs:7040-7064) does NOT enforce single-assignment in SQL; the earlier candidate must not be read as claiming it does. Its production callers supply the continuity: tensorlake/hosts.rs create_recorded:359-470 reads the current binding, checks its reserved name, looks up an existing resource by saved ID (by name only without one), and permits a fresh create only when sandbox_id is absent. Missing already-recorded IDs do not trigger replacement creation. delete_binding:550-600 uses a saved ID directly and recovers by name only for a pending create with no ID. The third caller found by git grep is cfg(test) plant. Podman ID enforcement and Tensorlake caller behavior therefore give the needed resource continuity without assuming a universal SQL invariant. Existing Tensorlake setup also refuses manager.is_sealed (provisioning/tensorlake_add.rs:890-898); setup and destruction share the host provisioning lock.\n\nSuggested bucket: highest if unrelated current files/processes could be destroyed; that original consequence is preserved but no shipped route was established. Could-be-highest: yes. Confidence: confirmed source refutation of the considered transitions, no execution. proposed_drop: source refutation above, not specification acceptance of destructive stale targeting. possible_cover: none. Caveats: this relies on Tensorlake's lookup-by-ID returning that resource, as the existing provider contract already does. It does not claim the store setter itself is immutable, or cover external operator replacement/reset outside the checked transitions. Revision: checked all production ID setters/callers and corrected the overly broad permanent-binding shorthand; candidate disposition and original possible consequence remain unchanged."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l3",
+          "state": "open",
+          "summary": "Environment rows cannot be retargeted under a sealed listing",
+          "location": "crates/farhelm-helm/src/manager.rs:5117",
+          "detail": "Reviewed commit: 222bf6253bcd168db04bcbb1df20180c88306998\n\nTLDR: Investigated whether a sealed listing from an obsolete connection could authorize destroying a different current environment. The shipped retarget/adoption/resource-binding paths checked do not establish that route.\n\nDetails: Original concern: refresh_once:5117-5119 notes a seal before cache identity validation; seal_is_actionable and hosts::finish_sealed_environment recheck ownership/kind rather than listing identity. update_ssh_destination (store.rs:7521-7567) rejects Tensorlake and Podman, so host editing cannot redirect an environment. manager.adopt:2914-2937 requires IdentityMismatch; the same actor cannot simultaneously be in its connected listing serve loop. Adoption retires withdrawn clients and advances incarnation (2975-3000). Final destruction re-reads the row under its provisioning lock and targets its recorded binding.\n\nSynthesis narrowed the binding premise: Podman store/podman.rs:415-433 admits a canonical container ID only if NULL or equal to the saved ID, so that provider enforces immutability in SQL. Tensorlake's set_tensorlake_sandbox_id (store.rs:7040-7064) does NOT enforce single-assignment in SQL; the earlier candidate must not be read as claiming it does. Its production callers supply the continuity: tensorlake/hosts.rs create_recorded:359-470 reads the current binding, checks its reserved name, looks up an existing resource by saved ID (by name only without one), and permits a fresh create only when sandbox_id is absent. Missing already-recorded IDs do not trigger replacement creation. delete_binding:550-600 uses a saved ID directly and recovers by name only for a pending create with no ID. The third caller found by git grep is cfg(test) plant. Podman ID enforcement and Tensorlake caller behavior therefore give the needed resource continuity without assuming a universal SQL invariant. Existing Tensorlake setup also refuses manager.is_sealed (provisioning/tensorlake_add.rs:890-898); setup and destruction share the host provisioning lock.\n\nSuggested bucket: highest if unrelated current files/processes could be destroyed; that original consequence is preserved but no shipped route was established. Could-be-highest: yes. Confidence: confirmed source refutation of the considered transitions, no execution. proposed_drop: source refutation above, not specification acceptance of destructive stale targeting. possible_cover: none. Caveats: this relies on Tensorlake's lookup-by-ID returning that resource, as the existing provider contract already does. It does not claim the store setter itself is immutable, or cover external operator replacement/reset outside the checked transitions. Revision: checked all production ID setters/callers and corrected the overly broad permanent-binding shorthand; candidate disposition and original possible consequence remain unchanged."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g027/findings.jsonl",
+        "id": "l3",
+        "line": 10,
+        "disposition": "under-investigation",
+        "group": "g027-l3",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-015",
+          "key": "g027/l3",
+          "latest_line": 10,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "stale-seal-destroys-rebound-environment-missing-binding-transition",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The checked shipped editing/adoption/provider paths do not replace a recorded resource beneath the connected listing. The original destructive consequence remains conditional and must pass independent drop checking.",
+          "checks": [
+            "222bf6253bcd168db04bcbb1df20180c88306998:manager.rs:5117-5133 notes a seal before the later cache/identity work, confirming the original observation. hosts.rs:1450-1471 re-reads session ownership and machine-deleting kind under the provisioning lock and destroys the recorded binding.",
+            "Same revision:store.rs:7521-7567 rejects Tensorlake/Podman SSH-destination edits. manager.rs:2914-2937 admits adoption only in IdentityMismatch; :2978-3000 retires the withdrawn client, clears live rows and advances incarnation.",
+            "store/podman.rs:415-433 enforces saved ID null-or-equal in SQL. Tensorlake store.rs:7040-7060 does not impose that SQL invariant; the reviewer's correction is required.",
+            "tensorlake/hosts.rs:364-470 reads current binding, uses saved ID when present and permits create-on-NotFound only without a saved ID. :550-600 destroys by saved ID, recovering by name only for pending create without one. git grep of ID setters found these production callers; :719-756 and the remaining callsites are test support/tests.",
+            "No runtime reproduction. External resource replacement/reset and a hypothetical future binding-replacement API are outside the demonstrated refutation. Correct provider lookup-by-ID semantics remains an assumption."
+          ],
+          "coverage_checked": [
+            "SPEC.md Sandbox sessions and SPEC_impl.md Environment Delete and the seal authorize finishing a permanent seal for the same recorded environment, not unrelated replacement work. Neither accepts stale destructive targeting.",
+            "TODO Planned is empty; BUGS.md has no matching acceptance. Active TRIAGE_OUTCOMES.md, plans/queue and INDEX.md searched for sealed-listing retarget/adoption/resource replacement: no exact covered defect or pending repair found. environment-agent-operations.md's feature design is not coverage for wrong-resource destruction.",
+            "No FILTER.md rule is used: wrong-target destruction lies outside the rare-glitch boundary."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "An allowed in-place binding/installation transition that leaves the stale connected refresh actionable and changes which user resource destruction reaches. The checked edit/adoption/create paths do not supply it.",
+          "original_stronger_consequence": "An obsolete connection's sealed listing might destroy unrelated current files or processes, potentially highest. Later wording narrows the source refutation and explicitly disclaims a universal Tensorlake SQL immutability invariant.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Propose a narrow source refutation of the checked shipped transitions, preserving the original highest hypothesis and external/provider assumptions for the independent checker."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-015.json",
+          "key": "g027/l3",
+          "proposal": "claim-checks/claims-015/result.json",
+          "parent_proposal": "source-refuted-checked-binding-replacement-transitions",
+          "final_independent_gate": "required-before-highest-drop",
+          "reason": "Full015 records seal before cacheidentity check, but actual destination edits denied, adoption requires mismatch then retires client/clearsrows/advancesincarnation, Podman saved ID null-or-equal and Tensorlake production setters reuse saved ID/create only unsaved pending. Tensorlake SQL itself NOT immutable; earlier overclaim corrected. Propose narrow lack of supported in-place replacement route beneath connected stale listing, preserving original unrelated-resource loss and provider lookup-ID/external reset assumptions. No universal absence proof or wrong-target spec/filter acceptance."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "stale-seal-destroys-rebound-environment-missing-binding-transition",
+        "destination": null
+      }
+    },
+    {
+      "key": "g027/l4",
+      "owner": "g027",
+      "id": "l4",
+      "domain": "environment-host-lifecycle",
+      "purpose": "environment-host-lifecycle: e2e/tests/tensorlake-lifecycle.spec.ts, crates/farhelm-helm/src/sessions.rs, crates/farhelm-helm/src/hosts.rs, crates/farhelm-helm/src/manager.rs, crates/farhelm-helm/src/sessions_tests.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l4",
+            "state": "open",
+            "summary": "Check seal failure bookkeeping for ordinary host removal",
+            "location": "crates/farhelm-helm/src/hosts.rs:1537",
+            "detail": "Reviewed commit: 222bf6253bcd168db04bcbb1df20180c88306998\n\nTLDR: A whole-environment Delete might fail without updating the sealed environment's persistent on-screen failure, or might leave its pending seal eligible for an automatic retry.\n\nDetails: forget_host_locked:1537-1545 releases the hold and returns an error; it relies on a caller writing sealed_outcome. sessions/sandbox.rs:290-304 does that for finish_seal_locked, but the ordinary remove_host_for path:1392-1403 calls forget_host_locked directly. A seal can already be present when a whole-host removal holds the provisioning lock. Need to check whether any shipped GUI route can invoke ordinary removal for an already-sealed host or observe a seal while its whole-host deletion is in progress; also check whether a wrapper records errors elsewhere. Contract: SPEC_impl.md Environment Delete and the seal says a failure and Retry cannot be lost and failed destruction waits for Retry.\n\nSuggested bucket: other for stale diagnostics or unintended retry of already-authorized destruction; could-be-highest: no, the suspected route destroys only an already-sealed environment, which is already authorized for deletion. Confidence: unresolved lead, no execution. proposed_drop: false. possible_cover: none. Next checks: host-removal handler and UI controls, manager held-refresh ordering, and outcome callers."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l4",
+            "state": "open",
+            "summary": "Whole-host Delete does not record sealed deletion failures",
+            "location": "crates/farhelm-helm/src/hosts.rs:1537",
+            "detail": "Reviewed commit: 222bf6253bcd168db04bcbb1df20180c88306998\n\nTLDR: Deleting a sealed sandbox or container through Hosts can leave its persistent error showing the previous failure instead of the failure just received. If its seal was still pending, a failed Delete remains pending and can be retried automatically instead of showing the error and waiting for Retry.\n\nDetails: forget_host_locked:1537-1545 releases the actor hold and returns a provider failure; its comment relies on the caller writing sealed_outcome. That is true for sessions/sandbox.rs finish_seal_locked:290-304, but remove_host:1374-1381 -> remove_host_for:1392-1403 and remove_host_checked:1423-1437 call forget_host_locked directly and never record a failure. Only successful forgetting clears the seal at hosts.rs:1575. With an existing SealedHost::Failed(old_reason), ordinary DELETE /api/hosts/{id} gets the new provider error but manager.status/snapshots keep projecting old_reason from the seal map (manager.rs:2183-2187,2214-2225,2677-2694). With SealedHost::Pending, failure leaves it in sealed_pending and the finisher tries again. This is not merely a missing response error: the handler does return the new error, but the durable-in-memory host presentation and automatic-retry policy are wrong after that response is dismissed. The source UI keeps the host deletion control while deleting (hosts.rs:4492-4510 excludes Suspend/Resume but retains the normal menu actions; its comment explicitly says Retry or Delete is what a failed deletion needs), and its confirmed removal calls the ordinary remove_host API at 2525.\n\nContract: SPEC_impl.md:6642-6646 says the seal record holds 'pending or with its last destruction’s failure' (apostrophe normalized in this quote), and 'the failure and its Retry cannot be lost'. manager.rs:2606-2611 says a failed destruction stays failed until Retry. Centralize failure recording for an existing seal in forget_host_locked, or route every removal of a sealed host through the seal-attempt/outcome wrapper without marking unsealed hosts as sealed.\n\nSuggested bucket: other, for stale diagnostics and retry policy on an already-authorized deletion. Could-be-highest: no; the resource already has a permanent seal authorizing destruction, so this does not establish loss beyond consent. Confidence: confirmed by source, not observed in execution. proposed_drop: false. possible_cover: none. Caveats: ordinary unsealed whole-host removal does not need a seal record. The pending case requires the seal to be known before the ordinary removal finishes; a stale open confirmation or a listing completing while removal acquires its lock supplies that ordering. The simpler already-Failed case does not require that race."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l4",
+            "state": "open",
+            "summary": "Whole-host Delete does not record sealed deletion failures",
+            "location": "crates/farhelm-helm/src/hosts.rs:1537",
+            "detail": "Reviewed commit: 222bf6253bcd168db04bcbb1df20180c88306998\n\nTLDR: Deleting a sealed sandbox or container through Hosts can leave its persistent error showing the previous failure instead of the failure just received. If its seal was still pending, a failed Delete remains pending and can be retried automatically instead of showing the error and waiting for Retry.\n\nDetails: forget_host_locked:1537-1545 releases the actor hold and returns a provider failure; its comment relies on the caller writing sealed_outcome. That is true for sessions/sandbox.rs finish_seal_locked:290-304, but remove_host:1374-1381 -> remove_host_for:1392-1403 and remove_host_checked:1423-1437 call forget_host_locked directly and never record a failure. Only successful forgetting clears the seal at hosts.rs:1575. With an existing SealedHost::Failed(old_reason), ordinary DELETE /api/hosts/{id} gets the new provider error but manager.status/snapshots keep projecting old_reason from sealed_state (manager.rs:2183-2187,2214-2225,2672-2686). With SealedHost::Pending, failure leaves it in sealed_pending and the finisher tries again. The handler returns the new error, but the persistent host presentation and automatic-retry policy are wrong after that response is dismissed.\n\nFollow-up route verification: crates/farhelm-ui/src/hosts.rs:3350-3362 computes row busy from current page mutations, provisioning and the page operation lock, not HostPhase::Deleting. The row's Remove control:5321-5353 is disabled only by busy, and on_remove_start:2540-2566 checks the page operation/provisioning locks but not deletion state. on_remove_confirm:2502-2535 calls ordinary remove_host at 2525. Thus a failed sealed host's menu can enter this path even though its separate Retry correctly uses retry_environment_delete. The host kind/resource remains bound; this is a bookkeeping failure, not unconsented resource selection.\n\nContract: SPEC_impl.md:6642-6646 says the seal record holds \"pending or with its last destruction's failure\" and \"the failure and its Retry cannot be lost\". manager.rs:2606-2611 says a failed destruction stays failed until Retry. Centralize failure recording for an existing seal in forget_host_locked, or route every removal of a sealed host through the seal-attempt/outcome wrapper without marking unsealed hosts as sealed.\n\nSuggested bucket: other, for stale diagnostics and retry policy on an already-authorized deletion. Could-be-highest: no; the resource already has a permanent seal authorizing destruction, so this does not establish loss beyond consent. Confidence: confirmed by source, not observed in execution. proposed_drop: false. possible_cover: none. Caveats: ordinary unsealed whole-host removal does not need a seal record. The pending case requires the seal to be known before the ordinary removal finishes; a stale open confirmation or a listing completing while removal acquires its lock supplies that ordering. The simpler already-Failed case does not require that race. Revision: verified the complete UI route and corrected quotation typography; original consequences and bucket are unchanged."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l4",
+            "state": "open",
+            "summary": "Whole-host Delete does not record sealed deletion failures",
+            "location": "crates/farhelm-helm/src/hosts.rs:1537",
+            "detail": "Reviewed commit: 222bf6253bcd168db04bcbb1df20180c88306998\n\nTLDR: Deleting a sealed sandbox or container through Hosts can leave its persistent error showing the previous failure instead of the failure just received. If the seal was pending, a failed whole-host Delete remains pending and can be retried automatically instead of showing its error and waiting for Retry.\n\nDetails: remove_host:1375-1383 -> remove_host_for:1393-1403 and remove_host_checked:1420-1436 call forget_host_locked directly. Its provider-error branch:1537-1545 releases the actor hold and returns without writing sealed_outcome. The post-destruction local-cleanup failure branch:1555-1565 also releases and returns without an outcome. Only successful forgetting clears the seal at 1575. The seal wrapper in sessions/sandbox.rs:290-304 records outcomes, but these ordinary-host-removal callers bypass it. Consequently an existing Failed(old_reason) remains unchanged after another ordinary Delete fails with new_reason, while an existing Pending remains eligible for a future finisher scan.\n\nAdmission checked in synthesis: the GUI's on_remove_start (crates/farhelm-ui/src/hosts.rs:2540-2566) checks page operation/provisioning busy state, not Deleting/Pending/Failed. Its remove answer binds the rendered ConfirmToken, extracts the captured host ID and calls remove_host at 2525; menu Remove:5321-5353 is disabled only by busy. Row busy:3350-3362 derives from page mutations/provisioning/page lock, not the seal state. Server remove_host_for takes a nonwaiting provisioning lock and never refuses a sealed host. Thus a Failed host is admitted after the earlier attempt finishes. Pending is admitted if the nonwaiting lock is free (for example, deletion confirmed while a seal is first being noted); a running destroy holds the lock and is refused as busy. Separate Retry (UI hosts.rs:2363-2371) correctly calls retry_environment_delete and does not fix ordinary Delete.\n\nProjection/release checked: manager snapshots:2165-2200 and status:2210-2235 always substitute sealed_state for the actor state, and status withholds its client. release_hold clears the actor hold, advances its nudge and permits reconnect, but never changes the seal record. note_sealed preserves an existing Failed/Pending entry. The old failure therefore remains after the API's current error/dialog is dismissed; reconnect cannot repair it. Contract: SPEC_impl.md:6642-6646 says the record holds \"pending or with its last destruction's failure\" and \"the failure and its Retry cannot be lost\".\n\nLater in-range check: git log and complete path diff from this commit through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db show no production changes in hosts.rs, manager.rs, sessions/sandbox.rs or UI hosts.rs; only f560058da19e02716e6f943883a9508b447aff4e removes two manager-test fixture fields. This finding remains at the endpoint. Suggested fix: record attempt/outcome for every already-sealed removal, without inserting unsealed hosts into the seal map.\n\nCross-input/provenance: parent supplied g028/l3, a distinct stale Pending Vec bug in the finisher. That path starts from correctly recorded direct-attempt failure, but uses captured eligibility without rechecking after taking the lock. l4 instead fails to write an outcome on ordinary host removal and needs no stale captured Vec: a later fresh scan still sees Pending, or Failed retains old_reason. Fixing either cause alone does not fix the other. Preserve both IDs and owners.\n\nSuggested bucket: other (stale diagnostics and retry policy for already-authorized destruction). Could-be-highest: no; the permanent seal already authorizes destruction of the recorded environment, and this establishes no work loss beyond that consent. Confidence: confirmed by source only; no execution. proposed_drop: false. possible_cover: none; related g028/l3 supplied by parent is not a duplicate cause. Caveats: unsealed whole-host failures do not require seal bookkeeping; Pending requires its seal be known before removal completes, while the simpler Failed case needs no such race. Revision: synthesis confirms admission, projection, release ordering and no later in-range fix; original consequences and priority retained."
+          }
+        }
+      ],
+      "latest": {
+        "line": 8,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l4",
+          "state": "open",
+          "summary": "Whole-host Delete does not record sealed deletion failures",
+          "location": "crates/farhelm-helm/src/hosts.rs:1537",
+          "detail": "Reviewed commit: 222bf6253bcd168db04bcbb1df20180c88306998\n\nTLDR: Deleting a sealed sandbox or container through Hosts can leave its persistent error showing the previous failure instead of the failure just received. If the seal was pending, a failed whole-host Delete remains pending and can be retried automatically instead of showing its error and waiting for Retry.\n\nDetails: remove_host:1375-1383 -> remove_host_for:1393-1403 and remove_host_checked:1420-1436 call forget_host_locked directly. Its provider-error branch:1537-1545 releases the actor hold and returns without writing sealed_outcome. The post-destruction local-cleanup failure branch:1555-1565 also releases and returns without an outcome. Only successful forgetting clears the seal at 1575. The seal wrapper in sessions/sandbox.rs:290-304 records outcomes, but these ordinary-host-removal callers bypass it. Consequently an existing Failed(old_reason) remains unchanged after another ordinary Delete fails with new_reason, while an existing Pending remains eligible for a future finisher scan.\n\nAdmission checked in synthesis: the GUI's on_remove_start (crates/farhelm-ui/src/hosts.rs:2540-2566) checks page operation/provisioning busy state, not Deleting/Pending/Failed. Its remove answer binds the rendered ConfirmToken, extracts the captured host ID and calls remove_host at 2525; menu Remove:5321-5353 is disabled only by busy. Row busy:3350-3362 derives from page mutations/provisioning/page lock, not the seal state. Server remove_host_for takes a nonwaiting provisioning lock and never refuses a sealed host. Thus a Failed host is admitted after the earlier attempt finishes. Pending is admitted if the nonwaiting lock is free (for example, deletion confirmed while a seal is first being noted); a running destroy holds the lock and is refused as busy. Separate Retry (UI hosts.rs:2363-2371) correctly calls retry_environment_delete and does not fix ordinary Delete.\n\nProjection/release checked: manager snapshots:2165-2200 and status:2210-2235 always substitute sealed_state for the actor state, and status withholds its client. release_hold clears the actor hold, advances its nudge and permits reconnect, but never changes the seal record. note_sealed preserves an existing Failed/Pending entry. The old failure therefore remains after the API's current error/dialog is dismissed; reconnect cannot repair it. Contract: SPEC_impl.md:6642-6646 says the record holds \"pending or with its last destruction's failure\" and \"the failure and its Retry cannot be lost\".\n\nLater in-range check: git log and complete path diff from this commit through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db show no production changes in hosts.rs, manager.rs, sessions/sandbox.rs or UI hosts.rs; only f560058da19e02716e6f943883a9508b447aff4e removes two manager-test fixture fields. This finding remains at the endpoint. Suggested fix: record attempt/outcome for every already-sealed removal, without inserting unsealed hosts into the seal map.\n\nCross-input/provenance: parent supplied g028/l3, a distinct stale Pending Vec bug in the finisher. That path starts from correctly recorded direct-attempt failure, but uses captured eligibility without rechecking after taking the lock. l4 instead fails to write an outcome on ordinary host removal and needs no stale captured Vec: a later fresh scan still sees Pending, or Failed retains old_reason. Fixing either cause alone does not fix the other. Preserve both IDs and owners.\n\nSuggested bucket: other (stale diagnostics and retry policy for already-authorized destruction). Could-be-highest: no; the permanent seal already authorizes destruction of the recorded environment, and this establishes no work loss beyond that consent. Confidence: confirmed by source only; no execution. proposed_drop: false. possible_cover: none; related g028/l3 supplied by parent is not a duplicate cause. Caveats: unsealed whole-host failures do not require seal bookkeeping; Pending requires its seal be known before removal completes, while the simpler Failed case needs no such race. Revision: synthesis confirms admission, projection, release ordering and no later in-range fix; original consequences and priority retained."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g027/findings.jsonl",
+        "id": "l4",
+        "line": 8,
+        "disposition": "verified",
+        "group": "ordinary-host-remove-bypasses-sealed-attempt-outcome",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-015 after inspecting it. Ordinary Hosts Delete bypasses the seal outcome wrapper, so a failed attempt preserves an obsolete failure or Pending eligibility. This is persistent bookkeeping/retry-policy failure on destruction the user already authorized. Record both failure branches and preserve the simpler Failed case. Keep separate from stale finisher-snapshot eligibility. Checked source/results: [\"222bf6253bcd168db04bcbb1df20180c88306998:hosts.rs:1375-1402,1422-1437 calls forget_host_locked directly. Its provider-error branch :1537-1545 and post-destruction cleanup-error branch :1555-1564 return without sealed_outcome; success alone clears it at :1575.\",\"sessions/sandbox.rs:290-304 supplies sealed_attempt and sealed_outcome for the seal path. Ordinary removal does not pass through it.\",\"UI hosts.rs:2502-2535 sends ordinary remove_host for the captured host; :2540-2568 checks operation/provisioning busy state, not seal state. Row busy :3355-3361 and Remove handler :5321-5353 allow another attempt on a Failed sealed host after prior work finishes.\",\"manager.rs:2606-2651 preserves an existing seal on note_sealed and changes outcome only through sealed_outcome. snapshots/status :2166-2228 project the seal over connection state and withhold clients, so reconnect does not refresh the saved error.\",\"Path diff from this commit to 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db shows only two manager test-fixture field removals, no production repair. No runtime failure was observed.\"] Current coverage/results: [\"SPEC.md Sandbox sessions requires visible failure and Retry; current SPEC_impl.md:6148-6157 requires the last destruction failure and Retry-only failed state. The source violates these rather than implementing an accepted limitation.\",\"TODO Planned is empty; BUGS.md has no matching exception. Active TRIAGE_OUTCOMES.md and INDEX.md searched for sealed deletion errors/Pending retry: no exact item. plans/queue/environment-agent-operations.md:524-530 requires reason/Retry but does not separately schedule this bypass repair.\",\"FILTER.md's rare-diagnostic filter does not wholly match: Pending can remain automatically retryable, and the retained failure survives reconnect. Already-Failed ordinary Delete also needs no narrow timing race.\",\"Supplied g028/l3 concerns stale captured finisher eligibility after a correctly recorded failure. It is a different cause; no alias is asserted without its assigned record.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Unchanged throughout: obsolete persistent error and unintended retry of already-authorized sealed-environment destruction. No wrong resource or work loss beyond consent is established.\"; \"A provider/local-cleanup failure must occur. The Pending variant additionally needs a known seal while ordinary removal obtains the free provisioning lock; the Failed(old_reason) variant needs no such race.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g027/l4",
+        "line": 8,
+        "disposition": "verified",
+        "group": "ordinary-host-remove-bypasses-sealed-attempt-outcome",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-015 after inspecting it. Ordinary Hosts Delete bypasses the seal outcome wrapper, so a failed attempt preserves an obsolete failure or Pending eligibility. This is persistent bookkeeping/retry-policy failure on destruction the user already authorized. Record both failure branches and preserve the simpler Failed case. Keep separate from stale finisher-snapshot eligibility. Checked source/results: [\"222bf6253bcd168db04bcbb1df20180c88306998:hosts.rs:1375-1402,1422-1437 calls forget_host_locked directly. Its provider-error branch :1537-1545 and post-destruction cleanup-error branch :1555-1564 return without sealed_outcome; success alone clears it at :1575.\",\"sessions/sandbox.rs:290-304 supplies sealed_attempt and sealed_outcome for the seal path. Ordinary removal does not pass through it.\",\"UI hosts.rs:2502-2535 sends ordinary remove_host for the captured host; :2540-2568 checks operation/provisioning busy state, not seal state. Row busy :3355-3361 and Remove handler :5321-5353 allow another attempt on a Failed sealed host after prior work finishes.\",\"manager.rs:2606-2651 preserves an existing seal on note_sealed and changes outcome only through sealed_outcome. snapshots/status :2166-2228 project the seal over connection state and withhold clients, so reconnect does not refresh the saved error.\",\"Path diff from this commit to 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db shows only two manager test-fixture field removals, no production repair. No runtime failure was observed.\"] Current coverage/results: [\"SPEC.md Sandbox sessions requires visible failure and Retry; current SPEC_impl.md:6148-6157 requires the last destruction failure and Retry-only failed state. The source violates these rather than implementing an accepted limitation.\",\"TODO Planned is empty; BUGS.md has no matching exception. Active TRIAGE_OUTCOMES.md and INDEX.md searched for sealed deletion errors/Pending retry: no exact item. plans/queue/environment-agent-operations.md:524-530 requires reason/Retry but does not separately schedule this bypass repair.\",\"FILTER.md's rare-diagnostic filter does not wholly match: Pending can remain automatically retryable, and the retained failure survives reconnect. Already-Failed ordinary Delete also needs no narrow timing race.\",\"Supplied g028/l3 concerns stale captured finisher eligibility after a correctly recorded failure. It is a different cause; no alias is asserted without its assigned record.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Unchanged throughout: obsolete persistent error and unintended retry of already-authorized sealed-environment destruction. No wrong resource or work loss beyond consent is established.\"; \"A provider/local-cleanup failure must occur. The Pending variant additionally needs a known seal while ordinary removal obtains the free provisioning lock; the Failed(old_reason) variant needs no such race.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-015",
+          "key": "g027/l4",
+          "latest_line": 8,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "ordinary-host-remove-bypasses-sealed-attempt-outcome",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Ordinary Hosts Delete bypasses the seal outcome wrapper, so a failed attempt preserves an obsolete failure or Pending eligibility. This is persistent bookkeeping/retry-policy failure on destruction the user already authorized.",
+          "checks": [
+            "222bf6253bcd168db04bcbb1df20180c88306998:hosts.rs:1375-1402,1422-1437 calls forget_host_locked directly. Its provider-error branch :1537-1545 and post-destruction cleanup-error branch :1555-1564 return without sealed_outcome; success alone clears it at :1575.",
+            "sessions/sandbox.rs:290-304 supplies sealed_attempt and sealed_outcome for the seal path. Ordinary removal does not pass through it.",
+            "UI hosts.rs:2502-2535 sends ordinary remove_host for the captured host; :2540-2568 checks operation/provisioning busy state, not seal state. Row busy :3355-3361 and Remove handler :5321-5353 allow another attempt on a Failed sealed host after prior work finishes.",
+            "manager.rs:2606-2651 preserves an existing seal on note_sealed and changes outcome only through sealed_outcome. snapshots/status :2166-2228 project the seal over connection state and withhold clients, so reconnect does not refresh the saved error.",
+            "Path diff from this commit to 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db shows only two manager test-fixture field removals, no production repair. No runtime failure was observed."
+          ],
+          "coverage_checked": [
+            "SPEC.md Sandbox sessions requires visible failure and Retry; current SPEC_impl.md:6148-6157 requires the last destruction failure and Retry-only failed state. The source violates these rather than implementing an accepted limitation.",
+            "TODO Planned is empty; BUGS.md has no matching exception. Active TRIAGE_OUTCOMES.md and INDEX.md searched for sealed deletion errors/Pending retry: no exact item. plans/queue/environment-agent-operations.md:524-530 requires reason/Retry but does not separately schedule this bypass repair.",
+            "FILTER.md's rare-diagnostic filter does not wholly match: Pending can remain automatically retryable, and the retained failure survives reconnect. Already-Failed ordinary Delete also needs no narrow timing race.",
+            "Supplied g028/l3 concerns stale captured finisher eligibility after a correctly recorded failure. It is a different cause; no alias is asserted without its assigned record."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "A provider/local-cleanup failure must occur. The Pending variant additionally needs a known seal while ordinary removal obtains the free provisioning lock; the Failed(old_reason) variant needs no such race.",
+          "original_stronger_consequence": "Unchanged throughout: obsolete persistent error and unintended retry of already-authorized sealed-environment destruction. No wrong resource or work loss beyond consent is established.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Record both failure branches and preserve the simpler Failed case. Keep separate from stale finisher-snapshot eligibility."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "ordinary-host-remove-bypasses-sealed-attempt-outcome",
+        "destination": "trailing-ordinary-host-remove-bypasses-sealed-attempt-outcome.md"
+      }
+    },
+    {
+      "key": "g027/l5",
+      "owner": "g027",
+      "id": "l5",
+      "domain": "environment-host-lifecycle",
+      "purpose": "environment-host-lifecycle: e2e/tests/tensorlake-lifecycle.spec.ts, crates/farhelm-helm/src/sessions.rs, crates/farhelm-helm/src/hosts.rs, crates/farhelm-helm/src/manager.rs, crates/farhelm-helm/src/sessions_tests.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l5",
+            "state": "open",
+            "summary": "Check raw helper-arrival wait in the new wake-timeout browser test",
+            "location": "e2e/tests/tensorlake-lifecycle.spec.ts:1917",
+            "detail": "Reviewed commit: 533169cf19571d34af3a8497eaceb8d2d7b7c852\n\nTLDR: The new wake-timeout test may bypass its route-gate cleanup if the wake helper never sends the expected read. This would weaken failure diagnostics and route teardown, not establish a product bug.\n\nDetails: In the assigned test, the resume handler sets helperRead before fulfilling its response. The body polls only for helperRead to be defined, then awaits helperRead.entered directly. fleet.holdNextRead returns an application-owned Promise whose completion comes from the matching host-route callback or explicit release. All gate releases are in the body finally. Need to check whether another owner guarantees bounded resolution/cancellation or teardown releases the gates when the helper fails to issue that read. Parent-provided neighbour g069/c3 proves the same raw-arrival-wait mechanism in a different test file; that related finding is context, not proof of this test's complete cleanup path or a new product failure.\n\nSuggested bucket: other if confirmed (browser test failure handling only). Could-be-highest: no. Confidence: unresolved lead, source-only. proposed_drop: false. possible_cover: related g069/c3, different assigned fixture. Missing premise: whether test/fixture cancellation supplies a rejecting completion for this raw Promise or releases its gate before route drain. Next checks: exact body waits, fleet afterEach, routeGate/drainedRoute and pinned test-runner lifecycle evidence already supplied by the neighbour."
+          }
+        },
+        {
+          "line": 14,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l5",
+            "state": "open",
+            "summary": "Bound the helper-arrival wait so the timeout test reaches gate cleanup",
+            "location": "e2e/tests/tensorlake-lifecycle.spec.ts:1917",
+            "detail": "# Bound the helper-arrival wait so the timeout test reaches gate cleanup\n\nReviewed commit: 533169cf19571d34af3a8497eaceb8d2d7b7c852\n\n## TLDR\n\nIf the wake helper never reaches the expected host read, the new browser test times out without reaching its own gate cleanup. Its afterEach then tries to drain a host route still held by that unreleased gate. The resulting timeout/teardown failure obscures the missing-read failure this fixture should diagnose. This is a test failure-handling defect, not an observed product failure.\n\n## Details\n\nThe new connection-never-seen mode first polls helperRead !== undefined and then awaits helperRead.entered directly (tensorlake-lifecycle.spec.ts:1916-1917). The resume callback creates helperRead before fulfilling Resume (1856-1857), so the bounded poll proves only that the gate exists, not that the wake helper sent its next GET. fleet.holdNextRead:115-131 makes entered an application-owned Promise resolved only by a host-route arrival or release(). The real page's earlier Connecting read has already entered lag and remains blocked on held.gate.wait (fleet:80-85, new handler:1850-1852). If the helper read never arrives, the body never reaches finally:1981-1986, which alone releases helperRead and lag. The afterEach:151-159 has no references to those gates and instead sequentially calls the fleet route stop. drainedRoute:39-43 waits every in-flight callback; the earlier lagged host callback cannot finish without lag.release. cleanupOwnedSteps:6-13 catches rejection but cannot move past a never-settling step. Page disposal does not resolve that JavaScript Promise or the Node-side gate.\n\nPinned runner premise checked independently: e2e/package-lock.json pins Playwright 1.64.0. Official primary source https://raw.githubusercontent.com/microsoft/playwright/v1.64.0/packages/playwright/src/worker/timeoutManager.ts:83-114 races cb() against a separate timeoutPromise (102-105), whose timer rejects at 128-132; it does not cancel or reject the awaited test-body Promise. workerMain.ts:384-389 awaits that timed wrapper and then proceeds to after hooks. The repository evidence fixture (helpers/evidence.ts:46-112) adds passive timeline/context/premise collection, not a gate-cancellation owner. Thus the overall runner deadline does not force this body's finally to run. No runtime occurrence or unbounded overall worker lifetime is claimed; runner teardown can itself time out or end the worker.\n\nUse a bounded arrival assertion (for example poll an entered flag with a useful failure message), or give the entered Promise an explicit rejecting deadline/lifetime signal. Keep response blocking separate and release every gate before draining routes. The supplied test-authoring rule requires bounded polling and cleanup while the owned fixture is still alive. Production wake-timeout correctness cannot refute this separate test-oracle/cleanup issue.\n\nSuggested bucket: other (maintainer browser test diagnostics/teardown only). Could-be-highest: no; this test creates no real session and no user-work-loss or security route is established. Confidence: confirmed by pinned source and runner source, not execution. proposed_drop: false. possible_cover: parent-supplied g069/c3 is a related raw-arrival-wait defect in podman-environments.spec.ts, not proof of coverage for this distinct new test at 533169cf; retain provenance for parent consolidation. Caveats: requires missing helper arrival after its gate is armed; normal arrival and ordinary assertion failures after arrival release the gates correctly. No leak beyond the browser-worker lifetime or shared-stack session contamination is claimed. No tests, reproductions or live actions run. Later in-range source history only lists f560058da19e02716e6f943883a9508b447aff4e for this test file/helpers; exact later diff is still to be checked for whether the new wait is repaired."
+          }
+        },
+        {
+          "line": 15,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l5",
+            "state": "open",
+            "summary": "Bound the helper-arrival wait so the timeout test reaches gate cleanup",
+            "location": "e2e/tests/tensorlake-lifecycle.spec.ts:1917",
+            "detail": "# Bound the helper-arrival wait so the timeout test reaches gate cleanup\n\nReviewed commit: 533169cf19571d34af3a8497eaceb8d2d7b7c852\n\n## TLDR\n\nIf the wake helper never reaches the expected host read, the new browser test times out without reaching its gate cleanup. Its afterEach then drains a host route still held by an unreleased gate, adding a teardown failure to the missing-read failure. This is a test failure-handling defect, not an observed product failure.\n\n## Details\n\nThe connection-never-seen mode polls helperRead !== undefined, then awaits helperRead.entered directly at tensorlake-lifecycle.spec.ts:1916-1917. The resume handler creates helperRead before fulfilling Resume (1856-1857), so the bounded poll establishes only that the gate exists, not that the helper sent its next GET. fleet.holdNextRead:115-131 creates an application-owned Promise resolved only by a route arrival or explicit release. The earlier page Connecting read already entered lag and remains blocked on held.gate.wait (fleet:80-85; handler:1850-1852). Without helper arrival, the body cannot reach finally:1979-1984, the only owner of helperRead.release and lag.release. afterEach:151-159 has no gate references and instead calls fleet route stops. helpers/drained-route.ts:39-43 waits all callback promises; the lagged host callback cannot finish until the body releases its gate. helpers/cleanup.ts:6-13 catches errors but cannot advance past a never-settling cleanup step. Browser disposal does not settle these Node-side application Promises.\n\nRunner premise independently checked: package-lock.json pins Playwright 1.64.0. Primary source https://raw.githubusercontent.com/microsoft/playwright/v1.64.0/packages/playwright/src/worker/timeoutManager.ts:83-114 uses Promise.race(cb(), timeoutPromise) at 102-105; its timer rejects the separate timeoutPromise at 128-132, without cancelling the test body's raw await. https://raw.githubusercontent.com/microsoft/playwright/v1.64.0/packages/playwright/src/worker/workerMain.ts:384-397 awaits that timed wrapper and proceeds to after hooks. Repository helpers/evidence.ts:46-112 installs passive timeline/context/premise collection, not cancellation for the gate. A runner timeout therefore does not force the body's finally to run. This does not assert an indefinite overall runner hang: teardown can itself time out or the worker can end.\n\nUse a bounded readiness assertion for actual arrival, or a Promise with an explicit rejecting deadline/lifetime signal, so absent arrival throws through this try/finally. Keep blocking the response separate from observing arrival, and release gates before draining their routes. The supplied test-authoring rules require bounded polling and fixture-owned cleanup. Production timeout correctness is separate from this test-oracle/cleanup guarantee.\n\nLater-fix check: complete diff from 533169cf through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db for this test, route-gate.ts and drained-route.ts contains only f560058's selector change at test line 170, removing .xterm-helper-textarea. The raw wait and cleanup ownership are unchanged. Attribution: this raw body wait is introduced by the assigned 533169cf patch, not inherited solely from its fixture helper.\n\nSuggested bucket: other (maintainer browser-test diagnostics/teardown). Could-be-highest: no; no real session is created here and no user-work loss/security consequence is established. Confidence: confirmed by pinned source and runner source, not execution. proposed_drop: false. possible_cover: parent-supplied g069/c3 concerns the same raw-wait pattern in podman-environments.spec.ts; retain it as related provenance for parent consolidation, without claiming that another test covers this new wait. Caveats: requires a missing helper read after the gate is armed; normal arrival and ordinary assertion failures after arrival release correctly. No shared-stack session contamination, leak beyond the browser-worker lifetime, or observed occurrence is claimed. No runtime tests, reproductions or live-install actions. Revision: corrected cleanup line anchors and confirmed no later in-range repair; original narrower failure/teardown consequence and other bucket unchanged."
+          }
+        }
+      ],
+      "latest": {
+        "line": 15,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l5",
+          "state": "open",
+          "summary": "Bound the helper-arrival wait so the timeout test reaches gate cleanup",
+          "location": "e2e/tests/tensorlake-lifecycle.spec.ts:1917",
+          "detail": "# Bound the helper-arrival wait so the timeout test reaches gate cleanup\n\nReviewed commit: 533169cf19571d34af3a8497eaceb8d2d7b7c852\n\n## TLDR\n\nIf the wake helper never reaches the expected host read, the new browser test times out without reaching its gate cleanup. Its afterEach then drains a host route still held by an unreleased gate, adding a teardown failure to the missing-read failure. This is a test failure-handling defect, not an observed product failure.\n\n## Details\n\nThe connection-never-seen mode polls helperRead !== undefined, then awaits helperRead.entered directly at tensorlake-lifecycle.spec.ts:1916-1917. The resume handler creates helperRead before fulfilling Resume (1856-1857), so the bounded poll establishes only that the gate exists, not that the helper sent its next GET. fleet.holdNextRead:115-131 creates an application-owned Promise resolved only by a route arrival or explicit release. The earlier page Connecting read already entered lag and remains blocked on held.gate.wait (fleet:80-85; handler:1850-1852). Without helper arrival, the body cannot reach finally:1979-1984, the only owner of helperRead.release and lag.release. afterEach:151-159 has no gate references and instead calls fleet route stops. helpers/drained-route.ts:39-43 waits all callback promises; the lagged host callback cannot finish until the body releases its gate. helpers/cleanup.ts:6-13 catches errors but cannot advance past a never-settling cleanup step. Browser disposal does not settle these Node-side application Promises.\n\nRunner premise independently checked: package-lock.json pins Playwright 1.64.0. Primary source https://raw.githubusercontent.com/microsoft/playwright/v1.64.0/packages/playwright/src/worker/timeoutManager.ts:83-114 uses Promise.race(cb(), timeoutPromise) at 102-105; its timer rejects the separate timeoutPromise at 128-132, without cancelling the test body's raw await. https://raw.githubusercontent.com/microsoft/playwright/v1.64.0/packages/playwright/src/worker/workerMain.ts:384-397 awaits that timed wrapper and proceeds to after hooks. Repository helpers/evidence.ts:46-112 installs passive timeline/context/premise collection, not cancellation for the gate. A runner timeout therefore does not force the body's finally to run. This does not assert an indefinite overall runner hang: teardown can itself time out or the worker can end.\n\nUse a bounded readiness assertion for actual arrival, or a Promise with an explicit rejecting deadline/lifetime signal, so absent arrival throws through this try/finally. Keep blocking the response separate from observing arrival, and release gates before draining their routes. The supplied test-authoring rules require bounded polling and fixture-owned cleanup. Production timeout correctness is separate from this test-oracle/cleanup guarantee.\n\nLater-fix check: complete diff from 533169cf through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db for this test, route-gate.ts and drained-route.ts contains only f560058's selector change at test line 170, removing .xterm-helper-textarea. The raw wait and cleanup ownership are unchanged. Attribution: this raw body wait is introduced by the assigned 533169cf patch, not inherited solely from its fixture helper.\n\nSuggested bucket: other (maintainer browser-test diagnostics/teardown). Could-be-highest: no; no real session is created here and no user-work loss/security consequence is established. Confidence: confirmed by pinned source and runner source, not execution. proposed_drop: false. possible_cover: parent-supplied g069/c3 concerns the same raw-wait pattern in podman-environments.spec.ts; retain it as related provenance for parent consolidation, without claiming that another test covers this new wait. Caveats: requires a missing helper read after the gate is armed; normal arrival and ordinary assertion failures after arrival release correctly. No shared-stack session contamination, leak beyond the browser-worker lifetime, or observed occurrence is claimed. No runtime tests, reproductions or live-install actions. Revision: corrected cleanup line anchors and confirmed no later in-range repair; original narrower failure/teardown consequence and other bucket unchanged."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g027/findings.jsonl",
+        "id": "l5",
+        "line": 15,
+        "disposition": "duplicate",
+        "group": "browser-native-arrival-latch-bypasses-owned-finally",
+        "reason": "Parent inspected claims-015 and reconciles this additional wake-timeout caller with g026/f5 and the complete existing bulk preference-latch item. At533169cf:tensorlake-lifecycle.spec.ts:1850-1857,1916-1917,1979-1984 the same raw arrival wait can prevent its finally from releasing the held callback; local fleet:117-131 and afterEach:153-159 then leave drained-route.ts:38-42 waiting. This is useful extension evidence for the same Promise/runner-timeout ownership defect, preserving the corrected local-fleet citation and distinct teardown consequence. It establishes no real session leak in this particular caller, indefinite overall runner hang or observed failure. The two consulted exact-version Playwright sources corroborate the existing item's mechanism. All original IDs and caller-specific consequences remain retained."
+      },
+      "accepted_parent_decision": {
+        "key": "g027/l5",
+        "line": 15,
+        "disposition": "duplicate",
+        "group": "browser-native-arrival-latch-bypasses-owned-finally",
+        "bucket": "other",
+        "recording": "extend-existing",
+        "queue_target_candidate": "review_feedback_queue/bulk-test-preference-latch-bypasses-finally.md",
+        "needs_independent_drop_check": false,
+        "reason": "Parent inspected claims-015 and reconciles this additional wake-timeout caller with g026/f5 and the complete existing bulk preference-latch item. At533169cf:tensorlake-lifecycle.spec.ts:1850-1857,1916-1917,1979-1984 the same raw arrival wait can prevent its finally from releasing the held callback; local fleet:117-131 and afterEach:153-159 then leave drained-route.ts:38-42 waiting. This is useful extension evidence for the same Promise/runner-timeout ownership defect, preserving the corrected local-fleet citation and distinct teardown consequence. It establishes no real session leak in this particular caller, indefinite overall runner hang or observed failure. The two consulted exact-version Playwright sources corroborate the existing item's mechanism. All original IDs and caller-specific consequences remain retained."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-015",
+          "key": "g027/l5",
+          "latest_line": 15,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "browser-raw-helper-arrival-await-prevents-gate-finally:wake-timeout",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The raw arrival Promise can remain pending after the runner deadline, preventing the test's own finally from releasing the gate that afterEach drains. This adds teardown failure; it does not establish an indefinite overall runner hang.",
+          "checks": [
+            "533169cf19571d34af3a8497eaceb8d2d7b7c852:e2e/tests/tensorlake-lifecycle.spec.ts:1850-1857 arms helperRead before fulfilling Resume; :1916-1917 polls existence then awaits entered without a rejecting deadline; :1979-1984 owns all releases.",
+            "The fixture is the local fleet function in tensorlake-lifecycle.spec.ts, not helpers/fleet.ts: :80-85 blocks a held host callback, :117-131 resolves entered only on arrival or explicit release, :153-159 afterEach drains routes without gate references. This corrects an ambiguous file citation in the named record.",
+            "helpers/drained-route.ts:38-42 waits tracked callback Promises; helpers/route-gate.ts:10-15 supplies no cancellation. helpers/evidence.ts adds observation, no raw-Promise cancellation owner.",
+            "The lock pins Playwright/core 1.64.0. Checked official v1.64.0 timeoutManager.ts:83-114,128-132: it races the callback against a separate rejecting timeout Promise, without rejecting the raw callback wait. Official workerMain.ts:384-409 proceeds from the timed test wrapper into afterEach. Primary URLs: https://raw.githubusercontent.com/microsoft/playwright/v1.64.0/packages/playwright/src/worker/timeoutManager.ts and https://raw.githubusercontent.com/microsoft/playwright/v1.64.0/packages/playwright/src/worker/workerMain.ts .",
+            "Complete later diff through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db for the test/route helpers changes only the unrelated terminal selector. No reproduction ran."
+          ],
+          "coverage_checked": [
+            "SPEC.md and SPEC_impl.md searched for test fixture cleanup/gate/wait ownership: no accepted failure path. .agents/test-authoring.md requires bounded readiness and owned-fixture lifetime; product wake-timeout correctness does not settle this test defect.",
+            "TODO Planned is empty. BUGS.md accepts an unrelated local-SSH installation hang. Active TRIAGE_OUTCOMES.md has a popover-template-movement gate cleanup claim, not this trigger/site; no exact coverage.",
+            "plans/queue/wake-launch-stuck.md supplies the product timeout/test purpose, not a bounded helper-arrival repair. INDEX.md and related cleanup-status-masks-body-assertion.md, route-retirement-failure-skips-owned-session-cleanup.md and lifecycle-fixture-cleanup-stops-after-release-failure.md concern different causes. No exact queue item was found.",
+            "FILTER.md has no full match: a missing helper request can be an ordinary regression and the whole consequence includes prevented gate release and failed route drain, not solely an imprecise diagnostic. Parent-supplied g069/c3 remains related unverified provenance outside this batch."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "The expected helper GET must fail to arrive after helperRead is armed. Normal arrival and later ordinary assertion failures release gates correctly. Incidence is unmeasured.",
+          "original_stronger_consequence": "No higher consequence was asserted: timeout/teardown failure within the browser worker; no real session, shared-stack contamination, leak beyond worker lifetime or observed product failure.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Record this separate test wait/cleanup boundary with corrected local-fleet references. Keep the runner-lifetime limitation and source-only confidence."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "browser-native-arrival-latch-bypasses-owned-finally",
+        "destination": "trailing-browser-native-arrival-latch-bypasses-owned-finally.md"
+      }
+    },
+    {
+      "key": "g027/l6",
+      "owner": "g027",
+      "id": "l6",
+      "domain": "environment-host-lifecycle",
+      "purpose": "environment-host-lifecycle: e2e/tests/tensorlake-lifecycle.spec.ts, crates/farhelm-helm/src/sessions.rs, crates/farhelm-helm/src/hosts.rs, crates/farhelm-helm/src/manager.rs, crates/farhelm-helm/src/sessions_tests.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 16,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l6",
+            "state": "open",
+            "summary": "Synthesize original-claim loss in the environment-create result API",
+            "location": "crates/farhelm-helm/src/sessions.rs:1793",
+            "detail": "Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435\n\nTLDR: Parent supplied exact g020/l8 event29: a new environment can return session state from its successful creating connection marked fresh under a replacement connection. Creation and reference remain valid; the possible defect is reply freshness, not changed execution authority.\n\nDetails: Complete own history and exact g020 event29 read. Canonical g020/l8 locates the post-result host_client lookup at agent_requests.rs:4582 and cites this group's create_in_session_sandbox:1793-1794 discarding create_session_request's original SessionClaim. This is independent of c1's fixed approved-command/trust route and its separately corrected GUI-history provenance, and independent of l3's permanent resource-binding analysis. A stable resource/reference cannot itself prove that a mutation reply came from the current connection. Next source checks are the exact return types, result sender timing, actor publish/closed behavior and AgentSession.host contract.\n\nSuggested bucket if confirmed: other (agent reply freshness); could-be-highest: no established physical retarget, security or work-loss consequence. Confidence: parent-supplied concrete source finding, local synthesis checks pending; no execution. proposed_drop: false. possible_cover: canonical g020/l8 event29, same result-claim loss, retained owner/provenance. No alias to an unrelated existing local finding is assumed. Missing premise to verify locally: whether any ownership lock/lease keeps the creating connection current through result projection despite the claim being omitted."
+          }
+        },
+        {
+          "line": 17,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l6",
+            "state": "open",
+            "summary": "Original create claim is lost before agent freshness projection (canonical g020/l8)",
+            "location": "crates/farhelm-helm/src/sessions.rs:1793",
+            "detail": "Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435\n\nTLDR: A successful environment create can report its earlier session state as fresh after the environment disconnects and reconnects before the agent reply is projected. Creation and the stable session reference remain valid. This is canonical parent-supplied g020/l8 event29, locally checked at the API/manager boundary rather than a new independent finding.\n\nDetails: create_session_request captures SessionClaim and client in one host_client read at sessions.rs:1844-1846, uses that claim through either fresh-checkout creation (1852-1866) or ordinary creation (1894-1923), and returns the original pair. create_in_session_sandbox:1793-1794 then qualifies the SessionInfo ID with claim.entry_uuid and drops the rest of the claim. qualify_session_info:874-886 retains entry/session identity only; it carries no connection incarnation. Provisioning SessionLaunch.result at tensorlake_add.rs:101 and start_session_environment:353-355 transports only Result<SessionInfo>. finish_session_launch awaits completed-step publication and memory.lock at 1018-1026, then sends that session at 1057. No creating-connection claim survives to the receiver.\n\nThe provisioning guard is not a connection lease: setup explicitly release_hold at tensorlake_add.rs:613 before attach_supervisor; its remaining host_provision_lock excludes resource operations, not actor transport reconnection. manager run:3691-3745 executes connect_phase/serve and re-enters an active connection window after serve returns; serve independently notices client.closed at 4720. publish_refresh:5190-5207 assigns a new incarnation whenever the client changes, including withdrawal. Ordinary post-create acceptance at sessions.rs:2152-2163 returns the already successful session even when cache/history cannot retain a now-old claim. Those paths therefore allow successful completion on connection A, then connection B before the separately scheduled receiver projects it, without retargeting the physical environment.\n\nThe new caller agent_requests.rs:4578-4588 obtains a fresh host_client claim after receiving the owned result. unqualified_launch_session:4278-4291 checks only entry UUID; a normal reconnect keeps that UUID, so it cannot catch the lost mutation incarnation. agent_row_of_mutation:4694-4707 compares the newly obtained claim to current snapshots and yields host Some/stale false for B while using A's SessionInfo. Contract: AgentSession.host (proto/lib.rs:2648-2658) pins every mutation reply, including creating replies, to the connection the mutation actually routed through. The ordinary projection contract at agent_requests.rs:4599-4631 requires the original routed claim for precisely this reason. Preserve that claim in a typed owned-launch result; qualify only at the outward REST boundary or explicitly project stale when the original claim is unavailable.\n\nAttribution/status: the API's SessionInfo-only result alone did not force this new caller to assert freshness; 190d844e adds the environment agent caller that reacquires a current claim and requires an operation-claim-aware result. The complete later sessions.rs/provisioning tensorlake_add.rs diff through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db only adds unrelated environment-seal/Delete behavior. The agent_requests production diff changes an unrelated delete comment; later additions are tests. No result payload, claim-discarding helper, or projection lookup repair is present. A larger combined diff output clipped test additions; relevant production hunks were reread separately in bounded outputs, and no coverage claim is made for unrelated test additions.\n\nSuggested bucket: other (agent reply freshness/contract accuracy). Could-be-highest: no; no changed physical destination, credential exposure, duplicate launch or work-loss route is established. Confidence: confirmed conditional source/data-flow defect; no execution or timing incidence measured. proposed_drop: duplicate-only consolidation with canonical g020/l8 event29, not a correctness rejection or specification acceptance. possible_cover: exact parent-supplied g020/l8; preserve its owner, ID and consequence. No alias to c1, l3, l4 or l5 is assumed: c1 command/trust remains a separate source refutation with history effects linked to g050/l1, and l3 resource continuity cannot establish connection freshness. Material caveat: a host still disconnected at the late sample uses the existing stale fallback correctly; the defect requires an intervening replacement connection before that sample. Revision: local lead closed to source-confirmed duplicate candidate after all readily checkable API, channel, actor, lease and protocol premises were resolved."
+          }
+        }
+      ],
+      "latest": {
+        "line": 17,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l6",
+          "state": "open",
+          "summary": "Original create claim is lost before agent freshness projection (canonical g020/l8)",
+          "location": "crates/farhelm-helm/src/sessions.rs:1793",
+          "detail": "Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435\n\nTLDR: A successful environment create can report its earlier session state as fresh after the environment disconnects and reconnects before the agent reply is projected. Creation and the stable session reference remain valid. This is canonical parent-supplied g020/l8 event29, locally checked at the API/manager boundary rather than a new independent finding.\n\nDetails: create_session_request captures SessionClaim and client in one host_client read at sessions.rs:1844-1846, uses that claim through either fresh-checkout creation (1852-1866) or ordinary creation (1894-1923), and returns the original pair. create_in_session_sandbox:1793-1794 then qualifies the SessionInfo ID with claim.entry_uuid and drops the rest of the claim. qualify_session_info:874-886 retains entry/session identity only; it carries no connection incarnation. Provisioning SessionLaunch.result at tensorlake_add.rs:101 and start_session_environment:353-355 transports only Result<SessionInfo>. finish_session_launch awaits completed-step publication and memory.lock at 1018-1026, then sends that session at 1057. No creating-connection claim survives to the receiver.\n\nThe provisioning guard is not a connection lease: setup explicitly release_hold at tensorlake_add.rs:613 before attach_supervisor; its remaining host_provision_lock excludes resource operations, not actor transport reconnection. manager run:3691-3745 executes connect_phase/serve and re-enters an active connection window after serve returns; serve independently notices client.closed at 4720. publish_refresh:5190-5207 assigns a new incarnation whenever the client changes, including withdrawal. Ordinary post-create acceptance at sessions.rs:2152-2163 returns the already successful session even when cache/history cannot retain a now-old claim. Those paths therefore allow successful completion on connection A, then connection B before the separately scheduled receiver projects it, without retargeting the physical environment.\n\nThe new caller agent_requests.rs:4578-4588 obtains a fresh host_client claim after receiving the owned result. unqualified_launch_session:4278-4291 checks only entry UUID; a normal reconnect keeps that UUID, so it cannot catch the lost mutation incarnation. agent_row_of_mutation:4694-4707 compares the newly obtained claim to current snapshots and yields host Some/stale false for B while using A's SessionInfo. Contract: AgentSession.host (proto/lib.rs:2648-2658) pins every mutation reply, including creating replies, to the connection the mutation actually routed through. The ordinary projection contract at agent_requests.rs:4599-4631 requires the original routed claim for precisely this reason. Preserve that claim in a typed owned-launch result; qualify only at the outward REST boundary or explicitly project stale when the original claim is unavailable.\n\nAttribution/status: the API's SessionInfo-only result alone did not force this new caller to assert freshness; 190d844e adds the environment agent caller that reacquires a current claim and requires an operation-claim-aware result. The complete later sessions.rs/provisioning tensorlake_add.rs diff through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db only adds unrelated environment-seal/Delete behavior. The agent_requests production diff changes an unrelated delete comment; later additions are tests. No result payload, claim-discarding helper, or projection lookup repair is present. A larger combined diff output clipped test additions; relevant production hunks were reread separately in bounded outputs, and no coverage claim is made for unrelated test additions.\n\nSuggested bucket: other (agent reply freshness/contract accuracy). Could-be-highest: no; no changed physical destination, credential exposure, duplicate launch or work-loss route is established. Confidence: confirmed conditional source/data-flow defect; no execution or timing incidence measured. proposed_drop: duplicate-only consolidation with canonical g020/l8 event29, not a correctness rejection or specification acceptance. possible_cover: exact parent-supplied g020/l8; preserve its owner, ID and consequence. No alias to c1, l3, l4 or l5 is assumed: c1 command/trust remains a separate source refutation with history effects linked to g050/l1, and l3 resource continuity cannot establish connection freshness. Material caveat: a host still disconnected at the late sample uses the existing stale fallback correctly; the defect requires an intervening replacement connection before that sample. Revision: local lead closed to source-confirmed duplicate candidate after all readily checkable API, channel, actor, lease and protocol premises were resolved."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g027/findings.jsonl",
+        "id": "l6",
+        "line": 17,
+        "disposition": "duplicate",
+        "group": "environment-create-result-drops-operation-claim-remints-current",
+        "reason": "Full128exactnamedAPI/managercorroborationofthe020l8claimloss/remintroot. Preserveactualoriginalclaimreturn/session-onlyownedcompletion/reconnectpublication boundaries,disconnectedfallbackalreadycorrect,onlyreplacementbeforelatersamplesuffices. Otherconditionalreplyaccuracy/noharmruntimeclaim. Retaincanonicalratherthanfilterviaalias; no independentdefect, noGUIhistorymerge."
+      },
+      "accepted_parent_decision": {
+        "key": "g027/l6",
+        "line": 17,
+        "disposition": "duplicate",
+        "group": "environment-create-result-drops-operation-claim-remints-current",
+        "bucket": "other",
+        "recording": "new-with-canonical",
+        "needs_independent_drop_check": false,
+        "reason": "Full128exactnamedAPI/managercorroborationofthe020l8claimloss/remintroot. Preserveactualoriginalclaimreturn/session-onlyownedcompletion/reconnectpublication boundaries,disconnectedfallbackalreadycorrect,onlyreplacementbeforelatersamplesuffices. Otherconditionalreplyaccuracy/noharmruntimeclaim. Retaincanonicalratherthanfilterviaalias; no independentdefect, noGUIhistorymerge."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-128",
+          "key": "g027/l6",
+          "latest_line": 17,
+          "recommendation": "duplicate",
+          "bucket": "other",
+          "underlying_key": "environment-create-result-drops-operation-claim-remints-current",
+          "aliases": [
+            "g020/l8"
+          ],
+          "target_queue_file": null,
+          "why": "Exact corroboration of the canonical claim-loss/reminted-connection route, not an additional defect. Stable resource/reference identity cannot prove connection freshness. Preserve this API/manager-boundary evidence with g020/l8.",
+          "checks": [
+            "Read both events, physical lines 16-17. Independently verified 190d844e sessions.rs:1793-1794,1844-1866,1894-1923; provisioning/tensorlake_add.rs:353-355,613,1018-1026,1057; manager.rs:3637-3745,4720,5190-5207; agent_requests.rs:4278-4291,4578-4588,4694-4707; proto/lib.rs:2640-2658. Conditional source defect confirmed, no runtime observation.",
+            "190d844e adds the new agent caller; inclusive 00de0b6c retains late claim lookup and claim-discarding result API. Earlier GUI-qualified result API alone is not attributed as an earlier agent freshness defect."
+          ],
+          "coverage_checked": [
+            "The same actual-trigger/consequence search and matching sections recorded under g020/l8 cover this exact alias: both specifications; empty TODO Planned; plans/queue; full BUGS; full INDEX and matching queue files; active TRIAGE_OUTCOMES. No existing acceptance, planned correction or queued equivalent found. FILTER rare-diagnostic boundary remains ambiguous; recommend retaining canonical, rather than using duplicate consolidation to silently filter it."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No missing source premise. Runtime occurrence/frequency unmeasured; possible rare-diagnostic classification remains for parent.",
+          "original_stronger_consequence": "None: both lead and final candidate explicitly exclude physical retarget, credential exposure, duplicate creation and work loss. The duplicate-only proposal was never correctness rejection or specification acceptance.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Proposal only: consolidate source-confirmed other-priority evidence with g020/l8, retaining the canonical issue and all caveats. A still-disconnected host uses the correct stale fallback; the defect needs intervening reconnection."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "environment-create-result-drops-operation-claim-remints-current",
+        "destination": "trailing-environment-create-result-drops-operation-claim-remints-current.md"
+      }
+    },
+    {
+      "key": "g027/l7",
+      "owner": "g027",
+      "id": "l7",
+      "domain": "environment-host-lifecycle",
+      "purpose": "environment-host-lifecycle: e2e/tests/tensorlake-lifecycle.spec.ts, crates/farhelm-helm/src/sessions.rs, crates/farhelm-helm/src/hosts.rs, crates/farhelm-helm/src/manager.rs, crates/farhelm-helm/src/sessions_tests.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 18,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l7",
+            "state": "open",
+            "summary": "Check the new Deleting variant against the promised backend phase guard",
+            "location": "crates/farhelm-helm/src/hosts.rs:279",
+            "detail": "Reviewed commit: 222bf6253bcd168db04bcbb1df20180c88306998\n\nTLDR: The assigned patch adds the deleting host phase and two independent phase spellings. I am checking whether its existing phase/serialization test includes that new variant while claiming every variant. This is a possible test-assurance defect, not a production phase mismatch.\n\nDetails: assigned hosts.rs patch adds HostStateView::Deleting with serde rename deleting and the separate phase() match literal. Refreshed exact neighbour g024/l2 identifies the earlier Stopped omission in phase_matches_the_serialized_tag and explicitly limits its record to that new state; g031/f8 covers the UI crate's separate phase matrices, including Deleting. Neither settles whether this assigned backend addition extends the same incomplete guard. Need to read the exact backend matrix and its docs at the reviewed revision, compare the introducing patch and later source, and decide root-cause grouping rather than count a known variant omission as independent novelty.\n\nSuggested bucket if confirmed: other (test coverage/assurance only). Could-be-highest: no. Confidence: unresolved source lead. proposed_drop: false. possible_cover: related g024/l2 backend Stopped guard and g031/f8 distinct UI phase guard, both parent-provided. Missing premise: exact Deleting fixture coverage and claimed scope of the backend guard after this change. No runtime execution, reproduction or production defect asserted."
+          }
+        },
+        {
+          "line": 19,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l7",
+            "state": "open",
+            "summary": "Deleting extends the known incomplete backend phase-test matrix",
+            "location": "crates/farhelm-helm/src/hosts.rs:1817",
+            "detail": "Reviewed commit: 222bf6253bcd168db04bcbb1df20180c88306998\n\nTLDR: The new deleting phase is also omitted from the backend test that claims every host-state phase matches its serialized tag. This is another assigned variant widening the already-known incomplete matrix reported by canonical g024/l2, not a new independent test root cause.\n\nDetails: HostStateView::Deleting is added with serde rename deleting at hosts.rs:278-279 and a separately written phase() literal at 310. phase() docs:283-296 justify the duplicate vocabulary by promising phase_matches_the_serialized_tag compares every variant. The test docs:1807-1815 repeat that universal guarantee. Its complete array:1818-1871 constructs Connecting, Unreachable, Connected, VersionSkew, IdentityMismatch, IdentityUnverified, Duplicate, two TensorlakeChanging directions, Suspended and Retired; it omits both Stopped and the newly added Deleting. The sole assertion:1872-1877 compares only those constructed cases. A mismatch in either new Deleting spelling therefore leaves this test satisfied. Scoped source search finds HostStateView::Deleting only in production phase/From matches, not another fixture in hosts.rs. The complete reviewed-to-tip hosts.rs diff is empty. The omission is introduced for Deleting by this exact assigned enum widening; it is not dismissed because the older Stopped omission predates this commit.\n\nContract: the test's explicit every-variant promise and supplied test-authoring requirement to distinguish competing mechanisms. The production spellings currently agree, which does not refute the independent oracle/documentation defect. Canonical g024/l2 records the same backend matrix missing Stopped at 56659839785691f76da3af5d8f51b511cff4ba8b. One matrix repair should include both variants and preserve both introduction commits. The refreshed g031/f8 covers the UI crate's different matrix, not this backend comparison, and is not used as a refutation.\n\nSuggested bucket: other (maintainer test assurance). Could-be-highest: no runtime security/work-loss route asserted. Confidence: confirmed by full enum/docs/matrix comparison and unchanged endpoint, source-only. proposed_drop: duplicate/common-remediation proposal with g024/l2 only; not a correctness rejection, accepted parent drop, or claim that production correctness cures the test. possible_cover: exact parent-provided g024/l2, same backend test/root cause with the additional Deleting variant and 222bf625 provenance supplied here; related UI g031/f8 remains separate. Material caveat: this records additional evidence for a known matrix defect rather than claiming an independently novel issue. Revision: l7 source lead closed as a duplicate candidate after fixture/alternate-construction/later-repair checks; original suspected false-assurance consequence preserved. No tests, builds, reproductions, checkout edits or live actions."
+          }
+        }
+      ],
+      "latest": {
+        "line": 19,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l7",
+          "state": "open",
+          "summary": "Deleting extends the known incomplete backend phase-test matrix",
+          "location": "crates/farhelm-helm/src/hosts.rs:1817",
+          "detail": "Reviewed commit: 222bf6253bcd168db04bcbb1df20180c88306998\n\nTLDR: The new deleting phase is also omitted from the backend test that claims every host-state phase matches its serialized tag. This is another assigned variant widening the already-known incomplete matrix reported by canonical g024/l2, not a new independent test root cause.\n\nDetails: HostStateView::Deleting is added with serde rename deleting at hosts.rs:278-279 and a separately written phase() literal at 310. phase() docs:283-296 justify the duplicate vocabulary by promising phase_matches_the_serialized_tag compares every variant. The test docs:1807-1815 repeat that universal guarantee. Its complete array:1818-1871 constructs Connecting, Unreachable, Connected, VersionSkew, IdentityMismatch, IdentityUnverified, Duplicate, two TensorlakeChanging directions, Suspended and Retired; it omits both Stopped and the newly added Deleting. The sole assertion:1872-1877 compares only those constructed cases. A mismatch in either new Deleting spelling therefore leaves this test satisfied. Scoped source search finds HostStateView::Deleting only in production phase/From matches, not another fixture in hosts.rs. The complete reviewed-to-tip hosts.rs diff is empty. The omission is introduced for Deleting by this exact assigned enum widening; it is not dismissed because the older Stopped omission predates this commit.\n\nContract: the test's explicit every-variant promise and supplied test-authoring requirement to distinguish competing mechanisms. The production spellings currently agree, which does not refute the independent oracle/documentation defect. Canonical g024/l2 records the same backend matrix missing Stopped at 56659839785691f76da3af5d8f51b511cff4ba8b. One matrix repair should include both variants and preserve both introduction commits. The refreshed g031/f8 covers the UI crate's different matrix, not this backend comparison, and is not used as a refutation.\n\nSuggested bucket: other (maintainer test assurance). Could-be-highest: no runtime security/work-loss route asserted. Confidence: confirmed by full enum/docs/matrix comparison and unchanged endpoint, source-only. proposed_drop: duplicate/common-remediation proposal with g024/l2 only; not a correctness rejection, accepted parent drop, or claim that production correctness cures the test. possible_cover: exact parent-provided g024/l2, same backend test/root cause with the additional Deleting variant and 222bf625 provenance supplied here; related UI g031/f8 remains separate. Material caveat: this records additional evidence for a known matrix defect rather than claiming an independently novel issue. Revision: l7 source lead closed as a duplicate candidate after fixture/alternate-construction/later-repair checks; original suspected false-assurance consequence preserved. No tests, builds, reproductions, checkout edits or live actions."
+        }
+      },
+      "recording_decision": null,
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "g027/l7",
+        "destination": "trailing-deleting-extends-the-known-incomplete-backend-phase-test-matrix.md"
+      }
+    },
+    {
+      "key": "g027/l8",
+      "owner": "g027",
+      "id": "l8",
+      "domain": "environment-host-lifecycle",
+      "purpose": "environment-host-lifecycle: e2e/tests/tensorlake-lifecycle.spec.ts, crates/farhelm-helm/src/sessions.rs, crates/farhelm-helm/src/hosts.rs, crates/farhelm-helm/src/manager.rs, crates/farhelm-helm/src/sessions_tests.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 20,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l8",
+            "state": "open",
+            "summary": "Check later deletion and withdrawal changes against stopped-actor manager retention",
+            "location": "crates/farhelm-helm/src/manager.rs:3845",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b; assigned interaction commit 222bf6253bcd168db04bcbb1df20180c88306998. TLDR: Parent-supplied canonical g024/l5 event35 (earlier31-33 also read) identifies idle stopped environment actors retaining strong manager references and delaying or preventing documented direct-drop cleanup. Complete own 19-event history read before this new synthesis record. The named remaining synthesis check is whether this group's later Deleting/seal/withdrawal changes break that retention or alter endpoint persistence. Canonical finding distinguishes one actor's bounded retention from overlapping actors keeping the manager and other connections alive indefinitely; ordinary explicit shutdown_and_wait remains protected. No graceful-shutdown hang, security or user-work-loss claim is made. Need local exact source check of the stopped arm's scope, Drop and withdrawal ordering, later changes and endpoint, plus governing lifecycle contract and protected caller. Suggested bucket if confirmed: other (manager/resource lifetime). Could-be-highest: false. Confidence: concrete parent-supplied source finding; local interaction synthesis pending, no execution. proposed_drop: false. possible_cover: canonical g024/l5 event35, same ownership root, preserve its original ID/provenance rather than claim independent discovery. No original local candidates or proposed-drop bases are changed."
+          }
+        },
+        {
+          "line": 21,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l8",
+            "state": "open",
+            "summary": "Stopped arm retains the named manager local on idle branches",
+            "location": "crates/farhelm-helm/src/manager.rs:3845",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b; interaction revision 222bf6253bcd168db04bcbb1df20180c88306998. TLDR: Exact original source confirms canonical g024/l5's ownership shape: the named Option<Arc<ConnectionManager>> at manager.rs:3845 is used for gate computation and moved only at :3864 after !stopped.attempted and gate succeed. Otherwise it remains in the Stopped arm containing the idle select loop :3873-3892. The automatic-start task is a separate legitimate owner; the idle branch needs no retained Arc. A source location search at assigned 222 still finds the same arm/local at :4050/:4054. This is evidence for the direct-drop cleanup delay/overlap concern, not yet the completed local withdrawal interaction check. Remaining checks: exact assigned withdrawal/Drop and sealing changes, endpoint body, protected explicit shutdown and lifecycle contract. Original canonical consequence retained: one stopped actor delays direct-drop cleanup; overlapping stopped actors may retain manager and unrelated connections indefinitely. No normal graceful-shutdown hang, security or user-work-loss assertion. Suggested bucket other; could-be-highest false; confidence confirmed source shape, final local synthesis pending; no execution. proposed_drop false. possible_cover canonical g024/l5 event35 (earlier31-33 read), same ownership defect and original identity. No independent new discovery or existing candidate revision."
+          }
+        },
+        {
+          "line": 22,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l8",
+            "state": "open",
+            "summary": "Later global withdrawal still requires an explicit call or reachable manager Drop",
+            "location": "crates/farhelm-helm/src/manager.rs:3342",
+            "detail": "Reviewed commit: 222bf6253bcd168db04bcbb1df20180c88306998; original canonical defect introduced at 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: The later actor-withdrawal implementation does not by itself repair canonical g024/l5's retained manager reference. At assigned 222 manager.rs:3298-3339, shutdown and shutdown_and_wait call withdraw_actors; it drains the actor map, withdraws clients and explicitly aborts actor tasks. Drop :3342-3350 calls shutdown, so it cannot initiate cleanup while idle actors still own strong manager references. The per-host hold :1655-1695 and release :1702-1714 alter status/nudge and retire that host's client; they do not independently invoke global shutdown. Exact endpoint arm :4050-4102 still retains the named Option across idle waits when the conditional move is skipped. This resolves the local withdrawal/endpoint interaction in favor of the canonical finding; the endpoint source is byte-for-byte the same relevant control shape as the original arm. Remaining checks are the later seal-state operations/diff, explicit serving caller and governing contracts; no open language or conditional-move premise is assumed away. Original consequence retained: one actor can defer direct-drop cleanup, overlapping stopped actors can keep manager/other connections alive indefinitely; normal explicit shutdown can cancel them and break retention. Suggested bucket other; could-be-highest false; confidence source-confirmed interaction, full synthesis pending. proposed_drop false. possible_cover canonical g024/l5 event35, same ownership cause, preserve ID/provenance. No execution, normal graceful-shutdown hang, security or user-work-loss consequence asserted."
+          }
+        },
+        {
+          "line": 23,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l8",
+            "state": "open",
+            "summary": "Later deletion and withdrawal changes leave canonical g024/l5 intact",
+            "location": "crates/farhelm-helm/src/manager.rs:4054",
+            "detail": "# Later deletion and withdrawal changes leave canonical g024/l5 intact\n\nReviewed commit: 222bf6253bcd168db04bcbb1df20180c88306998. Original introducing commit: 56659839785691f76da3af5d8f51b511cff4ba8b. Endpoint checked: 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db.\n\n## TLDR\n\nStopped environment actors can keep their manager, tasks and other host connections alive after the caller releases its last manager reference. One idle actor delays fallback cleanup until it leaves its wait; two persistently stopped actors with staggered waits can keep each other able to reacquire the manager indefinitely. This is the exact canonical g024/l5 event35 consequence, locally confirmed across the assigned later deletion changes, not an independent new discovery. Normal serving shutdown and the test restart path explicitly shut the manager down and remain protected.\n\n## Details\n\nRead complete own 19-event history and exact g024 events31-33/35 before revising. At original 566 manager.rs:3845-3893, let manager = self.manager.upgrade() creates a named Option<Arc<ConnectionManager>>. The gate borrows it; the only move into an owned start task is conditional on !stopped.attempted and gate. If either is false, that move is not evaluated and the initialized local survives the idle select loop inside the same arm. Independently consulted official Rust Reference local-variable drop scopes (https://doc.rust-lang.org/reference/destructors.html#scopes-of-local-variables) and condition chains (https://doc.rust-lang.org/reference/expressions/if-expr.html#chains-of-conditions): the named local belongs to its enclosing block; condition operands short-circuit left-to-right. Borrow last-use does not destroy this owned value early. The original manager self_ref docs :1161 expressly require Weak actor ownership so the manager/actor map can drop; ActorHandle :1075-1135 owns actor cancellation handles and connections.\n\nLocal interaction result: assigned 222 manager.rs:3298-3339 makes shutdown/shutdown_and_wait call withdraw_actors, which marks terminal shutdown, drains the actor map, withdraws clients and aborts actors. This cancels the idle future and drops the local Arc WHEN explicitly called. Drop :3342-3350 calls shutdown and cannot be reached while those strong references survive. Per-host hold_connection :1655-1695 retires that host's client and nudges it to park; release_hold :1702-1714 clears the hold and nudges again. stop_actor :3243-3259 removes and cancels only the selected actor. These operations can release that particular wait, but are not automatically invoked by losing the external manager owner. The new Deleting/seal maps and status/snapshot overlay do not end an idle Stopped arm or call global withdrawal. Their records contain phase/failure data, not a global lifetime cancellation signal.\n\nThe assigned host removal at hosts.rs:1506-1517 explicitly takes a Deleting hold for the selected host, later stopping its actor only on successful forgetting. Finisher :1450-1471 runs removal for already-sealed machine-deleting environments. An ordinary unsealed, gate-false Stopped episode requires no Delete, no seal and no connected listing. Therefore the fact that an actual Delete wakes a selected actor, or a sealed host projects Deleting, does not repair direct-drop fallback for the reachable ordinary stopped fleet. This interaction is separate from local l4 missing deletion-outcome writes and from g028/l3 stale captured finisher eligibility; no same-symptom merge or change to those findings is proposed.\n\nSupported source premise independently checked: original environment/podman.rs:1237-1276 maps an inspected canonical stopped/exited/created container to Stopped. inspect :226-264 uses provider commands; place/command :148-184 obtains the current registry/base route through podman_probe.runtime :338-378 and runs direct bounded commands via :409-415, independently of the place manager connection. Two stopped containers can therefore keep answering Stopped while the place has no connected Farhelm supervisor, leaving the gate false. Alternatively a completed failed automatic attempt leaves attempted true. Outer actor run :3643-3693 reloads and probes independently; it has no fleet barrier forcing all idle manager references to be released together. SPEC.md Container sessions' reboot/start paragraph :4782-4789 and complete SPEC_impl Environment rows/provider state :6434-6461 and Environment ownership/refusal :6572-6592 specify the ordinary Stopped/one-start/failure behavior. SPEC_impl connection actor/cadence paragraphs :5809-5854 describe independent actors and 45-second reprobing. None accepts self-retention across direct manager release.\n\nProtected boundary rechecked in local later source: 222 lib.rs:2568-2592 runs manager.shutdown_and_wait after the serving select, whether HTTP, token control or shutdown ends serving. Original rest_harness.rs:1007-1010 explicitly calls manager.shutdown before drop on restart. SPEC_impl serving teardown :7170-7174 requires cancellation/join while the runtime exists. These paths break the retained references; no normal desktop/standalone graceful-shutdown hang is established. The direct-drop contract is independently explicit in original manager.rs:11929-11976: its test destructures Fixture and drops manager without shutdown, then waits for connections to close and checks no more dials. Fixture :7425-7430 adds no destructor. That ordinary-host fixture misses the new Stopped state. Correct explicit shutdown does not refute this distinct direct-drop contract or the fixture's limited coverage.\n\nAttribution/persistence: exclusive-base targeted search contains none of the self_ref/StoppedEpisode/Stopped arm machinery. Original parent-to-566 patch adds the Weak manager, actor field, episode and this arm, confirming an in-range introduction. Later manager diff hunk locations through the endpoint change Deleting/seal/listing behavior and fixture metadata, not this arm or Drop/withdrawal scope. Exact endpoint :4050-4102 retains the named upgrade, short-circuit move and wait. Complete 222-to-endpoint manager diff removes only two obsolete test fixture fields; no later production repair. Fix direction remains canonical: scope the gate's temporary upgrade to gate calculation, then separately upgrade/move a manager only for the real owned lifecycle task. Preserve legitimate task settlement and explicit shutdown.\n\nSuggested bucket: other, manager/resource lifetime. Could-be-highest: false; no secret exposure, loss of user processes or work-loss route established. Confidence: confirmed conditional source/language/contract analysis, no execution or incidence measurement. proposed_drop: duplicate-only consolidation with canonical g024/l5 event35, preserving its original ID, introducing commit, consequences and false proposed_drop; not a correctness rejection, specification acceptance, parent-approved drop or lowering. possible_cover: exactly the parent-supplied g024/l5 events31-33/35, same ownership cause. One actor's delay is not described as an unconditional permanent leak; indefinite retention requires overlapping persistent Stopped actors and status/probe completion before the other releases its reference. Runtime cancellation or explicit shutdown ultimately releases these tasks. All named readily checkable local source premises resolved; l8 closes to this duplicate candidate. Existing c1/c2/l3/l4/l5/l6/l7 identities, original consequences and proposed-drop bases unchanged. No unrelated discovery, forbidden coverage search, nested agents, tests/builds/reproductions, checkout writes, installs or live actions."
+          }
+        }
+      ],
+      "latest": {
+        "line": 23,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l8",
+          "state": "open",
+          "summary": "Later deletion and withdrawal changes leave canonical g024/l5 intact",
+          "location": "crates/farhelm-helm/src/manager.rs:4054",
+          "detail": "# Later deletion and withdrawal changes leave canonical g024/l5 intact\n\nReviewed commit: 222bf6253bcd168db04bcbb1df20180c88306998. Original introducing commit: 56659839785691f76da3af5d8f51b511cff4ba8b. Endpoint checked: 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db.\n\n## TLDR\n\nStopped environment actors can keep their manager, tasks and other host connections alive after the caller releases its last manager reference. One idle actor delays fallback cleanup until it leaves its wait; two persistently stopped actors with staggered waits can keep each other able to reacquire the manager indefinitely. This is the exact canonical g024/l5 event35 consequence, locally confirmed across the assigned later deletion changes, not an independent new discovery. Normal serving shutdown and the test restart path explicitly shut the manager down and remain protected.\n\n## Details\n\nRead complete own 19-event history and exact g024 events31-33/35 before revising. At original 566 manager.rs:3845-3893, let manager = self.manager.upgrade() creates a named Option<Arc<ConnectionManager>>. The gate borrows it; the only move into an owned start task is conditional on !stopped.attempted and gate. If either is false, that move is not evaluated and the initialized local survives the idle select loop inside the same arm. Independently consulted official Rust Reference local-variable drop scopes (https://doc.rust-lang.org/reference/destructors.html#scopes-of-local-variables) and condition chains (https://doc.rust-lang.org/reference/expressions/if-expr.html#chains-of-conditions): the named local belongs to its enclosing block; condition operands short-circuit left-to-right. Borrow last-use does not destroy this owned value early. The original manager self_ref docs :1161 expressly require Weak actor ownership so the manager/actor map can drop; ActorHandle :1075-1135 owns actor cancellation handles and connections.\n\nLocal interaction result: assigned 222 manager.rs:3298-3339 makes shutdown/shutdown_and_wait call withdraw_actors, which marks terminal shutdown, drains the actor map, withdraws clients and aborts actors. This cancels the idle future and drops the local Arc WHEN explicitly called. Drop :3342-3350 calls shutdown and cannot be reached while those strong references survive. Per-host hold_connection :1655-1695 retires that host's client and nudges it to park; release_hold :1702-1714 clears the hold and nudges again. stop_actor :3243-3259 removes and cancels only the selected actor. These operations can release that particular wait, but are not automatically invoked by losing the external manager owner. The new Deleting/seal maps and status/snapshot overlay do not end an idle Stopped arm or call global withdrawal. Their records contain phase/failure data, not a global lifetime cancellation signal.\n\nThe assigned host removal at hosts.rs:1506-1517 explicitly takes a Deleting hold for the selected host, later stopping its actor only on successful forgetting. Finisher :1450-1471 runs removal for already-sealed machine-deleting environments. An ordinary unsealed, gate-false Stopped episode requires no Delete, no seal and no connected listing. Therefore the fact that an actual Delete wakes a selected actor, or a sealed host projects Deleting, does not repair direct-drop fallback for the reachable ordinary stopped fleet. This interaction is separate from local l4 missing deletion-outcome writes and from g028/l3 stale captured finisher eligibility; no same-symptom merge or change to those findings is proposed.\n\nSupported source premise independently checked: original environment/podman.rs:1237-1276 maps an inspected canonical stopped/exited/created container to Stopped. inspect :226-264 uses provider commands; place/command :148-184 obtains the current registry/base route through podman_probe.runtime :338-378 and runs direct bounded commands via :409-415, independently of the place manager connection. Two stopped containers can therefore keep answering Stopped while the place has no connected Farhelm supervisor, leaving the gate false. Alternatively a completed failed automatic attempt leaves attempted true. Outer actor run :3643-3693 reloads and probes independently; it has no fleet barrier forcing all idle manager references to be released together. SPEC.md Container sessions' reboot/start paragraph :4782-4789 and complete SPEC_impl Environment rows/provider state :6434-6461 and Environment ownership/refusal :6572-6592 specify the ordinary Stopped/one-start/failure behavior. SPEC_impl connection actor/cadence paragraphs :5809-5854 describe independent actors and 45-second reprobing. None accepts self-retention across direct manager release.\n\nProtected boundary rechecked in local later source: 222 lib.rs:2568-2592 runs manager.shutdown_and_wait after the serving select, whether HTTP, token control or shutdown ends serving. Original rest_harness.rs:1007-1010 explicitly calls manager.shutdown before drop on restart. SPEC_impl serving teardown :7170-7174 requires cancellation/join while the runtime exists. These paths break the retained references; no normal desktop/standalone graceful-shutdown hang is established. The direct-drop contract is independently explicit in original manager.rs:11929-11976: its test destructures Fixture and drops manager without shutdown, then waits for connections to close and checks no more dials. Fixture :7425-7430 adds no destructor. That ordinary-host fixture misses the new Stopped state. Correct explicit shutdown does not refute this distinct direct-drop contract or the fixture's limited coverage.\n\nAttribution/persistence: exclusive-base targeted search contains none of the self_ref/StoppedEpisode/Stopped arm machinery. Original parent-to-566 patch adds the Weak manager, actor field, episode and this arm, confirming an in-range introduction. Later manager diff hunk locations through the endpoint change Deleting/seal/listing behavior and fixture metadata, not this arm or Drop/withdrawal scope. Exact endpoint :4050-4102 retains the named upgrade, short-circuit move and wait. Complete 222-to-endpoint manager diff removes only two obsolete test fixture fields; no later production repair. Fix direction remains canonical: scope the gate's temporary upgrade to gate calculation, then separately upgrade/move a manager only for the real owned lifecycle task. Preserve legitimate task settlement and explicit shutdown.\n\nSuggested bucket: other, manager/resource lifetime. Could-be-highest: false; no secret exposure, loss of user processes or work-loss route established. Confidence: confirmed conditional source/language/contract analysis, no execution or incidence measurement. proposed_drop: duplicate-only consolidation with canonical g024/l5 event35, preserving its original ID, introducing commit, consequences and false proposed_drop; not a correctness rejection, specification acceptance, parent-approved drop or lowering. possible_cover: exactly the parent-supplied g024/l5 events31-33/35, same ownership cause. One actor's delay is not described as an unconditional permanent leak; indefinite retention requires overlapping persistent Stopped actors and status/probe completion before the other releases its reference. Runtime cancellation or explicit shutdown ultimately releases these tasks. All named readily checkable local source premises resolved; l8 closes to this duplicate candidate. Existing c1/c2/l3/l4/l5/l6/l7 identities, original consequences and proposed-drop bases unchanged. No unrelated discovery, forbidden coverage search, nested agents, tests/builds/reproductions, checkout writes, installs or live actions."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g027/findings.jsonl",
+        "id": "l8",
+        "line": 23,
+        "disposition": "duplicate",
+        "group": "stopped-idle-local-arc-blocks-direct-manager-drop",
+        "reason": "Full primary and129: selected stop_actor/Delete/hold or sealed-resource finisher do not run merely when external owner disappears; global withdrawal does explicitly cancel but depends on Drop unless called directly. Same024l5 local-Arc defect, with later withdrawal interaction checks preserved and explicit serving/REST teardown exclusions."
+      },
+      "accepted_parent_decision": {
+        "key": "g027/l8",
+        "line": 23,
+        "disposition": "duplicate",
+        "group": "stopped-idle-local-arc-blocks-direct-manager-drop",
+        "bucket": "other",
+        "recording": "supporting-provenance",
+        "needs_independent_drop_check": false,
+        "reason": "Full primary and129: selected stop_actor/Delete/hold or sealed-resource finisher do not run merely when external owner disappears; global withdrawal does explicitly cancel but depends on Drop unless called directly. Same024l5 local-Arc defect, with later withdrawal interaction checks preserved and explicit serving/REST teardown exclusions."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-129",
+          "key": "g027/l8",
+          "latest_line": 23,
+          "recommendation": "duplicate",
+          "bucket": "other",
+          "underlying_key": "helm-manager/stopped-idle-local-arc-blocks-direct-drop",
+          "aliases": [
+            "g024/l5",
+            "g022/f3",
+            "g026/f8",
+            "g067/l4"
+          ],
+          "alias_scope": "Exact same-root corroboration, with a later deletion/withdrawal interaction check. No independent residual defect.",
+          "target_queue_file": null,
+          "why": "Global withdrawal cancels idle actors when explicitly called; direct manager release cannot reach that fallback while the actors retain strong references. Selected-host deletion/holds do not automatically run merely because the external manager owner disappears.",
+          "checks": [
+            {
+              "source": "g027/findings.jsonl:20-23",
+              "result": "Read all l8 events. They preserve the canonical one-actor delay/two-actor conditional continuation, then resolve the later withdrawal/deletion interaction as duplicate-only corroboration. No stronger harm or runtime observation is introduced."
+            },
+            {
+              "source": "566:manager.rs:1075-1162,3067-3145,3838-3893; tip manager.rs:3243-3350,4050-4102",
+              "result": "Own reads confirm named local retention and destructor dependence. stop_actor removes only the chosen host; shutdown/withdraw_actors explicitly drains and cancels the map. Losing an external Arc is not one of those explicit calls. The later code leaves the Stopped arm intact."
+            },
+            {
+              "source": "566:environment/podman.rs:148-236,1237-1276; podman_probe.rs:338-378,409-415; manager.rs:4185-4219; tip sessions/sandbox.rs:339-361",
+              "result": "An admitted ordinary unsealed stopped container can be inspected directly while its place supervisor is disconnected, so this route requires no Delete or seal. Sealed-environment finishing supplies no implicit release of ordinary stopped-actor locals."
+            },
+            {
+              "source": "tip lib.rs:2568-2592; rest_harness.rs:1007-1016; original manager.rs:7425-7430,11929-11976; original-to-tip and recording-main diffs",
+              "result": "Explicit serving/REST teardown remains protective, and the direct-drop contract is exercised only for an ordinary host by the existing fixture. In-range introduction and unchanged endpoint/recording-main ownership shape are confirmed. Official Rust drop-scope/short-circuit rules were read directly. No runtime action."
+            }
+          ],
+          "coverage_checked": [
+            {
+              "source": "SPEC.md Container sessions; SPEC_impl.md actor/cadence, Disposable environments/provider state, lifecycle and serving teardown",
+              "result": "Ordinary Stopped and explicit teardown behavior are specified; direct-drop manager retention is not accepted. Actual Delete/hold wakeups cover selected operations, not dropping an unsealed fleet manager."
+            },
+            {
+              "source": "TODO.md Planned; plans/queue; BUGS.md",
+              "result": "Planned empty; targeted lifetime/hold/manager searches and matching environment/overlap plan sections reveal no unlanded work stating a repair. The accepted SSH transfer-helper hang is unrelated."
+            },
+            {
+              "source": "queue INDEX plus matching retired-connection/suspend/shutdown-test entries; TRIAGE_OUTCOMES.md",
+              "result": "No exact existing cover/decision; matching sections concern different triggers and consequences. Archive not read."
+            },
+            {
+              "source": "review_feedback_queue/FILTER.md",
+              "result": "No entire filter matches. A persistent resource-lifetime consequence is not covered just because its caller boundary is narrow."
+            }
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "None for the conditional ownership/withdrawal claim. Runtime occurrence/frequency not measured. Indefinite retention needs two persistent overlapping stopped actors; explicit shutdown/runtime cancellation releases them. No security/user-process/user-work loss established.",
+          "original_stronger_consequence": "Original l8 already limits the supplied claim to direct-drop resource retention, one-actor delay and overlapping-actor indefinite continuation, with explicit shutdown protected. Final duplicate candidate retains that scope; it is not a withdrawal of the canonical defect.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Merge exact same-root corroboration into g024/l5 with the later deletion/withdrawal checks preserved. No rejection or lowering of the retained production finding."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "stopped-idle-local-arc-blocks-direct-manager-drop",
+        "destination": "trailing-stopped-idle-local-arc-blocks-direct-manager-drop.md"
+      }
+    },
+    {
+      "key": "g027/l9",
+      "owner": "g027",
+      "id": "l9",
+      "domain": "environment-host-lifecycle",
+      "purpose": "environment-host-lifecycle: e2e/tests/tensorlake-lifecycle.spec.ts, crates/farhelm-helm/src/sessions.rs, crates/farhelm-helm/src/hosts.rs, crates/farhelm-helm/src/manager.rs, crates/farhelm-helm/src/sessions_tests.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 24,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l9",
+            "state": "open",
+            "summary": "Check late seal publication after successful host forgetting",
+            "location": "crates/farhelm-helm/src/manager.rs:5121",
+            "detail": "Reviewed commit: 222bf6253bcd168db04bcbb1df20180c88306998. TLDR: Checking whether an in-flight sealed listing can recreate a seal-map entry after successful resource removal, leaving an invisible pending/failed cleanup record. This is a possible process-local cleanup/bookkeeping concern, not the known stale eligibility retry or ordinary-host outcome omission. Source checked this pass: refresh_once :5121-5123 checks seal_is_actionable then separately note_sealed, before the cache-write gate; provisioning/service.rs:2147-2159 serializes row removal and stops the actor before returning, while hosts.rs clears the seal after forgetting. A preliminary apparent interleaving may be excluded by the earlier connection hold and parked-actor acknowledgement, so no defect is asserted yet. Need check exact hold/nudge/serve cancellation ordering and whether any supported removal can bypass it; normal bounded hold and exceptional timeout must be distinguished. Suggested bucket if established: other (stale internal cleanup state). Could-be-highest:false: no physical retarget or additional destructive route is alleged; removed host IDs are not assumed reusable. Confidence: concrete source lead, not execution, local exclusion check pending. proposed_drop:false. possible_cover:none in complete refreshed supplied interface records; existing l3 concerned resource identity before destruction, l4 missing outcome writes and g028/l3 stale finisher eligibility have distinct causes/consequences. No tests, builds, reproductions, checkout writes or live actions."
+          }
+        },
+        {
+          "line": 25,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l9",
+            "state": "open",
+            "summary": "Normal removal parks or cancels the listing before clearing its seal",
+            "location": "crates/farhelm-helm/src/manager.rs:4825",
+            "detail": "Reviewed commit: 222bf6253bcd168db04bcbb1df20180c88306998. TLDR: Investigated whether an in-flight listing can recreate a seal entry after successful host removal. The ordinary removal ordering excludes the proposed late-publication route, so no new bookkeeping defect is established. Original possible consequence retained: an invisible Pending/Failed entry after its host was forgotten, not extra destruction or changed resource authority.\n\nDetails: refresh_once :5121-5123 does check actionable and note the seal before acquiring its cache lock, but the entire refresh future is inside serve's nudge select :4825-4831. Every machine-deleting forget_host_locked :1513-1517 first awaits hold_connection. That method :1663-1688 sets a fresh hold/incarnation, withdraws the client, nudges and waits for the matching parked acknowledgement. Outer actor run :3868-3879 acknowledges parked only after leaving serve, so the refresh future (including its synchronous seal note) has already completed or been dropped before the acknowledged hold returns. A nudge landing just after refresh completion is checked again at :4850-4861 before serve continues. Removal then destroys, serializes the row/cache deletion, stops its actor (provisioning/service.rs:2147-2159), closes tunnels and only afterwards clears the seal (hosts.rs:1570-1575). With no actor present, seal_is_actionable :2700-2704 cannot admit a new note. remove_host_for, remove_host_checked and finish_sealed_environment all converge on this same held removal; foreign ordinary hosts never get actionable seals. Thus the initial separate actionability/note calls are not by themselves evidence of publication after successful ordinary forgetting.\n\nChecked exceptional boundary rather than assuming an unbounded hold: hold_connection :1682-1693 may continue after HOLD_PARK_TIMEOUT. The examined note path itself contains no await between its completed drain and actionability/note; the status/park route supplies cancellation, and no source-produced awaited operation was found that leaves an old refresh able to resume this seal note after a matching parked acknowledgement. A hypothetical thread stopped inside this synchronous segment beyond the park deadline would add an unestablished scheduling premise, not the concrete ordinary interleaving initially considered. No such incidence or blocking mechanism is claimed. The existing documented bounded shared-SSH release occurs outside this refresh note segment. No need to retain an open lead absent a supported contradictory ordering.\n\nContract: previously read SPEC_impl Environment Delete and the seal requires held destruction, retained seal failure and forgetting only after resource proof. The checked ownership/hold sequencing, rather than specification acceptance of stale records, refutes this particular candidate. Suggested bucket other if the suspected bookkeeping leak existed. Could-be-highest:false, no security or user-work-loss route alleged. Confidence: confirmed source refutation of the ordinary late-listing route, no execution. proposed_drop: source ordering/cancellation refutation above, not impact minimization or specification acceptance. possible_cover:none; known local l4 and canonical g028/l3 concern actual failure/outcome policy, not this candidate. Existing local l3 resource-continuity analysis is not used as a substitute for these cancellation checks. Revision: same-ID l9 lead closed to candidate after hold, serve, acknowledgement, all removal caller and clear-order checks; original suspected consequence preserved. No tests/builds/reproductions, prohibited coverage searches, nested agents, checkout writes or live actions."
+          }
+        }
+      ],
+      "latest": {
+        "line": 25,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l9",
+          "state": "open",
+          "summary": "Normal removal parks or cancels the listing before clearing its seal",
+          "location": "crates/farhelm-helm/src/manager.rs:4825",
+          "detail": "Reviewed commit: 222bf6253bcd168db04bcbb1df20180c88306998. TLDR: Investigated whether an in-flight listing can recreate a seal entry after successful host removal. The ordinary removal ordering excludes the proposed late-publication route, so no new bookkeeping defect is established. Original possible consequence retained: an invisible Pending/Failed entry after its host was forgotten, not extra destruction or changed resource authority.\n\nDetails: refresh_once :5121-5123 does check actionable and note the seal before acquiring its cache lock, but the entire refresh future is inside serve's nudge select :4825-4831. Every machine-deleting forget_host_locked :1513-1517 first awaits hold_connection. That method :1663-1688 sets a fresh hold/incarnation, withdraws the client, nudges and waits for the matching parked acknowledgement. Outer actor run :3868-3879 acknowledges parked only after leaving serve, so the refresh future (including its synchronous seal note) has already completed or been dropped before the acknowledged hold returns. A nudge landing just after refresh completion is checked again at :4850-4861 before serve continues. Removal then destroys, serializes the row/cache deletion, stops its actor (provisioning/service.rs:2147-2159), closes tunnels and only afterwards clears the seal (hosts.rs:1570-1575). With no actor present, seal_is_actionable :2700-2704 cannot admit a new note. remove_host_for, remove_host_checked and finish_sealed_environment all converge on this same held removal; foreign ordinary hosts never get actionable seals. Thus the initial separate actionability/note calls are not by themselves evidence of publication after successful ordinary forgetting.\n\nChecked exceptional boundary rather than assuming an unbounded hold: hold_connection :1682-1693 may continue after HOLD_PARK_TIMEOUT. The examined note path itself contains no await between its completed drain and actionability/note; the status/park route supplies cancellation, and no source-produced awaited operation was found that leaves an old refresh able to resume this seal note after a matching parked acknowledgement. A hypothetical thread stopped inside this synchronous segment beyond the park deadline would add an unestablished scheduling premise, not the concrete ordinary interleaving initially considered. No such incidence or blocking mechanism is claimed. The existing documented bounded shared-SSH release occurs outside this refresh note segment. No need to retain an open lead absent a supported contradictory ordering.\n\nContract: previously read SPEC_impl Environment Delete and the seal requires held destruction, retained seal failure and forgetting only after resource proof. The checked ownership/hold sequencing, rather than specification acceptance of stale records, refutes this particular candidate. Suggested bucket other if the suspected bookkeeping leak existed. Could-be-highest:false, no security or user-work-loss route alleged. Confidence: confirmed source refutation of the ordinary late-listing route, no execution. proposed_drop: source ordering/cancellation refutation above, not impact minimization or specification acceptance. possible_cover:none; known local l4 and canonical g028/l3 concern actual failure/outcome policy, not this candidate. Existing local l3 resource-continuity analysis is not used as a substitute for these cancellation checks. Revision: same-ID l9 lead closed to candidate after hold, serve, acknowledgement, all removal caller and clear-order checks; original suspected consequence preserved. No tests/builds/reproductions, prohibited coverage searches, nested agents, checkout writes or live actions."
+        }
+      },
+      "recording_decision": null,
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "g027/l9",
+        "destination": "trailing-normal-removal-parks-or-cancels-the-listing-before-clearing-its-seal.md"
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review is blocked: all six manifest ranges exceed their source files by one line, so the required evidence reader rejects the manifest.\n\nThe brief and complete commit list are read. Progress is recorded; the findings log is empty. All six mandatory patches remain unread. I’ve requested approval to create a corrected private manifest and continue."
+    },
+    {
+      "turn": 2,
+      "reply": "Initial pass complete. All six mandatory patches read through the corrected manifest; no assigned scope remains unread.\n\nRecorded `l4`: whole-host Delete fails to update sealed-deletion failure bookkeeping (`other`, source-confirmed). Three candidates recorded as ruled out; no open leads.\n\nFindings and progress logs updated. No tests, reproductions, or checkout changes."
+    },
+    {
+      "turn": 3,
+      "reply": "Revised records:\n\n- `l4`: confirmed admission and failure projection; no later in-range fix. Remains `other`, distinct from g028/l3’s stale pending-list bug.\n- `c1`: verified the complete provisioning handoff preserves approved launch authority.\n- `l3`: narrowed the binding claim—Podman enforces ID immutability in SQL; Tensorlake relies on its checked callers.\n\nNo new findings. No unresolved leads. Source-only synthesis complete."
+    },
+    {
+      "turn": 4,
+      "reply": "Discovery complete; something new was found.\n\n- **New verified:** `l5` (`other`)—the raw helper-arrival wait can bypass gate cleanup and stall route teardown. Checked fixture ownership, later diffs, and [pinned Playwright timeout handling](https://raw.githubusercontent.com/microsoft/playwright/v1.64.0/packages/playwright/src/worker/timeoutManager.ts).\n- **Revised:** `c1` now separates preserved command/trust authority from history effects tracked by canonical g050/l1.\n- **New unverified:** none.\n- **Open leads:** none.\n\nLogs updated. Source-only; no tests or reproductions run."
+    },
+    {
+      "turn": 5,
+      "reply": "Closed local `l6` as a source-confirmed duplicate of canonical g020/l8. Verified claim loss, independent reconnection, UUID-only validation, and false freshness projection; no later in-range repair found.\n\nNo new independent finding or broader security/work-loss consequence. Unresolved leads: none. Logs updated."
+    },
+    {
+      "turn": 6,
+      "reply": "Discovery pass 2 complete. Checked phase-test coverage, create-request authority, Delete/Replace routing, seal-state handling, and fixture changes.\n\nNo new independent finding. Recorded `l7` as supplemental duplicate evidence for canonical g024/l2.\n\nNew verified/unverified IDs: none. Open leads: none. Logs updated; source-only."
+    },
+    {
+      "turn": 7,
+      "reply": "Recorded l8 as a confirmed duplicate of canonical g024/l5. Later Deleting, seal and withdrawal changes leave the stopped-actor retention intact through the endpoint. Explicit serving shutdown and harness restart remain protected.\n\nNo independent new finding or unverified premise. Unresolved lead IDs: none. Synthesis complete; no runtime actions."
+    },
+    {
+      "turn": 8,
+      "reply": "Discovery pass 3 complete. No new issue found.\n\nChecked late seal publication/removal ordering, launch validation, Delete admission, wake-test boundaries and fixture edits. Recorded l9, then closed it as source-refuted.\n\nNew verified IDs: none. New unverified IDs: none. Open leads: none. Progress updated; no runtime actions."
+    }
+  ],
+  "progress": "# g027 environment-host-lifecycle\n\nTurn 1: initial review blocked before mandatory patch delivery. Read brief.md fully and only inventory.json commits field. Findings log verified present and remains empty.\n\nEvidence read failed: PERSISTENT_REVIEW_TOOL_FAILED: Invalid source range. Tooling.md and evidence.ts source() / manifest() confirm the helper counts physical lines without an extra empty line after a final newline. Supplied manifest ranges exceed actual source lengths by one for every patch: 00620 180 vs 179; 00655 288 vs 287; 00693 131 vs 130; 00695 366 vs 365; 00699 130 vs 129; 01037 204 vs 203. No manifest or snapshots changed. Requested authorization to create a corrected private manifest; no answer yet.\n\nMandatory patch reads: all six unread and uncertified. Initial pass incomplete. No findings, candidates or leads; no source conclusions about patches.\n\nContracts read at 222bf6253bcd168db04bcbb1df20180c88306998: SPEC_impl.md 1060-1105 (answers bind to drawn controls), 6420-6703 (disposable environments through agent requests); SPEC.md 1441-1610 (sandbox sessions and start of managed checkouts). Located corresponding contract headings at earlier revisions, not yet fully read there. Interface assumption: environment removal must require the supervisor seal or an explicit whole-environment confirmation; Replace preserves the environment after ambiguous outcomes.\n\nTurn type/count: initial / 1. Discovery-pass count: 0. New verified IDs: none. New unverified IDs: none. Next action: after caller corrects manifest or authorizes private replacement, deliver every mandatory packet in ranges of at most 200 physical lines, then complete source-and-contract analysis. No runtime tests or reproductions requested or run. No checkout modifications.\n\nTurn 2: coverage repair and assigned initial review resumed after parent corrected manifest. All six mandatory patches still pending; existing findings.jsonl preserved.\n\nTurn 2 boundary: coverage repair and initial source-review pass COMPLETE. Corrected manifest accepted by evidence reader; delivered all required physical lines of all six patches separately: 00620 1-179; 00655 1-150 and 151-287; 00693 1-130; 00695 1-190 and 191-365; 00699 1-129; 01037 1-180 and 181-203. No unread assigned patch scope. Parent owns delivery audit.\n\nReviewed patches at recorded revisions, with immediate callers and contracts: 533169cf19571d34af3a8497eaceb8d2d7b7c852 (browser wake timeout fixture, fleet/read gates, implementation timeout and one-shot submit; SPEC Creation 949-1440 and SPEC_impl Tensorlake hosts 7032-7165); 190d844e58c96cf197aa838d0b0eea8062f48435 (approved launch construction, agent origin, checkout preparation, final create guards and agent caller; SPEC Agents and environments 4289-4342, SPEC_impl Agent requests and environments 6658-6703 and Tensorlake sandbox sessions 7076-7134); 222bf6253bcd168db04bcbb1df20180c88306998 (host removal, manager seal projection, refresh/hold/adoption, delete and Replace routes, finisher/retry and UI callers; SPEC Sandbox sessions and SPEC_impl Disposable environments through Agent requests and environments, plus Answers bind to what was drawn); f560058da19e02716e6f943883a9508b447aff4e (all assigned fixture-field removal hunks and full Grid streams contract through the next heading).\n\nDurable event results: c1 candidate (approved agent command/trust/origin preserved); c2 candidate (fixture field deletions match removed protocol metadata and retain assertions); l3 lead revised to candidate (resource retarget and concurrent adoption routes refuted); l4 lead revised to source-confirmed finding, then revised with complete GUI route verification and exact quote. l4 bucket other: ordinary whole-host Delete fails without updating an existing sealed failure, or leaves a pending seal eligible for automatic retry. No open leads. One active finding; three candidates. No runtime observations, tests, builds, reproductions, or checkout changes.\n\nInterface assumptions: session-owned resource bindings cannot be retargeted through host destination editing; adoption requires IdentityMismatch rather than connected listing service. Seal is permanent supervisor evidence authorizing destruction, not cached session count. Agent environment create must retain the exact trust-resolved card launch and agent origin; fresh checkout still validates current allocation configuration separately. Ordinary Hosts Delete and seal Retry share provider destruction but currently differ in outcome bookkeeping (l4).\n\nTurn type/count: initial coverage repair / 2. Discovery-pass count: 0. New verified finding IDs this pass: l4. New unverified findings: none. Candidates: c1, c2, l3. Next action: return for parent-requested synthesis; do not run a discovery pass within this initial turn. Remaining assigned material: none.\n\nTurn 3 started: later-turn synthesis requested after audited delivery. Rechecking l4 admission/projection/release ordering, later in-range changes, c1 authority and l3 binding assumptions. Cross-input g028/l3 concerns stale captured Pending vectors, distinct from l4 missing outcome writes. Existing events preserved; no open leads at start.\n\nTurn 3 boundary: later-turn synthesis COMPLETE. Revised l4 with exact UI/API admission in Failed/Pending, seal projection surviving release/reconnect, post-destruction bookkeeping-error branch, and endpoint check. Path history plus full diff 222bf625..00de0b6 show no production changes to the implicated host/manager/sandbox/UI paths; only two manager test fields removed by f560058. l4 remains source-confirmed, bucket other.\n\nCross-input reconciliation: g028/l3 remains a distinct owner/ID and cause. That finisher uses a stale captured Pending Vec after a correctly recorded direct-attempt failure. g027/l4 bypasses outcome recording during ordinary host removal, so even a fresh later scan sees Pending or the old Failed reason. No deduplication by shared retry symptom. Both concern policy/diagnostics on destruction already authorized by a permanent seal; neither establishes new unconsented work loss.\n\nRevised c1: traced the full request move through start_session_environment -> SessionLaunch -> finish_session_launch -> create_in_session_sandbox. No serialization drops the private serde-skipped approved launch. Agent origin and fixed TrustResolvedLaunch survive; checkout destination configuration remains separately resolved on the new host.\n\nRevised l3: corrected the broad immutable-binding shorthand. Podman enforces canonical-ID equality in SQL. Tensorlake setter itself permits reassignment, but all production callers either look up the recorded ID or recover a pending create without an ID; they do not replace a missing already-recorded resource. Existing setup refuses a known seal and shares the provisioning lock. No shipped retarget/adoption/replacement route established for the original possible highest consequence.\n\nTurn type/count: synthesis / 3 total (first synthesis turn). Discovery-pass count: 0. New IDs: none. Revised IDs: l4 finding, c1 candidate, l3 candidate. New verified findings: none; existing l4 strengthened. Unverified findings: none. Open leads: none. Unread assigned scope: none. Source-only; no tests/builds/reproductions or checkout changes. Next: await parent discovery/completion request; no additional pass performed in this turn.\n\nTurn 4 started: separate discovery pass 1 after complete synthesis. Read discovery-neighbours.json fully in bounded chunks (658 lines; initial oversized 1-160 read clipped, then repaired via complete 1-50,51-105,106-175,176-230,231-285,286-335,336-385,386-440,441-490,491-545,546-600,601-658). Cross-input c1 history refutation narrowed immediately and canonical g050/l1 linked; source confirmation next before new search. No known finding will be recounted as new.\n\nTurn 4 boundary: discovery pass 1 COMPLETE. Began with complete discovery-neighbours context and synthesized the named history-provenance input before new search. c1 revised twice: withdrew broad GUI-history refutation, directly checked sessions.rs record_created_history and store/environment_history.rs target/NULL-selection/default/eviction branches, and linked canonical g050/l1 plus parent-supplied independent g024/c3. Fixed approved-command/trust authority remains separately source-refuted. This is correction/known provenance, not new discovery.\n\nNew discovery l5: the new 533169cf connection-never-seen test awaits helperRead.entered without a rejecting deadline after polling only gate allocation. Missing helper arrival leaves its body finally unreachable, and fleet afterEach drains the earlier lagged host callback without releasing its gate. Directly checked the complete new test, fleet gate/read/afterEach code, routeGate, drainedRoute, cleanupOwnedSteps, evidence fixture and package-lock. Installed Playwright worker sources were absent locally; read the official pinned v1.64.0 timeoutManager.ts and workerMain.ts via the web tool. Confirmed runner timeout races rather than cancels the raw test Promise. No runtime observation claimed. l5 lead revised to confirmed finding, other bucket; later complete test/helper diff contains only xterm-selector cleanup and does not repair it. No real session created; consequence restricted to missing-read diagnostics and route teardown timeout, not user work loss or indefinite global runner hang.\n\nOther discovery checks: revisited private approved launch propagation and separate target/history inputs; guarded environment Delete refusal before cards/RPC; manager foreign-seal refresh/nudge sequencing; environment-delete turn-map guard/cancellation cleanup and nonwaiting provisioning admission; test protocol-field removals remain mechanical. These checks established no additional new issue. Known l4 and neighbour finisher stale-Pending vector were not recounted as discoveries; parent owns consolidation of related browser raw-wait pattern g069/c3.\n\nTurn type/count: discovery / 4 total. Discovery-pass count: 1. Anything new found: YES, l5. New verified IDs: l5. New unverified-after-investigation IDs: none. Revised known IDs: c1. Open lead IDs: none. Active findings now l4 and l5; candidates c1,c2,l3 remain durable proposals, with no parent drops accepted. Unread assigned scope: none; neighbour context fully read despite repaired initial clipping. No tests/builds/reproductions, checkout edits or live-install actions. Next: return to parent; any additional discovery pass must be a later turn.\n\nTurn 5 started: reopened later-turn synthesis only for exact g020/l8 event29. Read complete own 15-event history in bounded chunks and the exact interface event. Preserve canonical g020/l8 ownership; verify the operation-claim discard, owned result handoff, manager reconnection and projection contract. Discovery count remains 1.\n\nTurn 5 boundary: reopened interface synthesis COMPLETE. Read own full 15-event history before revising and exact g020/l8 event29. Added local l6 lead, then closed same ID as source-confirmed duplicate candidate linked to canonical g020/l8. This is not an alias to c1 or l3 and not an independent discovery.\n\nResolved API/manager premises at 190d844e: create_session_request captures original claim/client together and returns original claim on both creation branches; create_in_session_sandbox drops incarnation when returning qualified SessionInfo. Qualification preserves entry/session identity only. SessionLaunch/result channel carries only SessionInfo; success bookkeeping awaits progress and memory before send. Setup releases its actor hold before attachment; host provisioning guard excludes resource operations but is no connection lease. Actor closed handling, outer retry loop and client-change incarnation minting independently permit a replacement connection before projection. Late host_client recaptures B; unqualified_launch_session checks UUID only; projection compares B against B and can falsely mark A result fresh. Exact proto host and ordinary mutation projection docs require the original mutation connection. No physical retarget, invalid reference, security or work-loss consequence established.\n\nLater-range check: relevant bounded production diffs for sessions/provisioning/caller contain no claim/result repair. One combined diff output clipped unrelated test additions; relevant production hunks were reread separately and unrelated test coverage is not claimed. Synthesis supports the canonical fix direction: preserve captured claim through owned launch result and project against it. Existing c1 command/trust refutation and its separately corrected canonical g050 history consequence remain unchanged; l3 resource permanence does not prove reply freshness.\n\nTurn type/count: interface synthesis / 5 total. Discovery-pass count remains 1. New independent findings: none. New local synthesis record: l6, now duplicate candidate for canonical g020/l8. Revised same-ID events: l6 lead -> candidate. Unverified-after-investigation findings: none. Open lead IDs: none. Assigned/named source premises unread: none. No unrelated discovery, tests/builds/reproductions, checkout edits, installs or live actions. Next: parent audits this synthesis before requesting the separate discovery turn.\n\nTurn 6 discovery pass 2 started. Refreshed discovery-neighbours.json fully read in bounded continuous chunks 1-1061, without clipping. All prior own history remains in context; no named pending input. New scoped lead l7 checks whether assigned backend Deleting addition extends the known incomplete phase-test matrix; novelty/grouping pending exact source. No runtime actions.\n\nTurn 6 boundary: separate discovery pass 2 COMPLETE. Read the refreshed 1061-line/429849-byte discovery-neighbours.json in contiguous bounded chunks covering 1-1061, with no clipped packet. No named pending questions. Existing complete own event history and corrections retained; no parent drop/lowering assumed.\n\nSearch/checks beyond known findings: compared the newly added backend Deleting enum serde tag and phase string against the complete phase_matches_the_serialized_tag docs/matrix, scoped every Deleting construction, and checked the empty later hosts.rs diff. l7 lead closed as duplicate candidate: this assigned new variant extends the SAME backend matrix defect known as canonical g024/l2 (earlier Stopped omission). Preserve Deleting and 222bf625 provenance as supplemental evidence, not independent root-cause novelty; g031/f8 is a separate UI matrix. Correct production labels were not used to dismiss the test-oracle defect.\n\nContinued assigned pass after resolving l7: checked the new approved-agent request/serde authority test, constructor origin/wrapper fields and validate_sandbox_launch direct-launch/prompt handling; inspected guarded user environment Delete dispatch, source-bound Replace behavior and NotFound acceptance; revisited manager note/attempt/outcome/failure projection invariants; checked removed terminal-kind fixture fields preserve actual session/tab assertions. Browser gate/oracle/focus issues and result-claim provenance already recorded locally or by exact interface owners were not recounted as new. No additional independent source defect or unsettled premise found.\n\nTurn type/count: discovery / 6 total. Discovery-pass count: 2. Anything independently new found: NO. New verified independent finding IDs: none. New unverified-after-investigation IDs: none. New supplemental duplicate record: l7 candidate, lead resolved, related to canonical g024/l2. Open lead IDs: none. Unread assigned or provided interface scope: none. All original findings/candidates/consequences/proposed-drop bases preserved. No runtime tests/builds/reproductions, forbidden coverage search, nested agents, checkout writes or live-install actions. Next: return to parent with empty independent discovery result and supplemental provenance.\n\nTurn 7 started: reopened interface synthesis only for canonical g024/l5 event35 and earlier31-33. Read complete own 19-event history before revising. Local l8 records the named deletion/withdrawal/Drop interaction check. No independent discovery; discovery-pass count remains 2. Existing IDs, original consequences and proposed-drop bases preserved. Source checks next; no runtime actions.\n\nTurn 7 boundary: reopened later-turn synthesis COMPLETE. Complete own 19-event prior history and exact g024/l5 events31-33/35 read. Local l8 progressed through immediate source updates to a source-confirmed duplicate candidate for canonical g024/l5. Original owner/ID, one-actor delay, conditional multi-actor indefinite retention, other bucket, and explicit normal-shutdown exclusion preserved. No existing local finding or proposed-drop basis changed.\n\nUseful checks/results: compared original Stopped local/short-circuit/idle-await scope against assigned 222 and exact endpoint; read Drop, global withdrawal, per-host hold/release/stop, selected host Delete and seal projection/finisher code. New deletion state does not cancel idle Stopped actors; explicit selected-host operations can cancel that actor but do not arise automatically from losing external manager references. Verified independent Podman status through direct place commands while the place supervisor connection is unavailable, actor reprobing without a fleet release barrier, direct-drop fixture contract, protected serving shutdown_and_wait and explicit harness restart shutdown. Consulted official Rust drop-scope and condition-chain references; no executable language experiment. Original patch/base search places introduction inside the pinned range; later production manager diff leaves arm and withdrawal unchanged. No named source premise remains unsettled.\n\nTurn type/count: interface synthesis / 7 total. Discovery-pass count remains 2; this turn performed no discovery. New independently verified findings: none. New unverified-after-investigation IDs: none. New local synthesis duplicate: l8 candidate for canonical g024/l5, lead resolved. Remaining open lead IDs: none. Unread assigned/named source premises: none. No tests/builds/reproductions, forbidden coverage search, nested agents, checkout modifications, installs or live actions. Next: return this delta to parent; a separate audited discovery turn is not performed here.\n\nTurn 8 started: separate discovery pass 3. Refreshed discovery-neighbours.json fully read in contiguous bounded chunks covering 1-1106 (467568 bytes). An oversized 176-220 packet clipped; complete rereads 176-195 and196-235 repaired it before source search. No named pending synthesis inputs. Complete own findings/candidate/withdrawal history reused; no parent drops or lowerings presumed. Existing findings.jsonl verified by prior append boundary and preserved. New scoped source search begins now; no findings or leads invented from interface context.\n\nTurn 8 boundary: separate discovery pass 3 COMPLETE. New source lead l9 checked a different late-publication/removal ordering beyond known issues, then closed under the same ID as a source-refuted candidate. Normal held removal nudges/cancels the refresh and observes matching parked acknowledgement before provider destruction, row/actor removal and final seal clear. Checked the bounded timeout separately; no source-produced suspended operation was found enabling the hypothesized post-ack seal note. The exact actionability predicate is manager.rs:2702-2706 (refining the candidate detail broader2700-2704 anchor). No new verified or investigated-unverified finding arose.\n\nContinued assigned pass after closing l9: reviewed private/public agent request construction, prebilling repository/preview/conversation/title/root checks and prompt validation; checked the request-authority test against its actual stated constructor scope; reviewed Session/Whole Delete flag conflict and liveness-guard admission before approval denial or RPC; compared the complete assigned terminal-fixture field-removal diff; inspected the full new wake-clock scenario and its fleet read-gate setup, explicit parked-state oracle, late-connection/no-create boundary and in-flight-create branch. These checks produced no additional substantive source lead beyond already durable known findings. No known interface symptom was counted as a discovery. Existing IDs, consequences and proposed-drop bases remain unchanged; l9 is a new candidate record, not a finding.\n\nTurn type/count: discovery / 8 total. Discovery-pass count: 3. Anything independently new found: NO. New verified finding IDs: none. New unverified-after-investigation finding IDs: none. New candidate: l9 (late-seal-publication route refuted); open lead IDs: none. Refreshed interface context fully delivered through line1106, with the single clipped packet repaired; no unread assigned/named source scope. No runtime tests/builds/reproductions, forbidden coverage searches, nested agents, checkout changes, installs or live actions. Next: return this discovery delta to parent; no extra synthesis/discovery pass performed within this turn.\n"
+}

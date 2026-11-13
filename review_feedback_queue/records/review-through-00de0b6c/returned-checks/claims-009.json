@@ -1,0 +1,231 @@
+[
+  {
+    "key": "g018/f1",
+    "latest_line": 5,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "agent-create-recipe-to-host-placement-fallback",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The ordinary-create fallback resolves the full template stack with recipes and places available. Spawn deliberately has a fixed host. Neither path establishes the suspected unnecessary refusal of a valid ordinary-create stack.",
+    "checks": [
+      "190d844e58c96cf197aa838d0b0eea8062f48435, crates/farhelm-helm/src/agent_requests.rs:1991-2008 and 4229-4254: environment classification uses resolve_placed and returns None when the final placement is an installed host.",
+      "Same revision, agent_requests.rs:2437-2480: only spawn calls resolve; ordinary create loads recipe names and container places and calls resolve_placed again. The explicit-host flag reaches that resolver.",
+      "Same revision, crates/farhelm-helm/src/agent_launch.rs:147-150, 215-219, 233-238: resolve supplies empty recipe/place catalogs; explicit --host clears template placement for non-spawn; spawn sets host_fixed.",
+      "Same revision, crates/farhelm-proto/src/launcher.rs:913-958, 970-998: spawn refuses any placement before availability checks; each intermediate template must be applicable and the first refusal stops application. A valid later placement does not rescue an invalid earlier template.",
+      "agent_launch.rs has no changes from 190d844e through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. Source checks only; no runtime result."
+    ],
+    "coverage_checked": [
+      "SPEC.md and SPEC_impl.md searched for placement/template/recipe stacking and ordinary creates. At reviewed 190d844e, SPEC.md:4138-4149 requires ordered templates, explicit-flag precedence and spawn's fixed host; current SPEC.md Agents and environments and SPEC_impl.md Agent requests and environments retain the separate recipe-launch route.",
+      "TODO.md Planned is empty (lines 25-27). BUGS.md contains only the unrelated SSH-helper install hang.",
+      "plans/queue searched for the actual placement claim. INDEX.md has no unlanded plans; retained environment-agent-operations.md rules/acceptance describe the landed feature, not a pending correction to fallback resolution.",
+      "review_feedback_queue/INDEX.md, matching queue content and active TRIAGE_OUTCOMES.md searched for agent_launch/resolve_placed/resolve_environment, recipe templates and placement stacks. No exact existing item or decision found. container-template-replacement-test-reuses-old-config.md concerns identical old/new test values, not this fallback. Archive not read.",
+      "FILTER.md read in full. No filter is used; this is a source refutation, not a rare safe-refusal dismissal."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "A recipe template followed by an ordinary-host template might be refused despite a valid final host. History first raised this as a lead, then withdrew it after reading the ordinary-create caller. No security or user-work-loss route was claimed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutation limited to valid ordinary-create template stacks and the intentional fixed-host spawn rule. Preserve the intermediate-template applicability caveat."
+  },
+  {
+    "key": "g018/f2",
+    "latest_line": 7,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "agent-launch-placement-docs-obsolete-caller-contract",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "New source documentation says ordinary creates have no recipe/place catalogs, but their caller explicitly supplies both so an earlier recipe placement can be overridden by an installed host. Both links name a nonexistent helper. This is an in-scope source-comment defect even though executable behavior is correct.",
+    "checks": [
+      "190d844e58c96cf197aa838d0b0eea8062f48435 adds crates/farhelm-helm/src/agent_launch.rs:158-164 and 196. Lines 162-164 say ordinary creates and spawns pass no recipes or places and only resolve_environment passes them; line 196 names that helper again.",
+      "Same revision, agent_requests.rs:2447-2475 loads recipes and places for ordinary creates and passes them to resolve_placed. agent_launch.rs:176-186 describes the actual valid stacking contract.",
+      "Pinned git grep over crates/farhelm-helm finds resolve_environment only in those two comments. The actual helper is resolve_placed at line 186; no imported target supplies the missing name.",
+      "Same revision, lib.rs:112 declares agent_launch privately, and Placement is pub(crate). No public-API documentation failure is established.",
+      "Pinned search of the helm crate, Cargo.toml, .cargo, .github and scripts found no broken_intra_doc_links override, RUSTDOCFLAGS, cargo doc invocation or document-private-items setting. No rustdoc build was run; no emitted diagnostic or fatal build is claimed.",
+      "No agent_launch.rs change occurs from 190d844e through the reviewed endpoint 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db."
+    ],
+    "coverage_checked": [
+      "Both specifications searched for agent placement/template resolution. SPEC.md's ordered-template and explicit-flag rules and SPEC_impl.md's Agent requests and environments describe the real contract; neither accepts false caller documentation or missing links.",
+      "TODO.md Planned is empty. BUGS.md's sole SSH-helper hang does not cover this documentation defect.",
+      "plans/queue searched for agent_launch, resolve_environment/resolve_placed and placement/template documentation. plans/queue/INDEX.md lists no unlanded plans; retained environment-agent-operations.md does not promise to correct these comments.",
+      "Queue index and queue files searched for exact resolver names and agent/recipe placement wording; active TRIAGE_OUTCOMES.md searched for the same claim. No exact cover or same-root item found. The existing container-template replacement oracle finding is separate and adds no coverage. Archive not read.",
+      "FILTER.md has no general low-impact/private-comment filter. Its rare-diagnostic filter does not fit an always-present false maintenance contract."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "The first candidate proposed dismissal because this was low-impact private documentation with correct runtime behavior. Subsequent history explicitly withdrew that dismissal and retained misleading maintenance documentation and unresolved internal links. No runtime failure, public-doc failure, emitted rustdoc warning or enforced build failure was established.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain the source documentation defect at other priority. Correct behavior elsewhere does not refute the false caller contract. Preserve the bounded rustdoc consequence and superseded low-impact dismissal."
+  },
+  {
+    "key": "g018/f3",
+    "latest_line": 12,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "environment-clone-owner-test-script-refresh-reappearance",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The proposed ordinary background-refresh race is prevented by this fixture's deliberate cadence and stale-drain fencing. The source remains in the script, so the conclusion is bounded to the test's normal execution without a new refresh or an hour-long delay.",
+    "checks": [
+      "190d844e58c96cf197aa838d0b0eea8062f48435, agent_requests.rs:15526-15595: the test awaits the approval card, forgets source ownership, checks route_session refuses, then allows and checks no build/registration. It does not remove the script row.",
+      "Same revision, agent_requests.rs:14234-14263: container_fleet uses FleetBuilder without a refresh override. rest_harness.rs:61-77 and 1402-1405 set the normal refresh interval to one hour. owned_environment at agent_requests.rs:14445-14453 waits for the immediate connection refresh before returning.",
+      "Same revision, manager.rs:2421-2474: forget_session removes membership, advances seed_epoch and emits an event; it does not request another list refresh. refresh_once samples the epoch at 4821-4827 and discards a stale drain under the cache-write lock at 4941-4962.",
+      "Same revision, sessions.rs:936-955 refuses an absent source membership. agent_requests.rs:4516-4527 reroutes the source after Allow before the launch starts.",
+      "A deliberately requested refresh or one after the one-hour interval could restore the still-scripted row. No such trigger occurs in this test's checked path. No runtime reproduction was run or flake observed."
+    ],
+    "coverage_checked": [
+      "Both specifications searched for clone source ownership and refresh. SPEC_impl.md:3438 onward requires the live source owner recheck; it does not accept unstable test fixtures or establish that this fixture has one.",
+      "TODO.md Planned is empty. BUGS.md has no fixture-refresh item.",
+      "plans/queue and its empty unlanded index searched for clone/source-owner/refresh-test work. No pending plan covering this exact test premise found.",
+      "Queue index/files and active TRIAGE_OUTCOMES.md searched for clone-owner, script refresh, owner disappearance and related fixture terms. No exact coverage or alias found. clone-read-overwrites-manual-recipe-choice.md was read: it concerns GUI draft ownership, not the helm test's forgotten session. Archive not read.",
+      "FILTER.md read; no filter used. The proposed test race is source-refuted under the fixture's cadence, rather than omitted for rarity."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "The source might reappear from HostScript.sessions before Allow and invalidate or flake the regression test. The history withdrew this concern after checking cadence and epoch semantics. It never established shipped user-work loss or a runtime flake.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Refute the ordinary recurring-refresh route only. Preserve that script contents are unchanged and a newly requested or hour-later refresh would restore membership."
+  },
+  {
+    "key": "g018/f4",
+    "latest_line": 11,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "agent-environment-guide-key-and-wait-exceptions",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The full guide at the environment-launch revision explicitly excludes idempotency keys and requires a forty-minute tool budget or background execution for new environments.",
+    "checks": [
+      "190d844e58c96cf197aa838d0b0eea8062f48435, crates/farhelm/src/agent_instructions.rs:235-238 retains ordinary ten-minute/key advice. Lines 258-267 in the same concatenated render output identify recipe creates, recipe templates and environment clones and provide the specific exception.",
+      "Lines 263-266 say these take no --host or --idempotency-key, require at least forty minutes or background execution, and require listing sessions before retrying an unknown outcome. This qualifies the general retry/key guidance at 282-287.",
+      "git diff of agent_instructions.rs from 190d844e to 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db is empty. The earlier lead used surrounding text from 12c79f61 before the new paragraph existed. No CLI execution or runtime observation."
+    ],
+    "coverage_checked": [
+      "SPEC.md Agents and environments explicitly states key refusal, the combined approval/build budget and unknown-outcome behavior. SPEC_impl.md Agent requests and environments explains the relay's extended budget and that expiry leaves the task running. These corroborate the guide exception, rather than cover a real erroneous guide.",
+      "TODO.md Planned is empty; BUGS.md's SSH-helper hang is unrelated.",
+      "plans/queue searched for agent guide/instruction timeout/key requirements. Its unlanded index is empty; no pending correction covers this claim.",
+      "Queue index/files and active TRIAGE_OUTCOMES.md searched for agent instructions, manual keys, environment waits and idempotency guidance. No exact existing item or decision found. Archive not read.",
+      "FILTER.md read. No filter used; source wording resolves the missing-exception premise."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "An agent might add a forbidden key or use only the ordinary tool wait, causing needless refusal or premature unknown outcome. The history withdrew this after reading the complete new render text. Duplicate environment creation, security harm and user-work loss were not established.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutation by explicit behavior-specific guide text, not by low impact or correct product implementation."
+  },
+  {
+    "key": "g019/l1",
+    "latest_line": 5,
+    "recommendation": "refuted",
+    "bucket": "highest",
+    "underlying_key": "confined-agent-template-reread-host-escape",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "A template edit between the initial confinement check and resolution cannot select another actual host or the environment-launch route. The security withdrawal requires an independent drop check; this consultation is not that check.",
+    "checks": [
+      "12c79f61a627a4241707dad0cf3b55b859d2d4fc, agent_requests.rs:2372-2403: templates are reread, but Environment scope chooses own after resolution rather than the template host.",
+      "190d844e58c96cf197aa838d0b0eea8062f48435 and endpoint 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, agent_requests.rs:1997-2008: recipe-template environment launching requires Fleet scope. Lines 2476-2479 reject any recipe target entering ordinary create, and 2495-2503 force a confined create onto own.",
+      "47f33bbdbd5ff4a6e437e97a800f9083be43096e, agent_requests.rs:514-530: direct CreateEnvironment is among verbs requiring Fleet admission. No explicit recipe-verb bypass is established.",
+      "190d844e, agent_requests.rs:4493-4548: LaunchEnvironment goes through its direct-Allow card with own-host eligibility false; the precomposed request then enters the owned launch task. This is a separate launch contract, not authority conferred by rereading a template.",
+      "The earlier template-field refusal can be bypassed by a concurrent template change without redirecting the actual confined create. No runtime escape was reproduced."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:4253-4306 and SPEC_impl.md:6167-6210 were read: agents inside an environment may not reach another host or create a new environment, and shared scope checks govern routing. This is a required boundary, not spec acceptance of an escape.",
+      "TODO.md Planned is empty; BUGS.md has no accepted template/confinement escape.",
+      "plans/queue searched for confinement/template rereads and environment-agent operations. The unlanded index is empty; retained environment-agent-operations.md repeats the own-environment rule rather than accepting this suspected escape or scheduling a remaining fix.",
+      "Queue index/files and active TRIAGE_OUTCOMES.md searched for confined creates, template rereads, recipe placement and authorization escape. No exact coverage, existing same-root item or alias found. Archive not read.",
+      "FILTER.md read. A security/trust-boundary consequence is outside its general rare-glitch filters. No filter is proposed."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No shipped path that routes a confined create beyond own, or admits it to environment creation, was established. Those would be needed to restore the original security claim.",
+    "original_stronger_consequence": "A concurrent template edit could let an environment agent create outside its environment, crossing the authorization boundary. The lead and subsequent withdrawal both identify this as potentially highest. All assessments were source-only.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Propose source refutation of the security route through the independent Fleet gate, recipe-target refusal and actual own-host selection. Keep the original highest consequence in the drop register; no parent drop decision inferred."
+  },
+  {
+    "key": "g019/c2",
+    "latest_line": 4,
+    "recommendation": "refuted",
+    "bucket": "highest",
+    "underlying_key": "confined-agent-sibling-delete-whole-environment-loss",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Confined deletion reaches ordinary session teardown and sends DeleteSession, never the environment-delete or delete-or-seal operation. The original whole-environment/work-loss concern remains a highest withdrawal for independent checking.",
+    "checks": [
+      "12c79f61a627a4241707dad0cf3b55b859d2d4fc, agent_requests.rs:1432-1446 scopes the resolved target before routing; 672-686 preserves fleet environment-delete refusal and self-delete refusal.",
+      "47f33bbdbd5ff4a6e437e97a800f9083be43096e, agent_requests.rs:2797-2835 dispatches Environment scope to delete_session_within_environment. sessions.rs:3658-3685 directly uses teardown with connection/guard checks, and client.rs:3930-3956 sends DeleteSession with the request fence and projects environment_remaining: None.",
+      "Reviewed endpoint 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db preserves that route at agent_requests.rs:2798-2835, sessions.rs:3699-3727 and client.rs:3811-3838. The later seal support does not change confined agent deletion into DeleteSessionOrSeal.",
+      "No provider destruction method lies on this inspected confined-delete route. The fixture's host-row survival assertion is intent/source evidence only; no runtime execution was performed."
+    ],
+    "coverage_checked": [
+      "SPEC.md Agents and environments explicitly says sibling deletion removes that session only, never its environment. SPEC_impl.md:6180-6184 explicitly separates session-only confined delete from user environment deletion. These state the contract rather than accept the suspected loss.",
+      "TODO.md Planned is empty. BUGS.md has no accepted confined-delete data-loss route.",
+      "plans/queue searched for sibling deletion, session-only delete and environment lifetime. Its unlanded index is empty; retained environment-agent-operations.md repeats session-only agent deletion and user seal semantics, not a pending fix for the named route.",
+      "Queue index/files and active TRIAGE_OUTCOMES.md searched for confined/sibling delete and whole-environment loss. No exact existing item, decision or same-root alias found. Archive not read.",
+      "FILTER.md read; no filter matches or is proposed for this security/work-loss concern."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A shipped path from confined sibling Delete into environment sealing/provider destruction would be required for the original whole-resource loss. The checked dispatch instead ends in session-only DeleteSession.",
+    "original_stronger_consequence": "Lifting the prior deletion refusal might let an agent destroy its entire sandbox/container, losing the asking session and its work. The reviewer set this aside as source-refuted and retained highest classification for the suspected loss. Later synthesis rechecked seal integration without claiming runtime validation.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Propose source refutation specifically of whole-environment destruction, supported by target scoping, self-delete refusal, session-only dispatch and guarded/fenced DeleteSession. Independent agreement is still required before any drop."
+  },
+  {
+    "key": "g019/l3",
+    "latest_line": 8,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "agent-environment-clone-guide-disk-copy-promise",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The full guide specifically places an environment clone in a new environment's home, with no cwd override, qualifying ordinary clone's directory inheritance. An unconditional promise to preserve source disk/local changes is not established. Because the original suspicion involves copying user work, flag the withdrawal for independent assessment.",
+    "checks": [
+      "190d844e58c96cf197aa838d0b0eea8062f48435, agent_instructions.rs:197-201 describes ordinary inheritance. Lines 258-263 separately describe cloning an environment into a new one with no --host/--cwd and new-home placement. No explicit promise to copy local changes appears.",
+      "Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a, agent_instructions.rs:197-201 already contains the source existing-directory sentence. This old ordinary-clone wording is not itself a newly introduced disk-copy mechanism or promise in this range.",
+      "190d844e, agent_requests.rs:4294-4305 explicitly describes recipe/place/launch/repository, never disk copy. Lines 4360-4387 build the plan from repository and launch, without source cwd. This corroborates the new-home meaning but is not used alone to excuse instruction defects.",
+      "The instruction path history and empty diff from 190d844e through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db confirm the exception remains. Source/wording assessment only; no runtime observation."
+    ],
+    "coverage_checked": [
+      "Both specifications searched/read for environment clone placement and disk semantics. SPEC.md:4291-4292 says recipe/place plus launch/repository intent, never a disk copy; SPEC_impl.md:6189-6192 describes that same plan. Neither accepts a misleading disk-copy promise.",
+      "TODO.md Planned is empty. BUGS.md has no accepted environment-clone instruction defect.",
+      "plans/queue searched for clone disk/folder/instruction semantics. Unlanded index is empty; retained sandbox-sessions/environment-agent-operations plans describe new environments, not a pending guide fix.",
+      "Queue index/files and active TRIAGE_OUTCOMES.md searched for clone disk-copy promises, inherited directories and environment guide exceptions. No exact cover or alias found. clone-read-overwrites-manual-recipe-choice.md was read and concerns GUI draft edits, not instruction wording. Archive not read.",
+      "FILTER.md read. No filter is used; ambiguity about copying user work would not be a rare-diagnostic dismissal."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "The wording could be clearer about disk contents, but no unconditional contents-copy guarantee or shipped destructive action induced by it was established. A path relocating content into a new home would also be compatible with new-home wording, so the refutation is limited to the asserted unconditional promise.",
+    "original_stronger_consequence": "Agents might be told cloning an environment preserves its old directory and local changes even though the clone only recreates recipe and repository intent. History withdrew the unconditional-promise interpretation after reading the specific exception. The reviewer established no destructive action or data-loss route and suggested other throughout.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Propose refutation of the claimed unconditional promise based on the complete agent-facing wording and pre-range attribution of the older sentence. Preserve residual wording ambiguity and let the independent check assess the user-work implication before dropping."
+  },
+  {
+    "key": "g019/l4",
+    "latest_line": 10,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "confined-agent-tests-list-only-no-contact-counter",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The ListSessions counters alone do not establish an all-RPC boundary, but these tests also await each handler and require the exact confinement refusal. That distinguishes ordinary foreign-host dispatch on the configured peers. No concrete false-pass regression was established. The security-boundary test withdrawal is conservatively flagged for independent checking.",
+    "checks": [
+      "12c79f61a627a4241707dad0cf3b55b859d2d4fc, rest_harness.rs:280-289 documents host_requests as ListSessions only. run_standalone at 506-558 acknowledges browser forwarding, serves lists and ignores other operations.",
+      "Same revision, agent_requests.rs:13911-13920 and 14039-14052 await handle and assert Unauthorized plus exactly ENVIRONMENT_SCOPE_REFUSAL, as well as unchanged counters. The prompt test doc at 13992-14005 explicitly describes the no-supervisor-contact boundary.",
+      "Foreign ordinary hosts use standalone peers; only the owned environment has the spliced operation responder. An ordinary awaited PromptTargetInfo dispatch to a foreign standalone peer cannot return the expected scope refusal: no peer reply produces that refusal.",
+      "The exact-refusal oracle is independent evidence beyond the negative counter. It does not prove no non-list/fire-and-forget traffic ever occurs before a later refusal. A handler that attempted such traffic then discarded its outcome could pass, but no distinct useful shipped false-pass route of that shape was established in the named history or checked source.",
+      "This is a test-oracle assessment, not a claim that correct production behavior excuses a test defect. No test or reproduction was run."
+    ],
+    "coverage_checked": [
+      "SPEC.md Agents and environments and SPEC_impl.md:6167-6178 require confinement and refusal without supervisor metadata/acknowledgement. Neither accepts an oracle defect; they supply the boundary the test intends to protect.",
+      "TODO.md Planned is empty; BUGS.md has no accepted no-contact test gap.",
+      "plans/queue searched for confinement test counters, all-RPC observability and supervisor-contact tests. Unlanded index is empty; retained environment-agent-operations acceptance requires coverage but schedules no pending fix of this counter.",
+      "Queue index/files and active TRIAGE_OUTCOMES.md searched for host_requests, ListSessions-only counters, exact refusal and confined cross-host tests. No exact existing coverage or same-root alias found. The supplied history's g126/l1 is outside this batch and was not independently read; no alias to it is asserted. Archive not read.",
+      "FILTER.md read. No filter is proposed for a security-boundary test concern."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A concrete regression that violates the promised no-contact boundary while still completing with the exact policy refusal remains unestablished. Do not claim the counter equality proves absence of arbitrary RPCs.",
+    "original_stronger_consequence": "Cross-host confinement tests might not detect supervisor contact because their observable counts only lists. The reviewer withdrew the test-bug claim after reading standalone peer behavior and exact awaited refusal assertions, while explicitly preserving the counter's limitation. No runtime security escape or user harm was established.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Propose refutation only of inability to detect ordinary foreign-host dispatch. Preserve the all-RPC observability limitation and missing counterexample; independent check should judge whether that residual limitation merits retention as a test-evidence finding."
+  }
+]

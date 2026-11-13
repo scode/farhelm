@@ -1,0 +1,1167 @@
+{
+  "group": {
+    "id": "g155",
+    "domain": "rust-terminal-host-regressions",
+    "purpose": "rust-terminal-host-regressions: crates/farhelm/tests/e2e/terminal_tabs.rs, crates/farhelm/tests/e2e/terminal_backpressure.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g001",
+      "g005",
+      "g006",
+      "g007",
+      "g008",
+      "g009",
+      "g144",
+      "g145",
+      "g146",
+      "g151",
+      "g153",
+      "g154",
+      "g156",
+      "g157",
+      "g158",
+      "g159",
+      "g160",
+      "g161",
+      "g162",
+      "g163",
+      "g164",
+      "g165",
+      "g166",
+      "g167",
+      "g168",
+      "g169",
+      "g170",
+      "g171",
+      "g172",
+      "g173"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00802-000.patch",
+        "ranges": [
+          [
+            1,
+            1377
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/terminal_tabs.rs",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,59933)",
+        "lines": 1377,
+        "bytes": 59985,
+        "start": 0,
+        "end": 59933,
+        "original": "[private-run]/prep/originals/00802.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00986-000.patch",
+        "ranges": [
+          [
+            1,
+            105
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/terminal_backpressure.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,5236)",
+        "lines": 105,
+        "bytes": 5246,
+        "start": 0,
+        "end": 5236,
+        "original": "[private-run]/prep/originals/00986.patch"
+      }
+    ],
+    "lines": 1482,
+    "bytes": 65231
+  },
+  "records": [
+    {
+      "key": "g155/c1",
+      "owner": "g155",
+      "id": "c1",
+      "domain": "rust-terminal-host-regressions",
+      "purpose": "rust-terminal-host-regressions: crates/farhelm/tests/e2e/terminal_tabs.rs, crates/farhelm/tests/e2e/terminal_backpressure.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "tab environment probe uses the intended shell variable",
+            "location": "crates/farhelm/tests/e2e/terminal_tabs.rs:1547",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: considered whether the new tab environment test queries a literal RC_MARKER_VAR instead of the exported fixture variable; source refutes this. Details: terminal_tabs.rs:11 imports RC_MARKER_VAR; restart_with_resume.rs:1466 defines it as FARHELM_RC_MARKER, and :1480 writes that variable into the private rc files. Rust format capture at terminal_tabs.rs:1547 substitutes the constant inside the string while leaving the dollar prefix, producing a shell expansion of FARHELM_RC_MARKER. Suggested bucket: other (test correctness only). Confidence: confirmed by source; no execution. proposed_drop: true, source refutation. possible_cover: none. Could-be-highest: no; this concern is confined to maintainer test tooling. This does not yet settle the test's broader readiness or parsing assumptions."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "retained tab environment probe uses the intended variable",
+            "location": "crates/farhelm/tests/e2e/terminal_tabs.rs:1547",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: the retained tab environment test queries its intended exported variable. Correction: this is not a new test; the parent already has the same probe at terminal_tabs.rs:4320, and large deletions make the diff show the retained test as additions. Details: terminal_tabs.rs:11 imports RC_MARKER_VAR; restart_with_resume.rs:1466 defines it as FARHELM_RC_MARKER and :1480 exports that variable. Rust format capture at terminal_tabs.rs:1547 substitutes the constant while preserving the dollar prefix, producing the intended shell expansion. Suggested bucket: other (test correctness only). Confidence: confirmed by source and parent comparison; no execution. proposed_drop: true, source refutation and pre-existing unchanged behavior. possible_cover: none. Could-be-highest: no; the considered consequence was a test probing the wrong variable and no product failure was established."
+          }
+        }
+      ],
+      "latest": {
+        "line": 5,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "retained tab environment probe uses the intended variable",
+          "location": "crates/farhelm/tests/e2e/terminal_tabs.rs:1547",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: the retained tab environment test queries its intended exported variable. Correction: this is not a new test; the parent already has the same probe at terminal_tabs.rs:4320, and large deletions make the diff show the retained test as additions. Details: terminal_tabs.rs:11 imports RC_MARKER_VAR; restart_with_resume.rs:1466 defines it as FARHELM_RC_MARKER and :1480 exports that variable. Rust format capture at terminal_tabs.rs:1547 substitutes the constant while preserving the dollar prefix, producing the intended shell expansion. Suggested bucket: other (test correctness only). Confidence: confirmed by source and parent comparison; no execution. proposed_drop: true, source refutation and pre-existing unchanged behavior. possible_cover: none. Could-be-highest: no; the considered consequence was a test probing the wrong variable and no product failure was established."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g155/findings.jsonl",
+        "id": "c1",
+        "line": 5,
+        "disposition": "excluded",
+        "group": "terminal-tests/rc-probe-variable-format-capture",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-098 after inspecting it. Rust captures the intended constant, preserving the shell dollar prefix. The probe queries FARHELM_RC_MARKER, not a shell variable literally named RC_MARKER_VAR. This is separate from readiness and framing. Source-refute the wrong-variable candidate. Pre-base sameness is additional attribution context, not the sole basis for dismissing a real bug. Checked source/results: [\"At 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513, terminal_tabs.rs:1547 formats printf with ${RC_MARKER_VAR}; restart_with_resume.rs:1466 defines RC_MARKER_VAR as FARHELM_RC_MARKER and :1480 exports it. Rust string interpolation makes the shell argument $FARHELM_RC_MARKER.\",\"The exclusive review base 6e423e30068b62c6cfa276c6d720ee35bb70387a already has the same test at terminal_tabs.rs:4259 and identical probe at :4314. It is retained material exposed by diff alignment over large deletions, not a new authored probe. No runtime checks ran.\"] Current coverage/results: [\"Both specifications searched for rc-file/environment behavior: SPEC.md:3488-3503 requires launch-time shell environment evaluation. This supports the test's purpose, not acceptance of a wrong probe. TODO.md Planned empty; no exact unlanded plan or BUGS.md entry.\",\"Full INDEX.md, matching grid-observer queue entries and active TRIAGE_OUTCOMES.md searches found no exact variable-selection claim. Those decoder issues do not change Rust interpolation. FILTER.md not applied.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The apparently new test might query a literal RC_MARKER_VAR and falsely validate environment behavior. The later record corrects newness and retains the test-only consequence.\"; \"None for variable selection. No conclusion about arbitrary text parsing follows.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g155/c1",
+        "line": 5,
+        "disposition": "excluded",
+        "group": "terminal-tests/rc-probe-variable-format-capture",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-098 after inspecting it. Rust captures the intended constant, preserving the shell dollar prefix. The probe queries FARHELM_RC_MARKER, not a shell variable literally named RC_MARKER_VAR. This is separate from readiness and framing. Source-refute the wrong-variable candidate. Pre-base sameness is additional attribution context, not the sole basis for dismissing a real bug. Checked source/results: [\"At 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513, terminal_tabs.rs:1547 formats printf with ${RC_MARKER_VAR}; restart_with_resume.rs:1466 defines RC_MARKER_VAR as FARHELM_RC_MARKER and :1480 exports it. Rust string interpolation makes the shell argument $FARHELM_RC_MARKER.\",\"The exclusive review base 6e423e30068b62c6cfa276c6d720ee35bb70387a already has the same test at terminal_tabs.rs:4259 and identical probe at :4314. It is retained material exposed by diff alignment over large deletions, not a new authored probe. No runtime checks ran.\"] Current coverage/results: [\"Both specifications searched for rc-file/environment behavior: SPEC.md:3488-3503 requires launch-time shell environment evaluation. This supports the test's purpose, not acceptance of a wrong probe. TODO.md Planned empty; no exact unlanded plan or BUGS.md entry.\",\"Full INDEX.md, matching grid-observer queue entries and active TRIAGE_OUTCOMES.md searches found no exact variable-selection claim. Those decoder issues do not change Rust interpolation. FILTER.md not applied.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The apparently new test might query a literal RC_MARKER_VAR and falsely validate environment behavior. The later record corrects newness and retains the test-only consequence.\"; \"None for variable selection. No conclusion about arbitrary text parsing follows.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-098",
+          "key": "g155/c1",
+          "latest_line": 5,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "terminal-tests/rc-probe-variable-format-capture",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Rust captures the intended constant, preserving the shell dollar prefix. The probe queries FARHELM_RC_MARKER, not a shell variable literally named RC_MARKER_VAR. This is separate from readiness and framing.",
+          "checks": [
+            "At 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513, terminal_tabs.rs:1547 formats printf with ${RC_MARKER_VAR}; restart_with_resume.rs:1466 defines RC_MARKER_VAR as FARHELM_RC_MARKER and :1480 exports it. Rust string interpolation makes the shell argument $FARHELM_RC_MARKER.",
+            "The exclusive review base 6e423e30068b62c6cfa276c6d720ee35bb70387a already has the same test at terminal_tabs.rs:4259 and identical probe at :4314. It is retained material exposed by diff alignment over large deletions, not a new authored probe. No runtime checks ran."
+          ],
+          "coverage_checked": [
+            "Both specifications searched for rc-file/environment behavior: SPEC.md:3488-3503 requires launch-time shell environment evaluation. This supports the test's purpose, not acceptance of a wrong probe. TODO.md Planned empty; no exact unlanded plan or BUGS.md entry.",
+            "Full INDEX.md, matching grid-observer queue entries and active TRIAGE_OUTCOMES.md searches found no exact variable-selection claim. Those decoder issues do not change Rust interpolation. FILTER.md not applied."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "None for variable selection. No conclusion about arbitrary text parsing follows.",
+          "original_stronger_consequence": "The apparently new test might query a literal RC_MARKER_VAR and falsely validate environment behavior. The later record corrects newness and retains the test-only consequence.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source-refute the wrong-variable candidate. Pre-base sameness is additional attribution context, not the sole basis for dismissing a real bug."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "terminal-tests/rc-probe-variable-format-capture",
+        "destination": null
+      }
+    },
+    {
+      "key": "g155/c2",
+      "owner": "g155",
+      "id": "c2",
+      "domain": "rust-terminal-host-regressions",
+      "purpose": "rust-terminal-host-regressions: crates/farhelm/tests/e2e/terminal_tabs.rs, crates/farhelm/tests/e2e/terminal_backpressure.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "new tab environment assertion waits for executed output",
+            "location": "crates/farhelm/tests/e2e/terminal_tabs.rs:1541",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: considered whether terminal echo or an incomplete value can make the new rc-file regression test pass before the shell executes its probe. Details: terminal_tabs.rs:223-263 establishes shell readiness by an executed printf marker distinct from the command echo; :1541 invokes that helper before querying the variable. At :1547-1551 the command contains EN%s[%s]%s and separate V/VNE arguments, so its echo contains neither ENV[ nor ]VNE. run_in_shell at :268-280 waits for ]VNE, after which :1553-1559 extracts the completed ENV[value]VNE. restart_with_resume.rs:1479-1489 writes only exports into the private rc files, not competing ENV[ witnesses. The first and second tabs each have their own replay/transcript and readiness markers. Suggested bucket: other (test correctness). Confidence: confirmed by source, no execution. proposed_drop: true, source refutation of echo/incomplete-output false pass. possible_cover: none. Could-be-highest: no; concern confined to maintainer test tooling. The test is Linux-scoped and deliberately skips an unsupported shell family rather than claiming its environment contract is verified."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "retained tab environment assertion waits for executed output",
+            "location": "crates/farhelm/tests/e2e/terminal_tabs.rs:1541",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: source refutes an echo/incomplete-output false pass in the rc-file test. Correction to the earlier event: checking the parent revision shows this test already existed at terminal_tabs.rs:4265-4366 and the probe at :4320; the patch presents the retained test as additions while deleting intervening tmux tests. It is not newly authored behavior. Details: terminal_tabs.rs:223-263 establishes readiness using output distinct from command echo, and :1541 invokes it before querying. At :1547-1551 the command contains EN%s[%s]%s and separate V/VNE arguments, so its echo contains neither ENV[ nor ]VNE. run_in_shell at :268-280 waits for ]VNE; :1553-1559 then extracts the completed ENV[value]VNE. restart_with_resume.rs:1479-1489 writes exports, not competing ENV[ witnesses. Each tab has an independent transcript and readiness marker. Suggested bucket: other (test correctness). Confidence: confirmed by source and parent comparison; no execution. proposed_drop: true, source refutation and unchanged pre-existing behavior. possible_cover: none. Could-be-highest: no; maintainer test tooling only. This preserves the originally considered consequence: a false passing environment regression test, not an established product failure."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "retained environment probe has a completed executed delimiter witness",
+            "location": "crates/farhelm/tests/e2e/terminal_tabs.rs:1547",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: synthesis confirms the apparent added environment test is retained unchanged, and its simple fixture-value check waits for executed output rather than echoed command text. Details: extracted the full function at parent terminal_tabs.rs:4265-4366 and reviewed terminal_tabs.rs:1492-1593 into private rc-before.txt and rc-after.txt; cmp exited 0. Rust diff alignment across the large deletion makes unchanged retained material appear as additions. wait_for_shell (:223-263) waits for an executed readiness witness; the printf at :1547 assembles ENV[value]VNE from separated format/arguments, so its echo cannot contain either completed delimiter. run_in_shell (:268-280) waits for ]VNE before the extraction at :1553-1559. write_rc_files exports only the controlled first/second values; each tab uses its own attachment transcript. This settles only this bounded ASCII marker probe and incomplete-output/echo concern, not general terminal text decoding, arbitrary grid redraw histories or byte-stream fidelity. Suggested bucket: other (test correctness). Confidence: source-confirmed plus source-text cmp, no runtime execution. proposed_drop: true for the specific false-pass candidate, based on source refutation and unchanged behavior; no parent drop is assumed accepted. possible_cover: none. Could-be-highest: no; the considered consequence remains a falsely passing maintainer environment regression test, not a demonstrated product failure."
+          }
+        }
+      ],
+      "latest": {
+        "line": 11,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "retained environment probe has a completed executed delimiter witness",
+          "location": "crates/farhelm/tests/e2e/terminal_tabs.rs:1547",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: synthesis confirms the apparent added environment test is retained unchanged, and its simple fixture-value check waits for executed output rather than echoed command text. Details: extracted the full function at parent terminal_tabs.rs:4265-4366 and reviewed terminal_tabs.rs:1492-1593 into private rc-before.txt and rc-after.txt; cmp exited 0. Rust diff alignment across the large deletion makes unchanged retained material appear as additions. wait_for_shell (:223-263) waits for an executed readiness witness; the printf at :1547 assembles ENV[value]VNE from separated format/arguments, so its echo cannot contain either completed delimiter. run_in_shell (:268-280) waits for ]VNE before the extraction at :1553-1559. write_rc_files exports only the controlled first/second values; each tab uses its own attachment transcript. This settles only this bounded ASCII marker probe and incomplete-output/echo concern, not general terminal text decoding, arbitrary grid redraw histories or byte-stream fidelity. Suggested bucket: other (test correctness). Confidence: source-confirmed plus source-text cmp, no runtime execution. proposed_drop: true for the specific false-pass candidate, based on source refutation and unchanged behavior; no parent drop is assumed accepted. possible_cover: none. Could-be-highest: no; the considered consequence remains a falsely passing maintainer environment regression test, not a demonstrated product failure."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g155/findings.jsonl",
+        "id": "c2",
+        "line": 11,
+        "disposition": "excluded",
+        "group": "terminal-tests/rc-probe-echo-and-completion-witness",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-098 after inspecting it. The bounded first/second ASCII probe waits for an executed closing delimiter that the echoed command cannot contain, then extracts the completed value. This refutes the specific echo/incomplete-output false-pass candidate; it does not certify general terminal decoding or all redraw histories. Refute the specific false-pass route by the completed executed delimiter and controlled fixture, without extending that result to other grid observers. Checked source/results: [\"At 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513, terminal_tabs.rs:223-263 uses an executed readiness witness; :1541 calls it before the probe. :1547 assembles ENV[value]VNE from EN%s[%s]%s and separate V/VNE arguments, so echo contains neither completed delimiter. :1548 and run_in_shell:268-280 wait for ]VNE before :1553-1559 extraction. write_rc_files at restart_with_resume.rs:1479-1489 supplies controlled exports only.\",\"Each tab has a separate attachment transcript at terminal_tabs.rs:1527-1540. The same probe already exists at exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:terminal_tabs.rs:4314. Unsupported shell handling is explicit at reviewed :1562-1583; source inspection is not an executed pass.\"] Current coverage/results: [\"Both specifications searched for launch environment and terminal framing: SPEC.md:3488-3503 supplies the environment contract; grid-client rows do not promise byte transcripts. No explicit acceptance of false passing tests. TODO.md Planned empty; plans/queue and BUGS.md have no exact item.\",\"Full INDEX.md and matching grid-row-is-not-program-line.md/grid-text-omits-blank-columns.md read: their program-line and gap-reconstruction concerns are different from this closing ASCII delimiter witness. Active TRIAGE_OUTCOMES.md contains no exact claim. FILTER.md not applied.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"An apparently new environment test might pass from echoed command text or an incomplete value. Later records correct its unchanged pre-existing status and narrow the conclusion to the actual controlled fixture values.\"; \"None for command-echo/incomplete-delimiter refutation in this fixed probe. Arbitrary styled output, grid redraw histories and byte-stream fidelity remain outside the conclusion.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g155/c2",
+        "line": 11,
+        "disposition": "excluded",
+        "group": "terminal-tests/rc-probe-echo-and-completion-witness",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-098 after inspecting it. The bounded first/second ASCII probe waits for an executed closing delimiter that the echoed command cannot contain, then extracts the completed value. This refutes the specific echo/incomplete-output false-pass candidate; it does not certify general terminal decoding or all redraw histories. Refute the specific false-pass route by the completed executed delimiter and controlled fixture, without extending that result to other grid observers. Checked source/results: [\"At 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513, terminal_tabs.rs:223-263 uses an executed readiness witness; :1541 calls it before the probe. :1547 assembles ENV[value]VNE from EN%s[%s]%s and separate V/VNE arguments, so echo contains neither completed delimiter. :1548 and run_in_shell:268-280 wait for ]VNE before :1553-1559 extraction. write_rc_files at restart_with_resume.rs:1479-1489 supplies controlled exports only.\",\"Each tab has a separate attachment transcript at terminal_tabs.rs:1527-1540. The same probe already exists at exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:terminal_tabs.rs:4314. Unsupported shell handling is explicit at reviewed :1562-1583; source inspection is not an executed pass.\"] Current coverage/results: [\"Both specifications searched for launch environment and terminal framing: SPEC.md:3488-3503 supplies the environment contract; grid-client rows do not promise byte transcripts. No explicit acceptance of false passing tests. TODO.md Planned empty; plans/queue and BUGS.md have no exact item.\",\"Full INDEX.md and matching grid-row-is-not-program-line.md/grid-text-omits-blank-columns.md read: their program-line and gap-reconstruction concerns are different from this closing ASCII delimiter witness. Active TRIAGE_OUTCOMES.md contains no exact claim. FILTER.md not applied.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"An apparently new environment test might pass from echoed command text or an incomplete value. Later records correct its unchanged pre-existing status and narrow the conclusion to the actual controlled fixture values.\"; \"None for command-echo/incomplete-delimiter refutation in this fixed probe. Arbitrary styled output, grid redraw histories and byte-stream fidelity remain outside the conclusion.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-098",
+          "key": "g155/c2",
+          "latest_line": 11,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "terminal-tests/rc-probe-echo-and-completion-witness",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The bounded first/second ASCII probe waits for an executed closing delimiter that the echoed command cannot contain, then extracts the completed value. This refutes the specific echo/incomplete-output false-pass candidate; it does not certify general terminal decoding or all redraw histories.",
+          "checks": [
+            "At 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513, terminal_tabs.rs:223-263 uses an executed readiness witness; :1541 calls it before the probe. :1547 assembles ENV[value]VNE from EN%s[%s]%s and separate V/VNE arguments, so echo contains neither completed delimiter. :1548 and run_in_shell:268-280 wait for ]VNE before :1553-1559 extraction. write_rc_files at restart_with_resume.rs:1479-1489 supplies controlled exports only.",
+            "Each tab has a separate attachment transcript at terminal_tabs.rs:1527-1540. The same probe already exists at exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:terminal_tabs.rs:4314. Unsupported shell handling is explicit at reviewed :1562-1583; source inspection is not an executed pass."
+          ],
+          "coverage_checked": [
+            "Both specifications searched for launch environment and terminal framing: SPEC.md:3488-3503 supplies the environment contract; grid-client rows do not promise byte transcripts. No explicit acceptance of false passing tests. TODO.md Planned empty; plans/queue and BUGS.md have no exact item.",
+            "Full INDEX.md and matching grid-row-is-not-program-line.md/grid-text-omits-blank-columns.md read: their program-line and gap-reconstruction concerns are different from this closing ASCII delimiter witness. Active TRIAGE_OUTCOMES.md contains no exact claim. FILTER.md not applied."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "None for command-echo/incomplete-delimiter refutation in this fixed probe. Arbitrary styled output, grid redraw histories and byte-stream fidelity remain outside the conclusion.",
+          "original_stronger_consequence": "An apparently new environment test might pass from echoed command text or an incomplete value. Later records correct its unchanged pre-existing status and narrow the conclusion to the actual controlled fixture values.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Refute the specific false-pass route by the completed executed delimiter and controlled fixture, without extending that result to other grid observers."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "terminal-tests/rc-probe-echo-and-completion-witness",
+        "destination": null
+      }
+    },
+    {
+      "key": "g155/c3",
+      "owner": "g155",
+      "id": "c3",
+      "domain": "rust-terminal-host-regressions",
+      "purpose": "rust-terminal-host-regressions: crates/farhelm/tests/e2e/terminal_tabs.rs, crates/farhelm/tests/e2e/terminal_backpressure.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "backpressure module removal preserves the shared drain helper",
+            "location": "crates/farhelm/tests/e2e/terminal_backpressure.rs:18",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether deleting the backpressure test module removes the helper other terminal regressions rely on. Details: the deleted drain_for helper at terminal_backpressure.rs:18-43 is present with the same timeout, accumulation, replay-complete, detach and closure behavior at crates/farhelm/tests/e2e/harness.rs:2060-2089 in this revision. The module declaration is removed from e2e/main.rs in the same commit; consumers already import the shared harness. This preserves the helper contract rather than removing it. Suggested bucket: other (test tooling). Confidence: confirmed by source comparison, no execution. proposed_drop: true, source refutation. possible_cover: none. Could-be-highest: no; no product change or catastrophic tooling impact is established. The separate static scrollback assertion is assessed independently."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "drain helper relocation preserves behavior within its narrow caller contract",
+            "location": "crates/farhelm/tests/e2e/terminal_backpressure.rs:18",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: deleting this module does not delete or change the shared event-drain helper; synthesis does not broaden that into a text-decoding guarantee. Details: the deleted terminal_backpressure.rs:18-43 implementation remains in harness.rs:2067-2089 with the same deadline, data accumulation, ignored ReplayComplete, detach reason and closure return behavior. The caller supplied g144/g145 interface confirmation that the relocation is unchanged and their current caller analysis is narrow. This confirms only preservation of the helper's existing event-draining semantics. It does not certify every caller, arbitrary terminal decoding, lossless raw output or grid-to-text fidelity; no new such property follows from relocation. The static scrollback assertion remains separately considered under c4. Suggested bucket: other (test tooling). Confidence: source-confirmed, with caller-supplied interface confirmation; no execution. proposed_drop: true for the deleted-helper/change-of-semantics candidate on source refutation; no parent drop is assumed accepted. possible_cover: none. Could-be-highest: no product or catastrophic tooling consequence established. Original considered consequence was loss or altered behavior of a shared regression-test helper."
+          }
+        }
+      ],
+      "latest": {
+        "line": 12,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "drain helper relocation preserves behavior within its narrow caller contract",
+          "location": "crates/farhelm/tests/e2e/terminal_backpressure.rs:18",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: deleting this module does not delete or change the shared event-drain helper; synthesis does not broaden that into a text-decoding guarantee. Details: the deleted terminal_backpressure.rs:18-43 implementation remains in harness.rs:2067-2089 with the same deadline, data accumulation, ignored ReplayComplete, detach reason and closure return behavior. The caller supplied g144/g145 interface confirmation that the relocation is unchanged and their current caller analysis is narrow. This confirms only preservation of the helper's existing event-draining semantics. It does not certify every caller, arbitrary terminal decoding, lossless raw output or grid-to-text fidelity; no new such property follows from relocation. The static scrollback assertion remains separately considered under c4. Suggested bucket: other (test tooling). Confidence: source-confirmed, with caller-supplied interface confirmation; no execution. proposed_drop: true for the deleted-helper/change-of-semantics candidate on source refutation; no parent drop is assumed accepted. possible_cover: none. Could-be-highest: no product or catastrophic tooling consequence established. Original considered consequence was loss or altered behavior of a shared regression-test helper."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g155/findings.jsonl",
+        "id": "c3",
+        "line": 12,
+        "disposition": "excluded",
+        "group": "terminal-tests/drain-helper-relocation",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-098 after inspecting it. The helper is relocated with the same event-draining behavior. Deleting its old module neither deletes that behavior nor creates a new decoding guarantee. This is distinct from g154/c5's question about raw-byte caller sensitivity. Source-refute only helper loss or semantic change from relocation; retain the independent caller-analysis limits. Checked source/results: [\"At 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513, terminal_backpressure.rs:20-43 contains deadline-based raw Data accumulation, ignored ReplayComplete, detach reason, closed result and timeout result. At 1ed482dde220452e424973faf38a5e1318986333, harness.rs:2067-2089 contains the same body. It remains reachable after the old module disappears. No runtime checks ran.\"] Current coverage/results: [\"Both specifications searched for drain/raw-grid helper contracts: no acceptance or removal of a separate public helper contract. TODO.md Planned empty; no matching unlanded plan or BUGS.md entry.\",\"Full INDEX.md and matching grid-row-is-not-program-line.md/grid-text-omits-blank-columns.md read: they concern decoded transcript defects, not loss through helper relocation. Active TRIAGE_OUTCOMES.md has no exact relocation item. FILTER.md not applied. g154/c5 remains a distinct caller-use question, not an exact alias.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing terminal_backpressure might remove or alter the drain helper used by other tests. Synthesis preserves the raw/grid distinction and expressly rejects expanding relocation correctness into caller or decoder certification.\"; \"None for behavior-preserving relocation. Caller-wide correctness, arbitrary text fidelity and lossless raw output are not established by this comparison.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g155/c3",
+        "line": 12,
+        "disposition": "excluded",
+        "group": "terminal-tests/drain-helper-relocation",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-098 after inspecting it. The helper is relocated with the same event-draining behavior. Deleting its old module neither deletes that behavior nor creates a new decoding guarantee. This is distinct from g154/c5's question about raw-byte caller sensitivity. Source-refute only helper loss or semantic change from relocation; retain the independent caller-analysis limits. Checked source/results: [\"At 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513, terminal_backpressure.rs:20-43 contains deadline-based raw Data accumulation, ignored ReplayComplete, detach reason, closed result and timeout result. At 1ed482dde220452e424973faf38a5e1318986333, harness.rs:2067-2089 contains the same body. It remains reachable after the old module disappears. No runtime checks ran.\"] Current coverage/results: [\"Both specifications searched for drain/raw-grid helper contracts: no acceptance or removal of a separate public helper contract. TODO.md Planned empty; no matching unlanded plan or BUGS.md entry.\",\"Full INDEX.md and matching grid-row-is-not-program-line.md/grid-text-omits-blank-columns.md read: they concern decoded transcript defects, not loss through helper relocation. Active TRIAGE_OUTCOMES.md has no exact relocation item. FILTER.md not applied. g154/c5 remains a distinct caller-use question, not an exact alias.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing terminal_backpressure might remove or alter the drain helper used by other tests. Synthesis preserves the raw/grid distinction and expressly rejects expanding relocation correctness into caller or decoder certification.\"; \"None for behavior-preserving relocation. Caller-wide correctness, arbitrary text fidelity and lossless raw output are not established by this comparison.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-098",
+          "key": "g155/c3",
+          "latest_line": 12,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "terminal-tests/drain-helper-relocation",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The helper is relocated with the same event-draining behavior. Deleting its old module neither deletes that behavior nor creates a new decoding guarantee. This is distinct from g154/c5's question about raw-byte caller sensitivity.",
+          "checks": [
+            "At 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513, terminal_backpressure.rs:20-43 contains deadline-based raw Data accumulation, ignored ReplayComplete, detach reason, closed result and timeout result. At 1ed482dde220452e424973faf38a5e1318986333, harness.rs:2067-2089 contains the same body. It remains reachable after the old module disappears. No runtime checks ran."
+          ],
+          "coverage_checked": [
+            "Both specifications searched for drain/raw-grid helper contracts: no acceptance or removal of a separate public helper contract. TODO.md Planned empty; no matching unlanded plan or BUGS.md entry.",
+            "Full INDEX.md and matching grid-row-is-not-program-line.md/grid-text-omits-blank-columns.md read: they concern decoded transcript defects, not loss through helper relocation. Active TRIAGE_OUTCOMES.md has no exact relocation item. FILTER.md not applied. g154/c5 remains a distinct caller-use question, not an exact alias."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "None for behavior-preserving relocation. Caller-wide correctness, arbitrary text fidelity and lossless raw output are not established by this comparison.",
+          "original_stronger_consequence": "Removing terminal_backpressure might remove or alter the drain helper used by other tests. Synthesis preserves the raw/grid distinction and expressly rejects expanding relocation correctness into caller or decoder certification.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source-refute only helper loss or semantic change from relocation; retain the independent caller-analysis limits."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "terminal-tests/drain-helper-relocation",
+        "destination": null
+      }
+    },
+    {
+      "key": "g155/c4",
+      "owner": "g155",
+      "id": "c4",
+      "domain": "rust-terminal-host-regressions",
+      "purpose": "rust-terminal-host-regressions: crates/farhelm/tests/e2e/terminal_tabs.rs, crates/farhelm/tests/e2e/terminal_backpressure.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "removed xterm scrollback bound does not govern host grids",
+            "location": "crates/farhelm/tests/e2e/terminal_backpressure.rs:73",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether deleting the static browser scrollback assertion establishes a current history-retention regression. It does not. Details: the deleted test parses terminal.js's xterm scrollback literal and compares it with tmux::HISTORY_LIMIT. SPEC.md:2962-2963 retains the product floor of the screen plus 10,000 history lines. Host terminals use a different renderer: SPEC_impl.md:1898-1917 states that the browser receives screen/history rows and that a host terminal mounts the grid directly; source terminal.js:32-40 and grid-model.js:792-799 support that distinction. GridModel sets historyCap from the supervisor's hello history_cap, so the removed cross-language xterm/tmux literal comparison does not validate the current host grid cap. Existing service/grid_stream/tests.rs has source assertions for held history across catch-up (:313-332), paused floods (:485-505), full writers (:520-545), and eviction (:560-584). This is source inspection, not an executed pass, and those tests do not independently certify the default 10,000-line floor. No changed runtime cap or route to missing history was established by this deletion. Suggested bucket: other (test-coverage concern). Confidence: confirmed by source regarding test applicability; no runtime observation. proposed_drop: true, source refutation of a product regression attributable to this deleted xterm/tmux bound. possible_cover: none. Could-be-highest: no established loss-of-work route; the considered issue is coverage removal in maintainer tooling, not demonstrated output loss. This is not a specification-accepted product bug."
+          }
+        }
+      ],
+      "latest": {
+        "line": 6,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c4",
+          "state": "open",
+          "summary": "removed xterm scrollback bound does not govern host grids",
+          "location": "crates/farhelm/tests/e2e/terminal_backpressure.rs:73",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether deleting the static browser scrollback assertion establishes a current history-retention regression. It does not. Details: the deleted test parses terminal.js's xterm scrollback literal and compares it with tmux::HISTORY_LIMIT. SPEC.md:2962-2963 retains the product floor of the screen plus 10,000 history lines. Host terminals use a different renderer: SPEC_impl.md:1898-1917 states that the browser receives screen/history rows and that a host terminal mounts the grid directly; source terminal.js:32-40 and grid-model.js:792-799 support that distinction. GridModel sets historyCap from the supervisor's hello history_cap, so the removed cross-language xterm/tmux literal comparison does not validate the current host grid cap. Existing service/grid_stream/tests.rs has source assertions for held history across catch-up (:313-332), paused floods (:485-505), full writers (:520-545), and eviction (:560-584). This is source inspection, not an executed pass, and those tests do not independently certify the default 10,000-line floor. No changed runtime cap or route to missing history was established by this deletion. Suggested bucket: other (test-coverage concern). Confidence: confirmed by source regarding test applicability; no runtime observation. proposed_drop: true, source refutation of a product regression attributable to this deleted xterm/tmux bound. possible_cover: none. Could-be-highest: no established loss-of-work route; the considered issue is coverage removal in maintainer tooling, not demonstrated output loss. This is not a specification-accepted product bug."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g155/findings.jsonl",
+        "id": "c4",
+        "line": 6,
+        "disposition": "under-investigation",
+        "group": "g155-c4",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-098",
+          "key": "g155/c4",
+          "latest_line": 6,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "terminal-tests/retired-xterm-scrollback-literal-bound",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The removed check compares an xterm browser literal with the old tmux limit. It does not govern the surviving host-grid history capacity, so its deletion alone does not establish the asserted current retention regression. This does not establish adequate independent tests of the default 10,000-line floor.",
+          "checks": [
+            "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:terminal_backpressure.rs:70-99 parses terminal.js scrollback and compares it to tmux::HISTORY_LIMIT plus 10,000. At 1ed482dde220452e424973faf38a5e1318986333, terminal.js:32-40 distinguishes direct grid mounting from the old xterm surface; grid-model.js:792-799 takes historyCap from hello.history_cap.",
+            "Same-revision SPEC_impl.md:1898-1917 explains the grid renderer and :2882-2888 says old terminals end at startup and the driver is gone. The earlier retirement is directly implemented by dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:core.rs:6426-6438,6965-6969. No changed runtime cap, missing-history source route or runtime incident is established. No runtime checks ran."
+          ],
+          "coverage_checked": [
+            "Both current specifications searched for history/scrollback floor and old renderer: SPEC.md Terminal experience retains screen plus 10,000 lines and SPEC_impl.md grid client renders supervisor rows. Neither accepts a lost-history bug; they explain why the deleted xterm comparison is not a host-capacity oracle.",
+            "TODO.md Planned empty; matching tmux-removal plans landed per plans/REPORTS.md:29-32, and no unlanded default-floor repair was found. BUGS.md has no exact entry. Full INDEX.md and active TRIAGE_OUTCOMES.md searches found history/recovery items with different triggers, not this deleted static test. FILTER.md not applied."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "A changed surviving host capacity or concrete missing default-floor oracle would need separate evidence. Surviving held-history/pause/eviction tests do not by themselves independently certify the default 10,000-line setting.",
+          "original_stronger_consequence": "Removing the static browser scrollback test might imply current history-retention loss. The reviewer narrows this to a test-applicability conclusion and preserves the absence of an independent default-floor certification; no actual output loss was shown.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Refute only a current product retention regression attributed to deleting the obsolete xterm/tmux literal comparison. Because the original consequence can be read as losing retained user output, route that dismissal independently; do not silently dismiss a separate default-floor test-gap claim."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "terminal-tests/retired-xterm-scrollback-literal-bound",
+        "destination": null
+      }
+    },
+    {
+      "key": "g155/c5",
+      "owner": "g155",
+      "id": "c5",
+      "domain": "rust-terminal-host-regressions",
+      "purpose": "rust-terminal-host-regressions: crates/farhelm/tests/e2e/terminal_tabs.rs, crates/farhelm/tests/e2e/terminal_backpressure.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c5",
+            "state": "open",
+            "summary": "tmux test retirement retains host lifecycle regression coverage",
+            "location": "crates/farhelm/tests/e2e/terminal_tabs.rs:735",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: considered whether the assigned deletions remove all checks for tab cleanup, consent, dead opens or supervisor-restart survival. Source shows host-based checks remain; no product defect was established from the test retirement. Details: terminal_tabs.rs:735-742 still exercises Stop against a detached daemon; :835-841 retains the no-tabs/ended-agent consent helper; :920-928 retains the competing-Restart consent helper. host_tabs.rs:396-459 retains deterministic dead-shell refusal with last words plus host/socket/record cleanup; :584-634 keeps the same host across supervisor restart, checks recovered screen content and drives fresh shell output afterwards. The specific tmux sink readability mechanism still has a direct test in supervisor/src/tmux/sink.rs:396-439. These replacements do not claim to preserve every old tmux-only assertion: old-session rediscovery, forwarder cleanup and sink registry lifetime tests in the assigned patch are actually removed, and old tmux sessions still exist at this intermediate revision (SPEC_impl.md:2370-2411). Test deletion alone supplies no source route to a shipped contract violation, and the review does not independently certify the remaining tmux implementation. Suggested bucket: other (test-coverage concern). Confidence: confirmed by source for retained tests; no execution. proposed_drop: true, source refutation of complete lifecycle coverage removal, with no actionable runtime regression established. possible_cover: none. Could-be-highest: no established security or loss-of-work route; loss of a regression guard is tooling impact, distinct from a demonstrated consent or process-loss bug. No product bug is being accepted solely because of a specification exception."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c5",
+            "state": "open",
+            "summary": "bound intermediate tmux lifecycle coverage loss separately from product defects",
+            "location": "crates/farhelm/tests/e2e/terminal_tabs.rs:1407",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: the old tmux test removals may leave specific still-shipped contracts without their prior regression oracle even though host lifecycle tests remain. This revises the earlier candidate, not an accepted drop. Details: the assigned patch removes old-tab rediscovery, pending-output cleanup and sink-lifetime tests while SPEC_impl.md:2370-2411 still describes mixed host/tmux sessions. Retained host Stop/consent/dead-open/restart tests refute only total loss of lifecycle coverage; tmux/sink.rs's direct readability test does not establish equivalent coverage for supervisor-owned sink registry lifetime or cleanup publication. User-supplied cross-group synthesis reports g152 found an actual intermediate migration-suite gap; this record does not assume that settles every g155 removal. Checks already made: retained host test source, the pinned mixed-session contract, and sink mechanism test source. Missing premise: which removed g155 assertions have a surviving oracle at 647f0227, and which become irrelevant only at later retirement. Next checks: targeted pinned test/source searches and compare retirement through the range tip. Suggested bucket: other (test-only regression-oracle loss), unless a separate shipped runtime failure is established. Confidence: unverified after initial investigation as to exact missing-oracle bounds; no execution. proposed_drop: false pending synthesis. possible_cover: related intermediate migration-suite issue reported by g152 through caller, without coverage-source search. Could-be-highest: no established product security/loss-of-work route; original concern is lost lifecycle regression protection, not demonstrated failure of Stop consent or process cleanup. No parent drop has been accepted."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c5",
+            "state": "open",
+            "summary": "narrow intermediate lifecycle gap to removed integration oracles",
+            "location": "crates/farhelm/tests/e2e/terminal_tabs.rs:1407",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: retained host tests do not replace all removed tmux integration checks, but additional source checks show tmux registry/barrier unit coverage remains too. Details: a pinned crates-wide search finds session_sink_pid only at its test-seam definition in service/terminals.rs:2979; removed end-to-end lifecycle assertions no longer invoke it. However service/terminals.rs:3207-3335 retains output-reap barrier success, failure, per-terminal scope and bounded-wait tests. Targeted sink-source search also finds the last-lease publication test at :4452, registry ownership tests at :4518 onward, fail-closed reap at :4633 and healthy respawn backoff at :4690. Thus the earlier assertion that only the direct sink readability test survives would be incomplete; no such broad claim is retained. Missing premise now: exact distinction between these synthetic unit oracles and the removed request-level close/restart and real-attachment lifetime checks. Next: inspect surviving unit fixtures and the production close/restart callers, then bound the later retirement. Suggested bucket: other (test-only oracle loss); no product failure established. Confidence: source-confirmed retained unit coverage; exact missing integration boundary still under investigation. proposed_drop: false pending completion. possible_cover: caller reports related intermediate migration-suite gap from g152; exact overlap unknown. Could-be-highest: no established runtime security/loss-of-work route. Original consequence remains reduced regression protection at a still-shipped intermediate tmux revision. No parent drop accepted; no execution."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c5",
+            "state": "open",
+            "summary": "tmux lifecycle tests retire before their request paths",
+            "location": "crates/farhelm/tests/e2e/terminal_tabs.rs (deleted close_notifies_and_removes_a_tab_while_output_cleanup_is_pending; parent line 1047)",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: this intermediate change removes regression checks for still-supported old terminals before the runtime behavior is retired. The established consequence is a missing integration oracle, not a demonstrated product failure. Details: the assigned patch deletes close_notifies_and_removes_a_tab_while_output_cleanup_is_pending (parent terminal_tabs.rs:1047 onward) and restart_restores_and_notifies_while_output_cleanup_is_pending (parent :1763 onward). A pinned search for forwarder_cleanup_gate across crates/farhelm/tests and crates/farhelm-supervisor/src finds only the hook definition in service/core.rs:900 and production use in service/connection.rs:1575, with no surviving test configuring it. The runtime branches still name pending cleanup at service/core.rs:13893 (Restart) and :15196 (closed tab). Unit tests in service/terminals.rs:3207-3335 manually publish output-reap results and prove barrier behavior, but do not run a Close or Restart with the forwarder's cleanup publication held; the retained host lifecycle tests use the other substrate. The exact lost assertions are that a killed tmux tab becomes absent and its viewer receives TabClosed even while cleanup returns pending, and that a Restart rejected after temporary unpublication restores a stopped row and notifies its viewer. SPEC_impl.md:2370-2411 still supports mixed tmux/host sessions at this revision, so host tests do not make these old-terminal request paths irrelevant here. Later dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 changes the product contract to end old terminals on startup; 1ed482dde220452e424973faf38a5e1318986333 removes the tmux driver. That later retirement bounds the gap but does not retroactively supply the intermediate regression check. Suggested bucket: other, test-only coverage loss. Confidence: source-confirmed for the specific forced cleanup boundary; no execution and no product failure asserted. proposed_drop: false. possible_cover: caller reports an intermediate migration-suite gap from g152; exact overlap is not established. Could-be-highest: no established security or loss-of-work route. Original concern about lost lifecycle regression protection is preserved; retained host and synthetic unit coverage refute only complete loss, not this missing integration oracle. No parent drop accepted. Follow-up source check will inspect the caller branches to pin their exact request semantics, not reproduce behavior."
+          }
+        },
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c5",
+            "state": "open",
+            "summary": "pending-cleanup integration oracles retire before tmux runtime support",
+            "location": "crates/farhelm/tests/e2e/terminal_tabs.rs (deleted tests; parent revision lines 1044 and 1761)",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: this intermediate change removes deterministic integration checks for still-supported old terminals. The confirmed impact is reduced regression protection, not an observed failure in Farhelm. Details: the assigned patch deletes close_notifies_and_removes_a_tab_while_output_cleanup_is_pending (parent terminal_tabs.rs:1044) and restart_restores_and_notifies_while_output_cleanup_is_pending (parent :1761). Both configured forwarder_cleanup_gate to hold cleanup-result publication. At the reviewed revision, a pinned search across crates/farhelm/tests and crates/farhelm-supervisor/src finds that hook only in its definition (service/core.rs:900) and production use (service/connection.rs:1575-1590), with no remaining test configuring it. The Close request still reaches detach_closed_tab after its window is gone (service/core.rs:15124-15128); that helper notifies TabClosed before returning pending cleanup (:15158-15198). Restart still removes the entry (:13312), converts detach_for_restart failure into a definitive relaunch failure (:13321-13342), then restores its prior outcome and republishes the entry (:13430-13456, :13544-13552). The helper itself sends the failed-restart detach notice before returning the pending-cleanup error (:13885-13906). The deleted tests were request-level oracles for these combined outcomes, beyond proving the lower-level barrier data structure. Surviving output-reap tests at service/terminals.rs:3207-3335 manually publish watch-channel results; the sink lease test at :4452-4509 constructs a synthetic handle and leases. Those retain useful unit coverage but do not invoke these real Close/Restart branches with forwarder cleanup publication held. Retained host Stop/consent/dead-open/restart tests use the other substrate. SPEC_impl.md:2370-2411 still supports mixed tmux/host sessions at this intermediate revision. Later dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 ends old terminals before reload and calls no_server_after_startup (core.rs:6426-6438), changing the product contract; 1ed482dde220452e424973faf38a5e1318986333 removes the tmux driver. Inspection through tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db found the old driver paths remain retired; the only later changes to these assigned test paths are 1ed482d and comment cleanup in 08399d092d20815ced6619c26df2391944ae2b4a. Thus this is an intermediate test-suite gap, not a current-tip missing oracle for an active tmux runtime. Keep the boundary tests through runtime retirement, or carry equivalent request-level tests while that runtime still ships. Suggested bucket: other (maintainer test coverage only). Confidence: confirmed by pinned source and targeted hook/caller searches, no runtime execution or reproduction. proposed_drop: false. possible_cover: caller reports a related intermediate migration-suite gap from g152; exact overlap is not established and no coverage sources were searched. Could-be-highest: no established product security/loss-of-work route. The original concern about lost lifecycle regression protection is preserved; no claim is made that every removed old-terminal contract lacks coverage, or that existing behavior is broken. Retained host/unit coverage refutes only complete loss. No parent drop has been accepted. Readily checkable caller and retirement premises are resolved; this ID is no longer an unresolved lead."
+          }
+        }
+      ],
+      "latest": {
+        "line": 13,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "c5",
+          "state": "open",
+          "summary": "pending-cleanup integration oracles retire before tmux runtime support",
+          "location": "crates/farhelm/tests/e2e/terminal_tabs.rs (deleted tests; parent revision lines 1044 and 1761)",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: this intermediate change removes deterministic integration checks for still-supported old terminals. The confirmed impact is reduced regression protection, not an observed failure in Farhelm. Details: the assigned patch deletes close_notifies_and_removes_a_tab_while_output_cleanup_is_pending (parent terminal_tabs.rs:1044) and restart_restores_and_notifies_while_output_cleanup_is_pending (parent :1761). Both configured forwarder_cleanup_gate to hold cleanup-result publication. At the reviewed revision, a pinned search across crates/farhelm/tests and crates/farhelm-supervisor/src finds that hook only in its definition (service/core.rs:900) and production use (service/connection.rs:1575-1590), with no remaining test configuring it. The Close request still reaches detach_closed_tab after its window is gone (service/core.rs:15124-15128); that helper notifies TabClosed before returning pending cleanup (:15158-15198). Restart still removes the entry (:13312), converts detach_for_restart failure into a definitive relaunch failure (:13321-13342), then restores its prior outcome and republishes the entry (:13430-13456, :13544-13552). The helper itself sends the failed-restart detach notice before returning the pending-cleanup error (:13885-13906). The deleted tests were request-level oracles for these combined outcomes, beyond proving the lower-level barrier data structure. Surviving output-reap tests at service/terminals.rs:3207-3335 manually publish watch-channel results; the sink lease test at :4452-4509 constructs a synthetic handle and leases. Those retain useful unit coverage but do not invoke these real Close/Restart branches with forwarder cleanup publication held. Retained host Stop/consent/dead-open/restart tests use the other substrate. SPEC_impl.md:2370-2411 still supports mixed tmux/host sessions at this intermediate revision. Later dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 ends old terminals before reload and calls no_server_after_startup (core.rs:6426-6438), changing the product contract; 1ed482dde220452e424973faf38a5e1318986333 removes the tmux driver. Inspection through tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db found the old driver paths remain retired; the only later changes to these assigned test paths are 1ed482d and comment cleanup in 08399d092d20815ced6619c26df2391944ae2b4a. Thus this is an intermediate test-suite gap, not a current-tip missing oracle for an active tmux runtime. Keep the boundary tests through runtime retirement, or carry equivalent request-level tests while that runtime still ships. Suggested bucket: other (maintainer test coverage only). Confidence: confirmed by pinned source and targeted hook/caller searches, no runtime execution or reproduction. proposed_drop: false. possible_cover: caller reports a related intermediate migration-suite gap from g152; exact overlap is not established and no coverage sources were searched. Could-be-highest: no established product security/loss-of-work route. The original concern about lost lifecycle regression protection is preserved; no claim is made that every removed old-terminal contract lacks coverage, or that existing behavior is broken. Retained host/unit coverage refutes only complete loss. No parent drop has been accepted. Readily checkable caller and retirement premises are resolved; this ID is no longer an unresolved lead."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g155/findings.jsonl",
+        "id": "c5",
+        "line": 13,
+        "disposition": "rejected",
+        "group": "647f0227-removes-supported-tmux-pending-cleanup-request-oracles",
+        "reason": "Full099:647 deletes deterministic forwarder_cleanup_gate Close/Restart request tests, includingTabClosed/listabsence andfailedRestart/exited-row restoration while oldservice supported. Synthetic result/barrier tests do not cover same request-publication boundary; no productbug needed to establish missing oracle. dbfc endsdriver andtiphasnoneofgate/sink/reapmachinery; preserve trueintermediategap but no obsoletefixturefixcurrentqueue. Distinct156real recoveryoracles andhostgeneric testsremainuseful. No security/workloss route."
+      },
+      "accepted_parent_decision": {
+        "key": "g155/c5",
+        "line": 13,
+        "disposition": "rejected",
+        "group": "647f0227-removes-supported-tmux-pending-cleanup-request-oracles",
+        "bucket": "other",
+        "recording": "retired-in-range",
+        "needs_independent_drop_check": false,
+        "reason": "Full099:647 deletes deterministic forwarder_cleanup_gate Close/Restart request tests, includingTabClosed/listabsence andfailedRestart/exited-row restoration while oldservice supported. Synthetic result/barrier tests do not cover same request-publication boundary; no productbug needed to establish missing oracle. dbfc endsdriver andtiphasnoneofgate/sink/reapmachinery; preserve trueintermediategap but no obsoletefixturefixcurrentqueue. Distinct156real recoveryoracles andhostgeneric testsremainuseful. No security/workloss route."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-099",
+          "key": "g155/c5",
+          "latest_line": 13,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "647f0227-removes-supported-tmux-pending-cleanup-request-oracles",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The two deterministic request-level cleanup oracles disappear while old terminals are still served. Retain the intermediate test-suite gap; retirement later in this range limits its duration but does not refute it. No product failure is established. g156/l1 concerns different removed recovery scenarios, not these Close/Restart assertions.",
+          "checks": [
+            "647f0227^:crates/farhelm/tests/e2e/terminal_tabs.rs:1044-1100 and 1761-1802 configure forwarder_cleanup_gate and assert TabClosed plus tab absence, or failed Restart plus restoration of an exited row. The 647f0227 diff deletes both tests.",
+            "git grep at 647f0227 across crates/farhelm/tests and crates/farhelm-supervisor/src finds forwarder_cleanup_gate only at service/core.rs:900 and service/connection.rs:1575; no surviving test configures it.",
+            "647f0227:service/core.rs:13885-13906 and 15124-15198 retain pending-cleanup notice/error behavior. service/terminals.rs:3207-3338 uses synthetic watch-channel results, not Close/Restart requests held at cleanup publication.",
+            "647f0227:SPEC_impl.md:2370-2411 and 2956-2963 still support mixed old/host terminals. dbfc6975:service/core.rs:6426-6438 ends the old server and disables the driver; :6965-6969 ignores old-kind terminal addresses. The old sink/reap/gate symbols are absent in crates at 00de0b6c (grep exit 1)."
+          ],
+          "coverage_checked": {
+            "SPEC.md / SPEC_impl.md": "Current Session view and Terminal host/Ending the old private tmux server sections describe hosts and later retirement; they do not accept removing these integration assertions before retirement. Current test-footing text retains known-gap qualifications, not this exact acceptance.",
+            "TODO.md Planned": "Empty at recording-time main.",
+            "plans/queue": "INDEX.md has no unlanded plans. Matching retained tmux-end-old-terminals and tmux-drop-from-docs plan text describes retirement/sweeping, not an unlanded repair of this intermediate gap.",
+            "BUGS.md": "Only an SSH transfer-helper hang is recorded; no match.",
+            "INDEX.md / matching queue files": "Searches for tmux, sink, forwarder, pending cleanup and terminal-test coverage find no exact item. The conformance management-permit item is a different test and trigger.",
+            "TRIAGE_OUTCOMES.md": "No matching cleanup-oracle decision; the generic conformance-test discard is unrelated. Archive not read.",
+            "FILTER.md": "No filter matches loss of regression protection. This is not a transient product diagnostic or a rare upgrade failure."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "None for the bounded missing-oracle conclusion. A shipped cleanup/consent failure would require separate evidence and is not inferred.",
+          "original_stronger_consequence": "Initial concern included loss of all tab cleanup, consent, dead-open and restart-survival protection. Retained host tests and synthetic barrier/registry tests refute that breadth. The first proposed drop based on retained coverage/no runtime defect was superseded; the specific old-terminal request oracles remain missing at the intermediate revision.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Record test-only intermediate regression-protection loss, preserving later retirement and surviving lower-layer/host coverage. No product-loss consequence was established or lowered."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "647f0227-removes-supported-tmux-pending-cleanup-request-oracles",
+        "destination": "trailing-647f0227-removes-supported-tmux-pending-cleanup-request-oracles.md"
+      }
+    },
+    {
+      "key": "g155/c6",
+      "owner": "g155",
+      "id": "c6",
+      "domain": "rust-terminal-host-regressions",
+      "purpose": "rust-terminal-host-regressions: crates/farhelm/tests/e2e/terminal_tabs.rs, crates/farhelm/tests/e2e/terminal_backpressure.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 14,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c6",
+            "state": "open",
+            "summary": "shell harness documentation may retain deleted conformance callers",
+            "location": "crates/farhelm/tests/e2e/terminal_tabs.rs:28",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: a retained helper's documentation describes conformance and dead-shell callers that the assigned deletion removes. This is a potential documentation defect distinct from the known missing integration oracle. Details: harness_with_shell at terminal_tabs.rs:25-32 says it gives the agent a plain shell so conformance tests drive both terminals identically, then describes the dead-at-open test as another caller assembling seams. The reviewed pinned call search finds harness_with_shell only at its definition (:33) and the bash/SIGTERM-close-latency test (:490), while the assigned patch deletes terminal_conformance_holds_for_the_agent_and_for_a_tab and its old-terminal helper. Checks made: full assigned patch, pinned helper-call search and actual retained close test :469-540. Missing premise: exact attribution across the whole pinned range and whether later edits remove or correct the stale description. Next: inspect base/parent/tip helper and deleted-test provenance; no runtime work. Suggested bucket: other (test documentation). Confidence: concrete source lead pending provenance/tip checks. proposed_drop: false pending investigation. possible_cover: no known neighbour record for this helper prose. Could-be-highest: no security/loss-of-work route; impact is a misleading explanation for test maintainers. Production correctness would not refute a documentation defect. No parent drop accepted."
+          }
+        },
+        {
+          "line": 15,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c6",
+            "state": "open",
+            "summary": "shell harness docs still describe the deleted conformance battery",
+            "location": "crates/farhelm/tests/e2e/terminal_tabs.rs:28",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513; checked through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: the retained test helper's explanation directs maintainers to a conformance battery that the same change deletes, hiding its actual remaining purpose: selecting bash for the tab-close/SIGTERM test. Details: terminal_tabs.rs:28-32 says 'Used to give the agent terminal a plain shell so the conformance tests can drive BOTH terminals identically' and follows with the former dead-at-open rationale. The assigned patch removes terminal_conformance_holds_for_the_agent_and_for_a_tab and its harness_with_shell_tmux wrapper. A pinned call search after the change finds harness_with_shell only at its definition (:33) and closing_a_tab_returns_well_inside_the_sigterm_grace (:490); that caller pins /bin/bash and checks its SIGTERM-ignore premise (:483-527), not agent/tab conformance. Whole-range attribution: at excluded base 6e423e30068b62c6cfa276c6d720ee35bb70387a, the same prose is present and the described conformance battery still exists at :1937 (using the tmux sibling wrapper), so merely observing that the prose predates 647f0227 would miss the new dangling explanation caused by this in-range deletion. At tip, the unchanged paragraph remains at :27-31, the sole helper caller remains the close-latency test at :489, and targeted searches find neither deleted conformance nor old dead-at-open function names. The host_tabs dead-open replacement still has its own seams; that does not restore the deleted conformance battery referred to by this paragraph. Update the helper explanation to its surviving shell-selection/close-latency responsibility, retaining useful seam context without claiming the removed caller exists. Suggested bucket: other, test documentation correctness. Confidence: confirmed by base/parent/reviewed/tip source and exact caller searches; no execution. proposed_drop: false. possible_cover: none in the supplied neighbour records. Could-be-highest: no established security or loss-of-work route. This is a bounded documentation defect, distinct from c5's lost request oracle and from any production correctness claim. No parent drop accepted. All readily source-checkable attribution and persistence premises resolved; c6 is no longer an open lead."
+          }
+        }
+      ],
+      "latest": {
+        "line": 15,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "c6",
+          "state": "open",
+          "summary": "shell harness docs still describe the deleted conformance battery",
+          "location": "crates/farhelm/tests/e2e/terminal_tabs.rs:28",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513; checked through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: the retained test helper's explanation directs maintainers to a conformance battery that the same change deletes, hiding its actual remaining purpose: selecting bash for the tab-close/SIGTERM test. Details: terminal_tabs.rs:28-32 says 'Used to give the agent terminal a plain shell so the conformance tests can drive BOTH terminals identically' and follows with the former dead-at-open rationale. The assigned patch removes terminal_conformance_holds_for_the_agent_and_for_a_tab and its harness_with_shell_tmux wrapper. A pinned call search after the change finds harness_with_shell only at its definition (:33) and closing_a_tab_returns_well_inside_the_sigterm_grace (:490); that caller pins /bin/bash and checks its SIGTERM-ignore premise (:483-527), not agent/tab conformance. Whole-range attribution: at excluded base 6e423e30068b62c6cfa276c6d720ee35bb70387a, the same prose is present and the described conformance battery still exists at :1937 (using the tmux sibling wrapper), so merely observing that the prose predates 647f0227 would miss the new dangling explanation caused by this in-range deletion. At tip, the unchanged paragraph remains at :27-31, the sole helper caller remains the close-latency test at :489, and targeted searches find neither deleted conformance nor old dead-at-open function names. The host_tabs dead-open replacement still has its own seams; that does not restore the deleted conformance battery referred to by this paragraph. Update the helper explanation to its surviving shell-selection/close-latency responsibility, retaining useful seam context without claiming the removed caller exists. Suggested bucket: other, test documentation correctness. Confidence: confirmed by base/parent/reviewed/tip source and exact caller searches; no execution. proposed_drop: false. possible_cover: none in the supplied neighbour records. Could-be-highest: no established security or loss-of-work route. This is a bounded documentation defect, distinct from c5's lost request oracle and from any production correctness claim. No parent drop accepted. All readily source-checkable attribution and persistence premises resolved; c6 is no longer an open lead."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g155/findings.jsonl",
+        "id": "c6",
+        "line": 15,
+        "disposition": "verified",
+        "group": "terminal-tabs-shell-harness-docs-retain-deleted-conformance-caller",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-099 after inspecting it. The deletion makes the retained shell helper's explanation dangle, and it remains wrong at tip. This is test documentation, independently of runtime correctness. c8 is related stale prose on a different helper and could share a correction, but is not exact coverage. Record persistent in-range dangling helper rationale, with its sole surviving bash/Close caller. Checked source/results: [\"647f0227:crates/farhelm/tests/e2e/terminal_tabs.rs:25-39 describes conformance callers; after deletion the actual call is the /bin/bash Close/SIGTERM test at :490.\",\"6e423e30:terminal_tabs.rs:28-58 has the same prose and its tmux sibling; grep locates terminal_conformance_holds_for_the_agent_and_for_a_tab at :1937 using that sibling at :1938. Thus the wording is old but its described battery disappears in range.\",\"00de0b6c:terminal_tabs.rs:24-39 retains the conformance rationale, while grep finds only its definition at :32 and the bash caller at :489. The close test's rationale at :469-489 is SIGTERM/hangup latency, not agent/tab conformance.\"] Current coverage/results: {\"SPEC.md / SPEC_impl.md\":\"Session view, Terminal host/test-footing and Testing sections supply launch/test context but no acceptance of inaccurate helper documentation.\",\"TODO.md Planned\":\"Empty.\",\"plans/queue\":\"No unlanded index entries. The retained tmux-drop-from-docs comment/final-audit criteria are historical context, not an unlanded fix; the prose remains at tip.\",\"BUGS.md\":\"No match.\",\"INDEX.md / matching queue files\":\"No shell-helper/conformance-caller documentation item. Read conformance-test-never-admits-management-candidates.md: it concerns saturated management permits, not this deleted battery.\",\"TRIAGE_OUTCOMES.md\":\"The matching conformance heading at :1351 records discard of the management-permit test issue; scope does not match. No helper-doc decision found.\",\"FILTER.md\":\"Stale developer explanation has no qualifying rare/transient diagnostic trigger.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The initial lead also questioned dead-at-open caller prose. The host dead-open replacement has its own seams, but it does not restore the deleted conformance battery. Established impact is misleading maintainer guidance, not product failure or work loss.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g155/c6",
+        "line": 15,
+        "disposition": "verified",
+        "group": "terminal-tabs-shell-harness-docs-retain-deleted-conformance-caller",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-099 after inspecting it. The deletion makes the retained shell helper's explanation dangle, and it remains wrong at tip. This is test documentation, independently of runtime correctness. c8 is related stale prose on a different helper and could share a correction, but is not exact coverage. Record persistent in-range dangling helper rationale, with its sole surviving bash/Close caller. Checked source/results: [\"647f0227:crates/farhelm/tests/e2e/terminal_tabs.rs:25-39 describes conformance callers; after deletion the actual call is the /bin/bash Close/SIGTERM test at :490.\",\"6e423e30:terminal_tabs.rs:28-58 has the same prose and its tmux sibling; grep locates terminal_conformance_holds_for_the_agent_and_for_a_tab at :1937 using that sibling at :1938. Thus the wording is old but its described battery disappears in range.\",\"00de0b6c:terminal_tabs.rs:24-39 retains the conformance rationale, while grep finds only its definition at :32 and the bash caller at :489. The close test's rationale at :469-489 is SIGTERM/hangup latency, not agent/tab conformance.\"] Current coverage/results: {\"SPEC.md / SPEC_impl.md\":\"Session view, Terminal host/test-footing and Testing sections supply launch/test context but no acceptance of inaccurate helper documentation.\",\"TODO.md Planned\":\"Empty.\",\"plans/queue\":\"No unlanded index entries. The retained tmux-drop-from-docs comment/final-audit criteria are historical context, not an unlanded fix; the prose remains at tip.\",\"BUGS.md\":\"No match.\",\"INDEX.md / matching queue files\":\"No shell-helper/conformance-caller documentation item. Read conformance-test-never-admits-management-candidates.md: it concerns saturated management permits, not this deleted battery.\",\"TRIAGE_OUTCOMES.md\":\"The matching conformance heading at :1351 records discard of the management-permit test issue; scope does not match. No helper-doc decision found.\",\"FILTER.md\":\"Stale developer explanation has no qualifying rare/transient diagnostic trigger.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The initial lead also questioned dead-at-open caller prose. The host dead-open replacement has its own seams, but it does not restore the deleted conformance battery. Established impact is misleading maintainer guidance, not product failure or work loss.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-099",
+          "key": "g155/c6",
+          "latest_line": 15,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "terminal-tabs-shell-harness-docs-retain-deleted-conformance-caller",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The deletion makes the retained shell helper's explanation dangle, and it remains wrong at tip. This is test documentation, independently of runtime correctness. c8 is related stale prose on a different helper and could share a correction, but is not exact coverage.",
+          "checks": [
+            "647f0227:crates/farhelm/tests/e2e/terminal_tabs.rs:25-39 describes conformance callers; after deletion the actual call is the /bin/bash Close/SIGTERM test at :490.",
+            "6e423e30:terminal_tabs.rs:28-58 has the same prose and its tmux sibling; grep locates terminal_conformance_holds_for_the_agent_and_for_a_tab at :1937 using that sibling at :1938. Thus the wording is old but its described battery disappears in range.",
+            "00de0b6c:terminal_tabs.rs:24-39 retains the conformance rationale, while grep finds only its definition at :32 and the bash caller at :489. The close test's rationale at :469-489 is SIGTERM/hangup latency, not agent/tab conformance."
+          ],
+          "coverage_checked": {
+            "SPEC.md / SPEC_impl.md": "Session view, Terminal host/test-footing and Testing sections supply launch/test context but no acceptance of inaccurate helper documentation.",
+            "TODO.md Planned": "Empty.",
+            "plans/queue": "No unlanded index entries. The retained tmux-drop-from-docs comment/final-audit criteria are historical context, not an unlanded fix; the prose remains at tip.",
+            "BUGS.md": "No match.",
+            "INDEX.md / matching queue files": "No shell-helper/conformance-caller documentation item. Read conformance-test-never-admits-management-candidates.md: it concerns saturated management permits, not this deleted battery.",
+            "TRIAGE_OUTCOMES.md": "The matching conformance heading at :1351 records discard of the management-permit test issue; scope does not match. No helper-doc decision found.",
+            "FILTER.md": "Stale developer explanation has no qualifying rare/transient diagnostic trigger."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "The initial lead also questioned dead-at-open caller prose. The host dead-open replacement has its own seams, but it does not restore the deleted conformance battery. Established impact is misleading maintainer guidance, not product failure or work loss.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Record persistent in-range dangling helper rationale, with its sole surviving bash/Close caller."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "terminal-tabs-shell-harness-docs-retain-deleted-conformance-caller",
+        "destination": "trailing-terminal-tabs-shell-harness-docs-retain-deleted-conformance-caller.md"
+      }
+    },
+    {
+      "key": "g155/c7",
+      "owner": "g155",
+      "id": "c7",
+      "domain": "rust-terminal-host-regressions",
+      "purpose": "rust-terminal-host-regressions: crates/farhelm/tests/e2e/terminal_tabs.rs, crates/farhelm/tests/e2e/terminal_backpressure.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 16,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c7",
+            "state": "open",
+            "summary": "host-only PID helper retains the same owned-child observation",
+            "location": "crates/farhelm/tests/e2e/terminal_tabs.rs:285",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: discovery considered whether simplifying the tab PID helper makes the retained close/delete tests observe the terminal-host process instead of its shell, weakening their cleanup assertions. Source refutes that particular change. Details: parent terminal_tabs.rs:432-436 returns host.status().child_pid when the tab is host-backed; reviewed :285-291 returns the same field and replaces only the retired tmux fallback with an explicit missing-host panic. Pinned call search finds callers at :508, :633 and :1210. They create tabs through host harnesses, with the bash close-latency caller first completing a shell round trip and then independently asserting the PID's kernel SIGTERM-ignore state at :507-527. The change does not substitute an outer host PID for a shell PID. Suggested bucket: other (test correctness). Confidence: confirmed by parent/reviewed source and current callers; no execution. proposed_drop: true, source refutation of the changed-PID/false-cleanup-oracle candidate. possible_cover: none. Could-be-highest: no shipped security or work-loss route; this record concerns the retained test observation only. This does not certify all bare-PID helper lifetimes, process reuse behavior or other test premises. No parent drop accepted."
+          }
+        }
+      ],
+      "latest": {
+        "line": 16,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c7",
+          "state": "open",
+          "summary": "host-only PID helper retains the same owned-child observation",
+          "location": "crates/farhelm/tests/e2e/terminal_tabs.rs:285",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: discovery considered whether simplifying the tab PID helper makes the retained close/delete tests observe the terminal-host process instead of its shell, weakening their cleanup assertions. Source refutes that particular change. Details: parent terminal_tabs.rs:432-436 returns host.status().child_pid when the tab is host-backed; reviewed :285-291 returns the same field and replaces only the retired tmux fallback with an explicit missing-host panic. Pinned call search finds callers at :508, :633 and :1210. They create tabs through host harnesses, with the bash close-latency caller first completing a shell round trip and then independently asserting the PID's kernel SIGTERM-ignore state at :507-527. The change does not substitute an outer host PID for a shell PID. Suggested bucket: other (test correctness). Confidence: confirmed by parent/reviewed source and current callers; no execution. proposed_drop: true, source refutation of the changed-PID/false-cleanup-oracle candidate. possible_cover: none. Could-be-highest: no shipped security or work-loss route; this record concerns the retained test observation only. This does not certify all bare-PID helper lifetimes, process reuse behavior or other test premises. No parent drop accepted."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g155/findings.jsonl",
+        "id": "c7",
+        "line": 16,
+        "disposition": "excluded",
+        "group": "host-tab-shell-pid-helper-does-not-switch-to-host-pid",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-099 after inspecting it. The helper continues returning the host's child_pid for host tabs; it does not start observing the outer terminal-host PID. This refutes the specific changed-observation claim only. Narrow source refutation of the test-helper PID substitution; no build or runtime observation. Checked source/results: [\"647f0227^:crates/farhelm/tests/e2e/terminal_tabs.rs:429-436 returns host.status().child_pid before its tmux fallback.\",\"647f0227:terminal_tabs.rs:283-292 returns the identical status().child_pid and panics when the host is missing. :507-527 completes a shell round trip and independently checks the chosen bash child's SIGTERM-ignore mask.\"] Current coverage/results: {\"SPEC.md / SPEC_impl.md\":\"Host-tab and Testing sections distinguish the host from its child. Tooling's within-run PID allowance is not needed for this source refutation.\",\"TODO.md Planned\":\"Empty.\",\"plans/queue\":\"No unlanded index entries; no matching PID-observation repair.\",\"BUGS.md\":\"No match.\",\"INDEX.md / matching queue files\":\"tab-survival-missing-live-exchange.md concerns a different successor liveness witness, not substituting host PID for shell PID here. No exact match.\",\"TRIAGE_OUTCOMES.md\":\"No matching helper-PID decision.\",\"FILTER.md\":\"Not used; the suspected substitution is absent.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Simplification might observe the terminal host instead of the shell and weaken close/delete cleanup tests. Both versions return child_pid for the host-backed callers; no runtime security or user-work-loss route was alleged.\"; \"The alleged changed PID field does not occur. This does not certify bare-PID lifetime/reuse assumptions or all cleanup assertions.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g155/c7",
+        "line": 16,
+        "disposition": "excluded",
+        "group": "host-tab-shell-pid-helper-does-not-switch-to-host-pid",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-099 after inspecting it. The helper continues returning the host's child_pid for host tabs; it does not start observing the outer terminal-host PID. This refutes the specific changed-observation claim only. Narrow source refutation of the test-helper PID substitution; no build or runtime observation. Checked source/results: [\"647f0227^:crates/farhelm/tests/e2e/terminal_tabs.rs:429-436 returns host.status().child_pid before its tmux fallback.\",\"647f0227:terminal_tabs.rs:283-292 returns the identical status().child_pid and panics when the host is missing. :507-527 completes a shell round trip and independently checks the chosen bash child's SIGTERM-ignore mask.\"] Current coverage/results: {\"SPEC.md / SPEC_impl.md\":\"Host-tab and Testing sections distinguish the host from its child. Tooling's within-run PID allowance is not needed for this source refutation.\",\"TODO.md Planned\":\"Empty.\",\"plans/queue\":\"No unlanded index entries; no matching PID-observation repair.\",\"BUGS.md\":\"No match.\",\"INDEX.md / matching queue files\":\"tab-survival-missing-live-exchange.md concerns a different successor liveness witness, not substituting host PID for shell PID here. No exact match.\",\"TRIAGE_OUTCOMES.md\":\"No matching helper-PID decision.\",\"FILTER.md\":\"Not used; the suspected substitution is absent.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Simplification might observe the terminal host instead of the shell and weaken close/delete cleanup tests. Both versions return child_pid for the host-backed callers; no runtime security or user-work-loss route was alleged.\"; \"The alleged changed PID field does not occur. This does not certify bare-PID lifetime/reuse assumptions or all cleanup assertions.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-099",
+          "key": "g155/c7",
+          "latest_line": 16,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "host-tab-shell-pid-helper-does-not-switch-to-host-pid",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The helper continues returning the host's child_pid for host tabs; it does not start observing the outer terminal-host PID. This refutes the specific changed-observation claim only.",
+          "checks": [
+            "647f0227^:crates/farhelm/tests/e2e/terminal_tabs.rs:429-436 returns host.status().child_pid before its tmux fallback.",
+            "647f0227:terminal_tabs.rs:283-292 returns the identical status().child_pid and panics when the host is missing. :507-527 completes a shell round trip and independently checks the chosen bash child's SIGTERM-ignore mask."
+          ],
+          "coverage_checked": {
+            "SPEC.md / SPEC_impl.md": "Host-tab and Testing sections distinguish the host from its child. Tooling's within-run PID allowance is not needed for this source refutation.",
+            "TODO.md Planned": "Empty.",
+            "plans/queue": "No unlanded index entries; no matching PID-observation repair.",
+            "BUGS.md": "No match.",
+            "INDEX.md / matching queue files": "tab-survival-missing-live-exchange.md concerns a different successor liveness witness, not substituting host PID for shell PID here. No exact match.",
+            "TRIAGE_OUTCOMES.md": "No matching helper-PID decision.",
+            "FILTER.md": "Not used; the suspected substitution is absent."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "The alleged changed PID field does not occur. This does not certify bare-PID lifetime/reuse assumptions or all cleanup assertions.",
+          "original_stronger_consequence": "Simplification might observe the terminal host instead of the shell and weaken close/delete cleanup tests. Both versions return child_pid for the host-backed callers; no runtime security or user-work-loss route was alleged.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Narrow source refutation of the test-helper PID substitution; no build or runtime observation."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "host-tab-shell-pid-helper-does-not-switch-to-host-pid",
+        "destination": null
+      }
+    },
+    {
+      "key": "g155/c8",
+      "owner": "g155",
+      "id": "c8",
+      "domain": "rust-terminal-host-regressions",
+      "purpose": "rust-terminal-host-regressions: crates/farhelm/tests/e2e/terminal_tabs.rs, crates/farhelm/tests/e2e/terminal_backpressure.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 17,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c8",
+            "state": "open",
+            "summary": "pause-hook docs may still claim local hook installations removed by the patch",
+            "location": "crates/farhelm/tests/e2e/terminal_tabs.rs:162",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: another retained helper explanation says this file installs two hooks and names local boundaries even though the assigned deletions remove the cleanup-gate tests and move dead-open coverage to host_tabs. Details: terminal_tabs.rs:162-173 says 'The two hooks this file installs' and 'The two boundaries in this file', while its updated cross-reference now names host_tabs's dead-open test. Prior synthesis source searches establish no remaining forwarder_cleanup_gate test configuration. Missing premise: whether any other retained local tests still call notifying_gate/install either named hook, and whether the misleading local-ownership wording persists to tip. Next: exact local caller and base/tip prose checks. Suggested bucket: other, test helper documentation. Confidence: concrete source lead. proposed_drop: false pending source checks. possible_cover: closely related retained-helper documentation issue c6, parent may combine; not a restatement of the pending-cleanup missing-oracle finding. Could-be-highest: no security or loss-of-work route. No runtime execution or accepted parent drop."
+          }
+        },
+        {
+          "line": 19,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c8",
+            "state": "open",
+            "summary": "shared gate docs claim hook installations that the module no longer has",
+            "location": "crates/farhelm/tests/e2e/terminal_tabs.rs:162",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513; checked through tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: the shared pause-gate helper still tells test maintainers that its module installs two kinds of hook, although this change removes every local installation. Details: terminal_tabs.rs:162 says 'The two hooks this file installs'; :168 introduces 'The two boundaries in this file' and describes forwarder cleanup publication and tab settle. A reviewed-revision search of that complete file for notifying_gate calls, forwarder_cleanup_gate and tab_settle_gate finds only the notifying_gate definition at :178. The remaining known consumer is host_tabs.rs, which imports the helper at :20 and constructs its settle gate at :417; the assigned patch updates the doc's dead-open reference to that other module but leaves the local-ownership claims. At the excluded base 6e423e30068b62c6cfa276c6d720ee35bb70387a, both kinds actually were installed locally (tab_settle_gate :121/:779 and forwarder_cleanup_gate :1051/:1767), so this is not dismissed because the prose itself predates the assigned commit: removal of the local callers makes it stale within the range. Tip retains the same claims at :161-172. Rewrite the paragraph around the shared constructor's shape and current consumer, rather than claiming these removed tests still live here; remove or identify the retired forwarder-gate example explicitly. Suggested bucket: other, test documentation correctness. Confidence: confirmed by base/reviewed/tip source and exact local/cross-module caller searches; no execution. proposed_drop: false. possible_cover: related to c6's stale helper-caller explanation and could share one documentation correction, but c6 concerns a different helper and no duplicate/drop decision is assumed. Could-be-highest: no security or loss-of-work route. This finding concerns misleading ownership/scope documentation, not whether runtime gate code works or whether the old pending-cleanup regression oracle exists (c5). All readily checkable premises settled; c8 is no longer an open lead. No parent drop accepted."
+          }
+        }
+      ],
+      "latest": {
+        "line": 19,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "c8",
+          "state": "open",
+          "summary": "shared gate docs claim hook installations that the module no longer has",
+          "location": "crates/farhelm/tests/e2e/terminal_tabs.rs:162",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513; checked through tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: the shared pause-gate helper still tells test maintainers that its module installs two kinds of hook, although this change removes every local installation. Details: terminal_tabs.rs:162 says 'The two hooks this file installs'; :168 introduces 'The two boundaries in this file' and describes forwarder cleanup publication and tab settle. A reviewed-revision search of that complete file for notifying_gate calls, forwarder_cleanup_gate and tab_settle_gate finds only the notifying_gate definition at :178. The remaining known consumer is host_tabs.rs, which imports the helper at :20 and constructs its settle gate at :417; the assigned patch updates the doc's dead-open reference to that other module but leaves the local-ownership claims. At the excluded base 6e423e30068b62c6cfa276c6d720ee35bb70387a, both kinds actually were installed locally (tab_settle_gate :121/:779 and forwarder_cleanup_gate :1051/:1767), so this is not dismissed because the prose itself predates the assigned commit: removal of the local callers makes it stale within the range. Tip retains the same claims at :161-172. Rewrite the paragraph around the shared constructor's shape and current consumer, rather than claiming these removed tests still live here; remove or identify the retired forwarder-gate example explicitly. Suggested bucket: other, test documentation correctness. Confidence: confirmed by base/reviewed/tip source and exact local/cross-module caller searches; no execution. proposed_drop: false. possible_cover: related to c6's stale helper-caller explanation and could share one documentation correction, but c6 concerns a different helper and no duplicate/drop decision is assumed. Could-be-highest: no security or loss-of-work route. This finding concerns misleading ownership/scope documentation, not whether runtime gate code works or whether the old pending-cleanup regression oracle exists (c5). All readily checkable premises settled; c8 is no longer an open lead. No parent drop accepted."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g155/findings.jsonl",
+        "id": "c8",
+        "line": 19,
+        "disposition": "verified",
+        "group": "terminal-tabs-shared-gate-docs-retain-removed-local-hook-installations",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-099 after inspecting it. The shared constructor still claims two hooks are installed in its file after every local installation is deleted. The remaining consumer is in host_tabs. This differs from c6's obsolete conformance-helper rationale. Record the persistent false local-ownership claims on the shared gate constructor; possible joint documentation fix with c6 is not exact-claim coverage. Checked source/results: [\"647f0227:crates/farhelm/tests/e2e/terminal_tabs.rs:162-173 says 'The two hooks this file installs' and 'two boundaries in this file'. Local hook search leaves only notifying_gate's definition; no remaining local gate installation.\",\"6e423e30:terminal_tabs.rs grep finds tab_settle_gate at :121/:779 and forwarder_cleanup_gate at :1051/:1767, so deletion newly invalidates those ownership statements.\",\"647f0227:host_tabs.rs:417-420 constructs and installs the shared settle gate. At 00de0b6c the import is :20 and use :407/:410, while terminal_tabs.rs:161-172 still claims local ownership and names the retired forwarder gate.\"] Current coverage/results: {\"SPEC.md / SPEC_impl.md\":\"Host-tab/test-footing and Testing sections do not accept obsolete local-hook ownership documentation.\",\"TODO.md Planned\":\"Empty.\",\"plans/queue\":\"No unlanded entries; retained comment-sweep plan is not a pending repair.\",\"BUGS.md\":\"No match.\",\"INDEX.md / matching queue files\":\"Hook, gate, forwarder, helper documentation and terminal-test searches find no exact existing item. Generic conformance test coverage is different.\",\"TRIAGE_OUTCOMES.md\":\"No matching shared-gate documentation decision.\",\"FILTER.md\":\"No rare/transient diagnostic filter applies to this always-stale maintainer description.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Initial lead questioned whether any local hook calls remained and whether wording persisted. Source settles both. It does not assert gate runtime failure or duplicate c5's missing pending-cleanup oracle.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g155/c8",
+        "line": 19,
+        "disposition": "verified",
+        "group": "terminal-tabs-shared-gate-docs-retain-removed-local-hook-installations",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-099 after inspecting it. The shared constructor still claims two hooks are installed in its file after every local installation is deleted. The remaining consumer is in host_tabs. This differs from c6's obsolete conformance-helper rationale. Record the persistent false local-ownership claims on the shared gate constructor; possible joint documentation fix with c6 is not exact-claim coverage. Checked source/results: [\"647f0227:crates/farhelm/tests/e2e/terminal_tabs.rs:162-173 says 'The two hooks this file installs' and 'two boundaries in this file'. Local hook search leaves only notifying_gate's definition; no remaining local gate installation.\",\"6e423e30:terminal_tabs.rs grep finds tab_settle_gate at :121/:779 and forwarder_cleanup_gate at :1051/:1767, so deletion newly invalidates those ownership statements.\",\"647f0227:host_tabs.rs:417-420 constructs and installs the shared settle gate. At 00de0b6c the import is :20 and use :407/:410, while terminal_tabs.rs:161-172 still claims local ownership and names the retired forwarder gate.\"] Current coverage/results: {\"SPEC.md / SPEC_impl.md\":\"Host-tab/test-footing and Testing sections do not accept obsolete local-hook ownership documentation.\",\"TODO.md Planned\":\"Empty.\",\"plans/queue\":\"No unlanded entries; retained comment-sweep plan is not a pending repair.\",\"BUGS.md\":\"No match.\",\"INDEX.md / matching queue files\":\"Hook, gate, forwarder, helper documentation and terminal-test searches find no exact existing item. Generic conformance test coverage is different.\",\"TRIAGE_OUTCOMES.md\":\"No matching shared-gate documentation decision.\",\"FILTER.md\":\"No rare/transient diagnostic filter applies to this always-stale maintainer description.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Initial lead questioned whether any local hook calls remained and whether wording persisted. Source settles both. It does not assert gate runtime failure or duplicate c5's missing pending-cleanup oracle.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-099",
+          "key": "g155/c8",
+          "latest_line": 19,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "terminal-tabs-shared-gate-docs-retain-removed-local-hook-installations",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The shared constructor still claims two hooks are installed in its file after every local installation is deleted. The remaining consumer is in host_tabs. This differs from c6's obsolete conformance-helper rationale.",
+          "checks": [
+            "647f0227:crates/farhelm/tests/e2e/terminal_tabs.rs:162-173 says 'The two hooks this file installs' and 'two boundaries in this file'. Local hook search leaves only notifying_gate's definition; no remaining local gate installation.",
+            "6e423e30:terminal_tabs.rs grep finds tab_settle_gate at :121/:779 and forwarder_cleanup_gate at :1051/:1767, so deletion newly invalidates those ownership statements.",
+            "647f0227:host_tabs.rs:417-420 constructs and installs the shared settle gate. At 00de0b6c the import is :20 and use :407/:410, while terminal_tabs.rs:161-172 still claims local ownership and names the retired forwarder gate."
+          ],
+          "coverage_checked": {
+            "SPEC.md / SPEC_impl.md": "Host-tab/test-footing and Testing sections do not accept obsolete local-hook ownership documentation.",
+            "TODO.md Planned": "Empty.",
+            "plans/queue": "No unlanded entries; retained comment-sweep plan is not a pending repair.",
+            "BUGS.md": "No match.",
+            "INDEX.md / matching queue files": "Hook, gate, forwarder, helper documentation and terminal-test searches find no exact existing item. Generic conformance test coverage is different.",
+            "TRIAGE_OUTCOMES.md": "No matching shared-gate documentation decision.",
+            "FILTER.md": "No rare/transient diagnostic filter applies to this always-stale maintainer description."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Initial lead questioned whether any local hook calls remained and whether wording persisted. Source settles both. It does not assert gate runtime failure or duplicate c5's missing pending-cleanup oracle.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Record the persistent false local-ownership claims on the shared gate constructor; possible joint documentation fix with c6 is not exact-claim coverage."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "terminal-tabs-shared-gate-docs-retain-removed-local-hook-installations",
+        "destination": "trailing-terminal-tabs-shared-gate-docs-retain-removed-local-hook-installations.md"
+      }
+    },
+    {
+      "key": "g155/c9",
+      "owner": "g155",
+      "id": "c9",
+      "domain": "rust-terminal-host-regressions",
+      "purpose": "rust-terminal-host-regressions: crates/farhelm/tests/e2e/terminal_tabs.rs, crates/farhelm/tests/e2e/terminal_backpressure.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 18,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c9",
+            "state": "open",
+            "summary": "assigned helper and module deletions leave no matching Rust references",
+            "location": "crates/farhelm/tests/e2e/terminal_tabs.rs (removed shared helpers)",
+            "detail": "Reviewed commits: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 and 1ed482dde220452e424973faf38a5e1318986333. TLDR: discovery checked whether deleting exported test helpers and the backpressure module strands other Rust tests with unresolved references. No matching references remain in the searched pinned crate sources. Details: git grep at 647f0227 across crates for DeniedDirectory, window_rows, wait_for_dead_tab_pane, pane_pid_of and harness_with_shell_tmux returned no matches (exit 1). At 1ed482d the same scoped search for terminal_backpressure:: and mod terminal_backpressure returned no matches. The accompanying terminal_tabs.rs diff removes its explicit drain_for import, while the helper is supplied by its existing harness glob; main.rs removes the module declaration. These results refute this concrete dangling-reference candidate, not every possible compilation problem. Suggested bucket: other (test compilation). Confidence: source-confirmed for the named references; no build executed. proposed_drop: true, exact source-search refutation. possible_cover: none; g144/g145 separately confirmed unchanged drain helper behavior via caller-supplied context. Could-be-highest: no established security, user-work loss or catastrophic tooling route. No parent drop accepted."
+          }
+        }
+      ],
+      "latest": {
+        "line": 18,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c9",
+          "state": "open",
+          "summary": "assigned helper and module deletions leave no matching Rust references",
+          "location": "crates/farhelm/tests/e2e/terminal_tabs.rs (removed shared helpers)",
+          "detail": "Reviewed commits: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 and 1ed482dde220452e424973faf38a5e1318986333. TLDR: discovery checked whether deleting exported test helpers and the backpressure module strands other Rust tests with unresolved references. No matching references remain in the searched pinned crate sources. Details: git grep at 647f0227 across crates for DeniedDirectory, window_rows, wait_for_dead_tab_pane, pane_pid_of and harness_with_shell_tmux returned no matches (exit 1). At 1ed482d the same scoped search for terminal_backpressure:: and mod terminal_backpressure returned no matches. The accompanying terminal_tabs.rs diff removes its explicit drain_for import, while the helper is supplied by its existing harness glob; main.rs removes the module declaration. These results refute this concrete dangling-reference candidate, not every possible compilation problem. Suggested bucket: other (test compilation). Confidence: source-confirmed for the named references; no build executed. proposed_drop: true, exact source-search refutation. possible_cover: none; g144/g145 separately confirmed unchanged drain helper behavior via caller-supplied context. Could-be-highest: no established security, user-work loss or catastrophic tooling route. No parent drop accepted."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g155/findings.jsonl",
+        "id": "c9",
+        "line": 18,
+        "disposition": "excluded",
+        "group": "removed-terminal-test-helpers-have-no-dangling-named-rust-references",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-099 after inspecting it. Pinned searches confirm removal of the named callers/imports with their helpers and module. This refutes the named dangling-reference candidate, not every possible compile failure. Narrow, pinned source-search refutation of the specified dangling references. Checked source/results: [\"git grep across crates at 647f0227 for DeniedDirectory, window_rows, wait_for_dead_tab_pane, pane_pid_of and harness_with_shell_tmux returns no matches (exit 1).\",\"git grep across crates at 1ed482dd for terminal_backpressure:: and mod terminal_backpressure returns no matches (exit 1).\",\"1ed482dd diff removes the terminal_backpressure module declaration and terminal_tabs.rs's explicit drain_for import. terminal_tabs retains use crate::harness::*; harness.rs:2067 defines pub(crate) async fn drain_for. No compilation was run.\"] Current coverage/results: {\"SPEC.md / SPEC_impl.md\":\"Current test-footing/Testing context has no exact defect acceptance; source refutation does not depend on coverage.\",\"TODO.md Planned\":\"Empty.\",\"plans/queue\":\"No unlanded entries; no matching dangling-reference repair.\",\"BUGS.md\":\"No match.\",\"INDEX.md / matching queue files\":\"No matching deleted-helper/module reference item.\",\"TRIAGE_OUTCOMES.md\":\"No matching decision.\",\"FILTER.md\":\"Not used; named unresolved references are absent.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Deleting exported helpers or the backpressure module might strand Rust tests with unresolved references. Exact named searches and import/module edits refute that route only; no build execution or catastrophic tooling consequence is claimed.\"; \"No surviving reference to the named removed symbols was found. The claim does not provide or refute unrelated compilation failures.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g155/c9",
+        "line": 18,
+        "disposition": "excluded",
+        "group": "removed-terminal-test-helpers-have-no-dangling-named-rust-references",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-099 after inspecting it. Pinned searches confirm removal of the named callers/imports with their helpers and module. This refutes the named dangling-reference candidate, not every possible compile failure. Narrow, pinned source-search refutation of the specified dangling references. Checked source/results: [\"git grep across crates at 647f0227 for DeniedDirectory, window_rows, wait_for_dead_tab_pane, pane_pid_of and harness_with_shell_tmux returns no matches (exit 1).\",\"git grep across crates at 1ed482dd for terminal_backpressure:: and mod terminal_backpressure returns no matches (exit 1).\",\"1ed482dd diff removes the terminal_backpressure module declaration and terminal_tabs.rs's explicit drain_for import. terminal_tabs retains use crate::harness::*; harness.rs:2067 defines pub(crate) async fn drain_for. No compilation was run.\"] Current coverage/results: {\"SPEC.md / SPEC_impl.md\":\"Current test-footing/Testing context has no exact defect acceptance; source refutation does not depend on coverage.\",\"TODO.md Planned\":\"Empty.\",\"plans/queue\":\"No unlanded entries; no matching dangling-reference repair.\",\"BUGS.md\":\"No match.\",\"INDEX.md / matching queue files\":\"No matching deleted-helper/module reference item.\",\"TRIAGE_OUTCOMES.md\":\"No matching decision.\",\"FILTER.md\":\"Not used; named unresolved references are absent.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Deleting exported helpers or the backpressure module might strand Rust tests with unresolved references. Exact named searches and import/module edits refute that route only; no build execution or catastrophic tooling consequence is claimed.\"; \"No surviving reference to the named removed symbols was found. The claim does not provide or refute unrelated compilation failures.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-099",
+          "key": "g155/c9",
+          "latest_line": 18,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "removed-terminal-test-helpers-have-no-dangling-named-rust-references",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Pinned searches confirm removal of the named callers/imports with their helpers and module. This refutes the named dangling-reference candidate, not every possible compile failure.",
+          "checks": [
+            "git grep across crates at 647f0227 for DeniedDirectory, window_rows, wait_for_dead_tab_pane, pane_pid_of and harness_with_shell_tmux returns no matches (exit 1).",
+            "git grep across crates at 1ed482dd for terminal_backpressure:: and mod terminal_backpressure returns no matches (exit 1).",
+            "1ed482dd diff removes the terminal_backpressure module declaration and terminal_tabs.rs's explicit drain_for import. terminal_tabs retains use crate::harness::*; harness.rs:2067 defines pub(crate) async fn drain_for. No compilation was run."
+          ],
+          "coverage_checked": {
+            "SPEC.md / SPEC_impl.md": "Current test-footing/Testing context has no exact defect acceptance; source refutation does not depend on coverage.",
+            "TODO.md Planned": "Empty.",
+            "plans/queue": "No unlanded entries; no matching dangling-reference repair.",
+            "BUGS.md": "No match.",
+            "INDEX.md / matching queue files": "No matching deleted-helper/module reference item.",
+            "TRIAGE_OUTCOMES.md": "No matching decision.",
+            "FILTER.md": "Not used; named unresolved references are absent."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "No surviving reference to the named removed symbols was found. The claim does not provide or refute unrelated compilation failures.",
+          "original_stronger_consequence": "Deleting exported helpers or the backpressure module might strand Rust tests with unresolved references. Exact named searches and import/module edits refute that route only; no build execution or catastrophic tooling consequence is claimed.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Narrow, pinned source-search refutation of the specified dangling references."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "removed-terminal-test-helpers-have-no-dangling-named-rust-references",
+        "destination": null
+      }
+    },
+    {
+      "key": "g155/c10",
+      "owner": "g155",
+      "id": "c10",
+      "domain": "rust-terminal-host-regressions",
+      "purpose": "rust-terminal-host-regressions: crates/farhelm/tests/e2e/terminal_tabs.rs, crates/farhelm/tests/e2e/terminal_backpressure.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 20,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c10",
+            "state": "open",
+            "summary": "check surviving oracle for an existing but unenterable tab directory",
+            "location": "crates/farhelm/tests/e2e/terminal_tabs.rs (deleted a_tab_refuses_a_directory_it_cannot_enter)",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: the assigned deletion removes the present-but-unenterable-directory tab test; the retained vanished-directory test exercises a different precondition. Need check whether host-specific tests retain this oracle before treating it as another coverage gap. Details: removed test used DeniedDirectory to establish successful metadata/canonicalization but failed real child chdir, then required a path-naming failed tab open with no published tab and an intact agent. Retained terminal_tabs.rs:423-466 removes the directory before open, so it may fail before any child launch. SPEC.md:2141-2150 requires clear failure for a missing or unusable directory and prohibits starting elsewhere. Missing premise: a surviving equivalent host-tab request assertion, or lower-level assertions that demonstrably exercise all relevant caller responsibilities, at the deletion revision and later range tip. Next: targeted host-tab/host-start test and caller-source checks. Suggested bucket: other (test-oracle concern only). Confidence: concrete source lead; no runtime failure inferred. proposed_drop: false pending investigation. possible_cover: none of the supplied neighbour latest findings names this tab-directory boundary. Could-be-highest: no established shipped security/work-loss route; suspected consequence is lost regression sensitivity, not actual wrong-directory execution. No runtime tests, reproductions or accepted parent drops."
+          }
+        },
+        {
+          "line": 21,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c10",
+            "state": "open",
+            "summary": "unenterable directory has a distinct host-start failure and possible missing path detail",
+            "location": "crates/farhelm/tests/e2e/terminal_tabs.rs (deleted directory refusal test)",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. Original concern retained: deletion loses the present-but-unenterable-directory tab oracle, unlike retained vanished-directory coverage. Source checks now show a distinct failure stage: service/core/host_tabs.rs:638-648 supplies the session cwd to ChildSpec, and terminal-host/src/spawn.rs:577-578 fails child startup at chdir before executing tab-shell. Targeted searches in pinned host-tab/create tests, supervisor host tests and terminal-host test sources found no directory-permission fixture; protocol tests cover invalid relative/NUL cwd instead, not entry denial. A further readily checkable premise arose: because failure happens before tab-shell's own directory diagnostic, does the surrounding host-start error chain still name cwd as SPEC.md:2141-2150 requires? Need inspect finish/failed-start error formatting and open_tab caller before alleging missing detail. Suggested bucket: other for the original test-oracle gap or a pathless diagnostic if established; no wrong-directory execution/work-loss route identified. Confidence: source-confirmed distinct startup stage; no runtime failure observed. proposed_drop: false pending source checks. possible_cover: none in supplied neighbour records. Could-be-highest: no established route. Next: inspect error wrappers and later test/source history, then settle the original and newly identified diagnostic premise separately within this ID. No tests/reproductions or parent drop."
+          }
+        },
+        {
+          "line": 22,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c10",
+            "state": "open",
+            "summary": "host directory-oracle and path-detail omissions predate the pinned range",
+            "location": "crates/farhelm/tests/e2e/terminal_tabs.rs (deleted directory refusal test)",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513; excluded base checked: 6e423e30068b62c6cfa276c6d720ee35bb70387a. Original consequences preserved: possible lost regression oracle for a present-but-unenterable tab directory, and a pathless failed-start diagnostic. TLDR: the inspected host path lacks the old tmux test's matching assertion and can omit the session folder from a child-chdir error, but those host omissions already exist at the entire range base. The assigned deletion removes the tmux-creation variant, not a prior host-path oracle. Details: reviewed ensure_cwd_usable at core.rs:4028-4039 checks absolute path/metadata, not actual entry; open_tab :14601-14604 then reaches start_tab_host's ChildSpec.cwd (host_tabs.rs:638-648). terminal-host/spawn.rs:577-578 refuses failed chdir before exec; :524-527 formats only program plus errno. The supervisor preserves that error at host_tabs.rs:686-704 and its unwind at :808-815 adds session id, not cwd. Thus a non-root process denied entry to an otherwise stat-able directory can receive a program/permission error without the required cwd detail; no program starts elsewhere. Source not execution. However base already has identical terminal-host error formatting at spawn.rs:524-527 and the same ChildSpec.cwd/starting.finish/unwind wrapper at host_tabs.rs:642/:688/:814; the base-to-reviewed diff leaves those relevant bodies unchanged. Base SPEC_impl.md:2014-2016 explicitly says every shipped launch has the host selector on; :2373-2376 defines tabs in hosts under it. The removed test forces the internal tmux selector, while base host-specific test searches already lack an entry-denial fixture. Reviewed/tip searches over host tab/create tests, supervisor host tests and terminal-host tests find only unrelated cwd-format validation and no corresponding denied-directory fixture. The retained vanished-directory test checks an earlier metadata failure and is not claimed equivalent. The old forced-tmux creation path has no remaining production caller after the selector removal, so its oracle's deletion does not newly remove coverage of this already-untested host-start path. Suggested bucket: other for the original diagnostic and test-oracle concerns. Confidence: source-confirmed conditional diagnostic and whole-range attribution; no runtime observation or reproduction. proposed_drop: attribution/scope only for a new finding in this assigned deletion: the host diagnostic and absent host oracle predate the excluded base, and the deleted test exercised the retired forced-tmux creation branch. This is not a claim that production correctness refutes a test defect, or that either host omission is fixed/accepted. possible_cover: none in supplied neighbour records. Could-be-highest: no established work-loss/security route; failed chdir exits before program execution. No parent drop accepted. All useful source premises for this bounded candidate were checked; no unresolved lead remains. A separate task targeting pre-range host directory diagnostics/coverage could address the retained omissions."
+          }
+        }
+      ],
+      "latest": {
+        "line": 22,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c10",
+          "state": "open",
+          "summary": "host directory-oracle and path-detail omissions predate the pinned range",
+          "location": "crates/farhelm/tests/e2e/terminal_tabs.rs (deleted directory refusal test)",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513; excluded base checked: 6e423e30068b62c6cfa276c6d720ee35bb70387a. Original consequences preserved: possible lost regression oracle for a present-but-unenterable tab directory, and a pathless failed-start diagnostic. TLDR: the inspected host path lacks the old tmux test's matching assertion and can omit the session folder from a child-chdir error, but those host omissions already exist at the entire range base. The assigned deletion removes the tmux-creation variant, not a prior host-path oracle. Details: reviewed ensure_cwd_usable at core.rs:4028-4039 checks absolute path/metadata, not actual entry; open_tab :14601-14604 then reaches start_tab_host's ChildSpec.cwd (host_tabs.rs:638-648). terminal-host/spawn.rs:577-578 refuses failed chdir before exec; :524-527 formats only program plus errno. The supervisor preserves that error at host_tabs.rs:686-704 and its unwind at :808-815 adds session id, not cwd. Thus a non-root process denied entry to an otherwise stat-able directory can receive a program/permission error without the required cwd detail; no program starts elsewhere. Source not execution. However base already has identical terminal-host error formatting at spawn.rs:524-527 and the same ChildSpec.cwd/starting.finish/unwind wrapper at host_tabs.rs:642/:688/:814; the base-to-reviewed diff leaves those relevant bodies unchanged. Base SPEC_impl.md:2014-2016 explicitly says every shipped launch has the host selector on; :2373-2376 defines tabs in hosts under it. The removed test forces the internal tmux selector, while base host-specific test searches already lack an entry-denial fixture. Reviewed/tip searches over host tab/create tests, supervisor host tests and terminal-host tests find only unrelated cwd-format validation and no corresponding denied-directory fixture. The retained vanished-directory test checks an earlier metadata failure and is not claimed equivalent. The old forced-tmux creation path has no remaining production caller after the selector removal, so its oracle's deletion does not newly remove coverage of this already-untested host-start path. Suggested bucket: other for the original diagnostic and test-oracle concerns. Confidence: source-confirmed conditional diagnostic and whole-range attribution; no runtime observation or reproduction. proposed_drop: attribution/scope only for a new finding in this assigned deletion: the host diagnostic and absent host oracle predate the excluded base, and the deleted test exercised the retired forced-tmux creation branch. This is not a claim that production correctness refutes a test defect, or that either host omission is fixed/accepted. possible_cover: none in supplied neighbour records. Could-be-highest: no established work-loss/security route; failed chdir exits before program execution. No parent drop accepted. All useful source premises for this bounded candidate were checked; no unresolved lead remains. A separate task targeting pre-range host directory diagnostics/coverage could address the retained omissions."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g155/findings.jsonl",
+        "id": "c10",
+        "line": 22,
+        "disposition": "excluded",
+        "group": "pre-base-host-tab-chdir-diagnostic-and-entry-denial-oracle-gap",
+        "reason": "Parent explicitly accepted named out-of-range proposal from claims-099 after inspecting it. The host startup diagnostic can lack cwd detail and the host entry-denial oracle is absent, but both host omissions predate the exclusive base. The removed test explicitly used the forced-tmux creation path, which the assigned change retires. Do not describe the host omissions as fixed or accepted. Whole-range attribution only: exclude the pre-base host omissions from newly introduced findings, and distinguish them from retirement of a forced-tmux creation test. Checked source/results: [\"647f0227^:crates/farhelm/tests/e2e/terminal_tabs.rs:98-163 explicitly calls this an old-terminal test, installs SupervisorSeams::tmux_terminals(), denies actual entry, and requires a path-naming refusal, no published tab, and a live agent.\",\"647f0227:crates/terminal-host/src/spawn.rs:524-527 formats program plus errno; :577-578 fails chdir before exec. service/core/host_tabs.rs:638-648 supplies cwd, :686-704 preserves finish errors, and :808-815 adds session identity rather than cwd. This supports a conditional pathless startup error, not wrong-directory execution.\",\"Base-to-647f0227 diff of terminal-host/spawn.rs and host_tabs.rs leaves those relevant error/spawn bodies unchanged. Base SPEC_impl.md:2014-2018 and 2284-2296 already puts shipped/default launches in hosts; :2373 onward defines host tabs under that selector.\",\"Pinned base and tip searches of host-tabs/create tests, supervisor host-terminal tests and terminal-host tests for denied-directory/cannot-enter/permission fixtures found no matching entry-denial oracle. The removed forced-tmux test never observed this host-start path. The retained vanished-directory case has a different, earlier metadata-failure premise.\"] Current coverage/results: {\"SPEC.md / SPEC_impl.md\":\"Current SPEC.md:2136-2145 requires a clear error naming the directory. SPEC_impl.md:2173-2177 explicitly records the host directory-entry diagnostic as a known gap; this acknowledges the omission but does not make the contradictory product rule acceptable.\",\"TODO.md Planned\":\"Empty.\",\"plans/queue\":\"No unlanded entries. Historical tmux-end-old-terminals test-footing text directs known-gap tests to be deleted/reported when hosts do not meet SPEC; it is context, not a new unlanded repair.\",\"BUGS.md\":\"No entry-denial diagnostic item.\",\"INDEX.md / matching queue files\":\"Read tab-helper-can-fail-after-open-succeeds.md. Its trigger is delayed helper chdir after an accepted open, losing the error; this claim fails in the host before exec/open success. Related directory requirement, different failure stage and consequence, so no exact duplicate or proposed extension here.\",\"TRIAGE_OUTCOMES.md\":\"No matching host pre-exec entry-denial diagnostic/oracle decision.\",\"FILTER.md\":\"Not used for attribution. No rare condition beyond ordinary entry denial was established; do not filter solely because it is a diagnostic.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Initial concern was deletion of the present-but-unenterable tab-directory regression; investigation additionally found a possible pathless host startup error. Both host limitations remain real candidates outside this range. Failed chdir exits before the requested program executes; no wrong-directory execution, security or user-work-loss route was established.\"; \"No in-range introduction of the host diagnostic or missing host oracle. The diagnostic remains a source-only conditional conclusion for a non-root process denied entry to a stat-able directory.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g155/c10",
+        "line": 22,
+        "disposition": "excluded",
+        "group": "pre-base-host-tab-chdir-diagnostic-and-entry-denial-oracle-gap",
+        "bucket": "other",
+        "recording": "out-of-range",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named out-of-range proposal from claims-099 after inspecting it. The host startup diagnostic can lack cwd detail and the host entry-denial oracle is absent, but both host omissions predate the exclusive base. The removed test explicitly used the forced-tmux creation path, which the assigned change retires. Do not describe the host omissions as fixed or accepted. Whole-range attribution only: exclude the pre-base host omissions from newly introduced findings, and distinguish them from retirement of a forced-tmux creation test. Checked source/results: [\"647f0227^:crates/farhelm/tests/e2e/terminal_tabs.rs:98-163 explicitly calls this an old-terminal test, installs SupervisorSeams::tmux_terminals(), denies actual entry, and requires a path-naming refusal, no published tab, and a live agent.\",\"647f0227:crates/terminal-host/src/spawn.rs:524-527 formats program plus errno; :577-578 fails chdir before exec. service/core/host_tabs.rs:638-648 supplies cwd, :686-704 preserves finish errors, and :808-815 adds session identity rather than cwd. This supports a conditional pathless startup error, not wrong-directory execution.\",\"Base-to-647f0227 diff of terminal-host/spawn.rs and host_tabs.rs leaves those relevant error/spawn bodies unchanged. Base SPEC_impl.md:2014-2018 and 2284-2296 already puts shipped/default launches in hosts; :2373 onward defines host tabs under that selector.\",\"Pinned base and tip searches of host-tabs/create tests, supervisor host-terminal tests and terminal-host tests for denied-directory/cannot-enter/permission fixtures found no matching entry-denial oracle. The removed forced-tmux test never observed this host-start path. The retained vanished-directory case has a different, earlier metadata-failure premise.\"] Current coverage/results: {\"SPEC.md / SPEC_impl.md\":\"Current SPEC.md:2136-2145 requires a clear error naming the directory. SPEC_impl.md:2173-2177 explicitly records the host directory-entry diagnostic as a known gap; this acknowledges the omission but does not make the contradictory product rule acceptable.\",\"TODO.md Planned\":\"Empty.\",\"plans/queue\":\"No unlanded entries. Historical tmux-end-old-terminals test-footing text directs known-gap tests to be deleted/reported when hosts do not meet SPEC; it is context, not a new unlanded repair.\",\"BUGS.md\":\"No entry-denial diagnostic item.\",\"INDEX.md / matching queue files\":\"Read tab-helper-can-fail-after-open-succeeds.md. Its trigger is delayed helper chdir after an accepted open, losing the error; this claim fails in the host before exec/open success. Related directory requirement, different failure stage and consequence, so no exact duplicate or proposed extension here.\",\"TRIAGE_OUTCOMES.md\":\"No matching host pre-exec entry-denial diagnostic/oracle decision.\",\"FILTER.md\":\"Not used for attribution. No rare condition beyond ordinary entry denial was established; do not filter solely because it is a diagnostic.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Initial concern was deletion of the present-but-unenterable tab-directory regression; investigation additionally found a possible pathless host startup error. Both host limitations remain real candidates outside this range. Failed chdir exits before the requested program executes; no wrong-directory execution, security or user-work-loss route was established.\"; \"No in-range introduction of the host diagnostic or missing host oracle. The diagnostic remains a source-only conditional conclusion for a non-root process denied entry to a stat-able directory.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-099",
+          "key": "g155/c10",
+          "latest_line": 22,
+          "recommendation": "out-of-range",
+          "bucket": "other",
+          "underlying_key": "pre-base-host-tab-chdir-diagnostic-and-entry-denial-oracle-gap",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The host startup diagnostic can lack cwd detail and the host entry-denial oracle is absent, but both host omissions predate the exclusive base. The removed test explicitly used the forced-tmux creation path, which the assigned change retires. Do not describe the host omissions as fixed or accepted.",
+          "checks": [
+            "647f0227^:crates/farhelm/tests/e2e/terminal_tabs.rs:98-163 explicitly calls this an old-terminal test, installs SupervisorSeams::tmux_terminals(), denies actual entry, and requires a path-naming refusal, no published tab, and a live agent.",
+            "647f0227:crates/terminal-host/src/spawn.rs:524-527 formats program plus errno; :577-578 fails chdir before exec. service/core/host_tabs.rs:638-648 supplies cwd, :686-704 preserves finish errors, and :808-815 adds session identity rather than cwd. This supports a conditional pathless startup error, not wrong-directory execution.",
+            "Base-to-647f0227 diff of terminal-host/spawn.rs and host_tabs.rs leaves those relevant error/spawn bodies unchanged. Base SPEC_impl.md:2014-2018 and 2284-2296 already puts shipped/default launches in hosts; :2373 onward defines host tabs under that selector.",
+            "Pinned base and tip searches of host-tabs/create tests, supervisor host-terminal tests and terminal-host tests for denied-directory/cannot-enter/permission fixtures found no matching entry-denial oracle. The removed forced-tmux test never observed this host-start path. The retained vanished-directory case has a different, earlier metadata-failure premise."
+          ],
+          "coverage_checked": {
+            "SPEC.md / SPEC_impl.md": "Current SPEC.md:2136-2145 requires a clear error naming the directory. SPEC_impl.md:2173-2177 explicitly records the host directory-entry diagnostic as a known gap; this acknowledges the omission but does not make the contradictory product rule acceptable.",
+            "TODO.md Planned": "Empty.",
+            "plans/queue": "No unlanded entries. Historical tmux-end-old-terminals test-footing text directs known-gap tests to be deleted/reported when hosts do not meet SPEC; it is context, not a new unlanded repair.",
+            "BUGS.md": "No entry-denial diagnostic item.",
+            "INDEX.md / matching queue files": "Read tab-helper-can-fail-after-open-succeeds.md. Its trigger is delayed helper chdir after an accepted open, losing the error; this claim fails in the host before exec/open success. Related directory requirement, different failure stage and consequence, so no exact duplicate or proposed extension here.",
+            "TRIAGE_OUTCOMES.md": "No matching host pre-exec entry-denial diagnostic/oracle decision.",
+            "FILTER.md": "Not used for attribution. No rare condition beyond ordinary entry denial was established; do not filter solely because it is a diagnostic."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "No in-range introduction of the host diagnostic or missing host oracle. The diagnostic remains a source-only conditional conclusion for a non-root process denied entry to a stat-able directory.",
+          "original_stronger_consequence": "Initial concern was deletion of the present-but-unenterable tab-directory regression; investigation additionally found a possible pathless host startup error. Both host limitations remain real candidates outside this range. Failed chdir exits before the requested program executes; no wrong-directory execution, security or user-work-loss route was established.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Whole-range attribution only: exclude the pre-base host omissions from newly introduced findings, and distinguish them from retirement of a forced-tmux creation test."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "pre-base-host-tab-chdir-diagnostic-and-entry-denial-oracle-gap",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial pass complete. All 1,482 assigned patch lines reviewed at their pinned revisions.\n\nNo confirmed findings or unresolved leads. Five investigated candidates and their dismissal reasons are recorded in `g155/findings.jsonl`; progress is updated. Source-only review; no tests, reproductions, or checkout changes."
+    },
+    {
+      "turn": 2,
+      "reply": "- Revised `c5` to a confirmed **other** finding: pending-cleanup Close/Restart integration tests disappear before tmux runtime retirement. No product failure established; the gap ends with later retirement.\n- Narrowed `c2` and `c3` to the verified marker-probe and unchanged-helper contracts.\n- Unresolved lead IDs: none."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 found two new verified documentation issues: `c6` and `c8`, covering stale helper-purpose and hook-ownership explanations.\n\nChecked base/reviewed/tip source, helper callers, PID semantics, and deleted-symbol references. Recorded source-refuted candidates `c7` and `c9`.\n\nNew unverified IDs: none. Open leads: none. No runtime execution."
+    },
+    {
+      "turn": 4,
+      "reply": "Discovery pass 2 found no new reportable in-range issue.\n\nChecked directory-refusal coverage, error propagation, and base-to-tip attribution. Recorded and resolved candidate `c10` on pre-range attribution grounds.\n\nNew verified IDs: none. New unverified IDs: none. Open leads: none. No runtime execution."
+    }
+  ],
+  "progress": "# g155 progress\n\nInitial review complete, turn 1. Turn type: initial source review. Discovery-pass count: 0 (no later synthesis or discovery turn performed).\n\nThe full brief and complete inventory commits field were read. All assigned patch material was delivered through evidence read: 00802-000.patch lines 1-1377 at 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513; 00986-000.patch lines 1-105 at 1ed482dde220452e424973faf38a5e1318986333. No assigned ranges remain unread. The first part is only the assigned portion of the larger terminal_tabs patch; no coverage of unassigned portions is claimed.\n\nGoverning contracts read at the pinned revisions: SPEC.md Session view and Terminal experience, the complete environment-contract paragraph in Durability and resume; SPEC_impl.md Tabs in hosts and Answers bind to what was drawn. At 1ed482d, also read the complete Grid client subsection and the complete product floor/attachment paragraph. Private numbered snapshots and contracts manifests preserve original line numbers and revision suffixes; unsuffixed snapshots are from 647f0227. Supplemental callers/helpers and retained tests were inspected with git show at their relevant revisions. An initial broad search result was clipped; subsequent bounded source reads delivered the governing material used for conclusions. No omitted mandatory patch material.\n\nResults: no verified or unverified findings; no open leads. Candidates c1-c5 record investigated concerns and the reasons for not reporting them. c1/c2 were revised immediately when parent-revision inspection established that the environment regression test is retained unchanged, rather than new. No queued findings, excluded inventory metadata or coverage index were consulted.\n\nInterface assumptions: tabs created by the test harness run in terminal hosts. At 647f0227 old tmux sessions remain supported even though tmux-creating test seams are retired; the assigned removal does not itself prove their remaining code correct. Host cleanup, Stop consent and restart survival have retained source tests. At 1ed482d the shared drain_for helper has moved intact to harness.rs. Host grids use the supervisor-provided history cap and do not use xterm's scrollback literal; removing the xterm/tmux numeric comparison does not establish a host retention bug. Runtime execution was neither requested nor performed; all conclusions are source-based. No checkout files were changed.\n\nNext action: return to caller for the separately requested synthesis/discovery turn. Findings log is the complete record; no separate final report was written.\n\n## Synthesis turn 2\n\nLater-turn synthesis complete. Discovery-pass count remains 0; this was the caller-requested synthesis turn, not a separate discovery pass. Revisited cross-batch environment-probe identity, helper/caller limits, host lifecycle coverage, surviving tmux unit tests, production cleanup callers and later retirement. No mandatory assigned material remains unread.\n\nRevised c2: source extraction/cmp confirms the whole environment test function is unchanged across 647f0227 (parent 4265-4366, reviewed 1492-1593; cmp exit 0). The executed delimiter conclusion is limited to the controlled ASCII marker probe and is not general text-decoding certification.\n\nRevised c3: preserved helper behavior only; incorporated caller-provided g144/g145 interface confirmation without expanding it into general caller/decoding coverage.\n\nRevised c5 through investigated lead to confirmed finding, bucket other. Specific missing oracle: no test configures forwarder_cleanup_gate after deletion of the real Close/Restart pending-cleanup tests. Retained synthetic output-reap and sink lease tests do exist; they do not drive those combined request paths. Production Close and Restart callers remain at 647f0227. Source confirms the paths end with old-terminal startup retirement in dbfc6975 and driver removal in 1ed482d, remaining retired at tip. Therefore this is intermediate test coverage loss only, not an established product defect and not an active-tip tmux runtime oracle gap. No claim that all removed still-applicable contracts are uncovered. No parent drop accepted. Caller reports g152's related intermediate migration gap; coverage/dedup remains the parent's responsibility.\n\nThis turn's new verified finding ID: c5 (revision of original candidate). New unverified finding IDs: none. Open lead IDs: none. c1/c4 unchanged. All results are from source analysis and a source-text comparison; no runtime tests or reproductions performed. No checkout files changed.\n\nNext action: return this turn's delta and await any separately requested discovery pass. A substantive synthesis discovery occurred (c5), so this is not a claim of completed later discovery. Findings log remains the complete record.\n\n## Discovery turn 3\n\nSeparate discovery pass 1 complete. Read the supplied discovery-neighbours.json through line 437 in bounded chunks before the new source search. The first 1-160 display clipped, so lines 1-437 were then fully redelivered in smaller 22-40-line chunks. Neighbour records were used for interface context and novelty only, not source credit or queue coverage.\n\nSearched only the assigned terminal_tabs/backpressure changes and their necessary callers. Rechecked helper-call sets, parent-versus-reviewed host PID behavior, retained shell-close/Delete fixtures, dangling references from removed shared helpers/module, and retained helper documentation. Compared the excluded range base, assigned revision and pinned tip to settle attribution and persistence of documentation concerns. No runtime tests, reproductions or live-install actions.\n\nNew verified findings this pass: c6 and c8, both other/documentation. c6: shell harness explanation still describes the conformance battery removed by the assigned patch, though the helper's only surviving caller pins bash for close latency. c8: shared gate helper docs claim two hook installations in this file after all local gate installations are deleted; the actual retained settle-gate caller is in host_tabs.rs. Both documentation claims were meaningful at the excluded base and become stale from the in-range deletions; both remain at tip. They may share a documentation correction, but no consolidation/drop is assumed. Recorded each lead immediately and closed it under the same ID once source checks settled it.\n\nNew investigated candidates: c7 refutes a changed PID observation (the helper preserves the same host child_pid field and current callers create host tabs); c9 refutes named dangling shared-helper/backpressure-module references (pinned crates-wide symbol searches returned no matches). These are narrow source refutations, not compilation or general lifecycle certifications.\n\nNew unverified-after-investigation findings: none. Remaining open lead IDs: none. Anything new found: yes, c6/c8. Known findings were not broadened or re-reported. The discovery pass continued through the remaining helper/reference checks after the first new finding. No assigned mandatory scope remains unread; no checkout files changed. Next: return this pass's delta; await any separately requested follow-up.\n\n## Discovery turn 4\n\nSeparate discovery pass 2 complete. Read refreshed discovery-neighbours.json (594 lines, 187854 bytes; sha256 02090fabe6b00a0524133ebae11c7a3857f4de03e1f1105d30c9d24c09a78f5c) completely in bounded 29-40-line chunks before the new source search. No pending cross-group questions were supplied; context was used for novelty, without claiming source delivery or disposition of neighbour findings.\n\nNew search focused on the assigned deletion of a_tab_refuses_a_directory_it_cannot_enter and its DeniedDirectory premise. Traced the present-but-unenterable directory through metadata validation, ChildSpec.cwd, child-side chdir, readiness error formatting, failed-tab unwind and the request wrapper. Searched relevant pinned host-tab/create tests, supervisor host tests and terminal-host tests for actual entry-denial fixtures; format/NUL/relative-cwd codec tests were distinguished from permission denial. Checked reviewed source and range tip for surviving coverage, then compared the excluded base for source and product-selector attribution.\n\nRecorded c10 immediately as a lead, revised it with the newly identified diagnostic premise, then closed it as an attribution/scope candidate. Useful result: failed host child chdir can yield a program/errno error without the session path, and no equivalent denied-directory host fixture was found in the scoped searches. Both relevant host omissions already exist at the excluded base; the assigned removed test forced the tmux selector, while base documentation says every shipped launch selects hosts. The base-to-reviewed source comparison leaves the relevant host failure-formatting and wrapper bodies unchanged. The lost tmux-creation oracle is not equivalent to preexisting host coverage. Candidate retains the omissions and the exact attribution basis; no claim that production correctness refutes test/documentation defects, and no parent drop accepted.\n\nNew verified finding IDs: none. New unverified-after-investigation finding IDs: none. New candidate: c10. Remaining open lead IDs: none. Anything new found: no new reportable in-range issue; the investigated pre-range host omission is durably recorded as a candidate, not discarded or misattributed. Existing findings were not restated or broadened. No runtime test, build, reproduction or live-install action; no checkout changes. Assigned mandatory delivery remains complete. Next: return this pass's result and await further instructions.\n"
+}

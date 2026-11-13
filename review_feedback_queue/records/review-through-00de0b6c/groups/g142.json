@@ -1,0 +1,1288 @@
+{
+  "group": {
+    "id": "g142",
+    "domain": "rust-session-agent-regressions",
+    "purpose": "rust-session-agent-regressions: crates/farhelm/tests/e2e/supervisor_stop.rs, crates/farhelm/tests/e2e/boot_id_durable_outcome.rs, crates/farhelm/tests/e2e/create_idempotency.rs, crates/farhelm/tests/e2e/session_lifecycle.rs, crates/farhelm/tests/e2e/tcp_relays.rs, crates/farhelm/tests/spawn_cli.rs, crates/farhelm/tests/e2e/real_agent_capture.rs, crates/farhelm/tests/e2e/codex_identity.rs, crates/farhelm/tests/e2e/command_shell.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g001",
+      "g005",
+      "g007",
+      "g008",
+      "g009",
+      "g010",
+      "g011",
+      "g137",
+      "g138",
+      "g139",
+      "g140",
+      "g141",
+      "g143",
+      "g144",
+      "g145",
+      "g146"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00884-000.patch",
+        "ranges": [
+          [
+            1,
+            120
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/supervisor_stop.rs",
+        "commit": "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4",
+        "notes": "patch header; patch character offsets [0,5898)",
+        "lines": 120,
+        "bytes": 5898,
+        "start": 0,
+        "end": 5898,
+        "original": "[private-run]/prep/originals/00884.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00969-000.patch",
+        "ranges": [
+          [
+            1,
+            212
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/boot_id_durable_outcome.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,11535)",
+        "lines": 212,
+        "bytes": 11553,
+        "start": 0,
+        "end": 11535,
+        "original": "[private-run]/prep/originals/00969.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00971-000.patch",
+        "ranges": [
+          [
+            1,
+            192
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/create_idempotency.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,9963)",
+        "lines": 192,
+        "bytes": 9975,
+        "start": 0,
+        "end": 9963,
+        "original": "[private-run]/prep/originals/00971.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00983-000.patch",
+        "ranges": [
+          [
+            1,
+            382
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/session_lifecycle.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,19148)",
+        "lines": 382,
+        "bytes": 19176,
+        "start": 0,
+        "end": 19148,
+        "original": "[private-run]/prep/originals/00983.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01124-000.patch",
+        "ranges": [
+          [
+            1,
+            15
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/boot_id_durable_outcome.rs",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,917)",
+        "lines": 15,
+        "bytes": 917,
+        "start": 0,
+        "end": 917,
+        "original": "[private-run]/prep/originals/01124.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01125-000.patch",
+        "ranges": [
+          [
+            1,
+            106
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/create_idempotency.rs",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,4654)",
+        "lines": 106,
+        "bytes": 4658,
+        "start": 0,
+        "end": 4654,
+        "original": "[private-run]/prep/originals/01125.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01135-000.patch",
+        "ranges": [
+          [
+            1,
+            93
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/session_lifecycle.rs",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,3944)",
+        "lines": 93,
+        "bytes": 3944,
+        "start": 0,
+        "end": 3944,
+        "original": "[private-run]/prep/originals/01135.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01137-000.patch",
+        "ranges": [
+          [
+            1,
+            12
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/tcp_relays.rs",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,525)",
+        "lines": 12,
+        "bytes": 525,
+        "start": 0,
+        "end": 525,
+        "original": "[private-run]/prep/originals/01137.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01138-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/spawn_cli.rs",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,447)",
+        "lines": 13,
+        "bytes": 447,
+        "start": 0,
+        "end": 447,
+        "original": "[private-run]/prep/originals/01138.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01402-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/real_agent_capture.rs",
+        "commit": "d751ff1633bb479c7bf53920f2e4ea4ba932a1c2",
+        "notes": "patch header; patch character offsets [0,753)",
+        "lines": 13,
+        "bytes": 753,
+        "start": 0,
+        "end": 753,
+        "original": "[private-run]/prep/originals/01402.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01403-000.patch",
+        "ranges": [
+          [
+            1,
+            33
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/session_lifecycle.rs",
+        "commit": "d751ff1633bb479c7bf53920f2e4ea4ba932a1c2",
+        "notes": "patch header; patch character offsets [0,1716)",
+        "lines": 33,
+        "bytes": 1716,
+        "start": 0,
+        "end": 1716,
+        "original": "[private-run]/prep/originals/01403.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01461-000.patch",
+        "ranges": [
+          [
+            1,
+            66
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/session_lifecycle.rs",
+        "commit": "303a1264b7bd791e8f6f6de2c7bb6136c08e8bab",
+        "notes": "patch header; patch character offsets [0,3475)",
+        "lines": 66,
+        "bytes": 3479,
+        "start": 0,
+        "end": 3475,
+        "original": "[private-run]/prep/originals/01461.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01562-000.patch",
+        "ranges": [
+          [
+            1,
+            26
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/codex_identity.rs",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,1526)",
+        "lines": 26,
+        "bytes": 1526,
+        "start": 0,
+        "end": 1526,
+        "original": "[private-run]/prep/originals/01562.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01563-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/command_shell.rs",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,673)",
+        "lines": 13,
+        "bytes": 673,
+        "start": 0,
+        "end": 673,
+        "original": "[private-run]/prep/originals/01563.patch"
+      }
+    ],
+    "lines": 1296,
+    "bytes": 65240
+  },
+  "records": [
+    {
+      "key": "g142/c1",
+      "owner": "g142",
+      "id": "c1",
+      "domain": "rust-session-agent-regressions",
+      "purpose": "rust-session-agent-regressions: crates/farhelm/tests/e2e/supervisor_stop.rs, crates/farhelm/tests/e2e/boot_id_durable_outcome.rs, crates/farhelm/tests/e2e/create_idempotency.rs, crates/farhelm/tests/e2e/session_lifecycle.rs, crates/farhelm/tests/e2e/tcp_relays.rs, crates/farhelm/tests/spawn_cli.rs, crates/farhelm/tests/e2e/real_agent_capture.rs, crates/farhelm/tests/e2e/codex_identity.rs, crates/farhelm/tests/e2e/command_shell.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removed terminal-kind assertions follow deletion of the wire fields",
+            "location": "crates/farhelm/tests/e2e/create_idempotency.rs:299",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether removing the reboot replay test and terminal-kind assertions leaves clients incorrectly told that an interrupted session still has a terminal. Source refutation: at this revision crates/farhelm-proto/src/lib.rs defines SessionInfo at line 929 without the removed fields; lines 7450-7502 explicitly test the retirement of agent_terminal and supervisor_creates_host_terminals, including old cache input. The assigned patches also remove grid and Attached.stream assertions consistently with ControlMsg::Attached { req_id, channel } at line 3844 and protocol version 77 at line 255. This candidate concerns assertions for fields which no longer exist, not the remaining status/retry identity contracts; those still require review. Suggested bucket: other (test coverage concern refuted). Confidence: confirmed by source; no execution. proposed_drop: wire representation and terminal-kind distinction were removed together, so retaining these assertions is impossible and their removal alone establishes no regression. possible_cover: none; coverage sources not searched. Could-be-highest: no established security or loss-of-work route; this is confined to obsolete test assertions. Caveat: this does not evaluate the protocol migration implementation outside the assigned scope."
+          }
+        },
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removed terminal-kind assertions follow deletion of the wire fields",
+            "location": "crates/farhelm/tests/e2e/create_idempotency.rs:299",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether removing the reboot replay test and terminal-kind assertions leaves clients incorrectly told that an interrupted session still has a terminal, or permits duplicate creates after a restart. Source refutation: crates/farhelm-proto/src/lib.rs:929 defines SessionInfo without the removed fields, :7450-7502 explicitly tests retirement of agent_terminal and supervisor_creates_host_terminals including tolerant old-cache decoding, :3777-3844 removes Attach.grid and Attached.stream, and :255 bumps the protocol to 77. Synthesis checked the retained keyed-retry test at create_idempotency.rs:244-298: it still verifies identical IDs for immediate replay, replay after a supervisor handoff, and a resized retry, then requires one listed session and exactly one live agent terminal. Removing kind assertions therefore does not remove those identity and no-duplicate-process witnesses. The retained one-version-behind test in session_lifecycle.rs:985-1038 asserts both protocol numbers in the refusal and no subsequent Attached response; old field-shaped peers cannot silently enter the new wire contract. SPEC_impl.md, Grid streams, states: 'every attachment’s data channel carries a grid stream' and that 'SessionInfo and TabInfo no longer report a terminal kind'; the same section requires hello refusal across protocol versions and old-cache tolerance. Suggested bucket: other (test coverage concern refuted). Confidence: confirmed by source; no execution. proposed_drop: wire representation and terminal-kind distinction were removed together, while retained tests still assert keyed identity, one actual agent, and protocol refusal; keeping the removed field assertions would test a representation that no longer exists. possible_cover: none; coverage sources not searched. Could-be-highest: no established security or loss-of-work route from these assertion removals. Caveat: this does not evaluate all protocol-migration implementation outside the group or claim exhaustive reboot classification coverage. Revision preserves the original considered misleading-terminal consequence and adds retained caller and duplicate-process checks."
+          }
+        },
+        {
+          "line": 18,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c1",
+            "state": "open",
+            "summary": "Check the deleted reboot replay test's still-valid identity oracle",
+            "location": "crates/farhelm/tests/e2e/create_idempotency.rs:299",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. Discovery revisits original c1's consequence beyond the removed kind fields: the deleted a_replay_after_a_reboot_reports_no_terminal_kind test also required a keyed create after a completed launch and reboot to return the original session ID. The field-removal argument refutes obsolete terminal-kind assertions, but does not refute loss of this distinct identity/no-unattended-relaunch oracle. Immediate source: parent create_idempotency.rs:329-382 creates a completed keyed session under boot-a, ends all hosts, changes to boot-b, confirms Interrupted and retries with the same key, requiring the same ID. At the reviewed revision :833-906 retains a reboot test only for a never-launched Pending intent, which must perform the launch; that exercises the opposite outcome. Searches for replay/reboot combinations across Rust e2e and supervisor sources found only the pending-intent fixture. The retained same-boot restart test preserves identity/count but does not establish classification of a successfully created intent after reboot. Suggested bucket: other (possible lost maintainer regression oracle). Confidence: concrete source lead; replacement and through-tip checks pending, not an unverified-after-investigation final result. proposed_drop: original c1 field-retirement basis still applies to kind assertions only; no drop proposed yet for the distinct reboot identity oracle. possible_cover: no matching supplied neighbour record. Could-be-highest: no established shipped security/loss-of-work route; duplicate creation is a hypothetical regression the removed test could detect, not a current production failure. Missing premise: whether an equivalent completed-create/reboot/key-replay oracle remains elsewhere or is added later in the pinned range, and the exact retained contract at the deletion revision. Next checks are bounded source and contract searches; no reproduction or runtime test."
+          }
+        },
+        {
+          "line": 19,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c1",
+            "state": "open",
+            "summary": "Deleting the kind test also removes the completed-create reboot retry oracle",
+            "location": "crates/farhelm/tests/e2e/create_idempotency.rs:299",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: removing the terminal-kind reboot test also removes its still-valid check that retrying a successfully created session after a host reboot returns the original session, rather than creating a new one. This is lost regression protection, not a demonstrated current duplicate-create bug. Original c1 history preserved: terminal-kind/stream-kind fields really are retired in protocol 77, and their assertions should go; the old proposed_drop correctly refutes the misleading-kind concern, but does not justify deleting this independent identity oracle with them. Deleted parent create_idempotency.rs:329-382 creates an actual keyed session under boot-a, ends every terminal host, reloads under boot-b, asserts the existing session is Interrupted, retries the same key and requires replay.id == first.id. The retained same-boot restart fixture at reviewed :244-298 asserts ID equality and one actual host while the host survives; it does not test key survival through reboot conversion. The retained reboot fixture at :833-906 starts from a crashed never-launched Pending reservation and requires a launch, the opposite outcome. Store tests are not an equivalent replacement: store.rs:13540-13645 directly checks that an interrupted row with a recorded terminal address refuses a pending-launch takeover; it neither runs record_boot on a completed reservation nor exercises the retry caller after conversion. store.rs:10264-10312 and :10582-10655 verify boot conversion using unkeyed rows, not retention of a created key. core.rs:28519-28630 exercises a pending reservation that ended with ObservedExit and settlement, with no boot transaction. A regression that loses only Created reservations during reboot conversion would satisfy these remaining cases but fail the deleted same-ID assertion. Source correctness of resolve_reservation (:9884-9960) and replay_created_session (:10182-10240) does not supply the lost oracle. Contract at SPEC_impl.md:3535-3540: 'Every keyed create gets a session-lifetime reservation: app creates, agent `create`/`clone`, and spawn all retain the key until the created session is deleted.' The interrupted row still exists; a reboot is not Delete. SPEC.md:3813-3818 likewise says retry returns the existing child rather than creating another and keys live as long as that child does. Suggested fix: retain the completed-create/reboot/key-retry identity assertion while removing only obsolete kind fields; no retired tmux fixture is needed. Suggested bucket: other (test-only regression coverage). Confidence: confirmed source discrimination at the deletion revision, no execution. proposed_drop: false for the lost reboot identity oracle; earlier field-retirement rationale remains applicable only to obsolete field assertions. possible_cover: none in supplied neighbour context; no prohibited coverage sources searched. Could-be-highest: no established shipped security or loss-of-work route; duplicate creation is a hypothetical future regression detected by the removed test, not an observed product defect. Through-tip source search found no matching reboot replay test, and subsequent diffs of create_idempotency.rs and boot_id_durable_outcome.rs are empty; store.rs only changes comments. Final bounded caller/alternative checks continue before this discovery pass ends. No tests, builds or reproductions."
+          }
+        },
+        {
+          "line": 20,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c1",
+            "state": "open",
+            "summary": "Deleting the kind test also removes the completed-create reboot retry oracle",
+            "location": "crates/farhelm/tests/e2e/create_idempotency.rs:299",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: removing the terminal-kind reboot test also removes its still-valid check that retrying a successfully created session after a host reboot returns the original session, rather than creating a new one. This is lost regression protection, not a demonstrated current duplicate-create bug. Original c1 history preserved: terminal-kind/stream-kind fields really are retired in protocol 77, and their assertions should go; the old proposed_drop correctly refutes the misleading-kind concern, but does not justify deleting this independent identity oracle with them. Deleted parent create_idempotency.rs:329-382 creates an actual keyed session under boot-a, ends every terminal host, reloads under boot-b, asserts the existing session is Interrupted, retries the same key and requires replay.id == first.id. The retained same-boot restart fixture at reviewed :244-298 asserts ID equality and one actual host while the host survives; it does not test key survival through reboot conversion. The retained reboot fixture at :833-906 starts from a crashed never-launched Pending reservation and requires a launch, the opposite outcome. Store tests are not an equivalent replacement: store.rs:13540-13645 directly checks that an interrupted row with a recorded terminal address refuses a pending-launch takeover; it neither runs record_boot on a completed reservation nor exercises the retry caller after conversion. store.rs:10264-10312 and :10582-10655 verify boot conversion using unkeyed rows, not retention of a created key. core.rs:28519-28630 exercises a pending reservation that ended with ObservedExit and settlement, with no boot transaction. A regression that loses only Created reservations during reboot conversion would satisfy these remaining cases but fail the deleted same-ID assertion. Source correctness of resolve_reservation (:9884-9960) and replay_created_session (:10182-10240) does not supply the lost oracle. Contract at SPEC_impl.md:3535-3540: 'Every keyed create gets a session-lifetime reservation: app creates, agent `create`/`clone`, and spawn all retain the key until the created session is deleted.' The interrupted row still exists; a reboot is not Delete. SPEC.md:3813-3818 likewise says retry returns the existing child rather than creating another and keys live as long as that child does. Suggested fix: retain the completed-create/reboot/key-retry identity assertion while removing only obsolete kind fields; no retired tmux fixture is needed. Suggested bucket: other (test-only regression coverage). Confidence: confirmed source discrimination at the deletion revision, no execution. proposed_drop: false for the lost reboot identity oracle; earlier field-retirement rationale remains applicable only to obsolete field assertions. possible_cover: none in supplied neighbour context; no prohibited coverage sources searched. Could-be-highest: no established shipped security or loss-of-work route; duplicate creation is a hypothetical future regression detected by the removed test, not an observed product defect. Through-tip source search found no matching reboot replay test, and subsequent diffs of create_idempotency.rs and boot_id_durable_outcome.rs are empty; store.rs only changes comments. Final bounded replacement checks are complete: at pinned tip, boot-seam/key-reference searches found no completed-create reboot replay in the remaining boot, launch-sentinel, restart-with, ticker or browser reboot fixtures. The named-create key at restart_with_resume.rs:287 belongs to a named-start same-process test, and browser intent-key hits at terminal-multihost.spec.ts:5095-5210 concern failed-create retargeting, not reboot. The core startup boot-file test at deletion-revision :32223-32262 checks only the boot-id source, with no session/key. store.rs:6912-6945 confirms the boot-conversion fixtures insert rows with no intent claim. The later core test-name/source search finds no replacement; create_idempotency.rs and boot_id_durable_outcome.rs have no later diff through tip, and the later store diff changes comments only. All readily checkable premises for this bounded coverage finding are resolved; no open lead remains for c1. No tests, builds or reproductions."
+          }
+        }
+      ],
+      "latest": {
+        "line": 20,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "c1",
+          "state": "open",
+          "summary": "Deleting the kind test also removes the completed-create reboot retry oracle",
+          "location": "crates/farhelm/tests/e2e/create_idempotency.rs:299",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: removing the terminal-kind reboot test also removes its still-valid check that retrying a successfully created session after a host reboot returns the original session, rather than creating a new one. This is lost regression protection, not a demonstrated current duplicate-create bug. Original c1 history preserved: terminal-kind/stream-kind fields really are retired in protocol 77, and their assertions should go; the old proposed_drop correctly refutes the misleading-kind concern, but does not justify deleting this independent identity oracle with them. Deleted parent create_idempotency.rs:329-382 creates an actual keyed session under boot-a, ends every terminal host, reloads under boot-b, asserts the existing session is Interrupted, retries the same key and requires replay.id == first.id. The retained same-boot restart fixture at reviewed :244-298 asserts ID equality and one actual host while the host survives; it does not test key survival through reboot conversion. The retained reboot fixture at :833-906 starts from a crashed never-launched Pending reservation and requires a launch, the opposite outcome. Store tests are not an equivalent replacement: store.rs:13540-13645 directly checks that an interrupted row with a recorded terminal address refuses a pending-launch takeover; it neither runs record_boot on a completed reservation nor exercises the retry caller after conversion. store.rs:10264-10312 and :10582-10655 verify boot conversion using unkeyed rows, not retention of a created key. core.rs:28519-28630 exercises a pending reservation that ended with ObservedExit and settlement, with no boot transaction. A regression that loses only Created reservations during reboot conversion would satisfy these remaining cases but fail the deleted same-ID assertion. Source correctness of resolve_reservation (:9884-9960) and replay_created_session (:10182-10240) does not supply the lost oracle. Contract at SPEC_impl.md:3535-3540: 'Every keyed create gets a session-lifetime reservation: app creates, agent `create`/`clone`, and spawn all retain the key until the created session is deleted.' The interrupted row still exists; a reboot is not Delete. SPEC.md:3813-3818 likewise says retry returns the existing child rather than creating another and keys live as long as that child does. Suggested fix: retain the completed-create/reboot/key-retry identity assertion while removing only obsolete kind fields; no retired tmux fixture is needed. Suggested bucket: other (test-only regression coverage). Confidence: confirmed source discrimination at the deletion revision, no execution. proposed_drop: false for the lost reboot identity oracle; earlier field-retirement rationale remains applicable only to obsolete field assertions. possible_cover: none in supplied neighbour context; no prohibited coverage sources searched. Could-be-highest: no established shipped security or loss-of-work route; duplicate creation is a hypothetical future regression detected by the removed test, not an observed product defect. Through-tip source search found no matching reboot replay test, and subsequent diffs of create_idempotency.rs and boot_id_durable_outcome.rs are empty; store.rs only changes comments. Final bounded replacement checks are complete: at pinned tip, boot-seam/key-reference searches found no completed-create reboot replay in the remaining boot, launch-sentinel, restart-with, ticker or browser reboot fixtures. The named-create key at restart_with_resume.rs:287 belongs to a named-start same-process test, and browser intent-key hits at terminal-multihost.spec.ts:5095-5210 concern failed-create retargeting, not reboot. The core startup boot-file test at deletion-revision :32223-32262 checks only the boot-id source, with no session/key. store.rs:6912-6945 confirms the boot-conversion fixtures insert rows with no intent claim. The later core test-name/source search finds no replacement; create_idempotency.rs and boot_id_durable_outcome.rs have no later diff through tip, and the later store diff changes comments only. All readily checkable premises for this bounded coverage finding are resolved; no open lead remains for c1. No tests, builds or reproductions."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g142/findings.jsonl",
+        "id": "c1",
+        "line": 20,
+        "disposition": "verified",
+        "group": "removed-completed-keyed-create-reboot-replay-oracle",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-090 after inspecting it. Retiring terminal-kind fields justifies removing their assertions. It does not justify removing the completed-create/reboot/same-key identity oracle in the same test. The checked retained tests exercise same-boot restart or never-launched reboot reservations instead. Retain the narrow test-coverage finding. Preserve the earlier field-contract refutation only for removed representation assertions; do not use it to drop the independent reboot/key sequence. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e diff of create_idempotency.rs deletes a_replay_after_a_reboot_reports_no_terminal_kind, including real completed keyed create, terminal-host termination, boot-a to boot-b handoff, Interrupted premise and replay.id == first.id. Field assertions can be removed independently of that sequence.\",\"f560058d:create_idempotency.rs:244-300 retains same-boot restart identity and one-agent assertions. :833-906 injects AfterRecord failure, retains a Pending reservation through reboot and requires a launch; this is the opposite initial outcome from the deleted completed-create fixture.\",\"f560058d:crates/farhelm-supervisor/src/store.rs:13539-13645 checks pending takeover against directly forced Interrupted rows, including one with an address; it does not run reboot conversion on a completed reservation or retry the real caller afterward.\",\"f560058d:SPEC_impl.md:3535-3540 requires session-lifetime create reservations. Current SPEC.md:3805-3811 keeps retry identity until child deletion. A surviving Interrupted row was not deleted.\",\"git diff from f560058d through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db is empty for create_idempotency.rs and boot_id_durable_outcome.rs. Pinned-tip boot-id/key search in those files finds the retained Pending case and unkeyed boot fixtures, not the removed completed-create retry. No runtime duplicate creation is claimed.\"] Current coverage/results: [\"Both specifications retain key/session lifetime; SPEC_impl.md Grid streams accepts retirement of terminal-kind fields only. It does not accept loss of the independent reboot identity test.\",\"TODO.md Planned empty. Targeted plans/queue searches for keyed/idempotency/reboot/replay found provider restart and terminal-kind removal work, no completed-create/reboot replay test replacement.\",\"BUGS.md has no such accepted bug. Full INDEX.md and matching queue-file searches found no same test deletion or reservation/reboot oracle. Existing reboot-concurrency-early-release.md concerns permit lifetime during teardown, a different cause and consequence.\",\"Active TRIAGE_OUTCOMES.md names unrelated GUI create cleanup and test witness findings; no exact completed-create/reboot replay disposition. FILTER.md does not cover deletion of this applicable identity oracle.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Original c1 considered misleading terminal-kind reporting and duplicate creates after restart, and initially proposed a field-retirement dismissal. Later source checks split that: obsolete fields are refuted, but the distinct lost completed-create/reboot identity oracle is retained. Duplicate processes are a hypothetical regression the deleted test could detect, not an established shipped failure or user-work loss.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g142/c1",
+        "line": 20,
+        "disposition": "verified",
+        "group": "removed-completed-keyed-create-reboot-replay-oracle",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-090 after inspecting it. Retiring terminal-kind fields justifies removing their assertions. It does not justify removing the completed-create/reboot/same-key identity oracle in the same test. The checked retained tests exercise same-boot restart or never-launched reboot reservations instead. Retain the narrow test-coverage finding. Preserve the earlier field-contract refutation only for removed representation assertions; do not use it to drop the independent reboot/key sequence. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e diff of create_idempotency.rs deletes a_replay_after_a_reboot_reports_no_terminal_kind, including real completed keyed create, terminal-host termination, boot-a to boot-b handoff, Interrupted premise and replay.id == first.id. Field assertions can be removed independently of that sequence.\",\"f560058d:create_idempotency.rs:244-300 retains same-boot restart identity and one-agent assertions. :833-906 injects AfterRecord failure, retains a Pending reservation through reboot and requires a launch; this is the opposite initial outcome from the deleted completed-create fixture.\",\"f560058d:crates/farhelm-supervisor/src/store.rs:13539-13645 checks pending takeover against directly forced Interrupted rows, including one with an address; it does not run reboot conversion on a completed reservation or retry the real caller afterward.\",\"f560058d:SPEC_impl.md:3535-3540 requires session-lifetime create reservations. Current SPEC.md:3805-3811 keeps retry identity until child deletion. A surviving Interrupted row was not deleted.\",\"git diff from f560058d through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db is empty for create_idempotency.rs and boot_id_durable_outcome.rs. Pinned-tip boot-id/key search in those files finds the retained Pending case and unkeyed boot fixtures, not the removed completed-create retry. No runtime duplicate creation is claimed.\"] Current coverage/results: [\"Both specifications retain key/session lifetime; SPEC_impl.md Grid streams accepts retirement of terminal-kind fields only. It does not accept loss of the independent reboot identity test.\",\"TODO.md Planned empty. Targeted plans/queue searches for keyed/idempotency/reboot/replay found provider restart and terminal-kind removal work, no completed-create/reboot replay test replacement.\",\"BUGS.md has no such accepted bug. Full INDEX.md and matching queue-file searches found no same test deletion or reservation/reboot oracle. Existing reboot-concurrency-early-release.md concerns permit lifetime during teardown, a different cause and consequence.\",\"Active TRIAGE_OUTCOMES.md names unrelated GUI create cleanup and test witness findings; no exact completed-create/reboot replay disposition. FILTER.md does not cover deletion of this applicable identity oracle.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Original c1 considered misleading terminal-kind reporting and duplicate creates after restart, and initially proposed a field-retirement dismissal. Later source checks split that: obsolete fields are refuted, but the distinct lost completed-create/reboot identity oracle is retained. Duplicate processes are a hypothetical regression the deleted test could detect, not an established shipped failure or user-work loss.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-090",
+          "key": "g142/c1",
+          "latest_line": 20,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "removed-completed-keyed-create-reboot-replay-oracle",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Retiring terminal-kind fields justifies removing their assertions. It does not justify removing the completed-create/reboot/same-key identity oracle in the same test. The checked retained tests exercise same-boot restart or never-launched reboot reservations instead.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e diff of create_idempotency.rs deletes a_replay_after_a_reboot_reports_no_terminal_kind, including real completed keyed create, terminal-host termination, boot-a to boot-b handoff, Interrupted premise and replay.id == first.id. Field assertions can be removed independently of that sequence.",
+            "f560058d:create_idempotency.rs:244-300 retains same-boot restart identity and one-agent assertions. :833-906 injects AfterRecord failure, retains a Pending reservation through reboot and requires a launch; this is the opposite initial outcome from the deleted completed-create fixture.",
+            "f560058d:crates/farhelm-supervisor/src/store.rs:13539-13645 checks pending takeover against directly forced Interrupted rows, including one with an address; it does not run reboot conversion on a completed reservation or retry the real caller afterward.",
+            "f560058d:SPEC_impl.md:3535-3540 requires session-lifetime create reservations. Current SPEC.md:3805-3811 keeps retry identity until child deletion. A surviving Interrupted row was not deleted.",
+            "git diff from f560058d through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db is empty for create_idempotency.rs and boot_id_durable_outcome.rs. Pinned-tip boot-id/key search in those files finds the retained Pending case and unkeyed boot fixtures, not the removed completed-create retry. No runtime duplicate creation is claimed."
+          ],
+          "coverage_checked": [
+            "Both specifications retain key/session lifetime; SPEC_impl.md Grid streams accepts retirement of terminal-kind fields only. It does not accept loss of the independent reboot identity test.",
+            "TODO.md Planned empty. Targeted plans/queue searches for keyed/idempotency/reboot/replay found provider restart and terminal-kind removal work, no completed-create/reboot replay test replacement.",
+            "BUGS.md has no such accepted bug. Full INDEX.md and matching queue-file searches found no same test deletion or reservation/reboot oracle. Existing reboot-concurrency-early-release.md concerns permit lifetime during teardown, a different cause and consequence.",
+            "Active TRIAGE_OUTCOMES.md names unrelated GUI create cleanup and test witness findings; no exact completed-create/reboot replay disposition. FILTER.md does not cover deletion of this applicable identity oracle."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Original c1 considered misleading terminal-kind reporting and duplicate creates after restart, and initially proposed a field-retirement dismissal. Later source checks split that: obsolete fields are refuted, but the distinct lost completed-create/reboot identity oracle is retained. Duplicate processes are a hypothetical regression the deleted test could detect, not an established shipped failure or user-work loss.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain the narrow test-coverage finding. Preserve the earlier field-contract refutation only for removed representation assertions; do not use it to drop the independent reboot/key sequence."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "removed-completed-keyed-create-reboot-replay-oracle",
+        "destination": "trailing-removed-completed-keyed-create-reboot-replay-oracle.md"
+      }
+    },
+    {
+      "key": "g142/c2",
+      "owner": "g142",
+      "id": "c2",
+      "domain": "rust-session-agent-regressions",
+      "purpose": "rust-session-agent-regressions: crates/farhelm/tests/e2e/supervisor_stop.rs, crates/farhelm/tests/e2e/boot_id_durable_outcome.rs, crates/farhelm/tests/e2e/create_idempotency.rs, crates/farhelm/tests/e2e/session_lifecycle.rs, crates/farhelm/tests/e2e/tcp_relays.rs, crates/farhelm/tests/spawn_cli.rs, crates/farhelm/tests/e2e/real_agent_capture.rs, crates/farhelm/tests/e2e/codex_identity.rs, crates/farhelm/tests/e2e/command_shell.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Default timeouts do not remove a retained terminal-host test budget",
+            "location": "crates/farhelm/tests/e2e/session_lifecycle.rs:191",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether changing restart/activity/proxy/scope fixtures from suite_timeouts() to production defaults reinstates timing failures under load. Source checks: parent revision crates/farhelm/tests/e2e/harness.rs:2482-2502 shows suite_timeouts only raises tmux_exchange, tmux_pane_list and sink_ready. At the reviewed commit crates/farhelm-supervisor/src/service/core.rs:375-465 has removed all three fields from SupervisorTimeouts; the remaining defaults are unchanged by the old floor. The old suite wrapper consequently cannot supply any retained host-specific budget. Suggested bucket: other (test-harness concern refuted). Confidence: confirmed by source, no execution. proposed_drop: every field adjusted by the deleted wrapper is itself retired, rather than reset to a shorter surviving budget. possible_cover: none; coverage sources not searched. Could-be-highest: no; this considered consequence is confined to test timing, with no established shipped security or work-loss route. Caveat: no claim that runtime tests cannot fail under load for unrelated reasons."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Default timeouts do not remove a retained terminal-host test budget",
+            "location": "crates/farhelm/tests/e2e/session_lifecycle.rs:191",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether changing restart/activity/proxy/scope fixtures from suite_timeouts() to production defaults reinstates timing failures under load. Source checks: parent revision crates/farhelm/tests/e2e/harness.rs:2482-2502 shows suite_timeouts only raises tmux_exchange, tmux_pane_list and sink_ready. At the reviewed commit crates/farhelm-supervisor/src/service/core.rs:375-465 has removed all three fields from SupervisorTimeouts. Synthesis checked the same commit's default-implementation diff: it only deletes assignments for retired tmux_exchange, tmux_pane_list, sink_ready and delete_sink_reap; no surviving default value is reduced. The constructor also deletes the TmuxDriver built from the tmux fields. The old wrapper therefore cannot supply a retained host-specific budget. Parent reports g139/g145 independently reach the same conclusion; the conclusion here is supported by these direct source reads. The real-session proxy fixture still waits for readiness/handshake, post-attach READY and a fresh echo with its own 25s/15s observation waits (:2274-2357); its child remains kill-on-drop, distinct from the unchanged raw EOF witness examined under c7. Suggested bucket: other (test-harness concern refuted). Confidence: confirmed by source, no execution. proposed_drop: every field adjusted by the deleted wrapper is itself retired, rather than reset to a shorter surviving budget. possible_cover: none; coverage sources not searched. Could-be-highest: no; this considered consequence is confined to test timing, with no established shipped security or work-loss route. Caveat: no claim that runtime tests cannot fail under load for unrelated reasons. This revision preserves the original considered timing consequence and adds exact-revision constructor/default and retained-proxy-witness checks."
+          }
+        }
+      ],
+      "latest": {
+        "line": 9,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Default timeouts do not remove a retained terminal-host test budget",
+          "location": "crates/farhelm/tests/e2e/session_lifecycle.rs:191",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether changing restart/activity/proxy/scope fixtures from suite_timeouts() to production defaults reinstates timing failures under load. Source checks: parent revision crates/farhelm/tests/e2e/harness.rs:2482-2502 shows suite_timeouts only raises tmux_exchange, tmux_pane_list and sink_ready. At the reviewed commit crates/farhelm-supervisor/src/service/core.rs:375-465 has removed all three fields from SupervisorTimeouts. Synthesis checked the same commit's default-implementation diff: it only deletes assignments for retired tmux_exchange, tmux_pane_list, sink_ready and delete_sink_reap; no surviving default value is reduced. The constructor also deletes the TmuxDriver built from the tmux fields. The old wrapper therefore cannot supply a retained host-specific budget. Parent reports g139/g145 independently reach the same conclusion; the conclusion here is supported by these direct source reads. The real-session proxy fixture still waits for readiness/handshake, post-attach READY and a fresh echo with its own 25s/15s observation waits (:2274-2357); its child remains kill-on-drop, distinct from the unchanged raw EOF witness examined under c7. Suggested bucket: other (test-harness concern refuted). Confidence: confirmed by source, no execution. proposed_drop: every field adjusted by the deleted wrapper is itself retired, rather than reset to a shorter surviving budget. possible_cover: none; coverage sources not searched. Could-be-highest: no; this considered consequence is confined to test timing, with no established shipped security or work-loss route. Caveat: no claim that runtime tests cannot fail under load for unrelated reasons. This revision preserves the original considered timing consequence and adds exact-revision constructor/default and retained-proxy-witness checks."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g142/findings.jsonl",
+        "id": "c2",
+        "line": 9,
+        "disposition": "excluded",
+        "group": "retired-suite-tmux-timeout-floor",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-090 after inspecting it. The deleted wrapper raised only three retired tmux-facing fields. Replacing it with defaults does not shorten a surviving host budget. Drop only the supposed reduction of a surviving timeout by wrapper removal. Same conclusion in other reviewer groups is reported history, not an alias established from this batch. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333^:crates/farhelm/tests/e2e/harness.rs:2482-2502 floors only tmux_exchange, tmux_pane_list and sink_ready.\",\"1ed482dd:crates/farhelm-supervisor/src/service/core.rs:375-436 defines surviving timeout fields without those three; :451-466 defines their defaults. No old floor applies to any surviving field.\",\"This is source refutation of the claimed budget regression, not evidence that unrelated runtime tests cannot fail under load. No tests were run.\"] Current coverage/results: [\"SPEC.md terminal-host behavior and SPEC_impl.md host/grid-only substrate checked; no retained tmux budget contract exists.\",\"TODO.md Planned empty; plans/queue/tmux-end-old-terminals.md:289-295 explicitly retires tmux/sink timeout fields. tmux-drop-from-tooling.md handles retired substrate tooling, not a surviving host budget.\",\"BUGS.md, full INDEX.md, targeted queue-file and active TRIAGE_OUTCOMES.md searches for suite_timeouts/tmux timeouts found no exact retained-budget issue. Unrelated timing/test-witness items do not cover it. FILTER.md is not needed for the refutation.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Concern that changing restart/activity/proxy/scope fixtures to production defaults reinstates load-sensitive failures. That mechanism is refuted because every field raised by the old wrapper was removed; no general test reliability claim follows.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g142/c2",
+        "line": 9,
+        "disposition": "excluded",
+        "group": "retired-suite-tmux-timeout-floor",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-090 after inspecting it. The deleted wrapper raised only three retired tmux-facing fields. Replacing it with defaults does not shorten a surviving host budget. Drop only the supposed reduction of a surviving timeout by wrapper removal. Same conclusion in other reviewer groups is reported history, not an alias established from this batch. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333^:crates/farhelm/tests/e2e/harness.rs:2482-2502 floors only tmux_exchange, tmux_pane_list and sink_ready.\",\"1ed482dd:crates/farhelm-supervisor/src/service/core.rs:375-436 defines surviving timeout fields without those three; :451-466 defines their defaults. No old floor applies to any surviving field.\",\"This is source refutation of the claimed budget regression, not evidence that unrelated runtime tests cannot fail under load. No tests were run.\"] Current coverage/results: [\"SPEC.md terminal-host behavior and SPEC_impl.md host/grid-only substrate checked; no retained tmux budget contract exists.\",\"TODO.md Planned empty; plans/queue/tmux-end-old-terminals.md:289-295 explicitly retires tmux/sink timeout fields. tmux-drop-from-tooling.md handles retired substrate tooling, not a surviving host budget.\",\"BUGS.md, full INDEX.md, targeted queue-file and active TRIAGE_OUTCOMES.md searches for suite_timeouts/tmux timeouts found no exact retained-budget issue. Unrelated timing/test-witness items do not cover it. FILTER.md is not needed for the refutation.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Concern that changing restart/activity/proxy/scope fixtures to production defaults reinstates load-sensitive failures. That mechanism is refuted because every field raised by the old wrapper was removed; no general test reliability claim follows.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-090",
+          "key": "g142/c2",
+          "latest_line": 9,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "retired-suite-tmux-timeout-floor",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The deleted wrapper raised only three retired tmux-facing fields. Replacing it with defaults does not shorten a surviving host budget.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333^:crates/farhelm/tests/e2e/harness.rs:2482-2502 floors only tmux_exchange, tmux_pane_list and sink_ready.",
+            "1ed482dd:crates/farhelm-supervisor/src/service/core.rs:375-436 defines surviving timeout fields without those three; :451-466 defines their defaults. No old floor applies to any surviving field.",
+            "This is source refutation of the claimed budget regression, not evidence that unrelated runtime tests cannot fail under load. No tests were run."
+          ],
+          "coverage_checked": [
+            "SPEC.md terminal-host behavior and SPEC_impl.md host/grid-only substrate checked; no retained tmux budget contract exists.",
+            "TODO.md Planned empty; plans/queue/tmux-end-old-terminals.md:289-295 explicitly retires tmux/sink timeout fields. tmux-drop-from-tooling.md handles retired substrate tooling, not a surviving host budget.",
+            "BUGS.md, full INDEX.md, targeted queue-file and active TRIAGE_OUTCOMES.md searches for suite_timeouts/tmux timeouts found no exact retained-budget issue. Unrelated timing/test-witness items do not cover it. FILTER.md is not needed for the refutation."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Concern that changing restart/activity/proxy/scope fixtures to production defaults reinstates load-sensitive failures. That mechanism is refuted because every field raised by the old wrapper was removed; no general test reliability claim follows.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Drop only the supposed reduction of a surviving timeout by wrapper removal. Same conclusion in other reviewer groups is reported history, not an alias established from this batch."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retired-suite-tmux-timeout-floor",
+        "destination": null
+      }
+    },
+    {
+      "key": "g142/c3",
+      "owner": "g142",
+      "id": "c3",
+      "domain": "rust-session-agent-regressions",
+      "purpose": "rust-session-agent-regressions: crates/farhelm/tests/e2e/supervisor_stop.rs, crates/farhelm/tests/e2e/boot_id_durable_outcome.rs, crates/farhelm/tests/e2e/create_idempotency.rs, crates/farhelm/tests/e2e/session_lifecycle.rs, crates/farhelm/tests/e2e/tcp_relays.rs, crates/farhelm/tests/spawn_cli.rs, crates/farhelm/tests/e2e/real_agent_capture.rs, crates/farhelm/tests/e2e/codex_identity.rs, crates/farhelm/tests/e2e/command_shell.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "The replacement tether fixture proves startup is pending",
+            "location": "crates/farhelm/tests/e2e/supervisor_stop.rs:363",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR: considered whether replacing a hung tmux command with a held state-folder lock lets the startup-stop regression test pass without entering startup. Source checks: service/core.rs:1491-1510 takes supervisor.lock before claiming state; :1572-1600 probes the socket only after finding the lock held; :1625-1642 performs hello and treats a connection dropped before hello as a non-serving holder. The test owns the lock until after child.wait(), accepts that probe, drops it, closes stdin, and requires a successful exit within ten seconds. Therefore the accepted probe establishes the contested startup path while the unreleased lock prevents normal startup from completing. service/core.rs:17272-17277 races construction against the tether, and main.rs:2180-2197 turns stdin EOF into that stop future. Suggested bucket: other (fixture-premise concern refuted). Confidence: confirmed by source; no execution. proposed_drop: the observed probe and held lock establish pending startup, and only the startup stop path can yield the required successful exit while the lock remains held. possible_cover: none; coverage sources not searched. Could-be-highest: no established shipped security or work-loss route in this candidate; considered issue is test premise only. Caveat: this test now covers an asynchronous lock wait, not a removed tmux startup command; SPEC_impl.md:2887 at 1ed482dde220452e424973faf38a5e1318986333 states the running supervisor runs no tmux at all."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "The replacement tether fixture proves startup is pending",
+            "location": "crates/farhelm/tests/e2e/supervisor_stop.rs:363",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR: considered whether replacing a hung tmux command with a held state-folder lock lets the startup-stop regression test pass without entering startup. Source checks: service/core.rs:1491-1510 takes supervisor.lock before claiming state; :1572-1600 probes the socket only after finding the lock held; :1625-1642 performs hello and treats a connection dropped before hello as a non-serving holder. The test owns the lock until after child.wait(), accepts that probe, drops it, closes stdin, and requires a successful exit within ten seconds. Therefore the accepted probe establishes the contested startup path while the unreleased lock prevents normal startup from completing. service/core.rs:17272-17277 races construction against the tether, and main.rs:2180-2197 turns stdin EOF into that stop future. The same reviewed revision's SPEC_impl.md:2961-2963 states: 'The running supervisor runs no tmux at all.' It also says: 'the driver is still in the source and goes with them.' This confirms the removed startup tmux fixture was obsolete already at this intermediate commit, rather than relying on a later revision's deletion. Suggested bucket: other (fixture-premise concern refuted). Confidence: confirmed by source; no execution. proposed_drop: the observed probe and held lock establish pending startup, and only the startup stop path can yield the required successful exit while the lock remains held. possible_cover: none; coverage sources not searched. Could-be-highest: no established shipped security or work-loss route in this candidate; considered issue is test premise only. Caveat: this test covers an asynchronous lock/hello wait, not a removed tmux startup command. Revision preserves the original considered consequence and replaces the previous later-revision supporting citation with the same-revision contract."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "The replacement tether fixture proves startup is pending",
+            "location": "crates/farhelm/tests/e2e/supervisor_stop.rs:363",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR: considered whether replacing a hung tmux command with a held state-folder lock lets the startup-stop regression test pass without entering startup. Source checks: service/core.rs:1491-1510 takes supervisor.lock before claiming state; :1572-1600 probes the socket only after finding the lock held; :1625-1642 performs hello and treats a connection dropped before hello as a non-serving holder. The test owns the lock until after child.wait(), accepts that probe, drops it, closes stdin, and requires a successful exit within ten seconds. The accepted probe establishes contested startup while the unreleased lock prevents normal startup from completing. service/core.rs:17272-17277 races construction against the tether; main.rs:2180-2197 reads stdin to EOF on a detached OS thread and sends that result into the stop future. Synthesis checked that both an early lock/hello timeout and a claim failure return errors, not the required successful child status. A stalled hello therefore cannot manufacture a pass even if the test is delayed between accept and dropping the probe. The parent owns the sole retained ChildStdin write end, takes and drops it before waiting, and retains the child with kill_on_drop through both bounded waits; normal success reaps the child before releasing the lock and dropping the state directory. No detached hung tmux sleep remains to need a separate PID guard. The owned lock is close-on-exec: this commit pins Rust 1.99.1 in rust-toolchain.toml, and that exact release's standard-library source, https://raw.githubusercontent.com/rust-lang/rust/1.99.1/library/std/src/sys/fs/unix.rs:1150-1160, opens File with O_CLOEXEC. The local minimal toolchain lacks rust-src, so this premise was checked against that primary versioned source, not execution. The same reviewed revision's SPEC_impl.md:2961-2963 says 'The running supervisor runs no tmux at all.' and 'the driver is still in the source and goes with them.' Suggested bucket: other (fixture-premise concern refuted). Confidence: confirmed by source; no execution. proposed_drop: the probe, held lock, explicit EOF and successful reaped-child status establish the intended pending-startup stop; an ordinary startup refusal does not satisfy the assertion. possible_cover: none; coverage sources not searched. Could-be-highest: no established shipped security or work-loss route in this candidate; considered issue is test premise only. Caveat: this covers an asynchronous lock/hello wait, not the removed tmux startup command. A panic uses kill_on_drop rather than an explicit successful reap; the lock and state directory remain owned test fixtures, and no proof of runtime scheduler timing is claimed. Revision preserves the original considered consequence and adds owned-descriptor, EOF, failure-path and process-lifetime checks."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "The replacement tether fixture proves startup is pending",
+          "location": "crates/farhelm/tests/e2e/supervisor_stop.rs:363",
+          "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR: considered whether replacing a hung tmux command with a held state-folder lock lets the startup-stop regression test pass without entering startup. Source checks: service/core.rs:1491-1510 takes supervisor.lock before claiming state; :1572-1600 probes the socket only after finding the lock held; :1625-1642 performs hello and treats a connection dropped before hello as a non-serving holder. The test owns the lock until after child.wait(), accepts that probe, drops it, closes stdin, and requires a successful exit within ten seconds. The accepted probe establishes contested startup while the unreleased lock prevents normal startup from completing. service/core.rs:17272-17277 races construction against the tether; main.rs:2180-2197 reads stdin to EOF on a detached OS thread and sends that result into the stop future. Synthesis checked that both an early lock/hello timeout and a claim failure return errors, not the required successful child status. A stalled hello therefore cannot manufacture a pass even if the test is delayed between accept and dropping the probe. The parent owns the sole retained ChildStdin write end, takes and drops it before waiting, and retains the child with kill_on_drop through both bounded waits; normal success reaps the child before releasing the lock and dropping the state directory. No detached hung tmux sleep remains to need a separate PID guard. The owned lock is close-on-exec: this commit pins Rust 1.99.1 in rust-toolchain.toml, and that exact release's standard-library source, https://raw.githubusercontent.com/rust-lang/rust/1.99.1/library/std/src/sys/fs/unix.rs:1150-1160, opens File with O_CLOEXEC. The local minimal toolchain lacks rust-src, so this premise was checked against that primary versioned source, not execution. The same reviewed revision's SPEC_impl.md:2961-2963 says 'The running supervisor runs no tmux at all.' and 'the driver is still in the source and goes with them.' Suggested bucket: other (fixture-premise concern refuted). Confidence: confirmed by source; no execution. proposed_drop: the probe, held lock, explicit EOF and successful reaped-child status establish the intended pending-startup stop; an ordinary startup refusal does not satisfy the assertion. possible_cover: none; coverage sources not searched. Could-be-highest: no established shipped security or work-loss route in this candidate; considered issue is test premise only. Caveat: this covers an asynchronous lock/hello wait, not the removed tmux startup command. A panic uses kill_on_drop rather than an explicit successful reap; the lock and state directory remain owned test fixtures, and no proof of runtime scheduler timing is claimed. Revision preserves the original considered consequence and adds owned-descriptor, EOF, failure-path and process-lifetime checks."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g142/findings.jsonl",
+        "id": "c3",
+        "line": 10,
+        "disposition": "excluded",
+        "group": "held-lock-startup-tether-fixture-premise",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-090 after inspecting it. The fixture observes the child's lock-contended startup probe, keeps the lock held and then requires a successful bounded exit after explicit stdin EOF. Ordinary startup refusal does not satisfy that assertion. Drop the false-premise concern narrowly. This does not certify scheduler timing or guarantee successful reaping on panic; it preserves kill_on_drop and owned fixture boundaries. Checked source/results: [\"dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:crates/farhelm/tests/e2e/supervisor_stop.rs:333-389 replaces the hung tmux fixture with a private held supervisor.lock, listener accept, dropped probe, dropped ChildStdin and successful child.wait before releasing the lock. kill_on_drop bounds assertion-failure ownership.\",\"dbfc6975:crates/farhelm-supervisor/src/service/core.rs:1490-1510 returns no claim for the busy lock; :1574-1593 probes only after failed claim and errors if waiting expires; :1625-1637 distinguishes a dropped hello from an answering holder.\",\"dbfc6975:core.rs:17272-17276 races startup against stop. main.rs:2180-2197 reports detached-thread stdin EOF through that stop future. The held lock prevents ordinary constructor completion, and claim/hello failure cannot manufacture the required success.\",\"The history's Rust 1.99.1 O_CLOEXEC citation was not independently fetched here; descriptor-inheritance details are not used as this refutation's decisive premise. Accepted probe plus parent-held lock and success-after-EOF suffice for the named concern. Source only, no process experiment.\"] Current coverage/results: [\"Both specs checked for supervisor lifetime/startup and terminal retirement. Same-revision SPEC_impl.md states the running supervisor runs no tmux; the retained lock wait is a real startup wait.\",\"TODO.md Planned empty. plans/queue/tmux-end-old-terminals.md and tmux-drop-from-tooling.md allow removing old tmux startup tooling while retaining needed behavior; neither supplies a competing test-premise acceptance.\",\"BUGS.md, full INDEX.md, targeted queue-file and active TRIAGE_OUTCOMES.md searches found no exact held-lock/tether finding. shutdown-wait-test-does-not-witness-waiting.md is a different in-process launch-registration wait; its ledger decision is not coverage. FILTER.md not applied.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Replacing a hung tmux command could let the startup-stop regression pass without actually entering blocked startup. History adds owned-descriptor, failure-path and process-lifetime checks; the source establishes the pending startup premise while preserving the caveat that this tests lock/hello waiting, not a retired tmux command.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g142/c3",
+        "line": 10,
+        "disposition": "excluded",
+        "group": "held-lock-startup-tether-fixture-premise",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-090 after inspecting it. The fixture observes the child's lock-contended startup probe, keeps the lock held and then requires a successful bounded exit after explicit stdin EOF. Ordinary startup refusal does not satisfy that assertion. Drop the false-premise concern narrowly. This does not certify scheduler timing or guarantee successful reaping on panic; it preserves kill_on_drop and owned fixture boundaries. Checked source/results: [\"dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:crates/farhelm/tests/e2e/supervisor_stop.rs:333-389 replaces the hung tmux fixture with a private held supervisor.lock, listener accept, dropped probe, dropped ChildStdin and successful child.wait before releasing the lock. kill_on_drop bounds assertion-failure ownership.\",\"dbfc6975:crates/farhelm-supervisor/src/service/core.rs:1490-1510 returns no claim for the busy lock; :1574-1593 probes only after failed claim and errors if waiting expires; :1625-1637 distinguishes a dropped hello from an answering holder.\",\"dbfc6975:core.rs:17272-17276 races startup against stop. main.rs:2180-2197 reports detached-thread stdin EOF through that stop future. The held lock prevents ordinary constructor completion, and claim/hello failure cannot manufacture the required success.\",\"The history's Rust 1.99.1 O_CLOEXEC citation was not independently fetched here; descriptor-inheritance details are not used as this refutation's decisive premise. Accepted probe plus parent-held lock and success-after-EOF suffice for the named concern. Source only, no process experiment.\"] Current coverage/results: [\"Both specs checked for supervisor lifetime/startup and terminal retirement. Same-revision SPEC_impl.md states the running supervisor runs no tmux; the retained lock wait is a real startup wait.\",\"TODO.md Planned empty. plans/queue/tmux-end-old-terminals.md and tmux-drop-from-tooling.md allow removing old tmux startup tooling while retaining needed behavior; neither supplies a competing test-premise acceptance.\",\"BUGS.md, full INDEX.md, targeted queue-file and active TRIAGE_OUTCOMES.md searches found no exact held-lock/tether finding. shutdown-wait-test-does-not-witness-waiting.md is a different in-process launch-registration wait; its ledger decision is not coverage. FILTER.md not applied.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Replacing a hung tmux command could let the startup-stop regression pass without actually entering blocked startup. History adds owned-descriptor, failure-path and process-lifetime checks; the source establishes the pending startup premise while preserving the caveat that this tests lock/hello waiting, not a retired tmux command.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-090",
+          "key": "g142/c3",
+          "latest_line": 10,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "held-lock-startup-tether-fixture-premise",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The fixture observes the child's lock-contended startup probe, keeps the lock held and then requires a successful bounded exit after explicit stdin EOF. Ordinary startup refusal does not satisfy that assertion.",
+          "checks": [
+            "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:crates/farhelm/tests/e2e/supervisor_stop.rs:333-389 replaces the hung tmux fixture with a private held supervisor.lock, listener accept, dropped probe, dropped ChildStdin and successful child.wait before releasing the lock. kill_on_drop bounds assertion-failure ownership.",
+            "dbfc6975:crates/farhelm-supervisor/src/service/core.rs:1490-1510 returns no claim for the busy lock; :1574-1593 probes only after failed claim and errors if waiting expires; :1625-1637 distinguishes a dropped hello from an answering holder.",
+            "dbfc6975:core.rs:17272-17276 races startup against stop. main.rs:2180-2197 reports detached-thread stdin EOF through that stop future. The held lock prevents ordinary constructor completion, and claim/hello failure cannot manufacture the required success.",
+            "The history's Rust 1.99.1 O_CLOEXEC citation was not independently fetched here; descriptor-inheritance details are not used as this refutation's decisive premise. Accepted probe plus parent-held lock and success-after-EOF suffice for the named concern. Source only, no process experiment."
+          ],
+          "coverage_checked": [
+            "Both specs checked for supervisor lifetime/startup and terminal retirement. Same-revision SPEC_impl.md states the running supervisor runs no tmux; the retained lock wait is a real startup wait.",
+            "TODO.md Planned empty. plans/queue/tmux-end-old-terminals.md and tmux-drop-from-tooling.md allow removing old tmux startup tooling while retaining needed behavior; neither supplies a competing test-premise acceptance.",
+            "BUGS.md, full INDEX.md, targeted queue-file and active TRIAGE_OUTCOMES.md searches found no exact held-lock/tether finding. shutdown-wait-test-does-not-witness-waiting.md is a different in-process launch-registration wait; its ledger decision is not coverage. FILTER.md not applied."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Replacing a hung tmux command could let the startup-stop regression pass without actually entering blocked startup. History adds owned-descriptor, failure-path and process-lifetime checks; the source establishes the pending startup premise while preserving the caveat that this tests lock/hello waiting, not a retired tmux command.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Drop the false-premise concern narrowly. This does not certify scheduler timing or guarantee successful reaping on panic; it preserves kill_on_drop and owned fixture boundaries."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "held-lock-startup-tether-fixture-premise",
+        "destination": null
+      }
+    },
+    {
+      "key": "g142/c4",
+      "owner": "g142",
+      "id": "c4",
+      "domain": "rust-session-agent-regressions",
+      "purpose": "rust-session-agent-regressions: crates/farhelm/tests/e2e/supervisor_stop.rs, crates/farhelm/tests/e2e/boot_id_durable_outcome.rs, crates/farhelm/tests/e2e/create_idempotency.rs, crates/farhelm/tests/e2e/session_lifecycle.rs, crates/farhelm/tests/e2e/tcp_relays.rs, crates/farhelm/tests/spawn_cli.rs, crates/farhelm/tests/e2e/real_agent_capture.rs, crates/farhelm/tests/e2e/codex_identity.rs, crates/farhelm/tests/e2e/command_shell.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Deleted hex tokenizer no longer has a caller",
+            "location": "crates/farhelm/tests/e2e/session_lifecycle.rs:2650",
+            "detail": "Reviewed commit: 303a1264b7bd791e8f6f6de2c7bb6136c08e8bab. TLDR: considered whether deleting the byte-token parser and its cursor-address regression test removes protection from the terminal input tests that still run. Source checks: the assigned patch removes only hex_tokens and hex_tokens_survive_a_cursor_address_glued_to_the_first_token plus its module-doc mention; git grep for hex_tokens, hexecho and hex tokens across crates/farhelm/tests at this revision returned no matches. The neighboring retained lifecycle tests exercise input through host/grid helpers rather than parsing a byte replay transcript. The deleted regression's explicit premise was synthesized cursor escape sequences glued to raw hex output, a retired byte-stream observation path. Suggested bucket: other (test removal concern refuted). Confidence: confirmed by source, no execution. proposed_drop: the parser has no remaining caller or producer fixture in the reviewed test tree; its private implementation regression no longer exercises a shipped or retained test contract. possible_cover: none; coverage sources not searched. Could-be-highest: no; deleting an unused test helper has no established security or work-loss route. Caveat: this does not establish comprehensive input coverage outside this group."
+          }
+        },
+        {
+          "line": 21,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Deleted hex tokenizer no longer has a caller",
+            "location": "crates/farhelm/tests/e2e/session_lifecycle.rs:2650",
+            "detail": "Reviewed commit: 303a1264b7bd791e8f6f6de2c7bb6136c08e8bab. TLDR: considered whether deleting the private byte-token parser and its glued-cursor-address regression test removes protection from terminal input tests that still run at this revision. Original source checks remain: the assigned patch removes only hex_tokens, its self-test and its module-doc mention; searching hex_tokens, hexecho and hex tokens across the test tree at this revision found no callers/producers. Its private regression concerns synthesized byte replay cursor escapes glued to raw hex text, while remaining helpers consume grid text. Discovery interface synthesis: the supplied g141/c4 record separately establishes that 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 deleted the original raw-input receiver tests without a complete host replacement. That earlier coverage-loss concern is not refuted by this unused-helper cleanup, and the earlier test deletion is assigned to g141, not this 303a1264 patch. Removing an already uncalled parser and its self-test at 303a1264 does not newly remove the end-to-end input oracle. Suggested bucket: other (considered incremental coverage concern refuted). Confidence: confirmed source attribution and supplied interface context; no execution. proposed_drop: only this later unused-parser cleanup has no remaining caller/test contract to weaken. This basis must not be applied to the earlier deletion of applicable raw-input behavior tests. possible_cover: supplied neighbour g141/c4 owns the distinct earlier raw-sequence-oracle loss; no prohibited coverage sources searched. Could-be-highest: no established security or loss-of-work route from unused helper cleanup; the consequence considered here is test protection only. Caveat: no claim of comprehensive input coverage or that the earlier deletion was safe. The original possible lost protection consequence is preserved and its attribution is narrowed, not erased. No open lead for this ID."
+          }
+        }
+      ],
+      "latest": {
+        "line": 21,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c4",
+          "state": "open",
+          "summary": "Deleted hex tokenizer no longer has a caller",
+          "location": "crates/farhelm/tests/e2e/session_lifecycle.rs:2650",
+          "detail": "Reviewed commit: 303a1264b7bd791e8f6f6de2c7bb6136c08e8bab. TLDR: considered whether deleting the private byte-token parser and its glued-cursor-address regression test removes protection from terminal input tests that still run at this revision. Original source checks remain: the assigned patch removes only hex_tokens, its self-test and its module-doc mention; searching hex_tokens, hexecho and hex tokens across the test tree at this revision found no callers/producers. Its private regression concerns synthesized byte replay cursor escapes glued to raw hex text, while remaining helpers consume grid text. Discovery interface synthesis: the supplied g141/c4 record separately establishes that 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 deleted the original raw-input receiver tests without a complete host replacement. That earlier coverage-loss concern is not refuted by this unused-helper cleanup, and the earlier test deletion is assigned to g141, not this 303a1264 patch. Removing an already uncalled parser and its self-test at 303a1264 does not newly remove the end-to-end input oracle. Suggested bucket: other (considered incremental coverage concern refuted). Confidence: confirmed source attribution and supplied interface context; no execution. proposed_drop: only this later unused-parser cleanup has no remaining caller/test contract to weaken. This basis must not be applied to the earlier deletion of applicable raw-input behavior tests. possible_cover: supplied neighbour g141/c4 owns the distinct earlier raw-sequence-oracle loss; no prohibited coverage sources searched. Could-be-highest: no established security or loss-of-work route from unused helper cleanup; the consequence considered here is test protection only. Caveat: no claim of comprehensive input coverage or that the earlier deletion was safe. The original possible lost protection consequence is preserved and its attribution is narrowed, not erased. No open lead for this ID."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g142/findings.jsonl",
+        "id": "c4",
+        "line": 21,
+        "disposition": "excluded",
+        "group": "unused-hex-token-helper-cleanup",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-090 after inspecting it. At this later cleanup revision the parser and its producer/callers are already gone from retained test behavior. Removing its private self-test does not newly remove the earlier end-to-end input oracle. Drop this unused-helper incremental coverage allegation; preserve the earlier independently owned end-to-end oracle-loss finding. No exact same-root alias among the ten named batch claims. Checked source/results: [\"303a1264b7bd791e8f6f6de2c7bb6136c08e8bab diff of crates/farhelm/tests/e2e/session_lifecycle.rs removes only hex_tokens, its cursor-address-gluing self-test and the module-doc mention.\",\"Pinned git grep for hex_tokens, hexecho and hex tokens across crates/farhelm/tests at 303a1264 returns no matches. The deleted regression models synthetic raw byte replay escapes, not retained grid-text consumption.\",\"The earlier 647f0227 deletion of input receiver tests remains the supplied g141/c4 concern, outside this batch's assigned records. No conclusion here refutes or drops it. No new source search into that separate finding was performed.\"] Current coverage/results: [\"SPEC.md terminal input fidelity and SPEC_impl.md grid-only output contract checked. No contract requires an uncalled private byte transcript tokenizer.\",\"TODO.md Planned empty; plans/queue terminal retirement work distinguishes surviving behavior from obsolete substrate tests. It is context, not an independent finding cover.\",\"BUGS.md, full INDEX.md, targeted queue-file and active TRIAGE_OUTCOMES.md searches for the helper, raw hex receiver and cursor-address test found no exact finding. No FILTER.md boundary is needed.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Possible loss of protection for terminal input tests that still run. That incremental attribution is refuted only for the later unused-helper cleanup. The earlier deletion of applicable raw-input tests, supplied as g141/c4, remains a distinct concern; comprehensive input coverage is not claimed.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g142/c4",
+        "line": 21,
+        "disposition": "excluded",
+        "group": "unused-hex-token-helper-cleanup",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-090 after inspecting it. At this later cleanup revision the parser and its producer/callers are already gone from retained test behavior. Removing its private self-test does not newly remove the earlier end-to-end input oracle. Drop this unused-helper incremental coverage allegation; preserve the earlier independently owned end-to-end oracle-loss finding. No exact same-root alias among the ten named batch claims. Checked source/results: [\"303a1264b7bd791e8f6f6de2c7bb6136c08e8bab diff of crates/farhelm/tests/e2e/session_lifecycle.rs removes only hex_tokens, its cursor-address-gluing self-test and the module-doc mention.\",\"Pinned git grep for hex_tokens, hexecho and hex tokens across crates/farhelm/tests at 303a1264 returns no matches. The deleted regression models synthetic raw byte replay escapes, not retained grid-text consumption.\",\"The earlier 647f0227 deletion of input receiver tests remains the supplied g141/c4 concern, outside this batch's assigned records. No conclusion here refutes or drops it. No new source search into that separate finding was performed.\"] Current coverage/results: [\"SPEC.md terminal input fidelity and SPEC_impl.md grid-only output contract checked. No contract requires an uncalled private byte transcript tokenizer.\",\"TODO.md Planned empty; plans/queue terminal retirement work distinguishes surviving behavior from obsolete substrate tests. It is context, not an independent finding cover.\",\"BUGS.md, full INDEX.md, targeted queue-file and active TRIAGE_OUTCOMES.md searches for the helper, raw hex receiver and cursor-address test found no exact finding. No FILTER.md boundary is needed.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Possible loss of protection for terminal input tests that still run. That incremental attribution is refuted only for the later unused-helper cleanup. The earlier deletion of applicable raw-input tests, supplied as g141/c4, remains a distinct concern; comprehensive input coverage is not claimed.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-090",
+          "key": "g142/c4",
+          "latest_line": 21,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "unused-hex-token-helper-cleanup",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "At this later cleanup revision the parser and its producer/callers are already gone from retained test behavior. Removing its private self-test does not newly remove the earlier end-to-end input oracle.",
+          "checks": [
+            "303a1264b7bd791e8f6f6de2c7bb6136c08e8bab diff of crates/farhelm/tests/e2e/session_lifecycle.rs removes only hex_tokens, its cursor-address-gluing self-test and the module-doc mention.",
+            "Pinned git grep for hex_tokens, hexecho and hex tokens across crates/farhelm/tests at 303a1264 returns no matches. The deleted regression models synthetic raw byte replay escapes, not retained grid-text consumption.",
+            "The earlier 647f0227 deletion of input receiver tests remains the supplied g141/c4 concern, outside this batch's assigned records. No conclusion here refutes or drops it. No new source search into that separate finding was performed."
+          ],
+          "coverage_checked": [
+            "SPEC.md terminal input fidelity and SPEC_impl.md grid-only output contract checked. No contract requires an uncalled private byte transcript tokenizer.",
+            "TODO.md Planned empty; plans/queue terminal retirement work distinguishes surviving behavior from obsolete substrate tests. It is context, not an independent finding cover.",
+            "BUGS.md, full INDEX.md, targeted queue-file and active TRIAGE_OUTCOMES.md searches for the helper, raw hex receiver and cursor-address test found no exact finding. No FILTER.md boundary is needed."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Possible loss of protection for terminal input tests that still run. That incremental attribution is refuted only for the later unused-helper cleanup. The earlier deletion of applicable raw-input tests, supplied as g141/c4, remains a distinct concern; comprehensive input coverage is not claimed.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Drop this unused-helper incremental coverage allegation; preserve the earlier independently owned end-to-end oracle-loss finding. No exact same-root alias among the ten named batch claims."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "unused-hex-token-helper-cleanup",
+        "destination": null
+      }
+    },
+    {
+      "key": "g142/c5",
+      "owner": "g142",
+      "id": "c5",
+      "domain": "rust-session-agent-regressions",
+      "purpose": "rust-session-agent-regressions: crates/farhelm/tests/e2e/supervisor_stop.rs, crates/farhelm/tests/e2e/boot_id_durable_outcome.rs, crates/farhelm/tests/e2e/create_idempotency.rs, crates/farhelm/tests/e2e/session_lifecycle.rs, crates/farhelm/tests/e2e/tcp_relays.rs, crates/farhelm/tests/spawn_cli.rs, crates/farhelm/tests/e2e/real_agent_capture.rs, crates/farhelm/tests/e2e/codex_identity.rs, crates/farhelm/tests/e2e/command_shell.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c5",
+            "state": "open",
+            "summary": "Stock tmux pane-migration comment describes systemd scopes",
+            "location": "crates/farhelm/tests/e2e/session_lifecycle.rs:4236",
+            "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. TLDR: considered whether the revised skip message still describes obsolete Farhelm migration of old terminals. Source refutation: the complete neighboring test at :4221-4370 launches /usr/bin/tmux itself, verifies libsystemd linkage, executable identity, server identity and the pane job's tmux-spawn scope outside Farhelm's agent scope. Its pane migration is stock tmux moving a job into a sibling systemd scope, not Farhelm moving old sessions between terminal substrates. The revised guard comment correctly limits ownership to the test's private socket. Suggested bucket: other (comment-accuracy concern refuted). Confidence: confirmed by source; no execution. proposed_drop: the comment refers to the systemd pane-migration premise explicitly checked by the same test. possible_cover: none; coverage sources not searched. Could-be-highest: no; this candidate is comment wording with no established security or loss-of-work route. Caveat: only the assigned comment changes were reviewed for correctness; no runtime execution of this containment test."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c5",
+            "state": "open",
+            "summary": "Stock tmux pane-migration comment describes systemd scopes",
+            "location": "crates/farhelm/tests/e2e/session_lifecycle.rs:4236",
+            "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. TLDR: considered whether the revised skip message describes obsolete Farhelm migration of old terminals, or whether the guard wording conceals reliance on terminal-host cleanup for a manually started server. Source refutation: session_lifecycle.rs:4221-4393 launches /usr/bin/tmux itself, checks libsystemd linkage, executable and server identity, verifies the pane job's tmux-spawn scope outside Farhelm's agent scope, requires ignored SIGHUP plus the session marker, and after Stop asserts the job survives while the server ends. Its pane migration is stock tmux moving a job into a sibling systemd scope, not Farhelm moving old sessions between substrates. The test creates TmuxServerGuard::with_program(socket, stock_tmux) before launch, and arms separate PidKillGuard values for the server and intentionally surviving job before any later skip. The guards are locals declared after the state/work fixtures, so they run before the directories drop. harness.rs:2648-2682 pins each PID's start time and rechecks it before killing; crates/farhelm-teststate/src/tmux/guard.rs:39-53 captures the chosen executable, and :71-100 attempts diagnostics then server shutdown on Drop even when diagnostic code unwinds. This explicit ownership agrees with the parent-supplied g144 interface result; it does not depend on TestDir ending host sockets. Suggested bucket: other (comment/fixture-ownership concerns refuted). Confidence: confirmed by source; no execution. proposed_drop: the comment names the same systemd pane-migration premise checked in the test, and the owned stock server plus intentionally surviving job retain their own cleanup guards. possible_cover: none; coverage sources not searched. Could-be-highest: no; the considered concerns are comment wording and test cleanup with no established shipped security or loss-of-work route. Caveat: source checks establish guard ownership and intended cleanup, not a runtime guarantee that every OS kill finishes. Revision preserves the original considered wording consequence and adds skip/unwind/owned-process-lifetime analysis."
+          }
+        }
+      ],
+      "latest": {
+        "line": 12,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c5",
+          "state": "open",
+          "summary": "Stock tmux pane-migration comment describes systemd scopes",
+          "location": "crates/farhelm/tests/e2e/session_lifecycle.rs:4236",
+          "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. TLDR: considered whether the revised skip message describes obsolete Farhelm migration of old terminals, or whether the guard wording conceals reliance on terminal-host cleanup for a manually started server. Source refutation: session_lifecycle.rs:4221-4393 launches /usr/bin/tmux itself, checks libsystemd linkage, executable and server identity, verifies the pane job's tmux-spawn scope outside Farhelm's agent scope, requires ignored SIGHUP plus the session marker, and after Stop asserts the job survives while the server ends. Its pane migration is stock tmux moving a job into a sibling systemd scope, not Farhelm moving old sessions between substrates. The test creates TmuxServerGuard::with_program(socket, stock_tmux) before launch, and arms separate PidKillGuard values for the server and intentionally surviving job before any later skip. The guards are locals declared after the state/work fixtures, so they run before the directories drop. harness.rs:2648-2682 pins each PID's start time and rechecks it before killing; crates/farhelm-teststate/src/tmux/guard.rs:39-53 captures the chosen executable, and :71-100 attempts diagnostics then server shutdown on Drop even when diagnostic code unwinds. This explicit ownership agrees with the parent-supplied g144 interface result; it does not depend on TestDir ending host sockets. Suggested bucket: other (comment/fixture-ownership concerns refuted). Confidence: confirmed by source; no execution. proposed_drop: the comment names the same systemd pane-migration premise checked in the test, and the owned stock server plus intentionally surviving job retain their own cleanup guards. possible_cover: none; coverage sources not searched. Could-be-highest: no; the considered concerns are comment wording and test cleanup with no established shipped security or loss-of-work route. Caveat: source checks establish guard ownership and intended cleanup, not a runtime guarantee that every OS kill finishes. Revision preserves the original considered wording consequence and adds skip/unwind/owned-process-lifetime analysis."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g142/findings.jsonl",
+        "id": "c5",
+        "line": 12,
+        "disposition": "excluded",
+        "group": "stock-user-tmux-pane-migration-comment-ownership",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-090 after inspecting it. The wording names stock tmux's systemd pane migration, which the same fixture checks. Its private server and intentionally surviving job have explicit cleanup guards; terminal-host cleanup is not their owner. Drop only the named comment/fixture-ownership concern. Intended cleanup remains distinct from measured OS cleanup success; no runtime execution occurred. Checked source/results: [\"d751ff1633bb479c7bf53920f2e4ea4ba932a1c2:crates/farhelm/tests/e2e/session_lifecycle.rs:4222-4393 starts /usr/bin/tmux on the owned socket, checks libsystemd, executable/server identity, sibling tmux-spawn scope, ignored HUP and marker, then requires the job survive Stop while the server ends.\",\"At :4294-4296 TmuxServerGuard captures the chosen stock executable before launch; :4311-4315 arms separate marker, server PID and job PID guards before later skip paths. The guards are declared after state/work fixtures and therefore drop first.\",\"d751ff16:harness.rs:2648-2682 records and rechecks /proc start time before the PID cleanup signal. farhelm-teststate/src/tmux/guard.rs:39-53 captures the executable, and :71-100 separates diagnostic and shutdown attempts on Drop. This establishes intended ownership, not a runtime guarantee every kill completes.\",\"No claim about arbitrary other-process signaling or a lost user session was established or tested.\"] Current coverage/results: [\"Both specs checked for user-run tmux containment and distinction from Farhelm's retired terminal substrate. The fixture's migration is not Farhelm terminal migration.\",\"TODO.md Planned empty. plans/queue/tmux-end-old-terminals.md:198-200 and tmux-drop-from-tooling.md:29-33 explicitly preserve the user's own tmux test. user-tmux-jobs-outlive-cleanup.md describes the same accepted containment boundary, not a comment defect.\",\"BUGS.md, full INDEX.md, targeted queue-file and active TRIAGE_OUTCOMES.md searches found no exact wrong-comment or missing-guard item for this test. FILTER.md is not used; source establishes the wording and guard owners.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The skip message might refer to obsolete Farhelm terminal migration, or guard wording might conceal reliance on host-directory cleanup for a manually launched server. Both are refuted by the stock pane-migration assertions and explicit owned guards. The history makes no catastrophic tooling or shipped user-work-loss allegation.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g142/c5",
+        "line": 12,
+        "disposition": "excluded",
+        "group": "stock-user-tmux-pane-migration-comment-ownership",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-090 after inspecting it. The wording names stock tmux's systemd pane migration, which the same fixture checks. Its private server and intentionally surviving job have explicit cleanup guards; terminal-host cleanup is not their owner. Drop only the named comment/fixture-ownership concern. Intended cleanup remains distinct from measured OS cleanup success; no runtime execution occurred. Checked source/results: [\"d751ff1633bb479c7bf53920f2e4ea4ba932a1c2:crates/farhelm/tests/e2e/session_lifecycle.rs:4222-4393 starts /usr/bin/tmux on the owned socket, checks libsystemd, executable/server identity, sibling tmux-spawn scope, ignored HUP and marker, then requires the job survive Stop while the server ends.\",\"At :4294-4296 TmuxServerGuard captures the chosen stock executable before launch; :4311-4315 arms separate marker, server PID and job PID guards before later skip paths. The guards are declared after state/work fixtures and therefore drop first.\",\"d751ff16:harness.rs:2648-2682 records and rechecks /proc start time before the PID cleanup signal. farhelm-teststate/src/tmux/guard.rs:39-53 captures the executable, and :71-100 separates diagnostic and shutdown attempts on Drop. This establishes intended ownership, not a runtime guarantee every kill completes.\",\"No claim about arbitrary other-process signaling or a lost user session was established or tested.\"] Current coverage/results: [\"Both specs checked for user-run tmux containment and distinction from Farhelm's retired terminal substrate. The fixture's migration is not Farhelm terminal migration.\",\"TODO.md Planned empty. plans/queue/tmux-end-old-terminals.md:198-200 and tmux-drop-from-tooling.md:29-33 explicitly preserve the user's own tmux test. user-tmux-jobs-outlive-cleanup.md describes the same accepted containment boundary, not a comment defect.\",\"BUGS.md, full INDEX.md, targeted queue-file and active TRIAGE_OUTCOMES.md searches found no exact wrong-comment or missing-guard item for this test. FILTER.md is not used; source establishes the wording and guard owners.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The skip message might refer to obsolete Farhelm terminal migration, or guard wording might conceal reliance on host-directory cleanup for a manually launched server. Both are refuted by the stock pane-migration assertions and explicit owned guards. The history makes no catastrophic tooling or shipped user-work-loss allegation.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-090",
+          "key": "g142/c5",
+          "latest_line": 12,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "stock-user-tmux-pane-migration-comment-ownership",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The wording names stock tmux's systemd pane migration, which the same fixture checks. Its private server and intentionally surviving job have explicit cleanup guards; terminal-host cleanup is not their owner.",
+          "checks": [
+            "d751ff1633bb479c7bf53920f2e4ea4ba932a1c2:crates/farhelm/tests/e2e/session_lifecycle.rs:4222-4393 starts /usr/bin/tmux on the owned socket, checks libsystemd, executable/server identity, sibling tmux-spawn scope, ignored HUP and marker, then requires the job survive Stop while the server ends.",
+            "At :4294-4296 TmuxServerGuard captures the chosen stock executable before launch; :4311-4315 arms separate marker, server PID and job PID guards before later skip paths. The guards are declared after state/work fixtures and therefore drop first.",
+            "d751ff16:harness.rs:2648-2682 records and rechecks /proc start time before the PID cleanup signal. farhelm-teststate/src/tmux/guard.rs:39-53 captures the executable, and :71-100 separates diagnostic and shutdown attempts on Drop. This establishes intended ownership, not a runtime guarantee every kill completes.",
+            "No claim about arbitrary other-process signaling or a lost user session was established or tested."
+          ],
+          "coverage_checked": [
+            "Both specs checked for user-run tmux containment and distinction from Farhelm's retired terminal substrate. The fixture's migration is not Farhelm terminal migration.",
+            "TODO.md Planned empty. plans/queue/tmux-end-old-terminals.md:198-200 and tmux-drop-from-tooling.md:29-33 explicitly preserve the user's own tmux test. user-tmux-jobs-outlive-cleanup.md describes the same accepted containment boundary, not a comment defect.",
+            "BUGS.md, full INDEX.md, targeted queue-file and active TRIAGE_OUTCOMES.md searches found no exact wrong-comment or missing-guard item for this test. FILTER.md is not used; source establishes the wording and guard owners."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "The skip message might refer to obsolete Farhelm terminal migration, or guard wording might conceal reliance on host-directory cleanup for a manually launched server. Both are refuted by the stock pane-migration assertions and explicit owned guards. The history makes no catastrophic tooling or shipped user-work-loss allegation.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Drop only the named comment/fixture-ownership concern. Intended cleanup remains distinct from measured OS cleanup success; no runtime execution occurred."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "stock-user-tmux-pane-migration-comment-ownership",
+        "destination": null
+      }
+    },
+    {
+      "key": "g142/c6",
+      "owner": "g142",
+      "id": "c6",
+      "domain": "rust-session-agent-regressions",
+      "purpose": "rust-session-agent-regressions: crates/farhelm/tests/e2e/supervisor_stop.rs, crates/farhelm/tests/e2e/boot_id_durable_outcome.rs, crates/farhelm/tests/e2e/create_idempotency.rs, crates/farhelm/tests/e2e/session_lifecycle.rs, crates/farhelm/tests/e2e/tcp_relays.rs, crates/farhelm/tests/spawn_cli.rs, crates/farhelm/tests/e2e/real_agent_capture.rs, crates/farhelm/tests/e2e/codex_identity.rs, crates/farhelm/tests/e2e/command_shell.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c6",
+            "state": "open",
+            "summary": "Removed tmux-driver tests target a retired implementation",
+            "location": "crates/farhelm/tests/e2e/session_lifecycle.rs:2357",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether removing the missing-session control-mode regression and direct tmux absence assertions weakens a behavior still required of running sessions. Source checks: crates/farhelm-supervisor/src/tmux.rs:1-13 now documents only installation policy and probing; the running supervisor no longer has the driver the deleted regression directly constructed. SPEC_impl.md, Terminal substrate: private tmux server, :2882-2889 says: 'every terminal runs in a terminal host' and 'The running supervisor runs no tmux at all, and its driver of the old terminals is gone'. The retained relative-cwd rejection test inspects the hosts directory (:1160-1180); the crash-before-launch test likewise asserts zero host entries rather than a missing tmux session. This does not propose independently fixing or reviewing retired driver code. Suggested bucket: other (removed regression coverage concern refuted). Confidence: confirmed by source; no execution. proposed_drop: the removed test's control-mode parser and tmux session creation no longer participate in running sessions, while the replacement terminal absence assertions address hosts. possible_cover: none; coverage sources not searched. Could-be-highest: no established shipped security or loss-of-work route from removal of tests for the retired driver. Caveat: this does not assess the separate startup conversion of historical tmux sessions, outside this assigned group."
+          }
+        },
+        {
+          "line": 14,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c6",
+            "state": "open",
+            "summary": "Removed tmux-driver tests target a retired implementation",
+            "location": "crates/farhelm/tests/e2e/session_lifecycle.rs:2357",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether removing the missing-session control-mode regression, direct tmux absence assertions and old launch override weakens a contract still required of running sessions. Source checks: crates/farhelm-supervisor/src/tmux.rs:1-13 now documents only installation policy and probing; the driver constructed by the deleted regression is gone. SPEC_impl.md, Terminal substrate: private tmux server, :2882-2889 says 'every terminal runs in a terminal host' and 'The running supervisor runs no tmux at all, and its driver of the old terminals is gone'. The retained relative-cwd rejection test checks hosts-directory absence (:1160-1180); the crash-before-launch test likewise asserts zero hosts. Synthesis checked the same commit's main.rs diff: SupervisorCmd::Run removes the tmux CLI field, the sole CLI resolution and SupervisorStartup.tmux_program together. The earlier dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 startup-tether fixture had already dropped its obsolete --tmux invocation, so it remains valid both before and after this CLI removal (c3). The d751ff1633bb479c7bf53920f2e4ea4ba932a1c2 real-agent-capture example separately drops --tmux none from the test recorder invocation: that revision's scripts/record-test-run.py parser at :232-246 has no tmux option. These are two distinct retired flags, both aligned with their actual caller; installation tmux requirements and explicit stock-server guards are not removed by these test patches (c5). Suggested bucket: other (removed regression/launch compatibility concerns refuted). Confidence: confirmed by source; no execution. proposed_drop: the removed regression directly exercised a driver no longer used by running sessions, replacement absence assertions address hosts, and the reviewed command examples no longer pass retired flags. possible_cover: none; coverage sources not searched. Could-be-highest: no established shipped security or loss-of-work route from these test/flag removals. Caveat: this does not independently evaluate startup conversion of historical tmux sessions or retired implementation defects outside the assignment. Revision preserves the original possible loss of retained coverage and adds exact-revision flag/caller interactions."
+          }
+        }
+      ],
+      "latest": {
+        "line": 14,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c6",
+          "state": "open",
+          "summary": "Removed tmux-driver tests target a retired implementation",
+          "location": "crates/farhelm/tests/e2e/session_lifecycle.rs:2357",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether removing the missing-session control-mode regression, direct tmux absence assertions and old launch override weakens a contract still required of running sessions. Source checks: crates/farhelm-supervisor/src/tmux.rs:1-13 now documents only installation policy and probing; the driver constructed by the deleted regression is gone. SPEC_impl.md, Terminal substrate: private tmux server, :2882-2889 says 'every terminal runs in a terminal host' and 'The running supervisor runs no tmux at all, and its driver of the old terminals is gone'. The retained relative-cwd rejection test checks hosts-directory absence (:1160-1180); the crash-before-launch test likewise asserts zero hosts. Synthesis checked the same commit's main.rs diff: SupervisorCmd::Run removes the tmux CLI field, the sole CLI resolution and SupervisorStartup.tmux_program together. The earlier dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 startup-tether fixture had already dropped its obsolete --tmux invocation, so it remains valid both before and after this CLI removal (c3). The d751ff1633bb479c7bf53920f2e4ea4ba932a1c2 real-agent-capture example separately drops --tmux none from the test recorder invocation: that revision's scripts/record-test-run.py parser at :232-246 has no tmux option. These are two distinct retired flags, both aligned with their actual caller; installation tmux requirements and explicit stock-server guards are not removed by these test patches (c5). Suggested bucket: other (removed regression/launch compatibility concerns refuted). Confidence: confirmed by source; no execution. proposed_drop: the removed regression directly exercised a driver no longer used by running sessions, replacement absence assertions address hosts, and the reviewed command examples no longer pass retired flags. possible_cover: none; coverage sources not searched. Could-be-highest: no established shipped security or loss-of-work route from these test/flag removals. Caveat: this does not independently evaluate startup conversion of historical tmux sessions or retired implementation defects outside the assignment. Revision preserves the original possible loss of retained coverage and adds exact-revision flag/caller interactions."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g142/findings.jsonl",
+        "id": "c6",
+        "line": 14,
+        "disposition": "excluded",
+        "group": "retired-tmux-driver-test-and-launch-flags",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-090 after inspecting it. The deleted missing-session regression directly constructed a driver removed from running sessions. Retained rejection checks now inspect terminal hosts, and callers stop passing the separately retired product/recorder flags. Drop the retired-driver test/flag concern only. g142/c3 and c5 provide distinct fixture context, not aliases for this root. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333:crates/farhelm-supervisor/src/tmux.rs:1-13 retains installation policy/probing, explicitly stating the supervisor no longer drives tmux. SPEC_impl.md:2882-2889 confirms all terminals use hosts and the old driver is gone.\",\"1ed482dd:crates/farhelm/tests/e2e/session_lifecycle.rs:1150-1180 retains InvalidRequest, empty session listing and zero host-directory entries for relative-cwd refusal. These are applicable replacement absence assertions.\",\"1ed482dd main.rs diff removes SupervisorCmd::Run.tmux, the sole resolution and SupervisorStartup.tmux_program together. dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 already removed the startup-tether fixture's --tmux caller.\",\"d751ff1633bb479c7bf53920f2e4ea4ba932a1c2:scripts/record-test-run.py:231-255 defines parser arguments without --tmux; removal of --tmux none from the real-agent example aligns that distinct recorder caller. Stock user-tmux guards remain independently owned under g142/c5.\",\"This does not independently judge historical-session startup conversion or any defect in the retired implementation. No execution.\"] Current coverage/results: [\"Both specs checked for current terminal-host/grid contract and historical-server shutdown. They explicitly remove the driver, not merely hide a still-running old terminal type.\",\"TODO.md Planned empty. plans/queue/tmux-end-old-terminals.md:110-132 and 289-295 retire driver/flags/timeouts with their code; tmux-drop-from-tooling.md:45-53 removes the distinct recorder mode. These match the intended obsolete surface removal.\",\"BUGS.md, full INDEX.md, targeted queue-file and active TRIAGE_OUTCOMES.md searches found no exact retained driver-test or these flag/caller inconsistencies. FILTER.md not used.\"] Exact cited cover: [{\"source\":\"1ed482dde220452e424973faf38a5e1318986333:SPEC_impl.md:2887-2889\",\"quote\":\"The running supervisor runs no tmux at all, and its driver of the old terminals is gone\"}] Original stronger consequence and missing premise remain preserved: \"Potential weakening of required missing-session/absence behavior or launch compatibility by removing tmux tests and overrides. Source refutes that narrow obsolete-driver/caller concern. Startup conversion, installation requirements and stock user-tmux cleanup remain separate and were not dismissed.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g142/c6",
+        "line": 14,
+        "disposition": "excluded",
+        "group": "retired-tmux-driver-test-and-launch-flags",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-090 after inspecting it. The deleted missing-session regression directly constructed a driver removed from running sessions. Retained rejection checks now inspect terminal hosts, and callers stop passing the separately retired product/recorder flags. Drop the retired-driver test/flag concern only. g142/c3 and c5 provide distinct fixture context, not aliases for this root. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333:crates/farhelm-supervisor/src/tmux.rs:1-13 retains installation policy/probing, explicitly stating the supervisor no longer drives tmux. SPEC_impl.md:2882-2889 confirms all terminals use hosts and the old driver is gone.\",\"1ed482dd:crates/farhelm/tests/e2e/session_lifecycle.rs:1150-1180 retains InvalidRequest, empty session listing and zero host-directory entries for relative-cwd refusal. These are applicable replacement absence assertions.\",\"1ed482dd main.rs diff removes SupervisorCmd::Run.tmux, the sole resolution and SupervisorStartup.tmux_program together. dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 already removed the startup-tether fixture's --tmux caller.\",\"d751ff1633bb479c7bf53920f2e4ea4ba932a1c2:scripts/record-test-run.py:231-255 defines parser arguments without --tmux; removal of --tmux none from the real-agent example aligns that distinct recorder caller. Stock user-tmux guards remain independently owned under g142/c5.\",\"This does not independently judge historical-session startup conversion or any defect in the retired implementation. No execution.\"] Current coverage/results: [\"Both specs checked for current terminal-host/grid contract and historical-server shutdown. They explicitly remove the driver, not merely hide a still-running old terminal type.\",\"TODO.md Planned empty. plans/queue/tmux-end-old-terminals.md:110-132 and 289-295 retire driver/flags/timeouts with their code; tmux-drop-from-tooling.md:45-53 removes the distinct recorder mode. These match the intended obsolete surface removal.\",\"BUGS.md, full INDEX.md, targeted queue-file and active TRIAGE_OUTCOMES.md searches found no exact retained driver-test or these flag/caller inconsistencies. FILTER.md not used.\"] Exact cited cover: [{\"source\":\"1ed482dde220452e424973faf38a5e1318986333:SPEC_impl.md:2887-2889\",\"quote\":\"The running supervisor runs no tmux at all, and its driver of the old terminals is gone\"}] Original stronger consequence and missing premise remain preserved: \"Potential weakening of required missing-session/absence behavior or launch compatibility by removing tmux tests and overrides. Source refutes that narrow obsolete-driver/caller concern. Startup conversion, installation requirements and stock user-tmux cleanup remain separate and were not dismissed.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-090",
+          "key": "g142/c6",
+          "latest_line": 14,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "retired-tmux-driver-test-and-launch-flags",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The deleted missing-session regression directly constructed a driver removed from running sessions. Retained rejection checks now inspect terminal hosts, and callers stop passing the separately retired product/recorder flags.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333:crates/farhelm-supervisor/src/tmux.rs:1-13 retains installation policy/probing, explicitly stating the supervisor no longer drives tmux. SPEC_impl.md:2882-2889 confirms all terminals use hosts and the old driver is gone.",
+            "1ed482dd:crates/farhelm/tests/e2e/session_lifecycle.rs:1150-1180 retains InvalidRequest, empty session listing and zero host-directory entries for relative-cwd refusal. These are applicable replacement absence assertions.",
+            "1ed482dd main.rs diff removes SupervisorCmd::Run.tmux, the sole resolution and SupervisorStartup.tmux_program together. dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 already removed the startup-tether fixture's --tmux caller.",
+            "d751ff1633bb479c7bf53920f2e4ea4ba932a1c2:scripts/record-test-run.py:231-255 defines parser arguments without --tmux; removal of --tmux none from the real-agent example aligns that distinct recorder caller. Stock user-tmux guards remain independently owned under g142/c5.",
+            "This does not independently judge historical-session startup conversion or any defect in the retired implementation. No execution."
+          ],
+          "coverage_checked": [
+            "Both specs checked for current terminal-host/grid contract and historical-server shutdown. They explicitly remove the driver, not merely hide a still-running old terminal type.",
+            "TODO.md Planned empty. plans/queue/tmux-end-old-terminals.md:110-132 and 289-295 retire driver/flags/timeouts with their code; tmux-drop-from-tooling.md:45-53 removes the distinct recorder mode. These match the intended obsolete surface removal.",
+            "BUGS.md, full INDEX.md, targeted queue-file and active TRIAGE_OUTCOMES.md searches found no exact retained driver-test or these flag/caller inconsistencies. FILTER.md not used."
+          ],
+          "exact_cover_quotes": [
+            {
+              "source": "1ed482dde220452e424973faf38a5e1318986333:SPEC_impl.md:2887-2889",
+              "quote": "The running supervisor runs no tmux at all, and its driver of the old terminals is gone"
+            }
+          ],
+          "missing_premise": null,
+          "original_stronger_consequence": "Potential weakening of required missing-session/absence behavior or launch compatibility by removing tmux tests and overrides. Source refutes that narrow obsolete-driver/caller concern. Startup conversion, installation requirements and stock user-tmux cleanup remain separate and were not dismissed.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Drop the retired-driver test/flag concern only. g142/c3 and c5 provide distinct fixture context, not aliases for this root."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retired-tmux-driver-test-and-launch-flags",
+        "destination": null
+      }
+    },
+    {
+      "key": "g142/c7",
+      "owner": "g142",
+      "id": "c7",
+      "domain": "rust-session-agent-regressions",
+      "purpose": "rust-session-agent-regressions: crates/farhelm/tests/e2e/supervisor_stop.rs, crates/farhelm/tests/e2e/boot_id_durable_outcome.rs, crates/farhelm/tests/e2e/create_idempotency.rs, crates/farhelm/tests/e2e/session_lifecycle.rs, crates/farhelm/tests/e2e/tcp_relays.rs, crates/farhelm/tests/spawn_cli.rs, crates/farhelm/tests/e2e/real_agent_capture.rs, crates/farhelm/tests/e2e/codex_identity.rs, crates/farhelm/tests/e2e/command_shell.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c7",
+            "state": "open",
+            "summary": "Retained EOF test does not establish when the reply was produced",
+            "location": "crates/farhelm/tests/e2e/session_lifecycle.rs:2558",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: the retained stdio half-close test observes a clean proxy exit and a SessionList reply, but it does not prove that the reply was produced or forwarded after stdin closed. The comment that the reply is in flight precisely because stdin closed first is stronger than the synchronization establishes. Source: :2540-2563 writes hello plus ListSessions to the child's stdin, drops the write end, then collects output. The child and supervisor can already process the request and flush its reply before the parent's write_all returns and its drop runs. Thus a hypothetical proxy that exits immediately on EOF could pass this fixture when its reply was already flushed; this is a test-evidence limitation, not observed runtime behavior. The assigned patch changes only suite_timeouts to SupervisorTimeouts::default in the earlier stdio_proxy_carries_a_real_session fixture; it does not alter this half-close test or remove a timing barrier from it. Suggested bucket: other (pre-existing test-evidence limitation). Confidence: confirmed by source ordering; no execution. proposed_drop: outside the assigned changed behavior; the EOF witness and its synchronization are unchanged in this commit and no removed tmux-only budget supplied the missing reply-timing barrier. possible_cover: none; coverage sources not searched. Could-be-highest: no established shipped security or loss-of-work route; this concerns test detection strength only. Caveat: wait_with_output's timeout still establishes bounded process exit, and finding the reply still proves that this run delivered it. A controlled server that holds the reply until it has observed request-side EOF would establish the stronger temporal premise, but no reproduction or fix is requested."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c7",
+            "state": "open",
+            "summary": "Retained EOF test does not establish when the reply was produced",
+            "location": "crates/farhelm/tests/e2e/session_lifecycle.rs:2558",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: the retained stdio half-close test observes a clean proxy exit and a SessionList reply, but does not prove the reply was produced or forwarded after stdin closed. The comment that the reply is in flight precisely because stdin closed first is stronger than the synchronization establishes. Source: :2540-2563 writes hello plus ListSessions to the child's stdin, drops the write end, then collects output. The child and supervisor can process the request and flush its reply before the parent's write_all returns and its drop runs. Thus a hypothetical proxy that exits immediately on EOF could pass when its reply was already flushed; this is a test-evidence limitation, not observed runtime behavior. Additional source check: crates/farhelm/src/main.rs:2751-2775 reads stdin and on EOF shuts down only the socket's write direction; :2804-2815 explicitly awaits downstream after clean upstream completion; :2820-2835 exits the process after the selected result so the uncancellable stdin reader cannot retain it. The implementation therefore preserves the promised drain even though this particular witness cannot deterministically distinguish an EOF-discarding mutant. ChildStdin is taken and dropped before wait_with_output; the proxy has kill_on_drop, wait_with_output drains stdout while waiting, and the 15s timeout bounds the observed process exit. The assigned patch changes only suite_timeouts to SupervisorTimeouts::default in the earlier stdio_proxy_carries_a_real_session fixture; it changes neither this half-close test nor its proxy path and removes no timing barrier. Suggested bucket: other (pre-existing test-evidence limitation). Confidence: confirmed by source ordering; no execution. proposed_drop: outside the assigned changed behavior; the EOF witness is unchanged in this commit and no removed tmux-only budget supplied the missing reply-timing barrier, while the actual proxy source still drains downstream. possible_cover: none; coverage sources not searched. Could-be-highest: no established shipped security or loss-of-work route; this concerns test detection strength only. Caveat: the timeout still establishes bounded process exit, and finding the reply proves that this run delivered it. A controlled server holding its reply until it observes request-side EOF would establish the stronger temporal premise; no reproduction or fix was requested. Revision preserves the original possible false-pass consequence and adds source confirmation that no corresponding shipped defect is established."
+          }
+        },
+        {
+          "line": 15,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c7",
+            "state": "open",
+            "summary": "Retained EOF test does not establish when the reply was produced",
+            "location": "crates/farhelm/tests/e2e/session_lifecycle.rs:2558",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Whole reviewed range: exclusive 6e423e30068b62c6cfa276c6d720ee35bb70387a through inclusive 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: the raw stdio half-close test can collect a reply already produced before stdin closes, so it does not deterministically reject a proxy mutant that discards later replies at EOF. The comment asserting that the reply is in flight precisely because stdin closed first overstates its synchronization. Source ordering remains write hello/ListSessions, drop ChildStdin, then wait_with_output; the child and supervisor may already have flushed the reply before the parent's drop. This is a distinct test-oracle/documentation limitation; current production correctness does not refute it. Whole-range attribution check requested by parent: at the exclusive base, crates/farhelm/tests/e2e/session_lifecycle.rs:3387-3450 already contains the same complete test, including the half-close docstring, :3408-3409 in-flight comment, :3426-3428 write/drop ordering, :3430-3434 bounded clean-exit assertion and :3436-3449 SessionList reply scan/assertion. git log over the complete bounded range with -G matching the test name, in-flight comment and half-close docstring for crates/farhelm/tests returned no commits. Thus both the asserted premise and oracle defect predate the exclusive base, not merely the immediate 1ed482dd parent. The assigned 1ed482dd patch changes only timeouts in the earlier real-session proxy fixture, and no removed tmux floor established this test's missing reply-after-EOF barrier. Additional source context, not a refutation of the test gap: main.rs:2751-2775 half-closes only the upstream socket at EOF, :2804-2815 awaits downstream after clean upstream completion, and :2820-2835 exits the process; no matching shipped proxy bug is established. Suggested bucket: other (pre-base test-oracle/documentation defect). Confidence: confirmed by bounded base source and history; no execution. proposed_drop: precise whole-range pre-base attribution, replacing the earlier insufficient immediate-parent-only rationale. possible_cover: none; prohibited coverage sources not searched. Could-be-highest: no established shipped security or loss-of-work route; the consequence is test discrimination strength. Caveats: collected reply plus clean bounded child exit remain useful observations of a run; a controlled reply-after-EOF barrier would be needed for the stronger witness. No reproduction or fix requested or performed. Original possible false-pass consequence is preserved; production correctness is explicitly not the drop basis. Parent has not accepted any drop."
+          }
+        }
+      ],
+      "latest": {
+        "line": 15,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c7",
+          "state": "open",
+          "summary": "Retained EOF test does not establish when the reply was produced",
+          "location": "crates/farhelm/tests/e2e/session_lifecycle.rs:2558",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Whole reviewed range: exclusive 6e423e30068b62c6cfa276c6d720ee35bb70387a through inclusive 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: the raw stdio half-close test can collect a reply already produced before stdin closes, so it does not deterministically reject a proxy mutant that discards later replies at EOF. The comment asserting that the reply is in flight precisely because stdin closed first overstates its synchronization. Source ordering remains write hello/ListSessions, drop ChildStdin, then wait_with_output; the child and supervisor may already have flushed the reply before the parent's drop. This is a distinct test-oracle/documentation limitation; current production correctness does not refute it. Whole-range attribution check requested by parent: at the exclusive base, crates/farhelm/tests/e2e/session_lifecycle.rs:3387-3450 already contains the same complete test, including the half-close docstring, :3408-3409 in-flight comment, :3426-3428 write/drop ordering, :3430-3434 bounded clean-exit assertion and :3436-3449 SessionList reply scan/assertion. git log over the complete bounded range with -G matching the test name, in-flight comment and half-close docstring for crates/farhelm/tests returned no commits. Thus both the asserted premise and oracle defect predate the exclusive base, not merely the immediate 1ed482dd parent. The assigned 1ed482dd patch changes only timeouts in the earlier real-session proxy fixture, and no removed tmux floor established this test's missing reply-after-EOF barrier. Additional source context, not a refutation of the test gap: main.rs:2751-2775 half-closes only the upstream socket at EOF, :2804-2815 awaits downstream after clean upstream completion, and :2820-2835 exits the process; no matching shipped proxy bug is established. Suggested bucket: other (pre-base test-oracle/documentation defect). Confidence: confirmed by bounded base source and history; no execution. proposed_drop: precise whole-range pre-base attribution, replacing the earlier insufficient immediate-parent-only rationale. possible_cover: none; prohibited coverage sources not searched. Could-be-highest: no established shipped security or loss-of-work route; the consequence is test discrimination strength. Caveats: collected reply plus clean bounded child exit remain useful observations of a run; a controlled reply-after-EOF barrier would be needed for the stronger witness. No reproduction or fix requested or performed. Original possible false-pass consequence is preserved; production correctness is explicitly not the drop basis. Parent has not accepted any drop."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g142/findings.jsonl",
+        "id": "c7",
+        "line": 15,
+        "disposition": "excluded",
+        "group": "prebase-stdio-half-close-reply-timing-oracle",
+        "reason": "Parent explicitly accepted named out-of-range proposal from claims-090 after inspecting it. The test's timing/documentation limitation is real but already complete at the exclusive review base. The drop basis is whole-range attribution, not correct production draining. Propose excluding only on verified pre-base attribution. A reply held until request-side EOF would establish the stronger oracle, but no fix, reproduction or new review is requested. Checked source/results: [\"6e423e30068b62c6cfa276c6d720ee35bb70387a:crates/farhelm/tests/e2e/session_lifecycle.rs:3387-3450 already has the same half-close docstring, :3408-3409 in-flight claim, :3426-3428 write/drop ordering and :3430-3449 bounded clean exit/reply scan.\",\"1ed482dde220452e424973faf38a5e1318986333:session_lifecycle.rs:2528-2582 retains that ordering. The child and supervisor may finish a reply before the parent's stdin drop, so the oracle does not deterministically distinguish a reply-discarding EOF mutant. It still checks that the observed reply arrived and the process exited cleanly within 15 seconds.\",\"git log -G matching the test name, in-flight timing comment and half-close docstring over exclusive 6e423e30068b62c6cfa276c6d720ee35bb70387a through inclusive 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db returns no commits for crates/farhelm/tests. This confirms pre-base attribution across the whole range rather than just the immediate parent.\",\"1ed482dd:crates/farhelm/src/main.rs:2752-2773 half-closes upstream at EOF; :2804-2815 awaits downstream; :2819-2834 exits the process. That context establishes no corresponding shipped proxy defect but is not a refutation of the test gap. No runtime reproduction.\"] Current coverage/results: [\"SPEC.md terminal transport/reconnect contract and SPEC_impl.md:6763-6775 retain clean EOF half-close/drain. They do not accept the stronger test timing assertion.\",\"TODO.md Planned empty; targeted plans/queue searches for stdio/half-close/EOF/tether found no replacement for this reply-after-EOF witness.\",\"BUGS.md is an unrelated local SSH helper-output provisioning hang. Full INDEX.md and matching queue-file checks found closed-stdin-epipe-witness.md, but that concerns keeping SSH input open after remote EPIPE, a different trigger/path/oracle. input-test-comments-overstate-termination-coverage.md concerns WebSocket reader/adjacent-frame claims; it is also distinct.\",\"Active TRIAGE_OUTCOMES.md named missing-witness decisions do not cover this test. FILTER.md does not clearly apply to a test oracle/comment overstatement. No coverage/filter drop is proposed.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Possible false pass against a proxy that discards replies after stdin EOF, plus an overstated in-flight timing comment. Earlier history incorrectly leaned on unchanged immediate-patch behavior and production correctness; latest history replaces that with exclusive-base source and bounded whole-range history. The actual test defect is preserved as pre-base, with no shipped product bug asserted.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g142/c7",
+        "line": 15,
+        "disposition": "excluded",
+        "group": "prebase-stdio-half-close-reply-timing-oracle",
+        "bucket": "other",
+        "recording": "out-of-range",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named out-of-range proposal from claims-090 after inspecting it. The test's timing/documentation limitation is real but already complete at the exclusive review base. The drop basis is whole-range attribution, not correct production draining. Propose excluding only on verified pre-base attribution. A reply held until request-side EOF would establish the stronger oracle, but no fix, reproduction or new review is requested. Checked source/results: [\"6e423e30068b62c6cfa276c6d720ee35bb70387a:crates/farhelm/tests/e2e/session_lifecycle.rs:3387-3450 already has the same half-close docstring, :3408-3409 in-flight claim, :3426-3428 write/drop ordering and :3430-3449 bounded clean exit/reply scan.\",\"1ed482dde220452e424973faf38a5e1318986333:session_lifecycle.rs:2528-2582 retains that ordering. The child and supervisor may finish a reply before the parent's stdin drop, so the oracle does not deterministically distinguish a reply-discarding EOF mutant. It still checks that the observed reply arrived and the process exited cleanly within 15 seconds.\",\"git log -G matching the test name, in-flight timing comment and half-close docstring over exclusive 6e423e30068b62c6cfa276c6d720ee35bb70387a through inclusive 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db returns no commits for crates/farhelm/tests. This confirms pre-base attribution across the whole range rather than just the immediate parent.\",\"1ed482dd:crates/farhelm/src/main.rs:2752-2773 half-closes upstream at EOF; :2804-2815 awaits downstream; :2819-2834 exits the process. That context establishes no corresponding shipped proxy defect but is not a refutation of the test gap. No runtime reproduction.\"] Current coverage/results: [\"SPEC.md terminal transport/reconnect contract and SPEC_impl.md:6763-6775 retain clean EOF half-close/drain. They do not accept the stronger test timing assertion.\",\"TODO.md Planned empty; targeted plans/queue searches for stdio/half-close/EOF/tether found no replacement for this reply-after-EOF witness.\",\"BUGS.md is an unrelated local SSH helper-output provisioning hang. Full INDEX.md and matching queue-file checks found closed-stdin-epipe-witness.md, but that concerns keeping SSH input open after remote EPIPE, a different trigger/path/oracle. input-test-comments-overstate-termination-coverage.md concerns WebSocket reader/adjacent-frame claims; it is also distinct.\",\"Active TRIAGE_OUTCOMES.md named missing-witness decisions do not cover this test. FILTER.md does not clearly apply to a test oracle/comment overstatement. No coverage/filter drop is proposed.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Possible false pass against a proxy that discards replies after stdin EOF, plus an overstated in-flight timing comment. Earlier history incorrectly leaned on unchanged immediate-patch behavior and production correctness; latest history replaces that with exclusive-base source and bounded whole-range history. The actual test defect is preserved as pre-base, with no shipped product bug asserted.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-090",
+          "key": "g142/c7",
+          "latest_line": 15,
+          "recommendation": "out-of-range",
+          "bucket": "other",
+          "underlying_key": "prebase-stdio-half-close-reply-timing-oracle",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The test's timing/documentation limitation is real but already complete at the exclusive review base. The drop basis is whole-range attribution, not correct production draining.",
+          "checks": [
+            "6e423e30068b62c6cfa276c6d720ee35bb70387a:crates/farhelm/tests/e2e/session_lifecycle.rs:3387-3450 already has the same half-close docstring, :3408-3409 in-flight claim, :3426-3428 write/drop ordering and :3430-3449 bounded clean exit/reply scan.",
+            "1ed482dde220452e424973faf38a5e1318986333:session_lifecycle.rs:2528-2582 retains that ordering. The child and supervisor may finish a reply before the parent's stdin drop, so the oracle does not deterministically distinguish a reply-discarding EOF mutant. It still checks that the observed reply arrived and the process exited cleanly within 15 seconds.",
+            "git log -G matching the test name, in-flight timing comment and half-close docstring over exclusive 6e423e30068b62c6cfa276c6d720ee35bb70387a through inclusive 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db returns no commits for crates/farhelm/tests. This confirms pre-base attribution across the whole range rather than just the immediate parent.",
+            "1ed482dd:crates/farhelm/src/main.rs:2752-2773 half-closes upstream at EOF; :2804-2815 awaits downstream; :2819-2834 exits the process. That context establishes no corresponding shipped proxy defect but is not a refutation of the test gap. No runtime reproduction."
+          ],
+          "coverage_checked": [
+            "SPEC.md terminal transport/reconnect contract and SPEC_impl.md:6763-6775 retain clean EOF half-close/drain. They do not accept the stronger test timing assertion.",
+            "TODO.md Planned empty; targeted plans/queue searches for stdio/half-close/EOF/tether found no replacement for this reply-after-EOF witness.",
+            "BUGS.md is an unrelated local SSH helper-output provisioning hang. Full INDEX.md and matching queue-file checks found closed-stdin-epipe-witness.md, but that concerns keeping SSH input open after remote EPIPE, a different trigger/path/oracle. input-test-comments-overstate-termination-coverage.md concerns WebSocket reader/adjacent-frame claims; it is also distinct.",
+            "Active TRIAGE_OUTCOMES.md named missing-witness decisions do not cover this test. FILTER.md does not clearly apply to a test oracle/comment overstatement. No coverage/filter drop is proposed."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Possible false pass against a proxy that discards replies after stdin EOF, plus an overstated in-flight timing comment. Earlier history incorrectly leaned on unchanged immediate-patch behavior and production correctness; latest history replaces that with exclusive-base source and bounded whole-range history. The actual test defect is preserved as pre-base, with no shipped product bug asserted.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Propose excluding only on verified pre-base attribution. A reply held until request-side EOF would establish the stronger oracle, but no fix, reproduction or new review is requested."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "prebase-stdio-half-close-reply-timing-oracle",
+        "destination": null
+      }
+    },
+    {
+      "key": "g142/l8",
+      "owner": "g142",
+      "id": "l8",
+      "domain": "rust-session-agent-regressions",
+      "purpose": "rust-session-agent-regressions: crates/farhelm/tests/e2e/supervisor_stop.rs, crates/farhelm/tests/e2e/boot_id_durable_outcome.rs, crates/farhelm/tests/e2e/create_idempotency.rs, crates/farhelm/tests/e2e/session_lifecycle.rs, crates/farhelm/tests/e2e/tcp_relays.rs, crates/farhelm/tests/spawn_cli.rs, crates/farhelm/tests/e2e/real_agent_capture.rs, crates/farhelm/tests/e2e/codex_identity.rs, crates/farhelm/tests/e2e/command_shell.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 16,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l8",
+            "state": "open",
+            "summary": "Check stop-race comment against host exit-record ordering",
+            "location": "crates/farhelm/tests/e2e/boot_id_durable_outcome.rs:573",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: the migrated stop/list race explanation now says the terminal host records its child's exit the instant the process dies. A host's processed exit is ordered behind output, so this may overstate the timing premise that makes the concurrent-list scenario effective. Concrete source read: boot_id_durable_outcome.rs:567-637 changes that explanation from tmux to the host while keeping a finite concurrent poller and final annotation assertion. Existing governing host contract in SPEC_impl.md, Terminal host, says a terminal counts as exited only once the stream exit record is processed, after drained child output. Next check: inspect the host's actual child reap/output-drain and runtime exit-record paths at this revision, then distinguish host recording from supervisor observation and determine whether the changed wording introduces a material false contract or only describes an ordinary quiet-fixture window imprecisely. Suggested bucket: other (test rationale/oracle), not a shipped annotation-loss allegation. Confidence: initial concrete source lead, not a completed finding or unverified-after-investigation result. proposed_drop: false pending source check. possible_cover: none in supplied neighbour records for this stop-race comment. Could-be-highest: no established security or loss-of-work route; the consequence under investigation is test timing rationale. No runtime observation, reproduction or test execution. Missing premise: exact host record publication timing relative to child exit and Stop's sweep, and whether the test depends on immediate publication. This lead must be settled before delivery."
+          }
+        },
+        {
+          "line": 17,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l8",
+            "state": "open",
+            "summary": "Stop-race comment does not require synchronous streamed exit publication",
+            "location": "crates/farhelm/tests/e2e/boot_id_durable_outcome.rs:573",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: checked whether replacing tmux with terminal-host wording falsely makes immediate exit publication a premise of the concurrent list/Stop test. Original concern preserved: a delayed host exit record could narrow the intended list-versus-stop observation window, making the timing explanation misleading. Source checks resolve the specific contradiction: crates/terminal-host/src/host.rs:455-472 calls nonblocking waitpid and immediately stores self.child_exit = Some(exit); it then drains output before journaling the stream's exit at :478-486. The comment says the host records its child's exit, which this immediate reaped-status field does; it does not promise the supervisor has already processed the stream's Exited record. crates/terminal-host/SPEC.md:130-148 explicitly separates child reaping/output drain from end of output, and hosts/terminal.rs:3932-3942 only advances runtime liveness when the exit record is processed. Thus reaping, journal publication and supervisor observation are distinct source boundaries, not a shown contradiction in the changed sentence. The test at boot_id_durable_outcome.rs:587-637 starts a successful observer before Stop, requires every concurrent list to succeed, waits for the poller and asserts both final and restarted annotation; it does not assert a precise timing bound for the host's publication. Suggested bucket: other (considered test-rationale concern). Confidence: confirmed source refutation of the immediate-publication interpretation; no execution. proposed_drop: the suspected timing contract conflated the host's retained reaped status with publication/processing of its later stream record; the new sentence makes no synchronous stream-delivery guarantee. possible_cover: none in supplied neighbour records. Could-be-highest: no established security or loss-of-work route; this was a test-rationale lead, not an allegation of current annotation loss. Caveats: these checks do not prove deterministic scheduling of the list race or prove it occurred in a run; the test's final annotation oracle remains probabilistic concurrency coverage. No unverified-after-investigation premise remains for this interpretation. Lead l8 is resolved as this candidate; no runtime tests, reproductions or live-install actions."
+          }
+        }
+      ],
+      "latest": {
+        "line": 17,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l8",
+          "state": "open",
+          "summary": "Stop-race comment does not require synchronous streamed exit publication",
+          "location": "crates/farhelm/tests/e2e/boot_id_durable_outcome.rs:573",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: checked whether replacing tmux with terminal-host wording falsely makes immediate exit publication a premise of the concurrent list/Stop test. Original concern preserved: a delayed host exit record could narrow the intended list-versus-stop observation window, making the timing explanation misleading. Source checks resolve the specific contradiction: crates/terminal-host/src/host.rs:455-472 calls nonblocking waitpid and immediately stores self.child_exit = Some(exit); it then drains output before journaling the stream's exit at :478-486. The comment says the host records its child's exit, which this immediate reaped-status field does; it does not promise the supervisor has already processed the stream's Exited record. crates/terminal-host/SPEC.md:130-148 explicitly separates child reaping/output drain from end of output, and hosts/terminal.rs:3932-3942 only advances runtime liveness when the exit record is processed. Thus reaping, journal publication and supervisor observation are distinct source boundaries, not a shown contradiction in the changed sentence. The test at boot_id_durable_outcome.rs:587-637 starts a successful observer before Stop, requires every concurrent list to succeed, waits for the poller and asserts both final and restarted annotation; it does not assert a precise timing bound for the host's publication. Suggested bucket: other (considered test-rationale concern). Confidence: confirmed source refutation of the immediate-publication interpretation; no execution. proposed_drop: the suspected timing contract conflated the host's retained reaped status with publication/processing of its later stream record; the new sentence makes no synchronous stream-delivery guarantee. possible_cover: none in supplied neighbour records. Could-be-highest: no established security or loss-of-work route; this was a test-rationale lead, not an allegation of current annotation loss. Caveats: these checks do not prove deterministic scheduling of the list race or prove it occurred in a run; the test's final annotation oracle remains probabilistic concurrency coverage. No unverified-after-investigation premise remains for this interpretation. Lead l8 is resolved as this candidate; no runtime tests, reproductions or live-install actions."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g142/findings.jsonl",
+        "id": "l8",
+        "line": 17,
+        "disposition": "excluded",
+        "group": "stop-list-race-comment-reaping-versus-stream-publication",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-091 after inspecting it. The suspected synchronous streamed-exit contract is not established. The host retains the reaped status before it publishes the drained-output exit record; the test does not assert synchronous delivery. This does not establish that its probabilistic race occurred in any run. Accept the latest distinction between retained reaped status and later streamed exit processing. Refutation is limited to the synchronous-publication interpretation; it does not certify deterministic race coverage or literal instantaneous recording. Checked source/results: [\"At 1ed482dde220452e424973faf38a5e1318986333, boot_id_durable_outcome.rs:567-587 explains the list/Stop race; :595-620 starts a successful concurrent observer, sends 200 lists and awaits it; :622-643 checks the final annotation and its persistence after restart.\",\"At that revision, crates/terminal-host/src/host.rs:455-475 uses nonblocking waitpid, stores child_exit at :471 and starts output drain. finish_drain at :478-486 publishes the journal exit only after drain completion or its bounds.\",\"At that revision, hosts/terminal.rs:3929-3942 advances runtime liveness only on processing Exited. crates/terminal-host/SPEC.md:130-147 separates reaping, draining, end of output and host lifetime. These are distinct boundaries.\",\"Source inspection only. The word 'instant' is informal: waitpid/event-loop scheduling is not a literal zero-delay guarantee, and neither the 200 polls nor final assertions prove an overlap with a particular death observation. No product annotation-loss claim or runtime observation follows.\"] Current coverage/results: {\"SPEC.md\":\"Current Terminal experience and Lifecycle operations were searched and relevant paragraphs read. Retained terminals and cleanup semantics do not require synchronous exit publication or prove this race was exercised.\",\"SPEC_impl.md\":\"Current Terminal host runtime and switch-point paragraphs, including :2049-2052 and :2135-2148, explicitly separate process roots from processed exit evidence. No acceptance of an inaccurate test timing claim was found.\",\"TODO.md Planned\":\"Empty at recording-time main; no coverage.\",\"plans/queue\":\"Searched for the named test, stop race, reaping and exit-record timing. The matching tmux documentation plan is already landed per plans/REPORTS.md:32, and does not cover this proposed comment concern as unlanded work.\",\"BUGS.md\":\"Read in full; its SSH-output-holder provisioning issue is unrelated.\",\"INDEX.md and queue\":\"Read INDEX.md in full and searched matching queue text. stop-annotation-exit-witness.md was read in full: it concerns an immediate assertion in restart_under_concurrency.rs, not this finite polling test or this comment. No exact alias or useful extension was established.\",\"TRIAGE_OUTCOMES.md\":\"Searched active ledger for this test, list-versus-stop wording and exit/publication premise; no matching decision.\",\"FILTER.md\":\"Read in full. No filter used: this is a source refutation of the proposed interpretation, not omission because a race is rare.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Delayed host exit publication could narrow the list-versus-Stop observation window and make the migrated test's timing rationale misleading. This was never a claim of reproduced annotation loss or user-work loss.\"; \"No synchronous stream-delivery promise or dependence on it was shown. Actual overlap and incidence remain unobserved; literal instant reaping is not guaranteed.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g142/l8",
+        "line": 17,
+        "disposition": "excluded",
+        "group": "stop-list-race-comment-reaping-versus-stream-publication",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-091 after inspecting it. The suspected synchronous streamed-exit contract is not established. The host retains the reaped status before it publishes the drained-output exit record; the test does not assert synchronous delivery. This does not establish that its probabilistic race occurred in any run. Accept the latest distinction between retained reaped status and later streamed exit processing. Refutation is limited to the synchronous-publication interpretation; it does not certify deterministic race coverage or literal instantaneous recording. Checked source/results: [\"At 1ed482dde220452e424973faf38a5e1318986333, boot_id_durable_outcome.rs:567-587 explains the list/Stop race; :595-620 starts a successful concurrent observer, sends 200 lists and awaits it; :622-643 checks the final annotation and its persistence after restart.\",\"At that revision, crates/terminal-host/src/host.rs:455-475 uses nonblocking waitpid, stores child_exit at :471 and starts output drain. finish_drain at :478-486 publishes the journal exit only after drain completion or its bounds.\",\"At that revision, hosts/terminal.rs:3929-3942 advances runtime liveness only on processing Exited. crates/terminal-host/SPEC.md:130-147 separates reaping, draining, end of output and host lifetime. These are distinct boundaries.\",\"Source inspection only. The word 'instant' is informal: waitpid/event-loop scheduling is not a literal zero-delay guarantee, and neither the 200 polls nor final assertions prove an overlap with a particular death observation. No product annotation-loss claim or runtime observation follows.\"] Current coverage/results: {\"SPEC.md\":\"Current Terminal experience and Lifecycle operations were searched and relevant paragraphs read. Retained terminals and cleanup semantics do not require synchronous exit publication or prove this race was exercised.\",\"SPEC_impl.md\":\"Current Terminal host runtime and switch-point paragraphs, including :2049-2052 and :2135-2148, explicitly separate process roots from processed exit evidence. No acceptance of an inaccurate test timing claim was found.\",\"TODO.md Planned\":\"Empty at recording-time main; no coverage.\",\"plans/queue\":\"Searched for the named test, stop race, reaping and exit-record timing. The matching tmux documentation plan is already landed per plans/REPORTS.md:32, and does not cover this proposed comment concern as unlanded work.\",\"BUGS.md\":\"Read in full; its SSH-output-holder provisioning issue is unrelated.\",\"INDEX.md and queue\":\"Read INDEX.md in full and searched matching queue text. stop-annotation-exit-witness.md was read in full: it concerns an immediate assertion in restart_under_concurrency.rs, not this finite polling test or this comment. No exact alias or useful extension was established.\",\"TRIAGE_OUTCOMES.md\":\"Searched active ledger for this test, list-versus-stop wording and exit/publication premise; no matching decision.\",\"FILTER.md\":\"Read in full. No filter used: this is a source refutation of the proposed interpretation, not omission because a race is rare.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Delayed host exit publication could narrow the list-versus-Stop observation window and make the migrated test's timing rationale misleading. This was never a claim of reproduced annotation loss or user-work loss.\"; \"No synchronous stream-delivery promise or dependence on it was shown. Actual overlap and incidence remain unobserved; literal instant reaping is not guaranteed.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-091",
+          "key": "g142/l8",
+          "latest_line": 17,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "stop-list-race-comment-reaping-versus-stream-publication",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The suspected synchronous streamed-exit contract is not established. The host retains the reaped status before it publishes the drained-output exit record; the test does not assert synchronous delivery. This does not establish that its probabilistic race occurred in any run.",
+          "checks": [
+            "At 1ed482dde220452e424973faf38a5e1318986333, boot_id_durable_outcome.rs:567-587 explains the list/Stop race; :595-620 starts a successful concurrent observer, sends 200 lists and awaits it; :622-643 checks the final annotation and its persistence after restart.",
+            "At that revision, crates/terminal-host/src/host.rs:455-475 uses nonblocking waitpid, stores child_exit at :471 and starts output drain. finish_drain at :478-486 publishes the journal exit only after drain completion or its bounds.",
+            "At that revision, hosts/terminal.rs:3929-3942 advances runtime liveness only on processing Exited. crates/terminal-host/SPEC.md:130-147 separates reaping, draining, end of output and host lifetime. These are distinct boundaries.",
+            "Source inspection only. The word 'instant' is informal: waitpid/event-loop scheduling is not a literal zero-delay guarantee, and neither the 200 polls nor final assertions prove an overlap with a particular death observation. No product annotation-loss claim or runtime observation follows."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "Current Terminal experience and Lifecycle operations were searched and relevant paragraphs read. Retained terminals and cleanup semantics do not require synchronous exit publication or prove this race was exercised.",
+            "SPEC_impl.md": "Current Terminal host runtime and switch-point paragraphs, including :2049-2052 and :2135-2148, explicitly separate process roots from processed exit evidence. No acceptance of an inaccurate test timing claim was found.",
+            "TODO.md Planned": "Empty at recording-time main; no coverage.",
+            "plans/queue": "Searched for the named test, stop race, reaping and exit-record timing. The matching tmux documentation plan is already landed per plans/REPORTS.md:32, and does not cover this proposed comment concern as unlanded work.",
+            "BUGS.md": "Read in full; its SSH-output-holder provisioning issue is unrelated.",
+            "INDEX.md and queue": "Read INDEX.md in full and searched matching queue text. stop-annotation-exit-witness.md was read in full: it concerns an immediate assertion in restart_under_concurrency.rs, not this finite polling test or this comment. No exact alias or useful extension was established.",
+            "TRIAGE_OUTCOMES.md": "Searched active ledger for this test, list-versus-stop wording and exit/publication premise; no matching decision.",
+            "FILTER.md": "Read in full. No filter used: this is a source refutation of the proposed interpretation, not omission because a race is rare."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "No synchronous stream-delivery promise or dependence on it was shown. Actual overlap and incidence remain unobserved; literal instant reaping is not guaranteed.",
+          "original_stronger_consequence": "Delayed host exit publication could narrow the list-versus-Stop observation window and make the migrated test's timing rationale misleading. This was never a claim of reproduced annotation loss or user-work loss.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Accept the latest distinction between retained reaped status and later streamed exit processing. Refutation is limited to the synchronous-publication interpretation; it does not certify deterministic race coverage or literal instantaneous recording."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "stop-list-race-comment-reaping-versus-stream-publication",
+        "destination": null
+      }
+    },
+    {
+      "key": "g142/c9",
+      "owner": "g142",
+      "id": "c9",
+      "domain": "rust-session-agent-regressions",
+      "purpose": "rust-session-agent-regressions: crates/farhelm/tests/e2e/supervisor_stop.rs, crates/farhelm/tests/e2e/boot_id_durable_outcome.rs, crates/farhelm/tests/e2e/create_idempotency.rs, crates/farhelm/tests/e2e/session_lifecycle.rs, crates/farhelm/tests/e2e/tcp_relays.rs, crates/farhelm/tests/spawn_cli.rs, crates/farhelm/tests/e2e/real_agent_capture.rs, crates/farhelm/tests/e2e/codex_identity.rs, crates/farhelm/tests/e2e/command_shell.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 22,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c9",
+            "state": "open",
+            "summary": "Cancelled-relay rejection still exercises the shared channel namespace",
+            "location": "crates/farhelm/tests/e2e/tcp_relays.rs:318",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: checked whether removing Attach.grid from the cancelled-relay test leaves an invalid attach that could return InvalidRequest for an unrelated obsolete-capability reason, hiding loss of the reserved-channel rule. Source refutation: tcp_relays.rs:263-346 establishes a real TCP relay on channel 7, closes it and observes target-socket EOF, sends late data, then requires correctly correlated InvalidRequest responses for reuse as TCP, download, upload and terminal streams. The terminal request uses an existing session, valid dimensions, Agent selector, legal empty lease and if_unowned:false; it has no retired capability field. handlers.rs:1590-1618 rejects !channels.can_begin_stream(channel) before terminal lookup/takeover, and :2991-3015 passes the new Attach shape directly to that handler without a grid-capability refusal. SPEC_impl.md, TCP relay channels, :3124-3125 explicitly requires channel IDs remain reserved after ending/cancellation. Suggested bucket: other (considered test-oracle concern refuted). Confidence: confirmed source/contract analysis; no execution. proposed_drop: at this reviewed revision the new Attach request is valid apart from the deliberately reused reserved channel, and the retained socket EOF/correlation checks still distinguish the cancellation/channel-namespace behavior. possible_cover: none in supplied neighbour records; no prohibited coverage search. Could-be-highest: no established security or work-loss route; this check concerns detection strength of one test modification. Caveat: this does not certify every relay cancellation or shared-channel implementation path; no current product failure or executed mutation is claimed. No open lead for c9."
+          }
+        }
+      ],
+      "latest": {
+        "line": 22,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c9",
+          "state": "open",
+          "summary": "Cancelled-relay rejection still exercises the shared channel namespace",
+          "location": "crates/farhelm/tests/e2e/tcp_relays.rs:318",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: checked whether removing Attach.grid from the cancelled-relay test leaves an invalid attach that could return InvalidRequest for an unrelated obsolete-capability reason, hiding loss of the reserved-channel rule. Source refutation: tcp_relays.rs:263-346 establishes a real TCP relay on channel 7, closes it and observes target-socket EOF, sends late data, then requires correctly correlated InvalidRequest responses for reuse as TCP, download, upload and terminal streams. The terminal request uses an existing session, valid dimensions, Agent selector, legal empty lease and if_unowned:false; it has no retired capability field. handlers.rs:1590-1618 rejects !channels.can_begin_stream(channel) before terminal lookup/takeover, and :2991-3015 passes the new Attach shape directly to that handler without a grid-capability refusal. SPEC_impl.md, TCP relay channels, :3124-3125 explicitly requires channel IDs remain reserved after ending/cancellation. Suggested bucket: other (considered test-oracle concern refuted). Confidence: confirmed source/contract analysis; no execution. proposed_drop: at this reviewed revision the new Attach request is valid apart from the deliberately reused reserved channel, and the retained socket EOF/correlation checks still distinguish the cancellation/channel-namespace behavior. possible_cover: none in supplied neighbour records; no prohibited coverage search. Could-be-highest: no established security or work-loss route; this check concerns detection strength of one test modification. Caveat: this does not certify every relay cancellation or shared-channel implementation path; no current product failure or executed mutation is claimed. No open lead for c9."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g142/findings.jsonl",
+        "id": "c9",
+        "line": 22,
+        "disposition": "under-investigation",
+        "group": "g142-c9",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-091",
+          "key": "g142/c9",
+          "latest_line": 22,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "cancelled-relay-test-attach-request-validity",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Removing the retired grid capability field leaves an otherwise valid Attach request. The inspected handler rejects its deliberately reserved channel before terminal lookup, and has no obsolete-capability refusal that could explain the expected InvalidRequest instead.",
+          "checks": [
+            "At f560058da19e02716e6f943883a9508b447aff4e, tcp_relays.rs:263-298 creates a real relay on channel 7, observes the accepted target socket, closes the relay and requires socket EOF before sending late data.",
+            "tcp_relays.rs:299-340 reuses channel 7 for TCP, download, upload and Attach and correlates each InvalidRequest to its request ID. Attach supplies an existing session, 80x24 dimensions, Agent selector, empty legacy lease and if_unowned:false.",
+            "At that revision, service/handlers.rs:1603-1615 rejects a channel that can_begin_stream refuses, before terminal lookup. :2991-3015 forwards the new Attach shape directly with no grid-capability branch. :1783-1785 explicitly permits the empty legacy lease.",
+            "At that revision, SPEC_impl.md:3111-3133, especially :3124-3125, requires reservation after ending/cancellation. No runtime execution, mutation test or claim that every cancellation path is correct was made."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "Searched relay, channel, TCP and terminal attach semantics. The product's tunnel/terminal contracts do not supply an unrelated InvalidRequest cause for this request.",
+            "SPEC_impl.md": "Current TCP relay channels section :3039-3061 read; it retains the same reservation contract. That is expected behavior, not coverage excusing a weakened oracle.",
+            "TODO.md Planned": "Empty; no coverage.",
+            "plans/queue": "Searched cancelled relay, reserved/shared channels, tcp_relays and related Attach wording; no unlanded plan fixing the claimed test-oracle issue.",
+            "BUGS.md": "Read in full; no matching issue.",
+            "INDEX.md and queue": "Full index read and queue searches found relay/tunnel issues but none about an obsolete grid-capability refusal masking this cancelled-channel test. No exact alias.",
+            "TRIAGE_OUTCOMES.md": "Searched active ledger for cancellation/channel namespace/relay test premise; no matching decision.",
+            "FILTER.md": "No full boundary matches or is needed for this source-refuted test interpretation."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "The proposed unrelated obsolete-capability InvalidRequest path is absent at the reviewed revision. No shipped channel-reuse failure or harmful late-data execution was established.",
+          "original_stronger_consequence": "An invalid migrated Attach request might return InvalidRequest for an obsolete-capability reason and hide loss of the reserved-channel rule. The record alleges a test-detection concern, not a demonstrated product isolation failure.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Source refutes the specific invalid-Attach premise. Conservatively obtain the parent's independent drop check because the protected channel isolation prevents late relay data becoming terminal input; no such user-work or security consequence is established by this record."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "cancelled-relay-test-attach-request-validity",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete: all 14 assigned patches reviewed at their recorded revisions.\n\nNo reportable findings or unresolved leads. Candidates c1–c6 and their source refutations are recorded in `findings.jsonl`; `progress.md` is updated. No tests or reproductions run."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised c1, c2, c3, c5 and c6 with cross-batch source checks.\n\nAdded c7: the unchanged EOF test does not prove the reply followed EOF; proposed exclusion as a pre-existing coverage limitation. Proxy source still drains replies correctly.\n\nNo new reportable findings. Unresolved lead IDs: none. No execution performed."
+    },
+    {
+      "turn": 3,
+      "reply": "New finding: **c1**, verified by source—deleting the terminal-kind test also removes the completed-create reboot retry identity check. No equivalent replacement found through the pinned tip.\n\nChecks also established c7 predates the range, resolved l8, and clarified c4’s attribution.\n\n- New verified IDs: c1\n- New unverified IDs: none\n- Open leads: none\n- Anything new found: yes\n\nLogs and progress updated. No runtime execution."
+    },
+    {
+      "turn": 4,
+      "reply": "Checked cancelled-channel rejection, CLI reply validation, agent fixture comments, directory rejection and geometry observations. Recorded c9 as a source-refuted candidate.\n\n- New verified findings: none\n- New unverified findings: none\n- Open leads: none\n- Anything new found: no reportable issue\n\nDiscovery count updated to 2. No runtime execution."
+    }
+  ],
+  "progress": "# g142 initial review\n\nGroup: rust-session-agent-regressions. Initial review turn 1 complete. Discovery-pass count: 0; this turn was the initial assigned pass, not a later synthesis or discovery turn.\n\nRead the complete brief and only the commits field of the inventory. Delivered all 14 assigned patch files (1,296 lines) through the prescribed evidence reader, with each packet in its own shell call and no packet over 200 lines. No assigned patch ranges remain unread. Reviewed their original revisions, including dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 before the later driver removal.\n\nRead the root instructions with End sentinel, machine rules, priority buckets and feedback-file format. Read the governing terminal-host section and old-terminal retirement section at 1ed482dde220452e424973faf38a5e1318986333, the complete Durability and resume section of SPEC.md there, the Grid streams section at f560058da19e02716e6f943883a9508b447aff4e, and targeted runtime-state, reservation, startup-tether and same-revision retirement contracts. No coverage files or inventory excluded metadata were consulted.\n\nInterface assumptions checked in source: a startup hello probe follows a failed state-folder claim; dropping that probe is not a serving holder; the lock stays held until child exit; host runtime liveness requires the processed exit record; reboot simulation confirms hosts ended; create-idempotency terminal counts use live host processes and launch records; the old timeout wrapper adjusted only retired fields; protocol 77 removes terminal-kind and stream-kind distinctions; the deleted hex parser has no remaining test-tree caller. Read neighboring comment-only changes against their host/root and owned-stock-tmux fixtures and checked that the recorder accepts no --tmux option.\n\nReportable findings: none. New verified findings: none. New unverified findings: none. Open leads: none. Durable candidates c1-c6 record considered concerns and source refutations; c3 was revised under the same ID to cite the contract at its own intermediate revision. No potential highest finding was dropped: all considered candidate consequences are obsolete assertion/helper or test-premise concerns without an established shipped security or loss-of-work route.\n\nValidation: source and contract analysis only. No runtime tests, reproductions, builds, process changes or checkout edits were performed. Conclusions are not runtime observations.\n\nNext action: return to the caller for its later synthesis/discovery prompt. No separate final report artifact was created.\n\nSynthesis turn 2 in progress; discovery-pass count remains 0. Findings log read and preserved (7 existing events). Rechecking c1-c3 and c5-c6 against same-revision callers, EOF ownership, and fixture budgets using parent interface results from g139/g145 and g144. No open leads carried forward.\n\n## Synthesis turn 2 complete\n\nTurn type/count: later-turn synthesis, turn 2. Discovery-pass count: 0. No unread assigned scope and no open leads. New verified/unverified findings this pass: none. Added candidate c7, then revised it with the actual proxy drain and process-exit source. Revised original IDs c1, c2, c3, c5 and c6; c4 needed no change. All drops remain proposals for the parent, not parent-accepted dispositions.\n\nCross-batch results: at 1ed482dde220452e424973faf38a5e1318986333 the default-timeout diff deletes only retired tmux/sink assignments and leaves surviving budgets unchanged; checked the constructor deletion too, consistent with parent-provided g139/g145 results. At f560058da19e02716e6f943883a9508b447aff4e retained keyed-retry tests still assert identical session IDs across handoff and resized replay plus exactly one live terminal; the protocol bump and retained stale-peer refusal gate align with removal of kind fields. Supervisor CLI --tmux removal and the later recorder example's --tmux removal were checked as separate caller contracts.\n\nStartup/ownership results: at dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 the held-lock test accepts the startup process's own probe before closing its sole retained stdin writer, retains the lock until successful child wait, and cannot confuse a failed hello/claim with the required successful exit. The exact pinned Rust 1.99.1 File::open source confirms O_CLOEXEC on the lock; the local toolchain lacks rust-src, so this was checked in primary upstream source at its exact versioned URL, recorded in c3. At d751ff1633bb479c7bf53920f2e4ea4ba932a1c2 the explicit stock-tmux fixture keeps server and surviving-job PID guards plus the socket/executable guard across skips and unwinding, consistent with parent-provided g144 results; it does not delegate old-server cleanup to TestDir's host cleanup.\n\nEOF witness result: the unchanged raw half-close test proves it collected a reply and a clean, bounded child exit, but parent-side write/drop ordering does not prove the reply was produced after stdin EOF. c7 records that source-supported detection limitation and proposes exclusion from this changed-code assignment. The same-revision proxy implementation explicitly half-closes upstream then drains downstream and exits the process, so no corresponding shipped defect was established. No reproduction was attempted.\n\nValidation remains source/contract analysis only. No tests, builds, reproductions, process changes or checkout edits. No runtime observations claimed. Next action: return only this turn's delta and unresolved lead IDs to the parent; await its next prompt.\n\nDiscovery turn 3 started; discovery-pass count 1 in progress. Reviewing exact latest interface context before new source search. Parent asks for whole-range attribution of c7; its existing proposed drop remains unaccepted pending base/history check. No open leads carried forward.\n\n## Discovery turn 3 complete\n\nTurn type/count: separate discovery pass, turn 3. Discovery-pass count: 1 complete. New verified finding this pass: c1 (existing ID promoted from candidate/lead to finding for a newly identified independent oracle in its deleted test). New unverified-after-investigation findings: none. Remaining open leads: none. New material found: yes, completed-create reboot/key-retry regression coverage is lost with the terminal-kind test. No assigned patch scope remains unread; no known finding was used as a reason to end the pass early.\n\nRead all 240 lines of discovery-neighbours.json for exact latest interface context. The first oversized read clipped; repeated it in complete 40-line packets (1-40 through 201-240), so no interface record remained unread. No queued/prohibited coverage files or excluded inventory metadata were searched.\n\nResolved parent question before the new search: c7's full EOF test, overstated in-flight comment and reply oracle already exist at exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:3387-3450. Bounded history search for the test/comment returned no commits. Revised c7 with this precise pre-base basis; current production correctness is not treated as refutation of its test gap. The first attempted event write had malformed JSON quoting in the event payload; corrected that private payload and the prescribed evidence record command then succeeded. No log history was truncated or bulk transcript substituted.\n\nIndependent discovery checks: examined the migrated host exit-status/race explanation, retained exited-agent attach helpers and pending-delete fixture. Recorded l8 immediately, then checked host.rs reaping versus output-drain journaling, terminal-host SPEC's child-exit section and supervisor on_exited publication. The host stores its reaped status before drain; no synchronous streamed-exit guarantee was established by the changed comment. Resolved l8 as a candidate with the probabilistic-concurrency caveat preserved.\n\nDiscovery c1 result: the removed test's obsolete kind fields were not its only assertion. It first completed a keyed create, simulated reboot, established Interrupted and required the same key to return the original ID. Remaining reboot tests start from never-launched Pending state and require a launch; same-boot restart tests retain a live host. Checked lower store takeover, record_boot, already-exited replay and startup boot-file tests, plus all boot-seam/key-reference replacement candidates at deletion and pinned tip. The store boot helpers insert unkeyed rows; lower takeover tests do not run reboot conversion on a completed reservation. No equivalent completed-create/reboot/key-replay oracle was found. Later create_idempotency and boot-outcome diffs are empty and store changes are comments only. c1 is now a confirmed test-only finding, proposed_drop:false for this independent oracle, with obsolete field assertions and earlier proposed-drop bases preserved distinctly.\n\nInterface synthesis also revised c4: g141/c4's earlier raw receiver oracle deletion is not refuted by this group's later unused-tokenizer cleanup. Explicitly narrowed the c4 drop basis to its own later patch. The supplied g144 restart-failure guard-lifetime finding concerns its consumed-Harness/OldServer fixtures, not this group's stock-tmux test whose guards and directories remain in one outer function; no scope expansion or new duplicate finding was made.\n\nAll conclusions are source/contract analysis, not execution. No runtime tests, builds, reproductions or live-install/process actions. No checkout changes. Next action: deliver checks/new IDs/open leads to parent; a substantive new discovery requires a later pass per the charter, not another pass inside this turn.\n\nDiscovery turn 4 started; discovery-pass count 2 in progress. Reusing complete earlier findings history and source context. No pending parent questions or open leads. Reading refreshed interface records before the new search; findings log remains append-only.\n\n## Discovery turn 4 complete\n\nTurn type/count: separate discovery pass, turn 4. Discovery-pass count: 2 complete. Read the refreshed 342-line, 124,607-byte discovery-neighbours.json in complete bounded packets (1-30 through 301-330, then 331-342), with no clipped packet. No named pending questions were supplied. Reused the existing full findings history and assigned-patch context; did not search prohibited coverage material or excluded inventory metadata.\n\nNew source checks beyond known findings: examined the cancelled TCP relay test's socket-EOF premise, late-data stimulus, correlated reuse refusals and valid grid-only Attach shape, then traced the current handler's shared-channel admission before lookup/takeover. Recorded c9 immediately on settling the considered alternative-refusal concern; it is a source-refuted candidate, not a new reportable defect. Read the complete current TCP relay-channel contract and its subsection end. Reviewed the spawn CLI helper's sole unexpected-reply caller and its independent exit/stdout/outcome-unknown assertions, rather than inferring behavior from the removed SessionInfo fields. Reviewed the Codex resident-launcher and recovered-report comment paths against host child PID, parent/process-group witnesses, preserved generation and durable hook provenance. No new error was found in those changed comments or helper shape.\n\nAlso checked the relative-directory rejection and crash-after-record terminal-absence assertions at 1ed482dde220452e424973faf38a5e1318986333, including ensure_cwd_usable's absolute-path error and its placement in fresh-create validation before launch. Compared the geometry helper with its parent's host branch: it retains the same HostTerminal.size observation and polling boundary while dropping the retired fallback. These checks produced no substantive unresolved lead or additional reportable concern. Source correctness was not used to refute any known distinct test-coverage finding.\n\nInterface synthesis: refreshed upstream records identify additional accepted-retirement/confirmation, old-page input, documentation and regression-oracle issues owned by their respective groups. None changes this group's c1 finding or supplies a new issue within these assigned small patches. The neighbour stop-test legacy oracle belongs to the preceding 647f0227 patch; this group's dbfc6975 startup fixture begins after old-terminal retirement and is a separate boundary. No duplicate finding was created.\n\nResult: no new reportable material found this pass. New verified finding IDs: none. New unverified-after-investigation finding IDs: none. New candidate: c9, with complete source refutation and caveats in findings.jsonl. Remaining open lead IDs: none. No assigned material unread. All drops/lowerings remain unaccepted parent proposals. No runtime tests, builds, reproductions, live-install/process actions or checkout edits were performed. Conclusions are source/contract analysis only. Next action: return this pass's checks and empty discovery result.\n"
+}

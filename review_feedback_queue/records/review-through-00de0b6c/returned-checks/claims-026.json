@@ -1,0 +1,145 @@
+[
+  {
+    "key": "g042/c1",
+    "latest_line": 8,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "browser-host-add-arrival-negative-observation",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The provisioning test alone lacks a closed-dialog observation, as the intermediate lead correctly states. The same reviewed revision explicitly tests that negative arrival boundary after arming, while the provisioning test retains its separate agent-origin/setup-preference assertions. No missing contract boundary is established across those tests.",
+    "checks": [
+      "At 9ff03ce91f191ea59f3ce16cefbd0b76d7fe599d, e2e/tests/provisioning.spec.ts:1489-1493 immediately clicks the card and cannot itself prove the form stayed closed. Lines 1497-1515 still require no provision before Set up and retained agent origin after refusal/reprobe.",
+      "At that revision, e2e/tests/approval-layout.spec.ts:198-219 stages arrival with an attached focused terminal, waits for the enabled card action, requires zero forms and retained focus, sends Enter, and again requires zero forms and no answers. Lines 221-236 separately require zero forms before explicit opening and no approval from opening.",
+      "At that revision, crates/farhelm-ui/src/approvals.rs:549-555 disables the open button only for busy state. Thus the local provisioning-test sensitivity caveat is real; it is the separate arrival assertions, not the explicit click alone, that refute the wider missing-coverage claim.",
+      "Historical SPEC.md:4179-4194 and SPEC_impl.md:9204-9218 establish explicit opening and mandatory agent setup confirmation. No runtime behavior, execution result or reliability measurement was observed."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:4193-4209 and SPEC_impl.md:8978-9002 preserve card-only arrival, opening-is-not-approval and agent-origin confirmation. They do not accept automatic opening.",
+      "TODO.md Planned is empty (:25-27). BUGS.md's sole SSH-output-holder hang does not cover this test concern.",
+      "Searched plans/queue for host-add, arrival and automatic opening. agent-host-add-card.md acceptance criteria 1-3 and test proposals explicitly place arrival regression coverage in approval-layout and add the click to provisioning. plans/REPORTS.md:20 records it landed; it is not unlanded-plan coverage.",
+      "Read INDEX.md in full and searched matching queue text. ordinary-setup-discards-deferred-agent-add.md and queued-agent-dialog-inherits-elapsed-arm-timer.md concern deferred openings and fresh arming, not absence of the initial negative arrival observation.",
+      "Searched active TRIAGE_OUTCOMES.md; ordinary-setup entry :183-205 addresses lost deferred presentation, not this test boundary. No exact queue/ledger alias or accepted exclusion found. FILTER.md has no complete match and is not the proposed basis."
+    ],
+    "exact_cover_quotes": [
+      "Historical SPEC.md:4181-4182: 'The request never opens the dialog by itself, because the user did not start it'.",
+      "Historical SPEC.md:4182: 'Opening is not approval.'",
+      "Historical approval-layout.spec.ts:213: 'await expect(page.locator(\".add-host-form\")).toHaveCount(0);'; :218 requires staged.answers to equal []."
+    ],
+    "missing_premise": "No shipped approval bypass is established. A narrower combination-specific defect would need evidence that automatic arrival depends on the saved setup preference or another state absent from the dedicated arrival cases; none is shown by these named records.",
+    "original_stronger_consequence": "Initial concern was loss of automatic-opening regression coverage; the first record over-refuted that concern, the intermediate lead restored the provisioning-test-only sensitivity gap, and the final synthesis refuted the suite-level gap using dedicated arrival tests. The provisioning test alone still cannot detect every automatic-opening regression. No production permission bypass was established.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Propose refutation only of the claimed missing suite boundary, with the local sensitivity caveat retained. Because arrival can redirect Enter into an approval surface, send this proposed dismissal through the parent's independent drop check. This consultation does not authorize a drop."
+  },
+  {
+    "key": "g042/c2",
+    "latest_line": 2,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "browser-unused-needs-tmux-fixture-type-removal",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The assigned browser-file change removes only an unused optional type property. No provisioning test configuration or assertion used it.",
+    "checks": [
+      "git diff 500548b9253b07a26fd03119679184b69544e31d^..500548b9253b07a26fd03119679184b69544e31d -- e2e/tests/provisioning.spec.ts removes only needs_tmux?: boolean at parent line 53.",
+      "Historical parent git grep over e2e finds that declaration plus distinct readme-hero scenario declarations/validation/configuration. Within provisioning.spec.ts it occurs only at line 53. Thus the claim must remain scoped to this browser test, not all parent e2e code.",
+      "git grep at 500548b9253b07a26fd03119679184b69544e31d over e2e and crates/farhelm-helm finds no needs_tmux. No runtime test, build or reproduction ran. Provisioning implementation changes are outside this named claim."
+    ],
+    "coverage_checked": [
+      "Searched both current specifications for tmux/provisioning and needs_tmux. SPEC.md's installation/uninstall text and SPEC_impl.md:7996-8011 describe no tmux requirement or provisioning payload; this does not itself prove test sensitivity, which the historical diff establishes.",
+      "TODO.md Planned is empty. BUGS.md's SSH transfer hang is unrelated. Searched active TRIAGE_OUTCOMES.md and INDEX.md/queue for needs_tmux and the specific browser fixture; no exact finding or decision found.",
+      "plans/queue/tmux-drop-from-install.md acceptance criterion 2 explicitly removes the browser needs_tmux field and users, with media authorization at :113-115. plans/REPORTS.md:30 says the plan landed; it is not pending repair coverage.",
+      "The user-tmux-jobs plan's needs_tmux_sweep concerns process cleanup, not this optional TypeScript field. FILTER.md does not match this source-refuted coverage concern."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A lost exercised scenario would require a browser case that configured or depended on this property. The historical file contains none. No conclusion is made about other provisioning implementation changes.",
+    "original_stronger_consequence": "Removing needs_tmux might silently remove browser setup coverage. That proposed consequence was refuted from its first record, with the caveat that implementation changes in the same commit were assigned elsewhere.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Propose source refutation of the unused browser type-field concern only. Its established scope is maintainer-test declarations, without a security or user-work-loss route."
+  },
+  {
+    "key": "g042/c3",
+    "latest_line": 6,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "browser-provisioning-busy-menu-retry-observation",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Shorter menu waits change when an attempt retries while leaving both menu readiness and enabled/disabled assertions inside the same required retry. Normal assertion failure still reaches the backend release hook.",
+    "checks": [
+      "At 350a4b33b6d4476f4a78e43cea124bc2b828f462, provisioning.spec.ts:3741-3798 holds both hosts, observes both running, checks both Settings disabled, releases the first host, then requires first enabled while second remains running and disabled. settingsReads :3779-3785 encloses opening and the state assertion in toPass; no outer swallowed assertion was found.",
+      "At that revision, helpers/fleet.ts:1344-1401 passes timeout options to toggle attributes/hover/click, panel visibility, evaluation and measured-placement polling. openHostMenu :1443-1452 forwards them. These are per-operation limits, not a whole-helper one-second deadline; showHostsPanel keeps its ordinary waits and the test already opened Hosts.",
+      "provisioning.spec.ts:1118-1130 aborts held setup POST gates, publishes default backend behavior, resets preferences and removes hosts beyond baseline. configureBackend :103-108 atomically replaces config; removeHostsBeyondBaseline :219-231 enumerates actual added IDs, and removeHostOnceIdle :172-208 retries the explicit busy refusal rather than assuming final progress releases the lock.",
+      "crates/farhelm-helm/src/provisioning/e2e.rs:206-235 at that revision rereads hold_actions each iteration; default false releases the held action, with a 30-second error fallback. The normal release does not depend on that fallback. A failed earlier teardown abort/config write can still prevent later cleanup; this timeout patch does not introduce that route. No runtime reliability observation was made."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:4689-4721 accepts same-host queueing but exempts other hosts and requires prompt removal refusal. SPEC_impl.md:1149-1152 retains per-host busy serialization. Neither accepts false-positive tests.",
+      "TODO.md Planned is empty. BUGS.md's SSH-output-holder hang is distinct from held injected actions and browser menu observation. Searched active TRIAGE_OUTCOMES.md and plans/queue for the test, busy rows, hold_actions and menu waits; no unlanded repair or acceptance of this concern found.",
+      "host-progress-hover.md's configuration example and test references concern hover contents and current-step following (:49-94), not busy-state Settings assertions. It is not exact coverage.",
+      "INDEX.md and matching queue searches reveal separate hidden-progress-test-observes-unaffected-host and host-removal-preference concerns, not this test's shorter-wait oracle. No exact alias found. FILTER.md is not used; rarity alone would not refute this oracle concern."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No demonstrated false-pass state satisfies the required wrong Settings assertion. Actual reliability or a global one-second helper deadline is not established. Cleanup depends on preceding teardown steps succeeding, and the record must not promise otherwise.",
+    "original_stronger_consequence": "Short menu waits might allow incorrect per-host busy state to pass, or leave the final held action poisoning later tests. Both ordinary paths are source-refuted. Earlier and latest caveats about per-operation deadlines, ordinary panel waits, preceding teardown failure and absent runtime measurements remain.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Propose refutation of the named observation and normal-release concern, not a claim that every exceptional teardown path succeeds. The consequences are confined to owned maintainer-test state and do not establish security or user-work loss."
+  },
+  {
+    "key": "g042/c4",
+    "latest_line": 9,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "browser-retirement-fixture-declared-presentation-boundary",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The test explicitly declares presentation and dispatch coverage, records returned fixture IDs before later assertions, and attempts each route/session cleanup independently. It neither claims nor demonstrates real Podman creation or legacy removal. The refutation must not carry forward the earlier unconditional primary-error-preservation statement.",
+    "checks": [
+      "At 04d85f0c98a9b635709d00b056719a0baa7fd3fc, retired-container-sessions.spec.ts:1-15 declares real ordinary backing sessions and HTTP presentation rewrites, no old/new container creation, and a refused Delete as dispatch evidence. Lines 29-33 record each returned ID within try before later setup/assertions.",
+      "Lines 43-74 bind mutation/socket observation and list/detail launch rewrites to the retired ID; :81-103 observes selected retired UI, absent terminal/tab/header lifecycle surfaces, an explicit confirmation, no earlier mutation, and exactly one refused DELETE. Lines 104-113 attach the current ID, require FAKE-AGENT READY and normal control visibility, and require no retired-ID socket.",
+      "helpers/term.ts:406-423 selects the requested ID then calls waitForSessionReady. helpers/terminal-readiness.ts:364-379 requires matching open socket, mounted island, revealed replay and focus before term buffer polling (:376-392). tabs.rs:255-264 uses the session-ID path prefix that the fixture observes. session_view.rs:2713-2720 captures the shown ID and shown confirmation token.",
+      "retired-container-sessions.spec.ts:114-118 passes each route stop and reversed owned ID as a separate cleanupOwnedSteps step. helpers/cleanup.ts:6-19 catches each rejection and continues subsequent steps. helpers/drained-route.ts:39-42 stops rewrite admission, waits for tracked callbacks and unroutes. helpers/fleet.ts:576-588 sends real Stop/Delete via independent APIRequestContext; page routes do not fabricate those responses.",
+      "Cleanup is an attempt, not an absolute guarantee: accepted create without a usable response supplies no owned ID; hung steps can exhaust teardown time; a Stop transport rejection skips that ID's Delete inside cleanupSession. The last is already recorded in cleanup-stop-transport-error-skips-delete.md. Neither successful legacy cleanup nor actual current-container lifecycle execution is demonstrated. No runtime check ran."
+    ],
+    "coverage_checked": [
+      "Historical SPEC.md:4816-4823 and SPEC_impl.md:8642-8656, plus current SPEC.md:4892-4899 and SPEC_impl.md:8312-8326, distinguish legacy Delete-only stored launches from ordinary supervisor paths in new provider environments. They do not waive successful production container cleanup.",
+      "TODO.md Planned is empty; BUGS.md is unrelated. Searched active TRIAGE_OUTCOMES.md and plans/queue for retired-container/presentation/fixture/cleanup. podman-environments.md retirement acceptance (:453-455) governs the product but plans/REPORTS.md:21 records it landed, so it is not pending repair coverage.",
+      "Read INDEX.md and matching queue items cleanup-stop-transport-error-skips-delete.md, route-retirement-failure-skips-owned-session-cleanup.md and cleanup-status-masks-body-assertion.md. Independent supplied steps avoid the route-failure-skips-later-ID root here. Existing Stop transport and own-finally primary-error roots remain relevant caveats, not refutations of presentation coverage.",
+      "No exact queued alias for the named overclaimed-container-lifecycle concern found. No FILTER.md boundary fully matches and none is used."
+    ],
+    "exact_cover_quotes": [
+      "Historical test :2-3: 'HTTP rewrites change only presentation: no old container or new Podman environment is created'.",
+      "Historical test :14-15: 'A refused Delete proves the surviving action dispatches without removing the real backing fixture'."
+    ],
+    "missing_premise": "Separate supervisor cleanup coverage asserted in the header was not independently verified and is not used as evidence. Successful real Podman creation/removal and successful execution of each current-container action remain outside this test's scope. The earlier history's claim that cleanup always preserves the original assertion is too strong.",
+    "original_stronger_consequence": "A presentation-mocked fixture might overclaim real lifecycle coverage or leave ordinary backing sessions behind after an assertion/setup failure. Source refutes an ordinary missing-finally/skip-later-ID path and the lifecycle overclaim. The intermediate statement that the refused backing session survives the whole test was superseded: teardown attempts real ordinary-session Stop/Delete. Pre-ID create loss, a hung cleanup step and shared helper transport failure remain caveats.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Propose refutation only of the declared-boundary and ordinary owned-ID cleanup concern. Do not describe this as proof of actual container cleanup, universal resource reclamation or primary-assertion preservation. All established consequences here concern owned maintainer fixtures, without catastrophic tooling or user-work loss.",
+    "new_interface_evidence": "Useful extension to existing review_feedback_queue/cleanup-status-masks-body-assertion.md: at 04d85f0c98a9b635709d00b056719a0baa7fd3fc, retired-container-sessions.spec.ts:115 passes info.status !== info.expectedStatus from the callback's own finally to unchanged helpers/cleanup.ts:6-19. e2e/package-lock.json pins the same Playwright/core 1.64.0 as the existing item's dependency assessment. This is another concrete caller of that recorded root, so the earlier c4 history's unconditional primary-error-preservation wording should not survive. Dependency worker timing was not independently re-investigated here; no reproduction ran. The existing cleanupSession transport root also applies at the new call, but is already documented and is not a new lifecycle finding."
+  },
+  {
+    "key": "g042/c5",
+    "latest_line": 10,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "browser-retirement-fixed-title-session-ownership",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The fixed display titles do not choose the selected session, intercepted identity, attachment or destructive cleanup target. Those operations use the exact returned IDs, and each worker owns its stack slot.",
+    "checks": [
+      "At 04d85f0c98a9b635709d00b056719a0baa7fd3fc, retired-container-sessions.spec.ts:30-33 records server-returned IDs; :43-50 binds observations to old.id; :65-74 rewrites only its list/detail row; :81-89 selects and opens the old-ID row; :104 attaches current.id; :115-118 cleans only the recorded IDs.",
+      "The title locator at :90 follows openRowMenu(oldRow). It locates the currently open menu's accessible name; it does not find a session or derive a mutation target from title. Helpers/term.ts:406-423 independently selects by data-session-id and waits for that ID's readiness.",
+      "e2e/playwright.config.ts:119-136 requires one worker per independent stack slot and serial tests within a project. Lines 170-177 create separate engine/spec projects; :179-180 documents independent port/state/credential per slot. Titles need not be globally unique for this design.",
+      "session_view.rs:2713-2720 captures the shown session ID and confirmation token for Delete. No runtime cross-project interference, accidental deletion or reproduction was observed."
+    ],
+    "coverage_checked": [
+      "Searched SPEC.md and SPEC_impl.md for fixed/duplicate titles, retirement and identity; SPEC.md:1996-1997 expressly allows duplicate titles. The retirement contracts at SPEC.md:4892-4899 and SPEC_impl.md:8312-8326 define behavior, not fixture-title ownership. The refutation rests on ID-bound source operations.",
+      "TODO.md Planned is empty. BUGS.md's SSH-output-holder hang is unrelated. Searched active TRIAGE_OUTCOMES.md, plans/queue, INDEX.md and queue for fixed/duplicate/same titles and this retirement fixture; no exact acceptance, known bug, queued root or unlanded repair found.",
+      "podman-environments.md is landed per plans/REPORTS.md:21; its retirement criteria do not cover wrong-fixture deletion. Existing cleanup items concern missed cleanup or reporting rather than selecting another session by title. No exact same-root alias among c4 or the existing queue found. FILTER.md is not used."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "The suspected wrong-session route needs a title-based choice that can supply another session's ID to attachment or cleanup. The reviewed test uses the returned IDs throughout. Global title uniqueness is neither shown nor required.",
+    "original_stronger_consequence": "Fixed fixture titles might let another project or prior fixture satisfy retirement assertions or have its session deleted. The stronger wrong-target cleanup possibility is preserved for independent checking even though source refutes the proposed title-to-target route.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Propose source refutation of title-based target confusion, retaining the absence of a global uniqueness claim. Because the original concern included deleting another agent's session or user-owned work, the parent must independently check this proposed dismissal. This consultation does not authorize dropping it."
+  }
+]

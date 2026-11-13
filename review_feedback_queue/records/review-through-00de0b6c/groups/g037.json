@@ -1,0 +1,777 @@
+{
+  "group": {
+    "id": "g037",
+    "domain": "gui-session-lifecycle",
+    "purpose": "gui-session-lifecycle: crates/farhelm-ui/src/list/row.rs, crates/farhelm-ui/src/list/shared.rs, crates/farhelm-ui/src/session_ops.rs, crates/farhelm-ui/src/list/bell.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g002",
+      "g009",
+      "g010",
+      "g011",
+      "g022",
+      "g023",
+      "g024",
+      "g025",
+      "g026",
+      "g027",
+      "g028",
+      "g029",
+      "g035",
+      "g036",
+      "g038"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00716-000.patch",
+        "ranges": [
+          [
+            1,
+            272
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/list/row.rs",
+        "commit": "2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa",
+        "notes": "patch header; patch character offsets [0,16848)",
+        "lines": 272,
+        "bytes": 16848,
+        "start": 0,
+        "end": 16848,
+        "original": "[private-run]/prep/originals/00716.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00717-000.patch",
+        "ranges": [
+          [
+            1,
+            169
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/list/shared.rs",
+        "commit": "2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa",
+        "notes": "patch header; patch character offsets [0,7664)",
+        "lines": 169,
+        "bytes": 7664,
+        "start": 0,
+        "end": 7664,
+        "original": "[private-run]/prep/originals/00717.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01119-000.patch",
+        "ranges": [
+          [
+            1,
+            333
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/session_ops.rs",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,15099)",
+        "lines": 333,
+        "bytes": 15099,
+        "start": 0,
+        "end": 15099,
+        "original": "[private-run]/prep/originals/01119.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01501-000.patch",
+        "ranges": [
+          [
+            1,
+            32
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/list/bell.rs",
+        "commit": "61e632323dbc6b4a35ed27bf5b9833102ffd5a4e",
+        "notes": "patch header; patch character offsets [0,1719)",
+        "lines": 32,
+        "bytes": 1719,
+        "start": 0,
+        "end": 1719,
+        "original": "[private-run]/prep/originals/01501.patch"
+      }
+    ],
+    "lines": 806,
+    "bytes": 41330
+  },
+  "records": [
+    {
+      "key": "g037/f1",
+      "owner": "g037",
+      "id": "f1",
+      "domain": "gui-session-lifecycle",
+      "purpose": "gui-session-lifecycle: crates/farhelm-ui/src/list/row.rs, crates/farhelm-ui/src/list/shared.rs, crates/farhelm-ui/src/session_ops.rs, crates/farhelm-ui/src/list/bell.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "f1",
+            "state": "open",
+            "summary": "Check whether rename remains available while an environment is being deleted",
+            "location": "crates/farhelm-ui/src/list/row.rs:2684",
+            "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa\n\nTLDR: A session whose sandbox or container is being destroyed may still offer Rename, despite the contract that its actions become unavailable.\n\nDetails: The patch adds environment_deleting guards to Clone and Delete (row.rs:2931-2950, 3123-3146), and frozen covers Stop/Restart/Replace, but the Rename item at 2684 is guarded by busy alone. SPEC.md, Sandbox sessions, lines 1522-1523 says sessions show as being deleted with their actions unavailable; SPEC_impl.md:6648 repeats that requirement. Need check menu eligibility, busy derivation and rename admission before drawing a conclusion. Suggested bucket: other unless a material user impact is established. Confidence: unresolved lead, not a verified bug. Could-be-highest: no established security or loss-of-work route. proposed_drop: false. possible_cover: none; no coverage sources searched. Source analysis only; no execution."
+          }
+        },
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f1",
+            "state": "open",
+            "summary": "Rename stays enabled for sessions whose environment is being deleted",
+            "location": "crates/farhelm-ui/src/list/row.rs:1179",
+            "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa\n\nTLDR: A session can show that its sandbox or container is being deleted while still offering a working Rename editor. Submitting the edit sends a request to the unavailable environment and leaves the user in an error state.\n\nDetails: This commit introduces environment_deleting at row.rs:1179-1184 and uses it to disable Clone and Delete, while frozen withholds Stop/Restart/Replace. It omits Rename: row.rs:2671-2716 renders Rename whenever controls.rename is true and checks busy alone at 2684/2707. controls is derived only from offers_mark_seen at 1401-1402. list/view.rs:6312-6317 computes busy from client-owned requests/questions, not the environment host phase; a failed automatic sealed-environment destruction (or destruction from another client) holds none of those session claims. on_rename_start at list/view.rs:3850-3888 admits that row, and on_rename_submit at 3909-3945 sends rename_session; neither checks the environment deleting phase. SessionOps::busy_now (session_ops.rs:178-179) checks only held/questions, confirming it does not supply the omitted guard.\n\nContract: SPEC.md, Sandbox sessions, lines 1521-1523: \"While that runs, and if it fails, Hosts and the sidebar attention area show the sandbox as being deleted, with the reason and **Retry**, and its sessions show as being deleted with their actions unavailable.\" Container sessions at SPEC.md:4867 inherits that contract. SPEC_impl.md:6648-6649 repeats that while a host is Deleting its sessions have actions unavailable. The concrete route is a retained session row after sealed destruction fails, already represented by being_deleted(host) returning Some(true), with no client session operation pending. At minimum the Rename dialog opens and offers a request the environment cannot serve; no data loss or security impact is established. Apply the same deleting guard to Rename presentation/admission as to the other lifecycle controls.\n\nSuggested bucket: other (unavailable action incorrectly offered; no established material or destructive consequence). Confidence: confirmed by source and contract analysis, not observed execution. Could-be-highest: no. proposed_drop: false. possible_cover: none; coverage sources were not searched. Caveat: backend refusal remains expected and prevents mutation; this finding is the incorrect available control/editor, not a claim that Rename succeeds on a sealed supervisor. Lead f1 is now closed as a finding."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f1",
+            "state": "open",
+            "summary": "Rename stays enabled for retained sessions while their environment is being deleted",
+            "location": "crates/farhelm-ui/src/list/row.rs:2684",
+            "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa\n\nTLDR: A retained session row can show that its sandbox or container is being deleted while still opening an enabled Rename editor. The editor can submit a request that the helm refuses because that environment has no routable connection. The established issue is the offered unavailable editor, not a successful mutation.\n\nDetails: Synthesis confirms the full availability/admission route. row_control_visibility at row.rs:144-150 sets rename=true unconditionally for ordinary non-retired rows. The new environment_deleting flag at :1179-1184 guards Clone/Delete, while frozen covers Stop/Restart/Replace; Rename at :2671-2716 checks only busy (:2684/:2707). list/view.rs:6312-6317 derives busy from local pending/held/questions. on_rename_start at :3850-3888 checks retired_row, local busy/questions and an existing editor, but never host phase. retired_row at :1249-1255 checks only retired-container compatibility. on_rename_submit at :3909-3945 checks the editor generation/unavailable flag and begin_row_op; begin_row_operation at :868-876 checks only local questions/claims/pending before reserving. listed_rename_unavailable is reconciled only against authoritative source absence at :2250-2262, not the Deleting host phase. Thus a row still displayed with no local request/confirmation can open and submit Rename.\n\nThe failed sealed-destruction premise is preserved and bounded precisely: manager.rs:2610-2619 notes a seal independently of any GUI session claim; sessions/sandbox.rs:290-304 records an attempt and failure; manager.rs:2639-2679 retains Failed(reason) as HostState::Deleting, and :2210-2228 exposes no client whatever the actor's connection does. finish_seal runs in the helm-owned finisher (:339-360), not a page's SessionOps. hosts.rs:1537-1545 returns on provider destruction failure before deleting the registered host/cache at :1550-1554. While a cached session row remains displayed after that failure, no failed sealed-host reconnection can make its Rename request routable. A later successful supervisor refresh may show the final session already gone and remove its row; this finding does not assert that a failed destruction always leaves a session row forever. The same omission is visible while a host-level whole-environment destruction holds Deleting at hosts.rs:1513-1534 and a cached session row remains, without a session-local GUI claim.\n\nBackend boundary: manager.status removes the client for every seal record (:2220-2224), and sessions::route_session at :905-926 refuses status.client=None with Conflict. An attempted rename is therefore refused before reaching the sealed supervisor. This prevents mutation and limits the effect to an invalid available control, an editor and its refusal.\n\nContract: SPEC.md:1521-1523 explicitly covers both active and failed destruction: \"While that runs, and if it fails, Hosts and the sidebar attention area show the sandbox as being deleted, with the reason and **Retry**, and its sessions show as being deleted with their actions unavailable.\" Container sessions at :4867 inherits that rule. SPEC_impl.md:6639-6648 says seal state must preserve Deleting/no-client across holds/releases/reconnects and that Deleting sessions' actions are unavailable. No Rename/metadata exception is stated for this phase. A host-phase guard in Rename presentation and local admission should match the other unavailable lifecycle controls.\n\nSuggested bucket: other, preserving the original offered-editor/refusal consequence. Confidence: confirmed source and contract analysis for retained displayed rows; no execution observed. Could-be-highest: no established security/loss-of-work route. proposed_drop: false. possible_cover: none known. Material caveats: a local Delete claim can independently disable Rename while it is pending, so the failure/helm-finisher/other-client or host-level path matters; disappearance of the cached row ends the opportunity. No mutation, data loss, permanent retained row or runtime reproduction is claimed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 11,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "f1",
+          "state": "open",
+          "summary": "Rename stays enabled for retained sessions while their environment is being deleted",
+          "location": "crates/farhelm-ui/src/list/row.rs:2684",
+          "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa\n\nTLDR: A retained session row can show that its sandbox or container is being deleted while still opening an enabled Rename editor. The editor can submit a request that the helm refuses because that environment has no routable connection. The established issue is the offered unavailable editor, not a successful mutation.\n\nDetails: Synthesis confirms the full availability/admission route. row_control_visibility at row.rs:144-150 sets rename=true unconditionally for ordinary non-retired rows. The new environment_deleting flag at :1179-1184 guards Clone/Delete, while frozen covers Stop/Restart/Replace; Rename at :2671-2716 checks only busy (:2684/:2707). list/view.rs:6312-6317 derives busy from local pending/held/questions. on_rename_start at :3850-3888 checks retired_row, local busy/questions and an existing editor, but never host phase. retired_row at :1249-1255 checks only retired-container compatibility. on_rename_submit at :3909-3945 checks the editor generation/unavailable flag and begin_row_op; begin_row_operation at :868-876 checks only local questions/claims/pending before reserving. listed_rename_unavailable is reconciled only against authoritative source absence at :2250-2262, not the Deleting host phase. Thus a row still displayed with no local request/confirmation can open and submit Rename.\n\nThe failed sealed-destruction premise is preserved and bounded precisely: manager.rs:2610-2619 notes a seal independently of any GUI session claim; sessions/sandbox.rs:290-304 records an attempt and failure; manager.rs:2639-2679 retains Failed(reason) as HostState::Deleting, and :2210-2228 exposes no client whatever the actor's connection does. finish_seal runs in the helm-owned finisher (:339-360), not a page's SessionOps. hosts.rs:1537-1545 returns on provider destruction failure before deleting the registered host/cache at :1550-1554. While a cached session row remains displayed after that failure, no failed sealed-host reconnection can make its Rename request routable. A later successful supervisor refresh may show the final session already gone and remove its row; this finding does not assert that a failed destruction always leaves a session row forever. The same omission is visible while a host-level whole-environment destruction holds Deleting at hosts.rs:1513-1534 and a cached session row remains, without a session-local GUI claim.\n\nBackend boundary: manager.status removes the client for every seal record (:2220-2224), and sessions::route_session at :905-926 refuses status.client=None with Conflict. An attempted rename is therefore refused before reaching the sealed supervisor. This prevents mutation and limits the effect to an invalid available control, an editor and its refusal.\n\nContract: SPEC.md:1521-1523 explicitly covers both active and failed destruction: \"While that runs, and if it fails, Hosts and the sidebar attention area show the sandbox as being deleted, with the reason and **Retry**, and its sessions show as being deleted with their actions unavailable.\" Container sessions at :4867 inherits that rule. SPEC_impl.md:6639-6648 says seal state must preserve Deleting/no-client across holds/releases/reconnects and that Deleting sessions' actions are unavailable. No Rename/metadata exception is stated for this phase. A host-phase guard in Rename presentation and local admission should match the other unavailable lifecycle controls.\n\nSuggested bucket: other, preserving the original offered-editor/refusal consequence. Confidence: confirmed source and contract analysis for retained displayed rows; no execution observed. Could-be-highest: no established security/loss-of-work route. proposed_drop: false. possible_cover: none known. Material caveats: a local Delete claim can independently disable Rename while it is pending, so the failure/helm-finisher/other-client or host-level path matters; disappearance of the cached row ends the opportunity. No mutation, data loss, permanent retained row or runtime reproduction is claimed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g037/findings.jsonl",
+        "id": "f1",
+        "line": 11,
+        "disposition": "verified",
+        "group": "deleting-environment-row-rename-omits-phase-guard",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-022 after inspecting it. A retained ordinary session row in Deleting can open and submit Rename because presentation and admission omit the host phase. The helm refuses routing. Retain as other. A failed destruction can hold the phase while a row remains displayed, so the whole claim is not a rare self-correcting display race. Do not make another-GUI-only consistency the trigger: the helm-owned finisher/host-level deletion also supplies the phase. Checked source/results: [\"At 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa, list/row.rs:144-150 enables rename for ordinary rows; :1179-1184 computes environment_deleting, but Rename :2671-2716 checks busy alone.\",\"list/view.rs:6312-6317 derives busy from page-owned pending/claims/questions. :3850-3888 opens Rename without a host-phase guard; :3909-3945 submits through begin_row_op without one.\",\"list/view.rs:2248-2262 retires questions and updates rename unavailability from authoritative source presence, not host Deleting.\",\"manager.rs:2210-2228 withholds every sealed host's client; sessions.rs:905-926 refuses a missing client with Conflict. This establishes refusal, not successful rename or lost work.\",\"2ef10815 is in range. Source-conditional on the row remaining displayed; no runtime observation.\"] Current coverage/results: [\"Recording-time main 24bc058066fd57848e788b465719b0e6da2f98f7: TODO.md:25-26 Planned is empty.\",\"BUGS.md searched for actual Restart, Deleting, marking, Replace-progress and notification claims; its sole SSH-helper install/update hang is unrelated.\",\"plans/queue searched for retirement/stale/floor/success, Deleting/Rename/question, marking/cleanup, ReplaceProgressGuard and OldTerminalEnded. Matching session-action-leftovers, environment-agent-operations, tmux and nonblocking plans have landed per plans/REPORTS.md; none is an unlanded repair covering these claims.\",\"review_feedback_queue/INDEX.md read in bounded chunks. Matching retained-restart-hides-reboot-card, suspended-sandbox-keeps-row-confirmations-enabled, frozen-sandbox-retains-header-lifecycle-answers and bulk-sandbox-delete-drops-eligible-peer files read; their trigger/consequence boundaries differ as noted per record.\",\"TRIAGE_OUTCOMES.md searched for the actual retirement/stale-success, Deleting/Rename/question, marking cleanup, progress-guard and notification claims; no matching active disposition. Archive not read.\",\"SPEC.md Sandbox sessions:1525-1528 and SPEC_impl.md:6148-6157 explicitly require actions unavailable while deletion runs or has failed. Container sessions share that policy. No Rename metadata exception found. Existing frozen/suspended lifecycle-answer queue items concern other controls and phases.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The earliest finding called this a working Rename editor and error state; its explicit caveat already excluded successful backend mutation. Latest wording correctly limits it to an offered editor and refused request.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g037/f1",
+        "line": 11,
+        "disposition": "verified",
+        "group": "deleting-environment-row-rename-omits-phase-guard",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-022 after inspecting it. A retained ordinary session row in Deleting can open and submit Rename because presentation and admission omit the host phase. The helm refuses routing. Retain as other. A failed destruction can hold the phase while a row remains displayed, so the whole claim is not a rare self-correcting display race. Do not make another-GUI-only consistency the trigger: the helm-owned finisher/host-level deletion also supplies the phase. Checked source/results: [\"At 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa, list/row.rs:144-150 enables rename for ordinary rows; :1179-1184 computes environment_deleting, but Rename :2671-2716 checks busy alone.\",\"list/view.rs:6312-6317 derives busy from page-owned pending/claims/questions. :3850-3888 opens Rename without a host-phase guard; :3909-3945 submits through begin_row_op without one.\",\"list/view.rs:2248-2262 retires questions and updates rename unavailability from authoritative source presence, not host Deleting.\",\"manager.rs:2210-2228 withholds every sealed host's client; sessions.rs:905-926 refuses a missing client with Conflict. This establishes refusal, not successful rename or lost work.\",\"2ef10815 is in range. Source-conditional on the row remaining displayed; no runtime observation.\"] Current coverage/results: [\"Recording-time main 24bc058066fd57848e788b465719b0e6da2f98f7: TODO.md:25-26 Planned is empty.\",\"BUGS.md searched for actual Restart, Deleting, marking, Replace-progress and notification claims; its sole SSH-helper install/update hang is unrelated.\",\"plans/queue searched for retirement/stale/floor/success, Deleting/Rename/question, marking/cleanup, ReplaceProgressGuard and OldTerminalEnded. Matching session-action-leftovers, environment-agent-operations, tmux and nonblocking plans have landed per plans/REPORTS.md; none is an unlanded repair covering these claims.\",\"review_feedback_queue/INDEX.md read in bounded chunks. Matching retained-restart-hides-reboot-card, suspended-sandbox-keeps-row-confirmations-enabled, frozen-sandbox-retains-header-lifecycle-answers and bulk-sandbox-delete-drops-eligible-peer files read; their trigger/consequence boundaries differ as noted per record.\",\"TRIAGE_OUTCOMES.md searched for the actual retirement/stale-success, Deleting/Rename/question, marking cleanup, progress-guard and notification claims; no matching active disposition. Archive not read.\",\"SPEC.md Sandbox sessions:1525-1528 and SPEC_impl.md:6148-6157 explicitly require actions unavailable while deletion runs or has failed. Container sessions share that policy. No Rename metadata exception found. Existing frozen/suspended lifecycle-answer queue items concern other controls and phases.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The earliest finding called this a working Rename editor and error state; its explicit caveat already excluded successful backend mutation. Latest wording correctly limits it to an offered editor and refused request.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-022",
+          "bucket": "other",
+          "aliases": [],
+          "target_queue_file": null,
+          "coverage_checked": [
+            "Recording-time main 24bc058066fd57848e788b465719b0e6da2f98f7: TODO.md:25-26 Planned is empty.",
+            "BUGS.md searched for actual Restart, Deleting, marking, Replace-progress and notification claims; its sole SSH-helper install/update hang is unrelated.",
+            "plans/queue searched for retirement/stale/floor/success, Deleting/Rename/question, marking/cleanup, ReplaceProgressGuard and OldTerminalEnded. Matching session-action-leftovers, environment-agent-operations, tmux and nonblocking plans have landed per plans/REPORTS.md; none is an unlanded repair covering these claims.",
+            "review_feedback_queue/INDEX.md read in bounded chunks. Matching retained-restart-hides-reboot-card, suspended-sandbox-keeps-row-confirmations-enabled, frozen-sandbox-retains-header-lifecycle-answers and bulk-sandbox-delete-drops-eligible-peer files read; their trigger/consequence boundaries differ as noted per record.",
+            "TRIAGE_OUTCOMES.md searched for the actual retirement/stale-success, Deleting/Rename/question, marking cleanup, progress-guard and notification claims; no matching active disposition. Archive not read.",
+            "SPEC.md Sandbox sessions:1525-1528 and SPEC_impl.md:6148-6157 explicitly require actions unavailable while deletion runs or has failed. Container sessions share that policy. No Rename metadata exception found. Existing frozen/suspended lifecycle-answer queue items concern other controls and phases."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "The earliest finding called this a working Rename editor and error state; its explicit caveat already excluded successful backend mutation. Latest wording correctly limits it to an offered editor and refused request.",
+          "needs_independent_drop_check": false,
+          "key": "g037/f1",
+          "latest_line": 11,
+          "recommendation": "retain-verified",
+          "underlying_key": "deleting-environment-row-rename-omits-phase-guard",
+          "why": "A retained ordinary session row in Deleting can open and submit Rename because presentation and admission omit the host phase. The helm refuses routing.",
+          "checks": [
+            "At 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa, list/row.rs:144-150 enables rename for ordinary rows; :1179-1184 computes environment_deleting, but Rename :2671-2716 checks busy alone.",
+            "list/view.rs:6312-6317 derives busy from page-owned pending/claims/questions. :3850-3888 opens Rename without a host-phase guard; :3909-3945 submits through begin_row_op without one.",
+            "list/view.rs:2248-2262 retires questions and updates rename unavailability from authoritative source presence, not host Deleting.",
+            "manager.rs:2210-2228 withholds every sealed host's client; sessions.rs:905-926 refuses a missing client with Conflict. This establishes refusal, not successful rename or lost work.",
+            "2ef10815 is in range. Source-conditional on the row remaining displayed; no runtime observation."
+          ],
+          "proposed_basis": "Retain as other. A failed destruction can hold the phase while a row remains displayed, so the whole claim is not a rare self-correcting display race. Do not make another-GUI-only consistency the trigger: the helm-owned finisher/host-level deletion also supplies the phase."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "deleting-environment-row-rename-omits-phase-guard",
+        "destination": "trailing-deleting-environment-row-rename-omits-phase-guard.md"
+      }
+    },
+    {
+      "key": "g037/f2",
+      "owner": "g037",
+      "id": "f2",
+      "domain": "gui-session-lifecycle",
+      "purpose": "gui-session-lifecycle: crates/farhelm-ui/src/list/row.rs, crates/farhelm-ui/src/list/shared.rs, crates/farhelm-ui/src/session_ops.rs, crates/farhelm-ui/src/list/bell.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "f2",
+            "state": "open",
+            "summary": "Delete scope remains bound to the answered question across connection changes",
+            "location": "crates/farhelm-ui/src/list/shared.rs:135",
+            "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa\n\nTLDR: Considered whether a session-only Delete could silently become deletion of the whole sandbox or container after connection loss. The source prevents that widening.\n\nDetails: row.rs:1171-1176 derives the current environment scope at render, which initially looked dangerous when a narrower confirmation remains open. But row.rs:1227-1250 chooses the displayed consequence from the rendered question token's Delete versus DeleteWhole key, not the newly computed scope. The confirming render passes that token, its guard and environment facts at 2530-2539. list/view.rs:3287-3300 first consumes precisely that opening, then uses token.key().answered(environment). shared.rs:135-148 overwrites scope from the answered key: Delete always Session, DeleteWhole always Whole. The live connection cannot turn Session into Whole. list/view.rs:3022-3055 handles an Unasked reply by opening a distinct DeleteWhole question rather than sending it. This satisfies SPEC_impl.md:1071-1090, Answers bind to what was drawn, and SPEC.md:1526-1536, requiring a warned whole-environment confirmation when the environment cannot answer.\n\nSuggested bucket if it were present: highest, since an unwarned widened Delete could destroy other sessions and files. Could-be-highest: yes (considered consequence), but source refutes the route. Confidence: confirmed source refutation. proposed_drop: source refutation; separate question keys and answered-scope override prevent the suspected destructive widening. No specification exception is needed. possible_cover: none; coverage sources not searched. No runtime behavior was observed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 3,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "f2",
+          "state": "open",
+          "summary": "Delete scope remains bound to the answered question across connection changes",
+          "location": "crates/farhelm-ui/src/list/shared.rs:135",
+          "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa\n\nTLDR: Considered whether a session-only Delete could silently become deletion of the whole sandbox or container after connection loss. The source prevents that widening.\n\nDetails: row.rs:1171-1176 derives the current environment scope at render, which initially looked dangerous when a narrower confirmation remains open. But row.rs:1227-1250 chooses the displayed consequence from the rendered question token's Delete versus DeleteWhole key, not the newly computed scope. The confirming render passes that token, its guard and environment facts at 2530-2539. list/view.rs:3287-3300 first consumes precisely that opening, then uses token.key().answered(environment). shared.rs:135-148 overwrites scope from the answered key: Delete always Session, DeleteWhole always Whole. The live connection cannot turn Session into Whole. list/view.rs:3022-3055 handles an Unasked reply by opening a distinct DeleteWhole question rather than sending it. This satisfies SPEC_impl.md:1071-1090, Answers bind to what was drawn, and SPEC.md:1526-1536, requiring a warned whole-environment confirmation when the environment cannot answer.\n\nSuggested bucket if it were present: highest, since an unwarned widened Delete could destroy other sessions and files. Could-be-highest: yes (considered consequence), but source refutes the route. Confidence: confirmed source refutation. proposed_drop: source refutation; separate question keys and answered-scope override prevent the suspected destructive widening. No specification exception is needed. possible_cover: none; coverage sources not searched. No runtime behavior was observed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g037/findings.jsonl",
+        "id": "f2",
+        "line": 3,
+        "disposition": "under-investigation",
+        "group": "g037-f2",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-022",
+          "bucket": "other",
+          "aliases": [],
+          "target_queue_file": null,
+          "coverage_checked": [
+            "Recording-time main 24bc058066fd57848e788b465719b0e6da2f98f7: TODO.md:25-26 Planned is empty.",
+            "BUGS.md searched for actual Restart, Deleting, marking, Replace-progress and notification claims; its sole SSH-helper install/update hang is unrelated.",
+            "plans/queue searched for retirement/stale/floor/success, Deleting/Rename/question, marking/cleanup, ReplaceProgressGuard and OldTerminalEnded. Matching session-action-leftovers, environment-agent-operations, tmux and nonblocking plans have landed per plans/REPORTS.md; none is an unlanded repair covering these claims.",
+            "review_feedback_queue/INDEX.md read in bounded chunks. Matching retained-restart-hides-reboot-card, suspended-sandbox-keeps-row-confirmations-enabled, frozen-sandbox-retains-header-lifecycle-answers and bulk-sandbox-delete-drops-eligible-peer files read; their trigger/consequence boundaries differ as noted per record.",
+            "TRIAGE_OUTCOMES.md searched for the actual retirement/stale-success, Deleting/Rename/question, marking cleanup, progress-guard and notification claims; no matching active disposition. Archive not read.",
+            "SPEC_impl.md:1069-1098 Answers bind to what was drawn and SPEC.md:1519-1550 require the warned scope. Source meets this requirement for the proposed connection-change widening route."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "An answered session-only Delete silently widens after connection loss and destroys other sessions, processes and files in the environment.",
+          "needs_independent_drop_check": true,
+          "key": "g037/f2",
+          "latest_line": 3,
+          "recommendation": "refuted",
+          "underlying_key": "row-delete-answer-scope-bound-to-question-key",
+          "why": "Connection changes cannot turn the drawn session-only answer into whole-environment consent; the token's key overwrites the current environment scope.",
+          "checks": [
+            "At 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa, row.rs:1227-1250 draws session versus whole-environment consequences from RowQuestion::Delete/DeleteWhole.",
+            "list/view.rs:3287-3300 consumes exactly that token then calls token.key().answered(environment). shared.rs:135-148 forces Delete to Session and DeleteWhole to Whole.",
+            "list/view.rs:3022-3055 opens a distinct DeleteWhole question after an Unasked result rather than dispatching whole deletion.",
+            "Relevant change is in range. No runtime evidence."
+          ],
+          "proposed_basis": "Proposed source refutation of this exact destructive-widening mechanism. Requires an independent drop check because the considered consequence is loss of user-owned work."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-022.json",
+          "key": "g037/f2",
+          "proposal": "claim-checks/claims-022/result.json",
+          "parent_proposal": "source-refuted-rendered-row-delete-scope-widening",
+          "final_independent_gate": "required-before-highest-drop",
+          "reason": "Parent read full022. DrawnRowQuestionDelete/DeleteWhole exacttokenconsumed, answeredforcesSession/Wholescopeirrespectiveupdatedconnection; UnaskedopensnewWholequestionnotdispatch. Sameboundedrouteas028c4butretainindependentrowrefs/history. Original otherprocess/filelossfromunconfirmedwideningkeptforfreshgate, noassertionallDeletepaths safe."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "row-delete-answer-scope-bound-to-question-key",
+        "destination": null
+      }
+    },
+    {
+      "key": "g037/f3",
+      "owner": "g037",
+      "id": "f3",
+      "domain": "gui-session-lifecycle",
+      "purpose": "gui-session-lifecycle: crates/farhelm-ui/src/list/row.rs, crates/farhelm-ui/src/list/shared.rs, crates/farhelm-ui/src/session_ops.rs, crates/farhelm-ui/src/list/bell.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "f3",
+            "state": "open",
+            "summary": "Check stale in-flight listings after removal of the restart listing floor",
+            "location": "crates/farhelm-ui/src/session_ops.rs:79",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\nTLDR: A sidebar read begun before a successful Restart can now retire its remembered success even when it only shows an older stale Interrupted row. Need establish whether this can make a reopened running session show the interrupted card.\n\nDetails: session_ops.rs:79-80 accepts stale as read_confirms_run, and restarts_retired_by:91-107 no longer checks listing generation. list/view.rs:1985 retires on committed listings with no per-session revision fence; a pre-restart stale read completing after pending release appears eligible. Detail reads retain their lifecycle boundary fences at session_view.rs:982-995. The removed floor previously rejected that stale listing for retiring the outcome. Need trace helm list freshness, the post-Restart refresh/read gate and view mount behavior to establish a shipped route and practical impact. Suggested bucket: other or high depending duration/severity; no destructive consequence currently established. Could-be-highest: no established security or loss-of-work route. Confidence: unresolved lead. proposed_drop: false. possible_cover: none. Source analysis only, no reproduction requested or run."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f3",
+            "state": "open",
+            "summary": "An old stale listing can forget a successful Restart before showing its run",
+            "location": "crates/farhelm-ui/src/session_ops.rs:79",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\nTLDR: After restarting an interrupted session, opening it again can show the interrupted-session recovery card instead of its new terminal if a delayed listing from the earlier host outage lands after Restart succeeds. A later fresh status read corrects it.\n\nDetails: This commit removes restart_listing_floor and the listing generation argument. read_confirms_run at session_ops.rs:79-80 returns true for any stale row, even Interrupted; restarts_retired_by at 91-107 then retires remembered success whenever no request is pending. The stated reasoning at 73-76 overlooks the stale disjunct: an old Interrupted row DOES retire the outcome when stale is true. list/view.rs:1935-1953 commits such a listing if newer than the last applied read, not newer than Restart; 1976-1985 calls retirement. Restart completion at 3416-3419 records success, asks the surface reader for a refresh, then releases pending. That refresh does not fence the outstanding listing: request_listing at 2473-2474 calls reader::request_read, whose single-flight request at reader.rs:644-660 coalesces the refresh behind an existing read. ReadGate::accept_success at ops.rs:182-187 accepts the old read if it beats the last applied generation. Thus an ordinary delayed GET from the preceding outage may land after the successful POST, now see pending empty, and clear restart_succeeded. The removed floor specifically excluded reads already started at completion.\n\nA concrete source route is an interrupted session cached during an outage: a stale listing snapshot is in flight; the host reconnects and a user Restart succeeds; that old listing completes after pending is released. The next connected listing may still say Interrupted because session_cache::merged_status preserves definite status when the Restart reply is Unknown (session_cache.rs:143-150), until the awakened supervisor refresh produces definite new liveness. Reopening from that listing seeds relaunched=false at session_view.rs:633; terminal_absence at 3701-3707 then chooses Interrupted and mounts no terminal. Its detail read is also listing-backed, so it is not guaranteed to cure the gap before the host refresh. Restore an age fence for stale evidence, or otherwise distinguish a post-Restart host disappearance from an older outage snapshot. Ordinary nonstale Interrupted snapshots correctly retain success.\n\nContract: SPEC.md:1897-1900 says actions and their results survive switching sessions and a reopened view observes the operation's outcome; SPEC_impl.md:1134-1139 says a view opened before the listing catches up can use the retained successful reply. This route instead retires the reply before a read shows the restarted run.\n\nSuggested bucket: other. The established consequence is a temporary wrong recovery surface and blocked terminal access; no lasting outage or security/loss-of-work route is claimed. Confidence: confirmed source/contract race, not observed execution; timing requires a stale pre-Restart listing to arrive after the POST and before a genuinely fresh status snapshot. Could-be-highest: no established route. proposed_drop: false. possible_cover: none; coverage sources not searched. Lead f3 is closed as a finding. No runtime tests or reproductions were run."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f3",
+            "state": "open",
+            "summary": "A delayed stale listing can forget Restart success before the new terminal is shown",
+            "location": "crates/farhelm-ui/src/session_ops.rs:79",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\nTLDR: A delayed sidebar listing from an earlier host outage can erase successful Restart knowledge, leaving an interrupted recovery card until a later live detail read replaces the view's old state. This is a temporary presentation/attachment gap, not evidence of a failed Restart.\n\nDetails: This synthesis revision corrects a premise in the earlier f3 record immediately after checking it. Connected detail is NOT served from the helm's status cache: sessions.rs:3052-3093 documents connected live whole-list versus disconnected cache, and :3195-3222 calls manager::drain_sessions then returns stale=false. Only :3162-3187 uses cached data when status.client is absent. Thus the previous claim that connected detail can remain Interrupted merely because session_cache::merged_status retains it is unsupported and retracted. The consequence remains a possible gap before the independent detail arrives; no lasting wrong state after a successful live post-Restart detail is claimed.\n\nThe old sidebar premise is established: aggregate.rs:547 captures manager snapshots before :578 awaits cached_slice, and row_of at :357 computes stale from that captured state. A pre-reconnect sidebar snapshot may therefore remain stale even when later delivered after reconnection. f3's retirement mechanism remains as previously recorded: session_ops.rs:79-80 treats stale Interrupted as confirming, :91-107 excludes pending operations but has no generation floor, list/view.rs:1985 retires on an accepted listing, Restart completion :3416-3419 records success then queues a refresh and releases pending, and ReadGate compares against applied reads rather than the mutation. The single-flight reader queues that refresh behind an old read rather than fencing it.\n\nCurrent confidence: likely, naming the required delivery premise: the old stale sidebar snapshot must be admitted after Restart's pending state clears, while a mounted view still holds Interrupted or a newly opened view has not received a post-Restart live detail. This ordering is permitted by source; it has not been observed in execution. Synthesis is continuing to check the opened-view, cache-publication and scheduling assumptions and to distinguish g036/l1's earlier eligible-listing/payload race. No new discovery is claimed.\n\nContract: SPEC.md Lifecycle operations: actions/results survive switching sessions; SPEC_impl.md:1134-1139 retains successful reply knowledge until the view/list catches up. Suggested bucket: other; the original temporary recovery-card/blocked-terminal consequence is preserved, with no persistent outage or loss-of-work route. Could-be-highest: no. proposed_drop: false. possible_cover: g038/l1 and g089/l1 report the same f560058 pre-Restart stale-list mechanism; g036/l1 is related at b3d6b3eff6b7508e0b1fb6ec5b5cde31d27ebabe but has a different age-eligible trigger and terminal-kind consequence. No runtime tests or reproductions were performed."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f3",
+            "state": "open",
+            "summary": "A delayed stale listing can forget Restart success before the new terminal is shown",
+            "location": "crates/farhelm-ui/src/session_ops.rs:79",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\nTLDR: After a successful Restart, a delayed sidebar response from the earlier host outage can leave the session showing its interrupted recovery card until live detail arrives. Opening the session again can also miss the retained success during this window. No lasting failure or destructive consequence is established.\n\nDetails: Synthesis verdict: retain the stale-list mechanism; classify its user-visible timing as likely, not observed execution. aggregate.rs:547 snapshots host state before awaiting cached_slice at :578, and row_of at :357 derives stale from that captured host. The response may thus say stale=true after reconnection. list/view.rs:1935-1953 admits an older in-flight response when newer than the last applied read; ops.rs:182-187 compares applied generation, not Restart age. session_ops.rs:79-80 treats even stale Interrupted as confirming; :91-107 and :215-226 clear restart_succeeded once pending is empty. Restart completion at list/view.rs:3416-3419 records success, requests a refresh and releases pending without fencing older listings. request_listing at :2473-2474 uses reader::request_read; reader.rs:644-660 coalesces that refresh behind an existing read. These are the exact read-age premises removed by this patch's deletion of restart_listing_floor.\n\nThe mounted-view route does NOT require fresh detail to remain Interrupted: the already mounted view can still hold its pre-Restart reachable Interrupted detail. Sidebar commit retires the shared success but does not replace that independent current detail (session_view.rs:1243-1262 follows only the selection title and requests detail). If retirement happens before use_restart_observation at :549-564, that observer sees the durable changed revision and increments mount_generation but cannot set relaunched=true. terminal_absence at :3701-3707 still chooses Interrupted; keep_terminal_surface at :3714-3722 returns false, and terminal_specs at :1709-1710 emits an empty set. A generation increment does not mount a terminal through that guard. If the observer runs before retirement, this particular mounted-view consequence does not occur.\n\nThe scheduling premise is source-permitted, not a timing observation: pinned Cargo.lock uses Dioxus core/hooks/desktop 0.7.10. Its installed use_effect.rs:15-47 queues callbacks that later read current state; core virtual_dom.rs:507-537 polls ready tasks before effects, and scheduler.rs:61-78 assigns effects lowest priority. Desktop webview.rs:537-590 returns while mutation delivery is pending before polling the virtual DOM again. Thus a ready old-list response task can run before the completion observer, while the independent post-Restart detail has not completed. No source ordering requires the live detail or observer to win. This supports the conditional race; it does not establish how often a real response lands in that window.\n\nThe original reopened-view consequence is preserved with a corrected premise: the next connected SIDEBAR row can still be Interrupted before the host refresh. sessions.rs:3472-3483 records the successful reply before answering; session_cache.rs:143-147 preserves definite Interrupted when that reply is Unknown. manager.rs:2447-2464 calls refresh_now without awaiting its drain. A view opened from such a row after success retirement seeds relaunched=false at session_view.rs:633 until its live detail arrives. Connected DETAIL is different: sessions.rs:3195-3222 drains the supervisor directly; only the no-client branch :3162-3187 reads cache. The earlier f3 statement that the helm status cache could keep a successful connected fresh detail Interrupted is retracted. A post-Restart live detail corrects the gap; no failure after it commits is asserted.\n\nContract: SPEC.md Lifecycle operations (1897-1900) preserves action outcomes across navigation; SPEC_impl.md:1134-1139 requires completion reattachment and retained successful knowledge before listing catches up. Suggested correction: restore an age fence for pre-Restart stale evidence (or fence those reads at completion); independently durable observer success would also protect mounted consumers.\n\nDuplicate boundaries: g038/l1 and g089/l1 are the same f560058 stale-evidence retirement defect, the latter using the mounted-view route above. g036/l1 at b3d6b3eff6b7508e0b1fb6ec5b5cde31d27ebabe has the same shared-consumer weakness but its listing is post-reply age-eligible under generation > floor and may lose terminal-kind payload as well. Restoring the old age floor fixes f3's specific pre-reply evidence trigger but does not fix g036's eligible-listing/observer trigger. Do not collapse those trigger/fix boundaries merely because the interrupted-card outcome overlaps. g088/l1's preserved-revision argument refutes lost mount-generation increments, not the empty terminal set when relaunched remains false.\n\nSuggested bucket: other, preserving the original temporary wrong recovery surface/blocked terminal access consequence. Confidence: likely, with the precise premise that a stale pre-Restart sidebar response is admitted after pending clears and before either the mounted observer or fresh detail supplies the new run (or before reopening from a still-Interrupted connected sidebar row). Every required code path and absence of an ordering fence was source-checked; timing was not executed. Could-be-highest: no established security or loss-of-work route. proposed_drop: false. possible_cover: g038/l1 and g089/l1, explicitly supplied by caller; no queue coverage search. No reproductions, tests or builds run. No unresolved source premise remains for the conditional route; actual incidence would require observing response/effect order, which was not requested."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "f3",
+          "state": "open",
+          "summary": "A delayed stale listing can forget Restart success before the new terminal is shown",
+          "location": "crates/farhelm-ui/src/session_ops.rs:79",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\nTLDR: After a successful Restart, a delayed sidebar response from the earlier host outage can leave the session showing its interrupted recovery card until live detail arrives. Opening the session again can also miss the retained success during this window. No lasting failure or destructive consequence is established.\n\nDetails: Synthesis verdict: retain the stale-list mechanism; classify its user-visible timing as likely, not observed execution. aggregate.rs:547 snapshots host state before awaiting cached_slice at :578, and row_of at :357 derives stale from that captured host. The response may thus say stale=true after reconnection. list/view.rs:1935-1953 admits an older in-flight response when newer than the last applied read; ops.rs:182-187 compares applied generation, not Restart age. session_ops.rs:79-80 treats even stale Interrupted as confirming; :91-107 and :215-226 clear restart_succeeded once pending is empty. Restart completion at list/view.rs:3416-3419 records success, requests a refresh and releases pending without fencing older listings. request_listing at :2473-2474 uses reader::request_read; reader.rs:644-660 coalesces that refresh behind an existing read. These are the exact read-age premises removed by this patch's deletion of restart_listing_floor.\n\nThe mounted-view route does NOT require fresh detail to remain Interrupted: the already mounted view can still hold its pre-Restart reachable Interrupted detail. Sidebar commit retires the shared success but does not replace that independent current detail (session_view.rs:1243-1262 follows only the selection title and requests detail). If retirement happens before use_restart_observation at :549-564, that observer sees the durable changed revision and increments mount_generation but cannot set relaunched=true. terminal_absence at :3701-3707 still chooses Interrupted; keep_terminal_surface at :3714-3722 returns false, and terminal_specs at :1709-1710 emits an empty set. A generation increment does not mount a terminal through that guard. If the observer runs before retirement, this particular mounted-view consequence does not occur.\n\nThe scheduling premise is source-permitted, not a timing observation: pinned Cargo.lock uses Dioxus core/hooks/desktop 0.7.10. Its installed use_effect.rs:15-47 queues callbacks that later read current state; core virtual_dom.rs:507-537 polls ready tasks before effects, and scheduler.rs:61-78 assigns effects lowest priority. Desktop webview.rs:537-590 returns while mutation delivery is pending before polling the virtual DOM again. Thus a ready old-list response task can run before the completion observer, while the independent post-Restart detail has not completed. No source ordering requires the live detail or observer to win. This supports the conditional race; it does not establish how often a real response lands in that window.\n\nThe original reopened-view consequence is preserved with a corrected premise: the next connected SIDEBAR row can still be Interrupted before the host refresh. sessions.rs:3472-3483 records the successful reply before answering; session_cache.rs:143-147 preserves definite Interrupted when that reply is Unknown. manager.rs:2447-2464 calls refresh_now without awaiting its drain. A view opened from such a row after success retirement seeds relaunched=false at session_view.rs:633 until its live detail arrives. Connected DETAIL is different: sessions.rs:3195-3222 drains the supervisor directly; only the no-client branch :3162-3187 reads cache. The earlier f3 statement that the helm status cache could keep a successful connected fresh detail Interrupted is retracted. A post-Restart live detail corrects the gap; no failure after it commits is asserted.\n\nContract: SPEC.md Lifecycle operations (1897-1900) preserves action outcomes across navigation; SPEC_impl.md:1134-1139 requires completion reattachment and retained successful knowledge before listing catches up. Suggested correction: restore an age fence for pre-Restart stale evidence (or fence those reads at completion); independently durable observer success would also protect mounted consumers.\n\nDuplicate boundaries: g038/l1 and g089/l1 are the same f560058 stale-evidence retirement defect, the latter using the mounted-view route above. g036/l1 at b3d6b3eff6b7508e0b1fb6ec5b5cde31d27ebabe has the same shared-consumer weakness but its listing is post-reply age-eligible under generation > floor and may lose terminal-kind payload as well. Restoring the old age floor fixes f3's specific pre-reply evidence trigger but does not fix g036's eligible-listing/observer trigger. Do not collapse those trigger/fix boundaries merely because the interrupted-card outcome overlaps. g088/l1's preserved-revision argument refutes lost mount-generation increments, not the empty terminal set when relaunched remains false.\n\nSuggested bucket: other, preserving the original temporary wrong recovery surface/blocked terminal access consequence. Confidence: likely, with the precise premise that a stale pre-Restart sidebar response is admitted after pending clears and before either the mounted observer or fresh detail supplies the new run (or before reopening from a still-Interrupted connected sidebar row). Every required code path and absence of an ordering fence was source-checked; timing was not executed. Could-be-highest: no established security or loss-of-work route. proposed_drop: false. possible_cover: g038/l1 and g089/l1, explicitly supplied by caller; no queue coverage search. No reproductions, tests or builds run. No unresolved source premise remains for the conditional route; actual incidence would require observing response/effect order, which was not requested."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g037/findings.jsonl",
+        "id": "f3",
+        "line": 10,
+        "disposition": "duplicate",
+        "group": "restart-success-retired-by-precompletion-stale-listing",
+        "reason": "Parent read complete claims-022 f3 and claims-019 g032/c4. Both describe the same precompletion stale listing accepted after Restart finishes, with no completion-age floor, removing success before the mounted observer can admit its terminal. Exact f560058 aggregate.rs:547-580,session_ops.rs:77-107,215-226,list/view.rs:1935-1953,1985,3416-3419 and session_view.rs:549-564,3701-3722 support the conditional route. Live connected detail at sessions.rs:3194-3231 corrects the display; cached detail is confined to no-client branch:3162-3192. Earlier connected-detail/cache and broad numerical-generation premises remain explicitly retracted. g032/c4's accepted rare self-correcting-display filter applies only to this temporary card/attachment gap and does not accept the implementation or a stronger lasting/destructive effect. The distinct newer eligible listing/observer race g036/l1 remains separately identified."
+      },
+      "accepted_parent_decision": {
+        "key": "g037/f3",
+        "line": 10,
+        "disposition": "duplicate",
+        "group": "restart-success-retired-by-precompletion-stale-listing",
+        "bucket": "other",
+        "recording": "same-filtered-transient-route",
+        "needs_independent_drop_check": false,
+        "reason": "Parent read complete claims-022 f3 and claims-019 g032/c4. Both describe the same precompletion stale listing accepted after Restart finishes, with no completion-age floor, removing success before the mounted observer can admit its terminal. Exact f560058 aggregate.rs:547-580,session_ops.rs:77-107,215-226,list/view.rs:1935-1953,1985,3416-3419 and session_view.rs:549-564,3701-3722 support the conditional route. Live connected detail at sessions.rs:3194-3231 corrects the display; cached detail is confined to no-client branch:3162-3192. Earlier connected-detail/cache and broad numerical-generation premises remain explicitly retracted. g032/c4's accepted rare self-correcting-display filter applies only to this temporary card/attachment gap and does not accept the implementation or a stronger lasting/destructive effect. The distinct newer eligible listing/observer race g036/l1 remains separately identified."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-022",
+          "bucket": "other",
+          "aliases": [
+            "g038/l1"
+          ],
+          "target_queue_file": null,
+          "coverage_checked": [
+            "Recording-time main 24bc058066fd57848e788b465719b0e6da2f98f7: TODO.md:25-26 Planned is empty.",
+            "BUGS.md searched for actual Restart, Deleting, marking, Replace-progress and notification claims; its sole SSH-helper install/update hang is unrelated.",
+            "plans/queue searched for retirement/stale/floor/success, Deleting/Rename/question, marking/cleanup, ReplaceProgressGuard and OldTerminalEnded. Matching session-action-leftovers, environment-agent-operations, tmux and nonblocking plans have landed per plans/REPORTS.md; none is an unlanded repair covering these claims.",
+            "review_feedback_queue/INDEX.md read in bounded chunks. Matching retained-restart-hides-reboot-card, suspended-sandbox-keeps-row-confirmations-enabled, frozen-sandbox-retains-header-lifecycle-answers and bulk-sandbox-delete-drops-eligible-peer files read; their trigger/consequence boundaries differ as noted per record.",
+            "TRIAGE_OUTCOMES.md searched for the actual retirement/stale-success, Deleting/Rename/question, marking cleanup, progress-guard and notification claims; no matching active disposition. Archive not read.",
+            "SPEC.md:1901-1904 and SPEC_impl.md:1134-1143 require completion observation/reattachment; no spec exception accepts this success-erasure interleaving. Existing retained-restart-hides-reboot-card concerns success retained too long after a later reboot, the opposite trigger. Landed session-action-leftovers is not unlanded coverage."
+          ],
+          "exact_cover_quotes": [
+            "FILTER.md, Rare, self-correcting glitches and imprecise diagnostics: \"The trigger is rare: a narrow timing window\".",
+            "Same filter: \"a display that is briefly wrong and corrects itself on the next refresh, retry or reconnect, or when the user leaves the view\"."
+          ],
+          "missing_premise": "Actual scheduling incidence and duration are unmeasured. No route to a persistent failure, wrong-target operation, loss of work or false successful Restart was established.",
+          "original_stronger_consequence": "Earlier record asserted a newly opened view and its connected detail could retain cached Interrupted. That detail-cache premise was explicitly retracted; a mounted pre-Restart Interrupted signal and a reopened still-Interrupted sidebar seed retain the temporary gap. No destructive second-Restart consequence was asserted.",
+          "needs_independent_drop_check": false,
+          "key": "g037/f3",
+          "latest_line": 10,
+          "recommendation": "filtered",
+          "underlying_key": "restart-success-retired-by-precompletion-stale-sidebar",
+          "why": "The conditional stale-sidebar retirement route is supported, but its whole asserted effect is a temporary interrupted card/attachment gap repaired by the next successful live detail.",
+          "checks": [
+            "At f560058da19e02716e6f943883a9508b447aff4e, aggregate.rs:547-580 snapshots host state before awaiting cached_slice. session_ops.rs:77-107 accepts stale rows without a read-age floor; :215-226 clears success when not pending.",
+            "list/view.rs:1935-1953 accepts by ReadGate ordering, :1985 retires success, and :3416-3419 finishes Restart, requests refresh and releases pending without fencing old listings. ops.rs:183-190 compares only applied generation; reader.rs:644-670 coalesces reads.",
+            "session_view.rs:549-564 preserves the numerical remount revision but sets relaunched only if success remains; :3701-3722 suppresses a terminal for nonstale Interrupted plus relaunched=false, and :1709-1710 emits []. :1243-1262 updates only followed title and requests detail.",
+            "sessions.rs:3162-3192 uses cache only without a client; :3194-3231 drains live supervisor sessions for connected detail. The earlier fresh-detail/cache premise is refuted. Lifecycle effect session_view.rs:1470-1490 requests correcting detail.",
+            "Cargo.lock at f560058 pins Dioxus 0.7.10. Installed matching hooks use_effect.rs:15-47 queues effects; core virtual_dom.rs:507-537 polls tasks before effects; scheduler.rs:61-78 gives effects lowest priority; desktop webview.rs:537-590 waits for mutation delivery. This permits the conditional ordering, without measuring incidence.",
+            "f560058 is in range; no runtime tests/reproductions."
+          ],
+          "proposed_basis": "Propose filtering the complete stated transient display/attachment gap under the rare self-correcting filter. Source establishes a real conditional mechanism; filtering is not refutation or product acceptance. g038/l1 is an exact alias. Do not collapse the distinct post-floor/terminal-kind mechanism named g036/l1 outside this batch."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "restart-success-retired-by-precompletion-stale-listing",
+        "destination": "trailing-restart-success-retired-by-precompletion-stale-listing.md"
+      }
+    },
+    {
+      "key": "g037/f4",
+      "owner": "g037",
+      "id": "f4",
+      "domain": "gui-session-lifecycle",
+      "purpose": "gui-session-lifecycle: crates/farhelm-ui/src/list/row.rs, crates/farhelm-ui/src/list/shared.rs, crates/farhelm-ui/src/session_ops.rs, crates/farhelm-ui/src/list/bell.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "f4",
+            "state": "open",
+            "summary": "Removing the retained terminal kind does not misroute terminal attachments",
+            "location": "crates/farhelm-ui/src/session_ops.rs:59",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\nTLDR: Considered whether replacing RestartOutcome with a success boolean loses information needed to open the restarted terminal. The current GUI uses one grid terminal path, so the old terminal-kind payload has no remaining consumer.\n\nDetails: The patch removes RestartOutcome.agent_terminal from Lifecycle. session_view.rs:1688-1752 builds terminal specs without terminal-kind branching, and use_restart_observation:532-564 retains the completion revision independently of success so failures and ambiguous replies still remount an already open terminal. git grep agent_terminal at this revision under crates/farhelm-ui/src returns no references. SPEC_impl.md:2156-2163 says every create/tab/Restart uses a terminal host and no new terminal selects tmux; its migration ends old tmux terminals at startup. Thus dropping the terminal-kind payload is compatible with the replacement attachment contract. This candidate is distinct from f3, which concerns premature retirement of the success bit on stale evidence.\n\nSuggested bucket if present: high for a wrong terminal attachment path. Could-be-highest: no established security/loss-of-work route. Confidence: confirmed source refutation for terminal-kind loss. proposed_drop: the replacement attachment path has no kind selection and still remounts on the durable completion revision. possible_cover: none. No runtime behavior was observed."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "f4",
+            "state": "open",
+            "summary": "Removed terminal kind is unused; preserved revision alone does not ensure a surface mounts",
+            "location": "crates/farhelm-ui/src/session_ops.rs:59",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\nTLDR: Removing the old terminal-kind payload does not select a wrong attachment transport. The retained completion revision still increments the mount generation, but that increment alone does not establish that an interrupted view mounts a terminal.\n\nDetails: This revises f4's scope after cross-group synthesis. The patch removes RestartOutcome.agent_terminal from Lifecycle. session_view.rs:1688-1752 builds terminal specs without terminal-kind branching; git grep agent_terminal under crates/farhelm-ui/src at this revision returns no consumer. SPEC_impl.md:2156-2163 requires every new terminal in a terminal host, so the removed payload has no attachment-path role. use_restart_observation:532-564 increments mount_generation on a changed restart_revision even after restart_succeeded is cleared. However, keep_terminal_surface:3714-3722 and terminal_absence:3701-3707 independently require relaunched=true when current is Interrupted; terminal_specs:1709-1710 emits an empty set otherwise. The generation increment therefore refutes only a lost generation/remount signal, not f3's temporary missing surface. The earlier f4 wording about remounts must not be read as refuting that presentation consequence. g088/l1 independently refutes the lost-generation claim at b3d6b3eff6b7508e0b1fb6ec5b5cde31d27ebabe and concedes the old Interrupted presentation may remain until detail refresh. g036/l1 concerns the unconsumed payload/Interrupted presentation at that earlier revision; f3 instead identifies pre-Restart stale evidence admitted after f560058 removes the listing floor.\n\nSuggested bucket if wrong attachment transport existed: high. Could-be-highest: no established security/loss-of-work route. Confidence: confirmed source refutation of terminal-kind loss only; no runtime observation. proposed_drop: the replacement attachment path has no terminal-kind selection; preserved completion revision ensures its increment, without guaranteeing a surface is mounted. possible_cover: none for this refuted terminal-kind concern. f3 remains independently retained; no drop of that finding is proposed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 8,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "f4",
+          "state": "open",
+          "summary": "Removed terminal kind is unused; preserved revision alone does not ensure a surface mounts",
+          "location": "crates/farhelm-ui/src/session_ops.rs:59",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\nTLDR: Removing the old terminal-kind payload does not select a wrong attachment transport. The retained completion revision still increments the mount generation, but that increment alone does not establish that an interrupted view mounts a terminal.\n\nDetails: This revises f4's scope after cross-group synthesis. The patch removes RestartOutcome.agent_terminal from Lifecycle. session_view.rs:1688-1752 builds terminal specs without terminal-kind branching; git grep agent_terminal under crates/farhelm-ui/src at this revision returns no consumer. SPEC_impl.md:2156-2163 requires every new terminal in a terminal host, so the removed payload has no attachment-path role. use_restart_observation:532-564 increments mount_generation on a changed restart_revision even after restart_succeeded is cleared. However, keep_terminal_surface:3714-3722 and terminal_absence:3701-3707 independently require relaunched=true when current is Interrupted; terminal_specs:1709-1710 emits an empty set otherwise. The generation increment therefore refutes only a lost generation/remount signal, not f3's temporary missing surface. The earlier f4 wording about remounts must not be read as refuting that presentation consequence. g088/l1 independently refutes the lost-generation claim at b3d6b3eff6b7508e0b1fb6ec5b5cde31d27ebabe and concedes the old Interrupted presentation may remain until detail refresh. g036/l1 concerns the unconsumed payload/Interrupted presentation at that earlier revision; f3 instead identifies pre-Restart stale evidence admitted after f560058 removes the listing floor.\n\nSuggested bucket if wrong attachment transport existed: high. Could-be-highest: no established security/loss-of-work route. Confidence: confirmed source refutation of terminal-kind loss only; no runtime observation. proposed_drop: the replacement attachment path has no terminal-kind selection; preserved completion revision ensures its increment, without guaranteeing a surface is mounted. possible_cover: none for this refuted terminal-kind concern. f3 remains independently retained; no drop of that finding is proposed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g037/findings.jsonl",
+        "id": "f4",
+        "line": 8,
+        "disposition": "excluded",
+        "group": "removed-terminal-kind-has-no-current-ui-consumer",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-022 after inspecting it. The removed terminal-kind payload cannot select the wrong attachment transport when the GUI has one terminal path. The retained revision guarantees an increment, not that a surface exists. Drop only terminal-kind transport loss and numerical-generation loss. Preserve the independent temporary no-surface claim. Checked source/results: [\"At f560058da19e02716e6f943883a9508b447aff4e, git grep agent_terminal under crates/farhelm-ui/src returns no references.\",\"session_view.rs:1688-1752 builds grid terminal specifications without terminal-kind branching. :549-564 increments generation independently of restart_succeeded.\",\"session_view.rs:1709-1710 and :3701-3722 independently guard surface mounting, so this refutation does not rebut g037/f3 or g038/l1.\",\"Historical SPEC_impl.md:2156-2163 says every create/tab open/Restart uses a host terminal. f560058 is in range; no runtime behavior observed.\"] Current coverage/results: [\"Recording-time main 24bc058066fd57848e788b465719b0e6da2f98f7: TODO.md:25-26 Planned is empty.\",\"BUGS.md searched for actual Restart, Deleting, marking, Replace-progress and notification claims; its sole SSH-helper install/update hang is unrelated.\",\"plans/queue searched for retirement/stale/floor/success, Deleting/Rename/question, marking/cleanup, ReplaceProgressGuard and OldTerminalEnded. Matching session-action-leftovers, environment-agent-operations, tmux and nonblocking plans have landed per plans/REPORTS.md; none is an unlanded repair covering these claims.\",\"review_feedback_queue/INDEX.md read in bounded chunks. Matching retained-restart-hides-reboot-card, suspended-sandbox-keeps-row-confirmations-enabled, frozen-sandbox-retains-header-lifecycle-answers and bulk-sandbox-delete-drops-eligible-peer files read; their trigger/consequence boundaries differ as noted per record.\",\"TRIAGE_OUTCOMES.md searched for the actual retirement/stale-success, Deleting/Rename/question, marking cleanup, progress-guard and notification claims; no matching active disposition. Archive not read.\",\"Both specifications describe host/grid terminals. Historical SPEC_impl.md:2156-2163 explicitly supplies the single-path contract. No exact queue/active ledger cover is needed for the no-consumer source refutation.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Wrong terminal attachment transport after deleting RestartOutcome.agent_terminal. Earlier wording also broadly invoked remounts; the later record correctly narrows that to the durable numerical generation increment.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g037/f4",
+        "line": 8,
+        "disposition": "excluded",
+        "group": "removed-terminal-kind-has-no-current-ui-consumer",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-022 after inspecting it. The removed terminal-kind payload cannot select the wrong attachment transport when the GUI has one terminal path. The retained revision guarantees an increment, not that a surface exists. Drop only terminal-kind transport loss and numerical-generation loss. Preserve the independent temporary no-surface claim. Checked source/results: [\"At f560058da19e02716e6f943883a9508b447aff4e, git grep agent_terminal under crates/farhelm-ui/src returns no references.\",\"session_view.rs:1688-1752 builds grid terminal specifications without terminal-kind branching. :549-564 increments generation independently of restart_succeeded.\",\"session_view.rs:1709-1710 and :3701-3722 independently guard surface mounting, so this refutation does not rebut g037/f3 or g038/l1.\",\"Historical SPEC_impl.md:2156-2163 says every create/tab open/Restart uses a host terminal. f560058 is in range; no runtime behavior observed.\"] Current coverage/results: [\"Recording-time main 24bc058066fd57848e788b465719b0e6da2f98f7: TODO.md:25-26 Planned is empty.\",\"BUGS.md searched for actual Restart, Deleting, marking, Replace-progress and notification claims; its sole SSH-helper install/update hang is unrelated.\",\"plans/queue searched for retirement/stale/floor/success, Deleting/Rename/question, marking/cleanup, ReplaceProgressGuard and OldTerminalEnded. Matching session-action-leftovers, environment-agent-operations, tmux and nonblocking plans have landed per plans/REPORTS.md; none is an unlanded repair covering these claims.\",\"review_feedback_queue/INDEX.md read in bounded chunks. Matching retained-restart-hides-reboot-card, suspended-sandbox-keeps-row-confirmations-enabled, frozen-sandbox-retains-header-lifecycle-answers and bulk-sandbox-delete-drops-eligible-peer files read; their trigger/consequence boundaries differ as noted per record.\",\"TRIAGE_OUTCOMES.md searched for the actual retirement/stale-success, Deleting/Rename/question, marking cleanup, progress-guard and notification claims; no matching active disposition. Archive not read.\",\"Both specifications describe host/grid terminals. Historical SPEC_impl.md:2156-2163 explicitly supplies the single-path contract. No exact queue/active ledger cover is needed for the no-consumer source refutation.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Wrong terminal attachment transport after deleting RestartOutcome.agent_terminal. Earlier wording also broadly invoked remounts; the later record correctly narrows that to the durable numerical generation increment.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-022",
+          "bucket": "other",
+          "aliases": [],
+          "target_queue_file": null,
+          "coverage_checked": [
+            "Recording-time main 24bc058066fd57848e788b465719b0e6da2f98f7: TODO.md:25-26 Planned is empty.",
+            "BUGS.md searched for actual Restart, Deleting, marking, Replace-progress and notification claims; its sole SSH-helper install/update hang is unrelated.",
+            "plans/queue searched for retirement/stale/floor/success, Deleting/Rename/question, marking/cleanup, ReplaceProgressGuard and OldTerminalEnded. Matching session-action-leftovers, environment-agent-operations, tmux and nonblocking plans have landed per plans/REPORTS.md; none is an unlanded repair covering these claims.",
+            "review_feedback_queue/INDEX.md read in bounded chunks. Matching retained-restart-hides-reboot-card, suspended-sandbox-keeps-row-confirmations-enabled, frozen-sandbox-retains-header-lifecycle-answers and bulk-sandbox-delete-drops-eligible-peer files read; their trigger/consequence boundaries differ as noted per record.",
+            "TRIAGE_OUTCOMES.md searched for the actual retirement/stale-success, Deleting/Rename/question, marking cleanup, progress-guard and notification claims; no matching active disposition. Archive not read.",
+            "Both specifications describe host/grid terminals. Historical SPEC_impl.md:2156-2163 explicitly supplies the single-path contract. No exact queue/active ledger cover is needed for the no-consumer source refutation."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Wrong terminal attachment transport after deleting RestartOutcome.agent_terminal. Earlier wording also broadly invoked remounts; the later record correctly narrows that to the durable numerical generation increment.",
+          "needs_independent_drop_check": false,
+          "key": "g037/f4",
+          "latest_line": 8,
+          "recommendation": "refuted",
+          "underlying_key": "removed-terminal-kind-has-no-current-ui-consumer",
+          "why": "The removed terminal-kind payload cannot select the wrong attachment transport when the GUI has one terminal path. The retained revision guarantees an increment, not that a surface exists.",
+          "checks": [
+            "At f560058da19e02716e6f943883a9508b447aff4e, git grep agent_terminal under crates/farhelm-ui/src returns no references.",
+            "session_view.rs:1688-1752 builds grid terminal specifications without terminal-kind branching. :549-564 increments generation independently of restart_succeeded.",
+            "session_view.rs:1709-1710 and :3701-3722 independently guard surface mounting, so this refutation does not rebut g037/f3 or g038/l1.",
+            "Historical SPEC_impl.md:2156-2163 says every create/tab open/Restart uses a host terminal. f560058 is in range; no runtime behavior observed."
+          ],
+          "proposed_basis": "Drop only terminal-kind transport loss and numerical-generation loss. Preserve the independent temporary no-surface claim."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "removed-terminal-kind-has-no-current-ui-consumer",
+        "destination": null
+      }
+    },
+    {
+      "key": "g037/f5",
+      "owner": "g037",
+      "id": "f5",
+      "domain": "gui-session-lifecycle",
+      "purpose": "gui-session-lifecycle: crates/farhelm-ui/src/list/row.rs, crates/farhelm-ui/src/list/shared.rs, crates/farhelm-ui/src/session_ops.rs, crates/farhelm-ui/src/list/bell.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "f5",
+            "state": "open",
+            "summary": "Bell comment update matches the replacement old-terminal notice",
+            "location": "crates/farhelm-ui/src/list/bell.rs:39",
+            "detail": "Reviewed commit: 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e\n\nTLDR: The changed notification comments accurately describe a notice that an update already ended the old terminal, rather than the earlier warning that a future update would end it. No defect found in the assigned comment-only patch.\n\nDetails: bell.rs:35-43 and 569-575 change only the explanation for allowing Farhelm docs links. SPEC.md:2804-2813 explicitly distinguishes the retired warning from the new unresolved notice and says the latter ends with a link to the new-terminals docs. SPEC_impl.md:5682-5689 names OldTerminalEnded and confirms startup recording for converted interrupted agents. The changed test's assertions at bell.rs:579-602 still verify plain/docs-link runs and punctuation, and NotificationText at 441-468 still isolates text and opens the same constrained docs link through the shared external opener. The patch makes no executable or assertion change.\n\nSuggested bucket: other if this documentation had been incorrect. Could-be-highest: no issue established; the security boundary for arbitrary supervisor links is unchanged and is accurately described. Confidence: confirmed source/contract consistency. proposed_drop: no bug in the changed comments; they match the replacement notice contract. possible_cover: none. Source-only review; no runtime tests performed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 7,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "f5",
+          "state": "open",
+          "summary": "Bell comment update matches the replacement old-terminal notice",
+          "location": "crates/farhelm-ui/src/list/bell.rs:39",
+          "detail": "Reviewed commit: 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e\n\nTLDR: The changed notification comments accurately describe a notice that an update already ended the old terminal, rather than the earlier warning that a future update would end it. No defect found in the assigned comment-only patch.\n\nDetails: bell.rs:35-43 and 569-575 change only the explanation for allowing Farhelm docs links. SPEC.md:2804-2813 explicitly distinguishes the retired warning from the new unresolved notice and says the latter ends with a link to the new-terminals docs. SPEC_impl.md:5682-5689 names OldTerminalEnded and confirms startup recording for converted interrupted agents. The changed test's assertions at bell.rs:579-602 still verify plain/docs-link runs and punctuation, and NotificationText at 441-468 still isolates text and opens the same constrained docs link through the shared external opener. The patch makes no executable or assertion change.\n\nSuggested bucket: other if this documentation had been incorrect. Could-be-highest: no issue established; the security boundary for arbitrary supervisor links is unchanged and is accurately described. Confidence: confirmed source/contract consistency. proposed_drop: no bug in the changed comments; they match the replacement notice contract. possible_cover: none. Source-only review; no runtime tests performed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g037/findings.jsonl",
+        "id": "f5",
+        "line": 7,
+        "disposition": "under-investigation",
+        "group": "g037-f5",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-022",
+          "bucket": "other",
+          "aliases": [],
+          "target_queue_file": null,
+          "coverage_checked": [
+            "Recording-time main 24bc058066fd57848e788b465719b0e6da2f98f7: TODO.md:25-26 Planned is empty.",
+            "BUGS.md searched for actual Restart, Deleting, marking, Replace-progress and notification claims; its sole SSH-helper install/update hang is unrelated.",
+            "plans/queue searched for retirement/stale/floor/success, Deleting/Rename/question, marking/cleanup, ReplaceProgressGuard and OldTerminalEnded. Matching session-action-leftovers, environment-agent-operations, tmux and nonblocking plans have landed per plans/REPORTS.md; none is an unlanded repair covering these claims.",
+            "review_feedback_queue/INDEX.md read in bounded chunks. Matching retained-restart-hides-reboot-card, suspended-sandbox-keeps-row-confirmations-enabled, frozen-sandbox-retains-header-lifecycle-answers and bulk-sandbox-delete-drops-eligible-peer files read; their trigger/consequence boundaries differ as noted per record.",
+            "TRIAGE_OUTCOMES.md searched for the actual retirement/stale-success, Deleting/Rename/question, marking cleanup, progress-guard and notification claims; no matching active disposition. Archive not read.",
+            "Current SPEC.md:2804-2815 describes the same replacement notice. SPEC_impl.md:5686-5689 identifies OldTerminalEnded. No contradictory queue item or active decision found."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "No bug was asserted. The candidate checked whether changed notification comments misdescribed the notice or link boundary.",
+          "needs_independent_drop_check": true,
+          "key": "g037/f5",
+          "latest_line": 7,
+          "recommendation": "refuted",
+          "underlying_key": "bell-comment-matches-old-terminal-ended-notice",
+          "why": "The changed comments describe the shipped replacement notice correctly and do not change executable link admission or assertions.",
+          "checks": [
+            "At 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e, git show for list/bell.rs changes only module/test comments at :35-43 and :569-575, from old-terminal warning wording to the notice that startup ended the old terminal.",
+            "Historical SPEC.md:2804-2813 expressly describes that notice, its docs link and unresolved lifetime.",
+            "61e63232 is inside the range. No runtime checks run; none needed to distinguish comment-only changes."
+          ],
+          "proposed_basis": "Source/contract refutation limited to comment accuracy. Conservatively include in the independent drop register because the record discusses the supervisor-supplied link trust boundary; no approval to drop a separate link-validation concern is implied."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-022.json",
+          "key": "g037/f5",
+          "proposal": "claim-checks/claims-022/result.json",
+          "parent_proposal": "source-refuted-old-terminal-bell-comment-accuracy",
+          "final_independent_gate": "required-by-conservative-link-trust-flag",
+          "reason": "Full022 actual61e632changesonlymodule/testcommentfromoldwarningtostartup-endednotice, matchinghistorical/currentSPEC; executablelinkadmission/assertionsunchanged. Nobugassertedandnoproductharmestablished. Freshgateconservativebecausementionssupervisorlinktrust, boundedcommentaccuracyonlynotseparatelinkvalidationexemption."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "bell-comment-matches-old-terminal-ended-notice",
+        "destination": null
+      }
+    },
+    {
+      "key": "g037/f6",
+      "owner": "g037",
+      "id": "f6",
+      "domain": "gui-session-lifecycle",
+      "purpose": "gui-session-lifecycle: crates/farhelm-ui/src/list/row.rs, crates/farhelm-ui/src/list/shared.rs, crates/farhelm-ui/src/session_ops.rs, crates/farhelm-ui/src/list/bell.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "f6",
+            "state": "open",
+            "summary": "Check open Stop/Replace answers when the environment enters Deleting",
+            "location": "crates/farhelm-ui/src/list/row.rs:2435",
+            "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa\n\nTLDR: An already open Stop or Replace question appears to retain an enabled confirming answer if its environment later starts deletion, unlike the newly guarded Delete answer. Need check question lifetime and admission before reporting or deciding this is covered by f1.\n\nDetails: row.rs:2435 disables Confirm stop on busy alone, :2447 similarly omits environment_deleting on Stop and suspend, while changed Delete confirmation :2521 includes environment_deleting.is_some(). Existing Replace answer follows at :2544 onward. A row's own question is deliberately excluded from busy in list/view.rs:6314-6317. Need determine whether any phase reconciliation cancels the question, and whether confirmation admission checks the environment before dispatch. SPEC.md:1521-1523 and SPEC_impl.md:6648 require Deleting sessions' actions unavailable; this may be the same availability omission as known f1 rather than an independent cause. Suggested bucket: other if established; no successful mutation claimed. Could-be-highest: no established security or loss-of-work route, since sealed/deleting backend routing may refuse. Confidence: unresolved source lead. proposed_drop: false. possible_cover: f1 may cover the same host-phase/local-admission gap; no coverage sources searched. No tests/reproductions or execution."
+          }
+        },
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "f6",
+            "state": "open",
+            "summary": "Open Stop/Replace answers share the recorded deletion-phase availability omission",
+            "location": "crates/farhelm-ui/src/list/row.rs:2435",
+            "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa\n\nTLDR: A row's pre-existing Stop or Replace question can retain an enabled answer after its environment enters Deleting. This is additional evidence of f1's missing deletion-phase UI/admission guard, rather than a new independent defect. It leads to an unavailable operation/refusal, not an established successful mutation.\n\nDetails: Source checks close the f6 lead. row.rs:2435 disables Confirm stop on busy alone, :2447 does the same for Stop and suspend apart from launch-target exclusion, and :2589 disables Confirm replace only on busy. In contrast the changed Delete answer at :2521 explicitly includes environment_deleting. list/view.rs:6314-6317 deliberately keeps a row's own question out of busy; host deletion in another client or the helm does not hold this client's session claim. Question cleanup at list/view.rs:2248 retains questions by listed ID only, with no host-phase reconciliation; a retained row's question can therefore persist or reappear when its menu is reopened. confirm_stop at :2885-2897 consumes the drawn Stop token, then admit_stop at :2692-2734 checks questions/rename/retirement/session claims but not Deleting before sending the request. confirm_replace at :3529-3542 similarly consumes the token and checks only begin_row_op before do_replace.\n\nContract is the same as f1: SPEC.md:1521-1523 and SPEC_impl.md:6648 require sessions' actions unavailable while environment deletion runs or has failed. The same f1 retained-row and no-local-request premise is required; a row that disappears loses the question. Manager status for a recorded seal withholds the client (manager.rs:2210-2228), so routing refuses these requests, just as it refuses Rename. Existing f1 already establishes the same missing host-phase availability guard and local admission pattern; a complete fix must include existing question answers as well as fresh Rename/menu controls. Production refusal does not refute the GUI defect.\n\nSuggested bucket: other, as for f1. Could-be-highest: no established security/loss-of-work route. Confidence: confirmed source-level additional route; no runtime observation. proposed_drop: proposed consolidation into f1 as the same phase-availability omission and common guard fix, not a claim of correct presentation and not an accepted parent drop. possible_cover: own f1, original consequences preserved; no coverage-source search. No new independent finding is asserted. f6 lead closed to candidate after checking question lifetime, disabled conditions and local admission. No tests, builds or reproductions performed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 13,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "f6",
+          "state": "open",
+          "summary": "Open Stop/Replace answers share the recorded deletion-phase availability omission",
+          "location": "crates/farhelm-ui/src/list/row.rs:2435",
+          "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa\n\nTLDR: A row's pre-existing Stop or Replace question can retain an enabled answer after its environment enters Deleting. This is additional evidence of f1's missing deletion-phase UI/admission guard, rather than a new independent defect. It leads to an unavailable operation/refusal, not an established successful mutation.\n\nDetails: Source checks close the f6 lead. row.rs:2435 disables Confirm stop on busy alone, :2447 does the same for Stop and suspend apart from launch-target exclusion, and :2589 disables Confirm replace only on busy. In contrast the changed Delete answer at :2521 explicitly includes environment_deleting. list/view.rs:6314-6317 deliberately keeps a row's own question out of busy; host deletion in another client or the helm does not hold this client's session claim. Question cleanup at list/view.rs:2248 retains questions by listed ID only, with no host-phase reconciliation; a retained row's question can therefore persist or reappear when its menu is reopened. confirm_stop at :2885-2897 consumes the drawn Stop token, then admit_stop at :2692-2734 checks questions/rename/retirement/session claims but not Deleting before sending the request. confirm_replace at :3529-3542 similarly consumes the token and checks only begin_row_op before do_replace.\n\nContract is the same as f1: SPEC.md:1521-1523 and SPEC_impl.md:6648 require sessions' actions unavailable while environment deletion runs or has failed. The same f1 retained-row and no-local-request premise is required; a row that disappears loses the question. Manager status for a recorded seal withholds the client (manager.rs:2210-2228), so routing refuses these requests, just as it refuses Rename. Existing f1 already establishes the same missing host-phase availability guard and local admission pattern; a complete fix must include existing question answers as well as fresh Rename/menu controls. Production refusal does not refute the GUI defect.\n\nSuggested bucket: other, as for f1. Could-be-highest: no established security/loss-of-work route. Confidence: confirmed source-level additional route; no runtime observation. proposed_drop: proposed consolidation into f1 as the same phase-availability omission and common guard fix, not a claim of correct presentation and not an accepted parent drop. possible_cover: own f1, original consequences preserved; no coverage-source search. No new independent finding is asserted. f6 lead closed to candidate after checking question lifetime, disabled conditions and local admission. No tests, builds or reproductions performed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g037/findings.jsonl",
+        "id": "f6",
+        "line": 13,
+        "disposition": "verified",
+        "group": "retained-row-lifecycle-answer-omits-host-phase",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-022 after inspecting it. Deleting supplies a verified additional phase for retained Stop/Replace answers. Existing suspension coverage does not exactly cover it; it is a useful extension. Rename is another control/admission surface, so consolidation with f1 is editorial grouping, not exact aliasing. Retain the Deleting/provider extension as other; do not silently discard it as an f1 duplicate. Can be grouped with f1 when recording if the queue file explicitly preserves all controls and phase-specific admission paths. No narrow timing bound is required when deletion fails with a retained row. Checked source/results: [\"At 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa, row.rs:2435,2447,2589 disables retained Stop/Stop-and-suspend/Replace answers on local busy (plus launch-target exclusion for suspend), unlike Delete :2521 which checks environment_deleting.\",\"list/view.rs:6314-6317 excludes a row's own question from busy. :2248 retains questions by listed identity, not phase, so a retained row's question survives a Deleting transition.\",\"list/view.rs:2692-2734 stop admission and :3529-3542 Replace answer admission omit Deleting; manager.rs:2210-2228 plus sessions.rs:905-926 prevent routing to a sealed host.\",\"2ef10815 is in range; conditional source assessment, not observed execution.\"] Current coverage/results: [\"Recording-time main 24bc058066fd57848e788b465719b0e6da2f98f7: TODO.md:25-26 Planned is empty.\",\"BUGS.md searched for actual Restart, Deleting, marking, Replace-progress and notification claims; its sole SSH-helper install/update hang is unrelated.\",\"plans/queue searched for retirement/stale/floor/success, Deleting/Rename/question, marking/cleanup, ReplaceProgressGuard and OldTerminalEnded. Matching session-action-leftovers, environment-agent-operations, tmux and nonblocking plans have landed per plans/REPORTS.md; none is an unlanded repair covering these claims.\",\"review_feedback_queue/INDEX.md read in bounded chunks. Matching retained-restart-hides-reboot-card, suspended-sandbox-keeps-row-confirmations-enabled, frozen-sandbox-retains-header-lifecycle-answers and bulk-sandbox-delete-drops-eligible-peer files read; their trigger/consequence boundaries differ as noted per record.\",\"TRIAGE_OUTCOMES.md searched for the actual retirement/stale-success, Deleting/Rename/question, marking cleanup, progress-guard and notification claims; no matching active disposition. Archive not read.\",\"SPEC.md:1525-1528 and SPEC_impl.md:6148-6157 require unavailable Deleting actions. Existing suspended-sandbox-keeps-row-confirmations-enabled.md:19-29 covers the same retained-answer control/admission omission for suspension, not Deleting or container scope. Extend it with the new phase/provider evidence instead of treating its suspension text as exact coverage. frozen-sandbox-retains-header-lifecycle-answers is a different header surface.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The lead suspected an enabled confirming answer during Deleting. Latest record proposes consolidating into f1 and preserves the avoidable refused operation, with no successful mutation or work loss.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g037/f6",
+        "line": 13,
+        "disposition": "verified",
+        "group": "retained-row-lifecycle-answer-omits-host-phase",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": "review_feedback_queue/suspended-sandbox-keeps-row-confirmations-enabled.md",
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-022 after inspecting it. Deleting supplies a verified additional phase for retained Stop/Replace answers. Existing suspension coverage does not exactly cover it; it is a useful extension. Rename is another control/admission surface, so consolidation with f1 is editorial grouping, not exact aliasing. Retain the Deleting/provider extension as other; do not silently discard it as an f1 duplicate. Can be grouped with f1 when recording if the queue file explicitly preserves all controls and phase-specific admission paths. No narrow timing bound is required when deletion fails with a retained row. Checked source/results: [\"At 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa, row.rs:2435,2447,2589 disables retained Stop/Stop-and-suspend/Replace answers on local busy (plus launch-target exclusion for suspend), unlike Delete :2521 which checks environment_deleting.\",\"list/view.rs:6314-6317 excludes a row's own question from busy. :2248 retains questions by listed identity, not phase, so a retained row's question survives a Deleting transition.\",\"list/view.rs:2692-2734 stop admission and :3529-3542 Replace answer admission omit Deleting; manager.rs:2210-2228 plus sessions.rs:905-926 prevent routing to a sealed host.\",\"2ef10815 is in range; conditional source assessment, not observed execution.\"] Current coverage/results: [\"Recording-time main 24bc058066fd57848e788b465719b0e6da2f98f7: TODO.md:25-26 Planned is empty.\",\"BUGS.md searched for actual Restart, Deleting, marking, Replace-progress and notification claims; its sole SSH-helper install/update hang is unrelated.\",\"plans/queue searched for retirement/stale/floor/success, Deleting/Rename/question, marking/cleanup, ReplaceProgressGuard and OldTerminalEnded. Matching session-action-leftovers, environment-agent-operations, tmux and nonblocking plans have landed per plans/REPORTS.md; none is an unlanded repair covering these claims.\",\"review_feedback_queue/INDEX.md read in bounded chunks. Matching retained-restart-hides-reboot-card, suspended-sandbox-keeps-row-confirmations-enabled, frozen-sandbox-retains-header-lifecycle-answers and bulk-sandbox-delete-drops-eligible-peer files read; their trigger/consequence boundaries differ as noted per record.\",\"TRIAGE_OUTCOMES.md searched for the actual retirement/stale-success, Deleting/Rename/question, marking cleanup, progress-guard and notification claims; no matching active disposition. Archive not read.\",\"SPEC.md:1525-1528 and SPEC_impl.md:6148-6157 require unavailable Deleting actions. Existing suspended-sandbox-keeps-row-confirmations-enabled.md:19-29 covers the same retained-answer control/admission omission for suspension, not Deleting or container scope. Extend it with the new phase/provider evidence instead of treating its suspension text as exact coverage. frozen-sandbox-retains-header-lifecycle-answers is a different header surface.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The lead suspected an enabled confirming answer during Deleting. Latest record proposes consolidating into f1 and preserves the avoidable refused operation, with no successful mutation or work loss.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-022",
+          "bucket": "other",
+          "aliases": [],
+          "target_queue_file": "review_feedback_queue/suspended-sandbox-keeps-row-confirmations-enabled.md",
+          "coverage_checked": [
+            "Recording-time main 24bc058066fd57848e788b465719b0e6da2f98f7: TODO.md:25-26 Planned is empty.",
+            "BUGS.md searched for actual Restart, Deleting, marking, Replace-progress and notification claims; its sole SSH-helper install/update hang is unrelated.",
+            "plans/queue searched for retirement/stale/floor/success, Deleting/Rename/question, marking/cleanup, ReplaceProgressGuard and OldTerminalEnded. Matching session-action-leftovers, environment-agent-operations, tmux and nonblocking plans have landed per plans/REPORTS.md; none is an unlanded repair covering these claims.",
+            "review_feedback_queue/INDEX.md read in bounded chunks. Matching retained-restart-hides-reboot-card, suspended-sandbox-keeps-row-confirmations-enabled, frozen-sandbox-retains-header-lifecycle-answers and bulk-sandbox-delete-drops-eligible-peer files read; their trigger/consequence boundaries differ as noted per record.",
+            "TRIAGE_OUTCOMES.md searched for the actual retirement/stale-success, Deleting/Rename/question, marking cleanup, progress-guard and notification claims; no matching active disposition. Archive not read.",
+            "SPEC.md:1525-1528 and SPEC_impl.md:6148-6157 require unavailable Deleting actions. Existing suspended-sandbox-keeps-row-confirmations-enabled.md:19-29 covers the same retained-answer control/admission omission for suspension, not Deleting or container scope. Extend it with the new phase/provider evidence instead of treating its suspension text as exact coverage. frozen-sandbox-retains-header-lifecycle-answers is a different header surface."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "The lead suspected an enabled confirming answer during Deleting. Latest record proposes consolidating into f1 and preserves the avoidable refused operation, with no successful mutation or work loss.",
+          "needs_independent_drop_check": false,
+          "key": "g037/f6",
+          "latest_line": 13,
+          "recommendation": "retain-verified",
+          "underlying_key": "retained-row-lifecycle-answer-omits-host-phase",
+          "why": "Deleting supplies a verified additional phase for retained Stop/Replace answers. Existing suspension coverage does not exactly cover it; it is a useful extension. Rename is another control/admission surface, so consolidation with f1 is editorial grouping, not exact aliasing.",
+          "checks": [
+            "At 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa, row.rs:2435,2447,2589 disables retained Stop/Stop-and-suspend/Replace answers on local busy (plus launch-target exclusion for suspend), unlike Delete :2521 which checks environment_deleting.",
+            "list/view.rs:6314-6317 excludes a row's own question from busy. :2248 retains questions by listed identity, not phase, so a retained row's question survives a Deleting transition.",
+            "list/view.rs:2692-2734 stop admission and :3529-3542 Replace answer admission omit Deleting; manager.rs:2210-2228 plus sessions.rs:905-926 prevent routing to a sealed host.",
+            "2ef10815 is in range; conditional source assessment, not observed execution."
+          ],
+          "proposed_basis": "Retain the Deleting/provider extension as other; do not silently discard it as an f1 duplicate. Can be grouped with f1 when recording if the queue file explicitly preserves all controls and phase-specific admission paths. No narrow timing bound is required when deletion fails with a retained row."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "retained-row-lifecycle-answer-omits-host-phase",
+        "destination": "suspended-sandbox-keeps-row-confirmations-enabled.md"
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete; all 806 assigned patch lines reviewed.\n\nRecorded two source-supported findings, both `other`:\n\n- **f1:** Rename remains enabled while the session’s environment is being deleted.\n- **f3:** A delayed stale listing can forget successful Restart and temporarily show the interrupted recovery card.\n\nThree refuted candidates recorded; no open leads. Findings and progress are saved in the assigned artifacts. No tests, reproductions, or checkout changes."
+    },
+    {
+      "turn": 2,
+      "reply": "Appended revisions at log lines 8–11:\n\n- **f1:** Confirmed local Rename admission ignores deletion phase; impact remains an unavailable editor and backend refusal.\n- **f3:** Revised confidence to **likely**, with explicit timing requirements. Corrected the cache premise: connected detail reads the supervisor directly. Matches g038/g089; preserves g036’s distinct trigger.\n- **f4:** Clarified that preserved mount generation does not guarantee an interrupted view mounts a terminal.\n\nNo new findings or drops. Unresolved lead IDs: **none**."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass complete. No new independent issues found.\n\nChecked confirmation targeting/admission, restart completion consumers and changed test assertions, and bell comments against pinned contracts.\n\nRecorded **f6** as a proposed duplicate of f1; its lead is resolved.\n\n- New verified findings: none\n- New unverified findings: none\n- Open leads: none\n\nProgress updated. No runtime execution or reproductions."
+    }
+  ],
+  "progress": "# g037 progress\n\nGroup: gui-session-lifecycle.\nTurn type/count: initial review, 1. Discovery passes: 0. This is the first pass; no later-turn synthesis protocol was performed.\n\nInitial pass complete. Read the full brief, the complete inventory commits field only, and all 806 assigned patch lines through evidence packets: 00716 lines 1-180 and 181-272; 00717 lines 1-169; 01119 lines 1-180 and 181-333; 01501 lines 1-32. No assigned patch material remains unread. The caller owns the delivery audit.\n\nRead governing priority/record format and pinned product/implementation contracts through evidence packets. Additional context-manifest snapshots are private copies at the reviewed revisions, not working-tree source. Examined callers and contracts at each patch's revision. No queued findings, excluded inventory metadata, TODO, plans, or other coverage sources were read.\n\nRecorded findings: f1 (Rename still enabled while environment deletion is pending/failed; other), f3 (old stale listing retires retained Restart success before the new run is seen; other). Both are supported by source and contract analysis; neither was reproduced. Candidates: f2 (Delete scope does not widen across a connection change), f4 (removed terminal-kind payload has no remaining GUI attachment consumer), f5 (bell comment update matches the replacement notice). No open leads; f1 and f3 lead records were revised under the same IDs.\n\nInterface assumptions checked: row Delete passes a drawn token/guard/environment value and the list consumes that token before dispatch; the question lane overrides current connection scope. Environment ownership comes from host metadata. Row busy/admission state is client-session-local and does not imply the host's Deleting phase. Sidebar read order is distinct from per-session lifecycle boundaries; the surface reader coalesces a restart refresh behind a read already running. The grid terminal uses one attachment path, and completion revisions remain independent of retained success.\n\nNew verified IDs this pass: f1, f3. New unverified findings: none. Proposed drops/refutations are durable candidates f2, f4, f5. Findings log contains every considered substantive conclusion.\n\nChecks: source-only review. No tests, builds, or reproductions requested or run. No checkout files changed, no live-install action, no helper agents.\n\nNext action: return initial results to caller; await the caller's later synthesis/discovery prompt. Unread assigned scope: none.\n\n## Later-turn synthesis, turn 2\n\nTurn type/count: synthesis, 2. Discovery passes: 0. No new IDs or discoveries. The caller reports all 806 mandatory lines audited complete, with zero missing/rejected/unfinished/unrecognized. No assigned scope remains unread.\n\nRead the caller-supplied interface records g038/l1 (line 4), g036/l1 (line 4), and supplied l1 records from g089 and g088. These named cross-group inputs were read for reconciliation only; no coverage sources were searched.\n\nRevised f4 (event 8): terminal-kind loss and loss of generation increment remain refuted, but a generation increment alone cannot mount an Interrupted view when retained success/relaunched is false. This explicitly preserves f3's presentation consequence and distinguishes g088's refutation from it.\n\nRevised f3 twice (events 9-10): corrected the earlier cache/detail premise immediately after reading the actual connected detail route. Connected detail drains the supervisor; it does not use the helm cache. Retained f3 as a likely conditional stale-list race, with exact order stated and no runtime-proven claim. aggregate.rs captures host phase before asynchronous cache reads; old stale evidence can be delivered after reconnection. Listing admission has no Restart age fence, and the refresh coalesces behind the older read. For mounted views, a delayed sidebar task before the completion effect can erase success while current remains Interrupted; preserved generation still produces an empty terminal set. For reopened views, sidebar status can lag because reply Unknown merges with old Interrupted and the host refresh wake is not awaited, but first successful live detail repairs it. Inspected pinned Dioxus 0.7.10 scheduler/hooks and desktop mutation delivery source, which permits tasks before effects. Actual incidence/timing was not executed.\n\nDuplicate reconciliation: f3 is the same stale pre-Restart evidence mechanism as g038/l1 and g089/l1. g036/l1 is earlier age-eligible listing retirement before observation, including then-needed terminal-kind payload; restoring f3's removed generation floor would not repair that distinct eligible-listing trigger. No deduplication disposition was written; that belongs to the caller. No candidate/finding was withdrawn or dropped.\n\nRevised f1 (event 11): confirmed row_control_visibility always offers Rename, the local start/submit/claim paths do not inspect host phase, and editor.unavailable reflects source absence only. Traced helm-owned seal finishing and provider failure retention: failed destruction preserves Deleting/no-client while a cached row may still display, with no GUI session claim. The record now explicitly conditions impact on a retained row and does not imply failed destruction always preserves it indefinitely. Traced Rename through route_active_session -> route_session and the no-client refusal: offered unavailable editor/refusal is established; successful mutation is not claimed. Also preserved the active host-level deletion route independently of session-local busy state.\n\nLatest status: f1 source-confirmed other; f3 likely other with explicit timing premise and corrected detail route. Candidates f2/f5 unchanged; f4 narrowed as above. No open leads. No new verified IDs or new unverified-after-investigation findings this turn. All readily accessible source premises for the conditional routes were checked. No runtime tests, builds, reproductions, checkout edits or live-install operations.\n\nNext action: return only turn delta and unresolved lead IDs; await caller. Unread assigned scope: none.\n\n## Discovery turn 3, startup synthesis\n\nRead discovery-neighbours.json fully in bounded chunks (lines 1-120, 121-160, 161-198). Reconciled supplied g038/l1:11 with the latest f3 record before starting discovery: both now use independently retained mounted current=nonstale Interrupted, a pre-Restart stale sidebar response admitted after completion and before the observer, and generation increment without surface admission. Connected detail directly drains the supervisor and normally repairs the gap. No new record or duplicate discovery is warranted; latest f3 already contains this correction and mechanism. Stale sidebar status need not itself be Interrupted; stale=true alone suffices. g036's newer eligible listing still has a distinct age/fix boundary. Existing f1/f3 and candidates f2/f4/f5 remain retained with no accepted drop/lowering.\n\nDiscovery pass 1 now in progress, confined to the four assigned patches at recorded revisions. Search focus beyond known findings: Delete lane/target preservation and answer availability, restart false/outcome/completion consumers and revised test oracles, and accuracy of the bell's comment-only change. No runtime work planned.\n\n## Discovery turn 3, completion\n\nDiscovery pass count: 1, completed. No new independent finding was found. New verified finding IDs: none. New unverified-after-investigation IDs: none. New candidate ID: f6 (lead event 12, closed as candidate event 13), proposed consolidation into own f1; this is not a parent-accepted drop or a correctness refutation. Open leads: none.\n\nUseful checks/results beyond the startup synthesis:\n- Re-read the assigned row/shared changes and inspected the full Delete/Stop/Replace confirmation branches. Traced question retention and answer admission at pinned 2ef10815. Delete lane, drawn token and rendered consent remain coherent; the additional already-open Stop/Replace answer route has the same missing Deleting-phase guard as f1 and was recorded immediately as f6 before further reads, then settled after checking lifetime/admission. Rows removed by authoritative absence lose their question; retained IDs do not lose it merely because host phase changes.\n- Checked changed shared.rs tests and their fixtures/expected values. The environment test asserts its ended/no-tabs premise, both opening lanes, and both direction changes through answered scope; no new independent test-oracle defect established. Inspected the callbacks/type replacements in row.rs against their tuple contract.\n- Re-read the entire assigned session_ops diff, both production and test halves, at f560058. Checked lifecycle revision versus success, failed-result completion, and persistent RestartBridge after/before consumers. The boolean retains its intended success-only role and completion revision remains separate. Changed tests assert boundary increments, unrelated-session isolation, pending and omitted rows, retention clearing and boundary preservation. The removed read-age assertion relates to known f3; no distinct new test claim was established.\n- Re-read the complete comment-only bell patch at 61e6323, its surrounding docs-link recognizer and unchanged link/punctuation assertions. The replacement old-terminal notice explanation remains consistent with the pinned notification contract; no new executable behavior or independent documentation/test defect established.\n- One batched context-read output exceeded the harness preview limit. Re-read the affected question-retention, confirm handlers and Stop admission snippets in smaller outputs before settling f6. Mandatory delivery remains the previously audited complete 806 lines.\n\nAll checks were source/contract analysis. No runtime tests, builds, reproductions, live-install actions or checkout modifications. No prohibited coverage source searched. All earlier findings/candidate bases remain retained. Unread assigned scope: none. Next action: return discovery delta to caller; await further prompt.\n"
+}

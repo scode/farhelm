@@ -1,0 +1,175 @@
+[
+  {
+    "key": "g033/r2",
+    "latest_line": 6,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "ui-xterm-removal-terminal-helper-readiness",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The removed scripts are not prerequisites of the replacement mounting path. Every named helper in its readiness gate still has a declaration and render site. This refutes the specific absent-helper removal regression by source; it does not establish successful runtime mounting.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e is inside the supplied review range (git rev-list membership checked).",
+      "f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/assets/terminal.js:3191-3226 gates on paste sanitizer, theme, clipboard names/copy/writer, tooltip, terminal links/files, all five grid globals, settled font and target element. It does not wait for the deleted helpers.",
+      "Same revision:crates/farhelm-ui/src/lib.rs:1440-1496 declares those assets; :1914-1926 renders them. TOOLTIP_JS is declared at :1518 and rendered in the desktop and web App branches at :1608 and :1617. APP_CSS and the fonts remain declared at :1395-1437,1527-1530.",
+      "Same revision:crates/farhelm-ui/assets/paste-sanitizer.js:18-42 exports window.farhelmPasteSanitizer. Pinned git grep found no farhelmTermBytes, farhelmShiftEnter or window.Terminal references. FitAddon matches are historical comments, not runtime globals.",
+      "The first history entry's tooltip declaration location was corrected in the latest entry; :1518 is the verified location. No runtime tests, builds or reproductions were performed."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md terminal experience (:2855 onward) requires a usable terminal; SPEC_impl.md:1692-1768 and The grid client (:1835-1886) describe bundled-script/font readiness and mounting every terminal before its socket. These are matching contracts, not acceptance of a missing prerequisite.",
+      "TODO.md Planned is empty (:25-27). BUGS.md has only the provisioning SSH-helper hang, not terminal asset readiness. Searches of active TRIAGE_OUTCOMES.md found no matching asset/helper removal disposition; the archive was not read.",
+      "plans/queue searches found tmux-end-old-terminals criterion 4, but plans/REPORTS.md:29 records that plan landed. The other tmux removal plans also landed (:30-32); no unlanded repair for this trigger/consequence was found.",
+      "INDEX.md and matching queue text were searched for helpers, scripts, assets, mounts, paste-sanitizer and xterm. held-font-test-lacks-mount-attempt-witness.md was read: it concerns a test's missing mount-attempt witness, not absent production scripts. No exact coverage or useful extension was found.",
+      "FILTER.md read in full. No filter supplies the basis: the suspicion was ordinary terminal unavailability after an asset deletion, not a qualifying rare diagnostic or recoverable timing case."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A deleted helper still required by a shipped mounting path was not found. Asset loading and actual browser execution were not tested.",
+    "original_stronger_consequence": "Removed scripts could leave sessions permanently connecting; that would be high if established. Both history entries explicitly exclude process loss and propose source refutation. The latest entry corrects a reference rather than withdrawing an established failure.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Propose dismissal of the narrowly stated absent-helper removal regression on the matching declarations, render sites and readiness gate. This is a proposal for the parent, not a recording decision."
+  },
+  {
+    "key": "g033/r3",
+    "latest_line": 4,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "ui-xterm-removal-retained-grid-port-notice",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Removing the deleted vendor bundles' notice declarations does not remove the separately declared notice for retained ports. The claim is refuted at the source asset-declaration boundary; distributed binaries were not inspected and this is not a broader licensing audit.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e is inside the supplied review range (git rev-list membership checked).",
+      "Same revision:crates/farhelm-ui/src/lib.rs:1484-1495 retains #[used] GRID_PORTED_CODE_LICENSES pointing to /assets/grid-ported-code-LICENSES.txt with its stable basename. declare_assets! generates all_assets from every declaration at :1337-1359; the font notices remain at :1412-1437.",
+      "Same revision:crates/farhelm-ui/assets/grid-ported-code-LICENSES.txt:1-40 identifies the grid client and supervisor encoder ports and the notice's distribution through the asset bundle. :48-145 contains separate xterm, addon-fit, addon-web-links and Visual Studio Code notice texts.",
+      "No binary build, archive inspection or runtime execution was performed. The source facts refute the deletion-of-declaration concern without proving all packaging paths."
+    ],
+    "coverage_checked": [
+      "SPEC.md and SPEC_impl.md were searched for xterm, licenses, notices and assets. Current SPEC_impl.md:1692-1700 requires static assets and retained port attribution; it does not accept omission of a required notice.",
+      "TODO.md Planned is empty (:25-27). BUGS.md and active TRIAGE_OUTCOMES.md contain no matching retained-port notice omission. The archive was not read.",
+      "plans/queue/tmux-end-old-terminals.md criterion 4 explicitly retains grid-ported-code-LICENSES.txt. plans/REPORTS.md:29 records that plan as landed; it is context rather than an unlanded repair. No matching unlanded plan was found.",
+      "INDEX.md and queue text searches for license, notice, ported code, xterm and grid assets found no exact queued item or extension for this claimed omission.",
+      "FILTER.md read in full; none of its complete boundaries matches this notice-deletion suspicion."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "The separate grid-port notice would have to be removed or excluded by the assigned deletion. It remains declared; actual binary inclusion was not independently checked.",
+    "original_stronger_consequence": "The concern was that removing xterm/add-on notice assets removes attribution for code that still ships. The sole history entry refutes that route, suggests other, and makes no security or user-work-loss claim.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Propose dismissal only of the claimed removed notice declaration for retained grid ports. Preserve the explicit no-binary-inspection and no-general-licensing-audit caveats."
+  },
+  {
+    "key": "g033/r4",
+    "latest_line": 10,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "ui-xterm-stylesheet-removal-grid-structural-css",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The grid's DOM classes are styled by the retained application CSS. The removed xterm stylesheet targets different classes, so its removal does not establish the claimed hidden-input or structural-layout failure.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e is inside the supplied review range (git rev-list membership checked).",
+      "Same revision:crates/farhelm-ui/assets/grid-terminal.js:341-388 creates grid-terminal, screen, selection/link overlays, cursor, scrollbar/slider, exit, input and measurement nodes with grid-terminal class names.",
+      "Same revision:crates/farhelm-ui/assets/app.css:8628-8825 supplies their structural rules. :8791-8805 keeps the keyboard textarea offscreen, zero-sized, transparent and non-resizable; :8811-8825 independently hides measurement nodes.",
+      "Same revision:crates/farhelm-ui/src/lib.rs:1527-1530 retains APP_CSS as a static head asset. Parent 1ed482dde220452e424973faf38a5e1318986333:crates/farhelm-ui/assets/vendor/xterm.css:38-136 targets .xterm and xterm-specific descendant classes, rather than the grid classes.",
+      "This checks only the removed stylesheet registration and immediate grid structural consumers. No visual rendering, browser reproduction or overall styling audit was performed."
+    ],
+    "coverage_checked": [
+      "Both specifications were searched for xterm, stylesheet, grid layout, input and assets. SPEC.md Terminal experience requires fidelity; current SPEC_impl.md:1692-1705,1835-1886 describes the independent grid renderer and fit. No acceptance of broken structural styles was found.",
+      "TODO.md Planned is empty (:25-27). BUGS.md and active TRIAGE_OUTCOMES.md have no matching removed-stylesheet consequence; the archive was not read.",
+      "plans/queue/tmux-end-old-terminals.md criterion 4 removes xterm CSS while retaining the grid. That plan is landed according to plans/REPORTS.md:29; no unlanded plan specifically repairs the asserted consequence.",
+      "INDEX.md and queue text were searched for stylesheet, textarea, CSS, xterm and grid. Other CSS geometry and fit findings do not assert this stylesheet-removal trigger or the claimed hidden-input failure. No exact coverage or extension found.",
+      "FILTER.md read in full. The ordinary layout/keyboard failure suspected here does not fit one of its complete boundaries."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A required grid structural rule supplied only by the removed stylesheet was not found. Actual rendering was not observed.",
+    "original_stronger_consequence": "The removed stylesheet could expose the hidden keyboard field or break grid layout; common keyboard/layout breakage would be high. The record reports no established route and explicitly proposes source refutation, with no highest consequence.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Propose dismissal of the narrowly stated xterm-stylesheet dependency on the independent class names, retained APP_CSS registration and matching grid rules."
+  },
+  {
+    "key": "g034/c1",
+    "latest_line": 3,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "desktop-tmux-removal-inherited-farhelm-tmux-child-scrub",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The desktop can pass an ambient FARHELM_TMUX into its supervisor, but both shipped session-child paths remove it after merging the environment. The host process itself starts with an empty environment. The claim that the deletion leaks this obsolete setting into session children is source-refuted.",
+    "checks": [
+      "17a3fe858c5511a24b7403af15dd41c93bf69fd7 is inside the supplied review range (git rev-list membership checked).",
+      "Same revision:crates/farhelm-ui/src/desktop.rs:1175-1200 no longer sets or removes FARHELM_TMUX when spawning the supervisor. Ambient supervisor inheritance is therefore possible; this premise is preserved.",
+      "Same revision:crates/farhelm-supervisor/src/service/core/host_launch.rs:108-115 lists FARHELM_TMUX in NOT_INHERITED; :135-147 removes it after base and launch environments are merged.",
+      "Same revision:host_launch.rs:490-518 puts the scrubbed result into the agent ChildSpec; service/core/host_tabs.rs:594-606 does the same for tab shells. Their post-scrub addition is the managed GitHub token, not FARHELM_TMUX.",
+      "Same revision:crates/farhelm-supervisor/src/hosts/spawn.rs:350-356 invokes the terminal host with env_clear. Pinned git grep across crates/scripts/.github/e2e found the scrub as the runtime use of FARHELM_TMUX; other hits are comments and tests. No runtime execution was performed."
+    ],
+    "coverage_checked": [
+      "Both specifications were searched. Current SPEC.md:2900-2904 requires terminal identity variables without tmux identity; SPEC_impl.md:7996-8001 explicitly says FARHELM_TMUX is not passed to terminal-host children and older units may keep setting it until setup/Update. This corroborates the scrub contract rather than accepting leakage.",
+      "TODO.md Planned is empty (:25-27). Its Mid term phase-3 removal entry (:225-233) describes eventually removing the scrub once old units are irrelevant; it is not Planned coverage for a current leak. BUGS.md and active TRIAGE_OUTCOMES.md have no matching inherited-variable disposition. Archive not read.",
+      "plans/queue/tmux-end-old-terminals.md criterion 1 requires the scrub; tmux-drop-from-install.md criterion 1 relies on it. Both plans landed (plans/REPORTS.md:29-30). No matching unlanded repair found.",
+      "INDEX.md and queue text were searched for FARHELM_TMUX, tmux, environment and inheritance. version-agreement-lifetime-doc.md's index entry concerns retained TERM_PROGRAM_VERSION after adoption, not the scrubbed obsolete selector. No exact alias, coverage or extension found.",
+      "FILTER.md read in full. No filter is used; no qualifying second rare upgrade condition was established or needed for the source refutation."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A shipped child caller bypassing the scrub, or adding FARHELM_TMUX after it, was not found in the inspected agent/tab paths. This is not an independent review of the whole child-environment implementation.",
+    "original_stronger_consequence": "The original concern was obsolete session configuration inherited after desktop tmux handoff removal. Both history entries propose refutation and report no established security or work-loss route. The later entry adds actual caller and env_clear evidence without changing consequence or disposition.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Propose dismissal of FARHELM_TMUX reaching session children through the removed desktop handoff, on the post-merge scrub, both production callers and the host's empty environment."
+  },
+  {
+    "key": "g034/c2",
+    "latest_line": 4,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "desktop-tmux-preflight-removal-session-runtime-dependency",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The deleted tmux search/version checks no longer guard the program used for shipped session launches. Agents and tabs start Farhelm terminal hosts. Startup's old-terminal cleanup connects to the old socket and signals its pinned peer without executing a selected tmux. This supports the proposed narrow source refutation, subject to the independent drop check for the original session-loss concern.",
+    "checks": [
+      "17a3fe858c5511a24b7403af15dd41c93bf69fd7 is inside the supplied review range (git rev-list membership checked).",
+      "Same revision:crates/farhelm-ui/src/desktop.rs:440-550 retains supervisor discovery/start and readiness waits. :1149-1157 checks the session-program path; the replacement branch performs this at :510 before stopping its owned predecessor at :533.",
+      "Same revision:crates/farhelm-supervisor/src/service/core.rs:6116-6184 opens the store, ends old terminals and reloads sessions. service/core/old_terminals.rs:176-202 connects to the old Unix socket and identifies its peer; :223-231 passes that pinned process to termination. No tmux executable is invoked in this path.",
+      "Same revision:service/core/host_launch.rs:388-390 selects the host program; :508-543 builds the agent ChildSpec and passes it to hosts::start_host. service/core/host_tabs.rs:603-622 does the same for tabs. hosts/spawn.rs:350-356 runs program internal terminal-host --socket with env_clear; crates/farhelm/src/main.rs:1920-1926 implements it through terminal_host::main_entry.",
+      "Same revision:crates/farhelm-ui/src/desktop/bundle.rs:264-267 holds the selected own-version CLI. :298-310 selects Contents/Versions/<app version>/farhelm and refuses its absence rather than selecting the forwarder. A deliberate developer override remains outside the ordinary shipped app/CLI-selection premise.",
+      "Same revision:crates/farhelm-supervisor/src/tmux.rs:1-11 identifies provisioning version policy as the remaining module role. Pinned git grep found no tmux_probe, tmux_preflight, find_tmux_in_prefixes, run_tmux_preflight_or_exit or resolve_supervisor_tmux in crates/scripts/.github/e2e. No startup, build or reproduction ran; old-terminal cleanup and provisioning were not independently reviewed."
+    ],
+    "coverage_checked": [
+      "Both specifications were searched. Reviewed SPEC_impl.md:2784-2796 explicitly says the desktop/setup/installer need no tmux, every terminal uses a terminal host, and old-server cleanup needs no tmux program. Current SPEC.md:5257-5258 says Farhelm neither requires nor looks for user tmux; current SPEC_impl.md:2780-2826 and :7996-8001 describe direct cleanup and no runtime tmux. These contracts corroborate source; they do not by themselves excuse a remaining dependency.",
+      "TODO.md Planned is empty (:25-27). Its later phase-3 cleanup entry is outside Planned and concerns eventual removal of the retained shutdown, not a runtime dependency after preflight removal. BUGS.md and active TRIAGE_OUTCOMES.md have no matching missing-preflight/session-crash disposition. Archive not read.",
+      "plans/queue/tmux-end-old-terminals.md criteria 1-2 and tmux-drop-from-install.md criterion 1 describe the replacement and deleted preflight. plans/REPORTS.md:29-30 marks both landed; tmux tooling/docs followups also landed (:31-32). No matching unlanded repair found.",
+      "INDEX.md and queue text searches for tmux, preflight, bootstrap, startup, inheritance and desktop smoke found no exact same-root item. The existing desktop-smoke path parsing and detached-supervisor cleanup findings were read and concern different triggers and consequences. No useful extension found.",
+      "FILTER.md read in full. No filter is the proposed basis, particularly no blanket upgrade/rarity exemption."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "The stronger route needs a shipped session-start path still executing a selected missing/unsupported tmux, or a shipped app/CLI mismatch caused by this deletion. The traced ordinary paths use terminal-host; neither premise was shown. Runtime behavior and arbitrary developer overrides were not tested.",
+    "original_stronger_consequence": "Deleting missing/below-floor tmux checks could make the app fail startup or start sessions on unsupported tmux. The historical unsupported-tmux crash concern could lose sessions and user-owned processes/work. Both history entries propose source refutation, not a runtime observation. The latest adds production launch/CLI-selection evidence; it does not erase the original crash/loss concern.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Propose a narrow source-refuted disposition because the protected runtime dependency has been replaced. Send the original unsupported-tmux session-crash/loss concern, this source chain and the preserved override/no-runtime caveats to the independent drop check before dismissing it."
+  },
+  {
+    "key": "g034/c3",
+    "latest_line": 5,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "desktop-refusal-comment-retained-bootstrap-smoke-oracle",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The revised comment promises a diagnostic shape, and the retained ordinary-bootstrap smoke leg asserts the exit status and stderr prefix. Removal of tmux-specific smoke legs does not remove that oracle. This is a source conclusion about a documentation/test claim, not a runtime pass.",
+    "checks": [
+      "17a3fe858c5511a24b7403af15dd41c93bf69fd7 is inside the supplied review range (git rev-list membership checked).",
+      "Same revision:crates/farhelm-ui/src/desktop.rs:1720-1722 names the farhelm-desktop error line and exit status 1 as the primary contract and says desktop-smoke.sh checks that shape. :138-142 routes bootstrap failures into refuse_and_exit; :1723-1738 prints the supplied message and exits 1.",
+      "Same revision:scripts/desktop-smoke.sh:718-724 creates a regular file as the private state path and launches the desktop against it. :725-728 requires exactly exit 1 and the farhelm-desktop: prefix; :729-733 rejects panicked and RUST_BACKTRACE text. These assertions remain independent of the deleted tmux refusal cases.",
+      "The oracle does not compare the complete OS-specific diagnostic, require exactly one stderr line or exercise every bootstrap refusal. The changed comment says shape, not byte-for-byte comparison. No smoke test, build or reproduction was run."
+    ],
+    "coverage_checked": [
+      "Both specifications were searched for startup diagnostics, desktop refusals and smoke validation. Current SPEC_impl.md:7282-7283 states the one-line stderr/exit-1/native-alert product contract, but does not accept a false claim of test coverage. No exact specification acceptance was used.",
+      "TODO.md Planned is empty (:25-27). BUGS.md and active TRIAGE_OUTCOMES.md have no matching missing ordinary-bootstrap oracle. Archive not read.",
+      "plans/queue/tmux-drop-from-install.md criterion 1 removes tmux preflight smoke legs; plans/REPORTS.md:30 marks the plan landed. This does not assert removal of ordinary bootstrap diagnostics. No matching unlanded repair found.",
+      "INDEX.md and matching desktop-smoke queue files were searched/read. desktop-smoke-misparses-space-bearing-run-path.md concerns a listener parser; desktop-smoke-supervisor-precedes-cleanup-record.md concerns detached supervisor cleanup. Neither matches this comment/oracle claim, and no useful extension was found.",
+      "FILTER.md read in full. No filter applies: this is a claim about retained test coverage, not a qualifying rare product diagnostic."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "The named retained script would have to lack the ordinary refusal shape assertion for the stale-comment suspicion to hold. That assertion remains. Its successful execution and exhaustive refusal coverage were not established.",
+    "original_stronger_consequence": "Deleting specialized tmux-refusal tests might leave the revised comment falsely claiming ordinary startup-error coverage. The only record proposes refutation, explicitly limits the oracle to prefix/status/no-panic shape and claims no security or work-loss route.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Propose dismissal of the stale coverage-comment suspicion on the retained, matching ordinary-bootstrap smoke assertions. Preserve the oracle's exact scope and lack of runtime execution."
+  }
+]

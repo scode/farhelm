@@ -1,0 +1,981 @@
+{
+  "group": {
+    "id": "g082",
+    "domain": "terminal-view-rendering",
+    "purpose": "terminal-view-rendering: crates/farhelm-ui/assets/terminal.js; phases -        function buildXtermSurface() {",
+    "interfaces": [
+      "g009",
+      "g010",
+      "g011",
+      "g052",
+      "g053",
+      "g054",
+      "g079",
+      "g081",
+      "g083",
+      "g088",
+      "g089",
+      "g117",
+      "g118",
+      "g119",
+      "g120",
+      "g121",
+      "g135",
+      "g136",
+      "g174",
+      "g175",
+      "g176",
+      "g177",
+      "g178",
+      "g179",
+      "g180",
+      "g181",
+      "g182",
+      "g184",
+      "g186",
+      "g187",
+      "g188",
+      "g189",
+      "g190",
+      "g191",
+      "g192",
+      "g193",
+      "g194",
+      "g195",
+      "g196",
+      "g197"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/01073-002.patch",
+        "ranges": [
+          [
+            1,
+            949
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/assets/terminal.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "-        function buildXtermSurface() {; patch character offsets [74421,133435)",
+        "lines": 949,
+        "bytes": 59158,
+        "start": 74421,
+        "end": 133435,
+        "original": "[private-run]/prep/originals/01073.patch"
+      }
+    ],
+    "lines": 949,
+    "bytes": 59158
+  },
+  "records": [
+    {
+      "key": "g082/c1",
+      "owner": "g082",
+      "id": "c1",
+      "domain": "terminal-view-rendering",
+      "purpose": "terminal-view-rendering: crates/farhelm-ui/assets/terminal.js; phases -        function buildXtermSurface() {",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Initial grid fit before socket construction is guarded",
+            "location": "crates/farhelm-ui/assets/terminal.js:3389",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: Considered whether making the grid unconditional causes terminal mounting to fail when its first fit reports a resize before the WebSocket exists. Details: terminal.js:3389–3393 creates and installs the grid and calls fit before assigning ws. The onResize callback is sendResize (4319), whose first statement at 4561 returns when ws is null or not OPEN; onopen calls sendResize at 4604. This safely covers both the initial fit and intervening fits during connection setup. SPEC_impl.md:1850–1852 requires the component to mount before the socket so the URL carries the fitted size. Suggested bucket: other if real; no established impact. Confidence: confirmed source refutation; no execution. proposed_drop: true, null-socket guard and onopen resend refute the suspected mount failure. possible_cover: none; coverage sources not searched. Could-be-highest: false. Caveat: this checks the callback ordering only, not every sizing boundary."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Initial grid fit before socket construction is guarded",
+            "location": "crates/farhelm-ui/assets/terminal.js:3389",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: Considered whether making the grid unconditional causes terminal mounting to fail when its first fit reports a resize before the WebSocket exists. Details: terminal.js:3389–3393 creates and installs the grid and calls fit before assigning ws. The onResize callback is sendResize (4319), whose first statement at 4561 returns when ws is null or not OPEN; onopen calls sendResize at 4604. This safely covers both the initial fit and intervening fits during connection setup. SPEC_impl.md:1842–1843 requires the component to mount before the socket so the URL carries the fitted size. Suggested bucket: other if real; no established impact. Confidence: confirmed source refutation; no execution. proposed_drop: true, null-socket guard and onopen resend refute the suspected mount failure. possible_cover: none; coverage sources not searched. Could-be-highest: false. Caveat: this checks the callback ordering only, not every sizing boundary. This revision corrects the specification line reference; the original consequence and conclusion are unchanged."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Initial grid fit before socket construction is guarded",
+            "location": "crates/farhelm-ui/assets/terminal.js:3389",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: Considered whether unconditional grid mounting fails when its initial fit reports size before the WebSocket exists. Details: terminal.js:3389–3393 assigns grid before install/fit and reads grid.size for the URL. sendResize at 4560–4567 returns while ws is null or not OPEN; onopen later resends the current size. This synthesis checked the other half of that ordering: grid-terminal.js:473–497 computes and assigns fitted before invoking onResize, so ignoring that early callback does not lose the fitted size; receive at 1987–1988 requests it again if the host's hello reports a different committed size. The component constructor at 1962–1964 measures metrics but does not fit, focus, receive protocol data, or send a key; the installed attachments liveness callback at terminal.js:4371 checks ws exists. SPEC_impl.md:1842–1843 requires mounting before the socket so its URL carries the fitted size. Suggested bucket: other if real; no impact established. Confidence: confirmed bounded source refutation; no execution. proposed_drop: true, the stored fitted value, guarded callback and onopen resend refute the null-socket/initial-size-loss premise for this deletion. possible_cover: none; no coverage sources searched. Could-be-highest: false. Caveats: this is the synchronous constructor/fit/URL ordering, not certification of all font metrics, layout, asynchronous teardown, or oversized initial-grid behavior."
+          }
+        }
+      ],
+      "latest": {
+        "line": 12,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Initial grid fit before socket construction is guarded",
+          "location": "crates/farhelm-ui/assets/terminal.js:3389",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: Considered whether unconditional grid mounting fails when its initial fit reports size before the WebSocket exists. Details: terminal.js:3389–3393 assigns grid before install/fit and reads grid.size for the URL. sendResize at 4560–4567 returns while ws is null or not OPEN; onopen later resends the current size. This synthesis checked the other half of that ordering: grid-terminal.js:473–497 computes and assigns fitted before invoking onResize, so ignoring that early callback does not lose the fitted size; receive at 1987–1988 requests it again if the host's hello reports a different committed size. The component constructor at 1962–1964 measures metrics but does not fit, focus, receive protocol data, or send a key; the installed attachments liveness callback at terminal.js:4371 checks ws exists. SPEC_impl.md:1842–1843 requires mounting before the socket so its URL carries the fitted size. Suggested bucket: other if real; no impact established. Confidence: confirmed bounded source refutation; no execution. proposed_drop: true, the stored fitted value, guarded callback and onopen resend refute the null-socket/initial-size-loss premise for this deletion. possible_cover: none; no coverage sources searched. Could-be-highest: false. Caveats: this is the synchronous constructor/fit/URL ordering, not certification of all font metrics, layout, asynchronous teardown, or oversized initial-grid behavior."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g082/findings.jsonl",
+        "id": "c1",
+        "line": 12,
+        "disposition": "excluded",
+        "group": "grid-initial-fit-null-websocket",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-053 after inspecting it. Initial fit stores its size before the guarded callback, and opening the socket resends the current size. Source-refute only the null-socket/initial-size-loss suspicion. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/assets/terminal.js:3389-3393 assigns grid, installs, fits, then reads grid.size before creating ws at :3424-3427; sendResize :4560-4565 returns when ws is absent/not OPEN and onopen :4594-4604 calls it again.\",\"Same revision grid-terminal.js:473-497 assigns fitted before onResize; :1961-1963 only measures/watches, and :1987-1988 requests the fitted size on a mismatched hello. Attachments' liveness callback terminal.js:4371 checks ws exists.\"] Current coverage/results: [\"SPEC_impl.md:1842-1846 The grid client explicitly requires mounting before socket construction; SPEC.md Terminal experience requires fitting/fidelity, not a failing early callback.\",\"TODO Planned empty; no exact fit-null-socket repair in plans/queue, BUGS.md, full INDEX.md or active TRIAGE_OUTCOMES.md. initial-oversized-grid-cannot-attach in INDEX is a distinct >1000-cell client-input boundary, not this guarded early callback. No full FILTER match used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Unconditional grid mounting might fail or lose its initial fitted size because resize fires before ws exists. Earlier specification line reference was corrected from 1850-1852 to 1842-1843; the concern was not withdrawn silently.\"; \"None for synchronous fit/callback/URL ordering. No engine execution, oversized-grid or general font/layout claim.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g082/c1",
+        "line": 12,
+        "disposition": "excluded",
+        "group": "grid-initial-fit-null-websocket",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-053 after inspecting it. Initial fit stores its size before the guarded callback, and opening the socket resends the current size. Source-refute only the null-socket/initial-size-loss suspicion. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/assets/terminal.js:3389-3393 assigns grid, installs, fits, then reads grid.size before creating ws at :3424-3427; sendResize :4560-4565 returns when ws is absent/not OPEN and onopen :4594-4604 calls it again.\",\"Same revision grid-terminal.js:473-497 assigns fitted before onResize; :1961-1963 only measures/watches, and :1987-1988 requests the fitted size on a mismatched hello. Attachments' liveness callback terminal.js:4371 checks ws exists.\"] Current coverage/results: [\"SPEC_impl.md:1842-1846 The grid client explicitly requires mounting before socket construction; SPEC.md Terminal experience requires fitting/fidelity, not a failing early callback.\",\"TODO Planned empty; no exact fit-null-socket repair in plans/queue, BUGS.md, full INDEX.md or active TRIAGE_OUTCOMES.md. initial-oversized-grid-cannot-attach in INDEX is a distinct >1000-cell client-input boundary, not this guarded early callback. No full FILTER match used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Unconditional grid mounting might fail or lose its initial fitted size because resize fires before ws exists. Earlier specification line reference was corrected from 1850-1852 to 1842-1843; the concern was not withdrawn silently.\"; \"None for synchronous fit/callback/URL ordering. No engine execution, oversized-grid or general font/layout claim.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-053",
+          "key": "g082/c1",
+          "latest_line": 12,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "grid-initial-fit-null-websocket",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Initial fit stores its size before the guarded callback, and opening the socket resends the current size.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/assets/terminal.js:3389-3393 assigns grid, installs, fits, then reads grid.size before creating ws at :3424-3427; sendResize :4560-4565 returns when ws is absent/not OPEN and onopen :4594-4604 calls it again.",
+            "Same revision grid-terminal.js:473-497 assigns fitted before onResize; :1961-1963 only measures/watches, and :1987-1988 requests the fitted size on a mismatched hello. Attachments' liveness callback terminal.js:4371 checks ws exists."
+          ],
+          "coverage_checked": [
+            "SPEC_impl.md:1842-1846 The grid client explicitly requires mounting before socket construction; SPEC.md Terminal experience requires fitting/fidelity, not a failing early callback.",
+            "TODO Planned empty; no exact fit-null-socket repair in plans/queue, BUGS.md, full INDEX.md or active TRIAGE_OUTCOMES.md. initial-oversized-grid-cannot-attach in INDEX is a distinct >1000-cell client-input boundary, not this guarded early callback. No full FILTER match used."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "None for synchronous fit/callback/URL ordering. No engine execution, oversized-grid or general font/layout claim.",
+          "original_stronger_consequence": "Unconditional grid mounting might fail or lose its initial fitted size because resize fires before ws exists. Earlier specification line reference was corrected from 1850-1852 to 1842-1843; the concern was not withdrawn silently.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source-refute only the null-socket/initial-size-loss suspicion."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "grid-initial-fit-null-websocket",
+        "destination": null
+      }
+    },
+    {
+      "key": "g082/c2",
+      "owner": "g082",
+      "id": "c2",
+      "domain": "terminal-view-rendering",
+      "purpose": "terminal-view-rendering: crates/farhelm-ui/assets/terminal.js; phases -        function buildXtermSurface() {",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Pages left open across the protocol removal require reload by contract",
+            "location": "crates/farhelm-ui/assets/terminal.js:3424",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: Considered whether removing grid capability negotiation and the byte-rendering fallback breaks an older browser page left open across a helm upgrade. Details: assigned patch replaces conditional surface creation with the grid and removes grid=1 from the WebSocket URL (terminal.js:3389–3393,3424–3427). SPEC_impl.md, Grid streams, 3021–3026 explicitly accepts this route: 'A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working. Its terminals stop reconnecting on their own once the page sees the helm’s new build (the build-mismatch latch, which can take a few seconds), and any reconnect from it, automatic in that window or manual, misdraws the terminal: that page builds its old terminal component for a terminal whose kind the listing no longer names and takes the missing stream notice for an older helm’s byte stream, so it draws grid messages as terminal output, and what is typed into it ends the attachment as malformed input. Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy.' The same section says different-protocol helm/supervisor peers refuse each other at hello. Suggested bucket: high if unsupported by the specification. Confidence: confirmed specification acceptance; source-only. proposed_drop: true, the exact cross-update page failure is deliberately accepted by the quoted contract. possible_cover: none; coverage sources not searched. Could-be-highest: false: established consequence is terminal unavailability/misrendering until reload, and malformed input ends attachment; no route to loss of user-owned work established. Caveat: no cross-version execution was performed."
+          }
+        },
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Pages left open across the protocol removal require reload by contract",
+            "location": "crates/farhelm-ui/assets/terminal.js:3424",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: Removing grid capability negotiation and the byte-rendering fallback leaves an older browser page broken across a helm upgrade until reload. Details: assigned patch replaces conditional surface creation with the grid and removes grid=1 from the WebSocket URL (terminal.js:3389–3393,3424–3427). Exact acceptance text, SPEC_impl.md, Grid streams, 3021–3026: A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working. Its terminals stop reconnecting on their own once the page sees the helm's new build (the build-mismatch latch, which can take a few seconds), and any reconnect from it, automatic in that window or manual, misdraws the terminal: that page builds its old terminal component for a terminal whose kind the listing no longer names and takes the missing stream notice for an older helm's byte stream, so it draws grid messages as terminal output, and what is typed into it ends the attachment as malformed input. Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy. The same section says different-protocol helm/supervisor peers refuse each other at hello. Suggested bucket: high if unsupported by the specification. Confidence: confirmed specification acceptance; source-only. proposed_drop: true, the exact cross-update page failure is deliberately accepted by the quoted contract. possible_cover: none; coverage sources not searched. Could-be-highest: false: established consequence is terminal unavailability/misrendering until reload, and malformed input ends attachment; no route to loss of user-owned work established. Caveat: no cross-version execution was performed. This revision corrects the quotation's apostrophes; the conclusion and consequence are unchanged."
+          }
+        },
+        {
+          "line": 16,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c2",
+            "state": "open",
+            "summary": "Old-page reload acceptance may not cover successful JSON input reinterpretation",
+            "location": "crates/farhelm-ui/assets/terminal.js:3424",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: The old-page compatibility concern must retain a potentially destructive input consequence as well as misrendering and malformed-input detach. Caller-provided discovery-neighbours.json g196/l1 identifies an old raw-byte page pasting a complete valid GridInput JSON document, which the new supervisor can decode as text instructions rather than inserting literal JSON. This group's earlier checks already read deleted sendData sending TextEncoder bytes as one WebSocket message, reviewed terminal.rs:762–775 relaying binary messages unchanged, and service/grid_stream.rs:1064–1090 decoding GridInput before InputEncoder; those are useful supporting premises. Exact remaining check: validate the parent page paste framing/default mode and current Text variant decode, and compare the alleged accepted malformed-input-only consequence with the complete pinned contract. Original consequence and proposed-drop basis remain: SPEC_impl.md, Grid streams, explicitly requires reload, accepts old-page misdrawing/malformed-input detachment, and says preserving the stream notice was considered and rejected. That exact text is retained in earlier c2 events. It does not by itself prove all legacy raw bytes are invalid JSON. Suggested bucket: potentially highest if escaped control characters in pasted literal JSON become unbracketed command input. Confidence: source-supported lead after prior source checks and neighbour evidence, pending the precise framing/decoder checks above; no execution. proposed_drop: prior explicit reload acceptance retained only as a proposal requiring independent judgment; no drop accepted, and the original no-highest conclusion is reopened. possible_cover: supplied exact g196/l1; no prohibited coverage sources searched. Could-be-highest: true. No claim yet that an actual program executed a command; original ordinary-key detach and reload remedy remain material caveats."
+          }
+        },
+        {
+          "line": 19,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c2",
+            "state": "open",
+            "summary": "Old raw-byte pages can reinterpret a literal JSON paste as grid text input",
+            "location": "crates/farhelm-ui/assets/terminal.js:3424",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: A page left open across the grid-only update can paste a JSON document as terminal instructions: the JSON's data field, including escaped carriage returns, becomes actual unbracketed input instead of the literal pasted document. This strengthens the original c2 old-page misrender/detach consequence; it does not erase the reload acceptance or ordinary-key detach caveats. Source checks this turn: parent terminal.js:4657–4666 selects xterm when spec.kind is unknown; :4628–4634 installs term.paste, :2650–2675 intercepts text and calls insert, :2232–2235 sanitizes literal ESC markers only, and :4157–4158/:4191–4196 sends each onData chunk as one encoded WebSocket message. Parent vendor/xterm.js:1 contains its paste routine: it converts literal line endings, optionally brackets using decPrivateModes.bracketedPasteMode, and calls triggerDataEvent once with the complete prepared text; that mode's initial value is false. At the new revision terminal.rs:762–773 forwards the binary message unchanged. GridInput at grid.rs:1564–1566 uses serde tag t; its Text variant at :1610–1612 holds a String; decode at :1650–1655 parses JSON, and Text validation at :1686–1693 checks length rather than escaping decoded control characters. grid_input.rs:175 sends Text data.as_bytes without paste wrapping. Thus a small one-line JSON document shaped as a Text message can turn its literal escaped CR into real Enter outside bracketed paste. service/grid_stream.rs:1064–1090, checked in prior synthesis, supplies the actual decode/encode/queue path. Suggested bucket: highest/security or loss of work, because literal pasted document text can become command input under an established shipped paste route. Confidence: likely, explicitly requiring a fresh legacy xterm surface on an unknown-kind listing after upgrade, still attached until paste, and no accidentally parsed output having enabled xterm's bracketed-paste mode. Source establishes the relevant default and complete-message path; no command execution or runtime timing was observed. proposed_drop: the earlier explicit reload acceptance remains a proposal for independent check, not an accepted disposition of this stronger consequence. Exact pinned SPEC_impl.md, Grid streams: 'A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.' Also: 'and any reconnect from it, automatic in that window or manual, misdraws the terminal: that page builds its old terminal component for a terminal whose kind the listing no longer names and takes the missing stream notice for an older helm's byte stream, so it draws grid messages as terminal output, and what is typed into it ends the attachment as malformed input. Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy.' The contract describes malformed-input detach, not successful interpretation of valid JSON as instructions. possible_cover: exact supplied neighbour g196/l1; do not count this as an independent new defect. No prohibited coverage sources searched. Could-be-highest: true; prior c2 false/no-highest conclusion is superseded, without lowering any original consequence. Missing source premises: none left for the conditional parser/paste path; its frequency and occurrence were not measured. Boundaries: this is page/helm skew caused by removed negotiation, not a new grid-client paste defect, not proof every stale page or paste is dangerous, and not a request to change the terminal-host protocol. No reproduction, runtime test, build or live-install action performed."
+          }
+        },
+        {
+          "line": 22,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c2",
+            "state": "open",
+            "summary": "Old raw-byte pages can reinterpret a literal JSON paste as grid text input",
+            "location": "crates/farhelm-ui/assets/terminal.js:3424",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: An old page left open through the grid-only update can send a literal JSON paste as terminal instructions: its data field, including escaped carriage returns, becomes actual unbracketed input instead of inserting the literal document. Original old-page misrendering and ordinary malformed-input detachment consequences remain preserved. Details: this turn directly checked the unknown-kind caller premise: parent UI lib.rs:514–521 defaults absent agent_terminal to None; session_view.rs:3839–3852 preserves that absence outside the pending-restart case, and :1806–1810 passes it into spec.kind. Parent terminal.js:4657–4666 then selects xterm. Its text paste goes through onPaste/insert (:2650–2675,:2232–2235), installed term.paste (:4628–4634), and one encoded WebSocket message from onData/sendData (:4157–4158,:4191–4196). Parent term-bytes.js:55–56 removes literal ESC markers only, preserving JSON backslash escapes. Parent vendor/xterm.js:1 paste routine converts literal line endings, adds markers only if decPrivateModes.bracketedPasteMode is true, and calls triggerDataEvent once; that mode initially is false. Reviewed terminal.rs:762–773 relays binary input unchanged; grid.rs:1564–1566,1610–1612,1650–1655,1686–1693 deserialize a tagged Text message and validate its size without rejecting decoded control characters; grid_input.rs:175 outputs Text.data bytes without paste wrapping. service/grid_stream.rs:1064–1090 supplies the actual decoder/encoder/queue path. Thus a small one-line literal JSON document shaped as a Text input can become program input containing real CR, outside the real host's bracketed-paste markers. Suggested bucket: highest/security or loss of work; unintended command input is an established conditional shipped route, though no destructive command execution was observed. Confidence: likely, naming runtime conditions: a fresh unknown-kind legacy surface remains attached until paste, with no misparsed output having enabled its bracketed-paste mode. These are trigger conditions rather than missing source paths; the default and complete-message dispatch were checked. proposed_drop: earlier explicit reload acceptance remains a proposal requiring independent check, not accepted for this stronger consequence. Exact pinned SPEC_impl.md, Grid streams: 'A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.' Further exact text: 'and any reconnect from it, automatic in that window or manual, misdraws the terminal: that page builds its old terminal component for a terminal whose kind the listing no longer names and takes the missing stream notice for an older helm's byte stream, so it draws grid messages as terminal output, and what is typed into it ends the attachment as malformed input. Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy.' This names malformed-input detachment, not successful reinterpretation of valid JSON as instructions. possible_cover: supplied exact neighbour g196/l1, not an independently new defect or accepted disposition; no prohibited coverage sources searched. Could-be-highest: true. The original c2 no-highest conclusion is superseded while its exact acceptance basis and caveats are retained. Missing premises after investigation: none for the conditional source route; no runtime incidence/frequency or destructive result was measured. Boundaries: this is removed page/helm negotiation and legacy raw-input interpretation, not a new proper-grid paste defect or terminal-host protocol change. No reproduction, runtime tests, build or live-install action."
+          }
+        }
+      ],
+      "latest": {
+        "line": 22,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "c2",
+          "state": "open",
+          "summary": "Old raw-byte pages can reinterpret a literal JSON paste as grid text input",
+          "location": "crates/farhelm-ui/assets/terminal.js:3424",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: An old page left open through the grid-only update can send a literal JSON paste as terminal instructions: its data field, including escaped carriage returns, becomes actual unbracketed input instead of inserting the literal document. Original old-page misrendering and ordinary malformed-input detachment consequences remain preserved. Details: this turn directly checked the unknown-kind caller premise: parent UI lib.rs:514–521 defaults absent agent_terminal to None; session_view.rs:3839–3852 preserves that absence outside the pending-restart case, and :1806–1810 passes it into spec.kind. Parent terminal.js:4657–4666 then selects xterm. Its text paste goes through onPaste/insert (:2650–2675,:2232–2235), installed term.paste (:4628–4634), and one encoded WebSocket message from onData/sendData (:4157–4158,:4191–4196). Parent term-bytes.js:55–56 removes literal ESC markers only, preserving JSON backslash escapes. Parent vendor/xterm.js:1 paste routine converts literal line endings, adds markers only if decPrivateModes.bracketedPasteMode is true, and calls triggerDataEvent once; that mode initially is false. Reviewed terminal.rs:762–773 relays binary input unchanged; grid.rs:1564–1566,1610–1612,1650–1655,1686–1693 deserialize a tagged Text message and validate its size without rejecting decoded control characters; grid_input.rs:175 outputs Text.data bytes without paste wrapping. service/grid_stream.rs:1064–1090 supplies the actual decoder/encoder/queue path. Thus a small one-line literal JSON document shaped as a Text input can become program input containing real CR, outside the real host's bracketed-paste markers. Suggested bucket: highest/security or loss of work; unintended command input is an established conditional shipped route, though no destructive command execution was observed. Confidence: likely, naming runtime conditions: a fresh unknown-kind legacy surface remains attached until paste, with no misparsed output having enabled its bracketed-paste mode. These are trigger conditions rather than missing source paths; the default and complete-message dispatch were checked. proposed_drop: earlier explicit reload acceptance remains a proposal requiring independent check, not accepted for this stronger consequence. Exact pinned SPEC_impl.md, Grid streams: 'A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.' Further exact text: 'and any reconnect from it, automatic in that window or manual, misdraws the terminal: that page builds its old terminal component for a terminal whose kind the listing no longer names and takes the missing stream notice for an older helm's byte stream, so it draws grid messages as terminal output, and what is typed into it ends the attachment as malformed input. Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy.' This names malformed-input detachment, not successful reinterpretation of valid JSON as instructions. possible_cover: supplied exact neighbour g196/l1, not an independently new defect or accepted disposition; no prohibited coverage sources searched. Could-be-highest: true. The original c2 no-highest conclusion is superseded while its exact acceptance basis and caveats are retained. Missing premises after investigation: none for the conditional source route; no runtime incidence/frequency or destructive result was measured. Boundaries: this is removed page/helm negotiation and legacy raw-input interpretation, not a new proper-grid paste defect or terminal-host protocol change. No reproduction, runtime tests, build or live-install action."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g082/findings.jsonl",
+        "id": "c2",
+        "line": 22,
+        "disposition": "under-investigation",
+        "group": "g082-c2",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-053",
+          "key": "g082/c2",
+          "latest_line": 22,
+          "recommendation": "retain-verified",
+          "bucket": "highest",
+          "underlying_key": "grid-protocol-77-legacy-raw-json-paste-reinterpretation",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Source establishes a conditional route from a literal pasted JSON document to unbracketed program input containing decoded control characters. The accepted old-page misrender/malformed-input failure does not explicitly accept successfully interpreting that document as instructions. Retain the stronger consequence and contract ambiguity.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e^:crates/farhelm-ui/src/lib.rs:514-521 defaults missing agent_terminal to None; session_view.rs:3839-3849 preserves absence outside pending restart and :1806-1810 passes kind; terminal.js:4658-4666 chooses xterm for unknown kind.",
+            "Parent terminal.js:2649-2675 intercepts text and calls insert; :2232-2235 sanitizes then pastes; :4628-4634 supplies term.paste; :4158-4159 and :4191-4196 encode each onData chunk into one binary WebSocket message. Parent term-bytes.js:55-56 removes literal ESC, preserving JSON backslash escapes.",
+            "Parent vendor/xterm.js:1 contains paste routine replacing literal CRLF/LF, optionally adding bracketed-paste markers, then one triggerDataEvent; bracketedPasteMode initializes false. This supports a fresh unknown-kind surface with that mode still false, not every legacy surface.",
+            "f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-helm/src/terminal.rs:762-774 forwards binary input; crates/farhelm-proto/src/grid.rs:1564-1566,1608-1610,1650-1655,1686-1693 deserialize tagged Text JSON and validate length, without rejecting decoded CR. crates/farhelm-supervisor/src/grid_input.rs:175 emits Text bytes directly; service/grid_stream.rs:1064-1090 decodes/encodes/queues them as OneOff; :1245-1256 sends them to host input.",
+            "A small one-line literal document with t=text and a data string containing escaped CR therefore becomes actual CR-bearing input. No runtime timing, actual command execution, frequency or destructive outcome was observed."
+          ],
+          "coverage_checked": [
+            "Current SPEC_impl.md:2938-2956 Grid streams and reviewed revision :3011-3027 explicitly accept previous-page misdrawing and malformed-input detachment until reload. The words do not establish that all raw input is malformed. SPEC.md Terminal experience says user paste sends pasted content; its clipboard rule does not authorize this reinterpretation. No explicit acceptance of decoded command input found in either specification.",
+            "TODO.md:25-27 Planned is empty. Targeted plans/queue searches and matching tmux-end-old-terminals criteria :119-145 plus tmux-drop-from-docs :29-104 show removal/sweep work, not a stated fix or acceptance of JSON paste reinterpretation. No exact coverage in BUGS.md, full INDEX.md or active TRIAGE_OUTCOMES.md.",
+            "FILTER.md upgrade-plus-rare filter expressly excludes security/trust-boundary consequences; rare self-correcting and subsecond filters also exclude security/work-loss. Reload remedy does not bound the effect of input already delivered.",
+            "History names supplied neighbour g196/l1 as apparently identical. That claim is outside this batch; identity is unverified here and must be reconciled by parent, rather than counted as independently new or as existing queue coverage."
+          ],
+          "exact_cover_quotes": [
+            "SPEC_impl.md:2950-2956 (same text at reviewed f560058da19e02716e6f943883a9508b447aff4e:3021-3027): 'A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.'",
+            "Same paragraph: 'so it draws grid messages as terminal output, and what is typed into it ends the attachment as malformed input. Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy.' These cover the original ordinary failure, not explicitly the stronger successful JSON interpretation."
+          ],
+          "missing_premise": "None for the conditional parser/paste route. Trigger requires a newly constructed unknown-kind legacy surface that remains attached until paste, with bracketed-paste mode still false (no misparsed output enabled it). No observed destructive command or runtime incidence is claimed.",
+          "original_stronger_consequence": "Initial candidate proposed dropping old-page misrendering/detachment as explicitly accepted, with could-be-highest=false. Events 16/19/22 reopen that conclusion: literal JSON can become unbracketed command input, potentially executing a command or losing work. Preserve both the original reload/malformed-input acceptance and the newer highest consequence; no drop was accepted.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Retain highest on an established conditional unintended-input route. Any decision that broad old-page acceptance covers it, any filter dismissal, deduplication or consequence lowering requires the independent drop check. This consultation does not make that decision."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-053.json",
+          "key": "g082/c2",
+          "proposal": "claim-checks/claims-053/result.json",
+          "parent_proposal": "retain-highest-successful-legacy-paste-Text-reinterpretation",
+          "final_independent_gate": "required-for-any-prior-drop-or-lowering",
+          "reason": "Parent read full053. Fresh unknown-kind xterm, no enabled legacy paste wrapper, literal small complete JSON paste preserved through sanitizer/onebinarymessage, new tagged Text parser decodes controls and queues ordinary bytes. This is successful unintended input, beyond named accepted malformed detach/misdrawing; reload does not undo delivered input. Source conditions remain explicit, no runtime command execution/frequency/loss observed. Preserve original reload-only low assessment and later reopened highest route, reconcile196/053/032 aliases without dropping caveats. Broad old-page or upgrade filter coverage is unclear and therefore not accepted."
+        }
+      ],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "grid-protocol-77-legacy-raw-json-paste-reinterpretation",
+        "destination": "trailing-grid-protocol-77-legacy-raw-json-paste-reinterpretation.md"
+      }
+    },
+    {
+      "key": "g082/c3",
+      "owner": "g082",
+      "id": "c3",
+      "domain": "terminal-view-rendering",
+      "purpose": "terminal-view-rendering: crates/farhelm-ui/assets/terminal.js; phases -        function buildXtermSurface() {",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Grid selection no longer needs the removed xterm native-selection sweep",
+            "location": "crates/farhelm-ui/assets/terminal.js:3389",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: Considered whether deleting xterm's selection-dismissal listeners leaves stale highlights after typing or pasting. Details: assigned deleted buildXtermSurface implements a two-part sweep because xterm's DOM rows could acquire both library and native browser selections. Replacement grid-terminal.js:1761–1766 prevents default on terminal mousedown, so its drag does not create the browser selection that motivated the deleted workaround. Its sendUserInput at 1481–1487 clears the grid's own selection for keys, text and pastes, while program replies stay host-side; terminal.js:4364–4371 separately passes created.clearSelection for intercepted attachments. SPEC.md:2861 requires real-terminal fidelity and 3061–3079 describes selection copying; the deletion does not remove this clearing behavior from the active surface. Suggested bucket: other if real. Confidence: confirmed source refutation; no execution. proposed_drop: true, replacement owns its selection model and prevents the extra native drag selection rather than requiring the xterm cleanup. possible_cover: none; coverage sources not searched. Could-be-highest: false. Caveat: no engine-specific execution was performed; this concludes only that the removed xterm workaround has a corresponding grid-side mechanism."
+          }
+        }
+      ],
+      "latest": {
+        "line": 4,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Grid selection no longer needs the removed xterm native-selection sweep",
+          "location": "crates/farhelm-ui/assets/terminal.js:3389",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: Considered whether deleting xterm's selection-dismissal listeners leaves stale highlights after typing or pasting. Details: assigned deleted buildXtermSurface implements a two-part sweep because xterm's DOM rows could acquire both library and native browser selections. Replacement grid-terminal.js:1761–1766 prevents default on terminal mousedown, so its drag does not create the browser selection that motivated the deleted workaround. Its sendUserInput at 1481–1487 clears the grid's own selection for keys, text and pastes, while program replies stay host-side; terminal.js:4364–4371 separately passes created.clearSelection for intercepted attachments. SPEC.md:2861 requires real-terminal fidelity and 3061–3079 describes selection copying; the deletion does not remove this clearing behavior from the active surface. Suggested bucket: other if real. Confidence: confirmed source refutation; no execution. proposed_drop: true, replacement owns its selection model and prevents the extra native drag selection rather than requiring the xterm cleanup. possible_cover: none; coverage sources not searched. Could-be-highest: false. Caveat: no engine-specific execution was performed; this concludes only that the removed xterm workaround has a corresponding grid-side mechanism."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g082/findings.jsonl",
+        "id": "c3",
+        "line": 4,
+        "disposition": "excluded",
+        "group": "deleted-xterm-native-selection-sweep",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-053 after inspecting it. The replacement prevents browser drag selection and clears its own selection on user keys/text/pastes; removing the xterm sweep does not remove those mechanisms. Source-refute the deletion-specific missing-sweep claim only. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/assets/grid-terminal.js:1761-1766 prevents default on mousedown; :1481-1504 clears grid selection through sendUserInput for user text/paste, and :1514-1522 uses it for keys. terminal.js:4365-4371 supplies clearSelection to intercepted attachment insertion.\"] Current coverage/results: [\"Both current specs' Terminal experience/grid-island selection rules require local selection/copy; they do not accept stale typing/paste highlights. TODO Planned empty; no exact matching plan, BUGS or ledger item. INDEX's alternate-screen-wheel-keeps-stale-selection.md read in full: wheel sends through a different path, so it neither covers nor refutes this keys/text/paste deletion concern. No full FILTER match used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Deleted xterm listeners might leave stale highlights after typing/pasting (other). The result does not certify wheel input or every native selection source.\"; \"None for corresponding replacement mechanisms. No engine-specific selection execution was performed.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g082/c3",
+        "line": 4,
+        "disposition": "excluded",
+        "group": "deleted-xterm-native-selection-sweep",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-053 after inspecting it. The replacement prevents browser drag selection and clears its own selection on user keys/text/pastes; removing the xterm sweep does not remove those mechanisms. Source-refute the deletion-specific missing-sweep claim only. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/assets/grid-terminal.js:1761-1766 prevents default on mousedown; :1481-1504 clears grid selection through sendUserInput for user text/paste, and :1514-1522 uses it for keys. terminal.js:4365-4371 supplies clearSelection to intercepted attachment insertion.\"] Current coverage/results: [\"Both current specs' Terminal experience/grid-island selection rules require local selection/copy; they do not accept stale typing/paste highlights. TODO Planned empty; no exact matching plan, BUGS or ledger item. INDEX's alternate-screen-wheel-keeps-stale-selection.md read in full: wheel sends through a different path, so it neither covers nor refutes this keys/text/paste deletion concern. No full FILTER match used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Deleted xterm listeners might leave stale highlights after typing/pasting (other). The result does not certify wheel input or every native selection source.\"; \"None for corresponding replacement mechanisms. No engine-specific selection execution was performed.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-053",
+          "key": "g082/c3",
+          "latest_line": 4,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "deleted-xterm-native-selection-sweep",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The replacement prevents browser drag selection and clears its own selection on user keys/text/pastes; removing the xterm sweep does not remove those mechanisms.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/assets/grid-terminal.js:1761-1766 prevents default on mousedown; :1481-1504 clears grid selection through sendUserInput for user text/paste, and :1514-1522 uses it for keys. terminal.js:4365-4371 supplies clearSelection to intercepted attachment insertion."
+          ],
+          "coverage_checked": [
+            "Both current specs' Terminal experience/grid-island selection rules require local selection/copy; they do not accept stale typing/paste highlights. TODO Planned empty; no exact matching plan, BUGS or ledger item. INDEX's alternate-screen-wheel-keeps-stale-selection.md read in full: wheel sends through a different path, so it neither covers nor refutes this keys/text/paste deletion concern. No full FILTER match used."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "None for corresponding replacement mechanisms. No engine-specific selection execution was performed.",
+          "original_stronger_consequence": "Deleted xterm listeners might leave stale highlights after typing/pasting (other). The result does not certify wheel input or every native selection source.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source-refute the deletion-specific missing-sweep claim only."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "deleted-xterm-native-selection-sweep",
+        "destination": null
+      }
+    },
+    {
+      "key": "g082/c4",
+      "owner": "g082",
+      "id": "c4",
+      "domain": "terminal-view-rendering",
+      "purpose": "terminal-view-rendering: crates/farhelm-ui/assets/terminal.js; phases -        function buildXtermSurface() {",
+      "history": [
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Shift+Enter remains one encoded input after deleting the browser prefix merge",
+            "location": "crates/farhelm-ui/assets/terminal.js:3389",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: Considered whether deleting xterm's armed ESC-prefix merge turns Shift+Enter into prompt submission again. Details: SPEC.md:2869–2876 promises ESC CR in a single write for the exact non-composing chord. The grid's keydown path (grid-terminal.js:1514–1522) sends one key message from grid-input.js:keyMessage (363–369), preserving modifier bits. Composing keydowns are ignored by keydownAction (325–327). grid_input.rs:298–313 prepends ESC when key is Enter and mods equals SHIFT; input_frames at 268–270 keeps this two-byte sequence in one frame. SPEC_impl.md:1722–1727 explicitly assigns the chord to the supervisor encoder and terminal host rather than a browser merge. Suggested bucket: high if real (unintended prompt submission); no data-loss route established. Confidence: confirmed source refutation; no execution. proposed_drop: true, the replacement sends the same exact-chord encoding from the host-side input path. possible_cover: none; coverage sources not searched. Could-be-highest: false on established premises; downstream consequences of a user submitting an unfinished prompt are not shown. Caveat: this is contract and source evidence, not observed TUI behavior."
+          }
+        },
+        {
+          "line": 15,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Shift+Enter remains one encoded input after deleting the browser prefix merge",
+            "location": "crates/farhelm-ui/assets/terminal.js:3389",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: Considered whether deleting the browser's armed ESC merge makes Shift+Enter submit a prompt instead of inserting a newline. Details: original checks establish grid-terminal.js:1514–1522 sends one key description, grid-input.js:keyMessage preserves modifiers and keydownAction ignores composition, and grid_input.rs:298–313 encodes exact Shift+Enter as ESC CR. This synthesis resolved the previously contract-only caller step: service/grid_stream.rs:1064–1090 decodes one viewer input, runs InputEncoder, and queues the complete key bytes as QueuedInput::OneOff; its pump at 1245–1256 iterates input_frames, whose MAX_INPUT chunking keeps two bytes together, and passes that slice once to InputSequence.send. hosts/terminal.rs:1527–1534 copies that slice into one queued input, and hosts/client.rs:833–862 defines and implements one Input per call; its documented host contract offers inputs no larger than ATOMIC_INPUT to the PTY in one write. SPEC.md, Terminal experience, and SPEC_impl.md:1722–1727 require this exact-chord single-write behavior. Suggested bucket if real: high (unintended prompt submission), with no demonstrated loss-of-work consequence. Confidence: confirmed bounded source and callee-contract refutation; no execution. proposed_drop: true, the surviving key path retains one ESC CR input through the actual grid sender, without the deleted xterm prefix mechanism. possible_cover: caller reports g081 checked identical paste sanitization and frozen-grid selection; no queue coverage sources searched. Could-be-highest: false on the established route; harmful downstream agent actions remain unestablished. Caveats: the result concerns this two-byte exact chord and its caller wiring; it does not certify every keyboard encoding, scheduler, arbitrary large paste, or terminal-host implementation detail, and no actual agent TUI was exercised."
+          }
+        },
+        {
+          "line": 17,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Deleted browser prefix merge is replaced by one ESC CR input, not guaranteed physical atomicity",
+            "location": "crates/farhelm-ui/assets/terminal.js:3389",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: Deleting the xterm prefix merge does not split Shift+Enter into separate application sends, but this group's earlier wording must not imply that one encoded message guarantees one successful physical PTY write or one program read. Original considered consequence remains unintended prompt submission if ESC and CR reach a boundary-sensitive line editor separately. Source basis retained: grid-terminal.js keydown sends one description; grid_input.rs:298–313 encodes exact Shift+Enter as ESC CR; service/grid_stream.rs:1064–1090 queues the complete key as OneOff, and 1245–1256 passes one two-byte input_frames slice into InputSequence.send. New discovery-context check prompted by g010/f1: terminal-host/SPEC.md:399–403 explicitly says: 'An `Input` of at most `ATOMIC_INPUT` bytes is offered to the pty whole, in one `write` call, so the host itself never\nsplits a key that encodes to several bytes (Shift+Enter’s ESC CR). The pty may still take only part of it when its input\nqueue is nearly full (macOS’s pty takes what fits and returns a short write), and the rest then follows in later writes.\nHow the program’s reads divide the bytes is up to the program and its terminal settings; the host promises nothing about\nit.' Source host.rs:570–617 confirms it offers segment.data[written..] to libc::write and retains a short-write suffix. The ASCII-apostrophe original source quotation is at the cited file; the typography here does not change its content. Suggested bucket if a new chord-splitting behavior existed: high, no destructive or loss-of-work sequence established. Confidence: confirmed source refutation only of splitting caused by removal of the browser merge; physical write/read atomicity is not established and must not be claimed. proposed_drop: retained for this deletion-specific browser-message concern, not for the distinct newly inaccurate specification explanation identified by g010/f1. possible_cover: exact supplied g010/f1 documentation-contract finding; no prohibited coverage sources searched. Could-be-highest: no established route for this chord concern. Caveats: no observed short write, unintended submit, runtime reproduction or tests. Earlier one-input wiring evidence remains valid; any stronger unconditional single-write inference is superseded by this event, and no parent drop is accepted."
+          }
+        },
+        {
+          "line": 18,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Deleted browser prefix merge is replaced by one ESC CR input, not guaranteed physical atomicity",
+            "location": "crates/farhelm-ui/assets/terminal.js:3389",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: Deleting the xterm prefix merge does not split Shift+Enter into separate application sends, but this group's earlier wording must not imply that one encoded message guarantees one successful physical PTY write or one program read. Original considered consequence remains unintended prompt submission if ESC and CR reach a boundary-sensitive line editor separately. Source basis retained: grid-terminal.js keydown sends one description; grid_input.rs:298–313 encodes exact Shift+Enter as ESC CR; service/grid_stream.rs:1064–1090 queues the complete key as OneOff, and 1245–1256 passes one two-byte input_frames slice into InputSequence.send. New discovery-context check prompted by g010/f1: terminal-host/SPEC.md:399–403 explicitly says: 'An `Input` of at most `ATOMIC_INPUT` bytes is offered to the pty whole, in one `write` call, so the host itself never\nsplits a key that encodes to several bytes (Shift+Enter's ESC CR). The pty may still take only part of it when its input\nqueue is nearly full (macOS's pty takes what fits and returns a short write), and the rest then follows in later writes.\nHow the program's reads divide the bytes is up to the program and its terminal settings; the host promises nothing about\nit.' Source host.rs:570–617 confirms it offers segment.data[written..] to libc::write and retains a short-write suffix. The ASCII-apostrophe original source quotation is at the cited file; the typography here does not change its content. Suggested bucket if a new chord-splitting behavior existed: high, no destructive or loss-of-work sequence established. Confidence: confirmed source refutation only of splitting caused by removal of the browser merge; physical write/read atomicity is not established and must not be claimed. proposed_drop: retained for this deletion-specific browser-message concern, not for the distinct newly inaccurate specification explanation identified by g010/f1. possible_cover: exact supplied g010/f1 documentation-contract finding; no prohibited coverage sources searched. Could-be-highest: no established route for this chord concern. Caveats: no observed short write, unintended submit, runtime reproduction or tests. Earlier one-input wiring evidence remains valid; any stronger unconditional single-write inference is superseded by this event, and no parent drop is accepted."
+          }
+        }
+      ],
+      "latest": {
+        "line": 18,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c4",
+          "state": "open",
+          "summary": "Deleted browser prefix merge is replaced by one ESC CR input, not guaranteed physical atomicity",
+          "location": "crates/farhelm-ui/assets/terminal.js:3389",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: Deleting the xterm prefix merge does not split Shift+Enter into separate application sends, but this group's earlier wording must not imply that one encoded message guarantees one successful physical PTY write or one program read. Original considered consequence remains unintended prompt submission if ESC and CR reach a boundary-sensitive line editor separately. Source basis retained: grid-terminal.js keydown sends one description; grid_input.rs:298–313 encodes exact Shift+Enter as ESC CR; service/grid_stream.rs:1064–1090 queues the complete key as OneOff, and 1245–1256 passes one two-byte input_frames slice into InputSequence.send. New discovery-context check prompted by g010/f1: terminal-host/SPEC.md:399–403 explicitly says: 'An `Input` of at most `ATOMIC_INPUT` bytes is offered to the pty whole, in one `write` call, so the host itself never\nsplits a key that encodes to several bytes (Shift+Enter's ESC CR). The pty may still take only part of it when its input\nqueue is nearly full (macOS's pty takes what fits and returns a short write), and the rest then follows in later writes.\nHow the program's reads divide the bytes is up to the program and its terminal settings; the host promises nothing about\nit.' Source host.rs:570–617 confirms it offers segment.data[written..] to libc::write and retains a short-write suffix. The ASCII-apostrophe original source quotation is at the cited file; the typography here does not change its content. Suggested bucket if a new chord-splitting behavior existed: high, no destructive or loss-of-work sequence established. Confidence: confirmed source refutation only of splitting caused by removal of the browser merge; physical write/read atomicity is not established and must not be claimed. proposed_drop: retained for this deletion-specific browser-message concern, not for the distinct newly inaccurate specification explanation identified by g010/f1. possible_cover: exact supplied g010/f1 documentation-contract finding; no prohibited coverage sources searched. Could-be-highest: no established route for this chord concern. Caveats: no observed short write, unintended submit, runtime reproduction or tests. Earlier one-input wiring evidence remains valid; any stronger unconditional single-write inference is superseded by this event, and no parent drop is accepted."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g082/findings.jsonl",
+        "id": "c4",
+        "line": 18,
+        "disposition": "under-investigation",
+        "group": "g082-c4",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-053",
+          "key": "g082/c4",
+          "latest_line": 18,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "deleted-browser-shift-enter-prefix-merge",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The replacement produces and sends one two-byte ESC CR input. This refutes splitting caused by deleting the browser merge, but does not establish physical write/read atomicity.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/assets/grid-terminal.js:1514-1522 sends one key description; grid-input.js:326-347 ignores composing keydowns and :363-369 preserves modifier bits. crates/farhelm-supervisor/src/grid_input.rs:298-312 encodes exact Shift+Enter as ESC CR and :265-270 keeps those two bytes in one frame.",
+            "Same revision service/grid_stream.rs:1064-1090 queues OneOff and :1245-1256 sends input_frames pieces. terminal-host/SPEC.md:399-403 explicitly allows PTY short writes and program-chosen read boundaries. terminal-host/src/host.rs:570-617 offers the remaining segment to write, retains a short suffix and retries later."
+          ],
+          "coverage_checked": [
+            "SPEC.md:2869-2876 and SPEC_impl.md:1721-1726 contain a stronger single-write explanation; the terminal-host contract's short-write qualification prevents using those words as proof of physical atomicity. Preserve the already supplied separate g010/f1 documentation-contract concern; it is outside this batch, not dismissed.",
+            "TODO Planned empty; no exact deletion-induced split repair in plans/queue, BUGS.md, full INDEX.md or active TRIAGE_OUTCOMES.md. Read grid-shift-enter-loses-independent-altgraph.md: different modifier-loss trigger; it is not exact coverage. No full FILTER match used."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No physical-write/read atomicity, observed short write, observed TUI submission or downstream harmful action established. Those cannot be inferred from one application message.",
+          "original_stronger_consequence": "Original concern was unintended prompt submission when ESC and CR arrive separately, suggested high with no established work-loss sequence. Earlier events described single-write delivery too strongly; events 17/18 expressly withdraw that inference while retaining one-input wiring and the independent specification defect.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Refute only removal-induced application-message splitting. Conservative independent checking is warranted before dropping the unintended-submission consequence or treating this as a broad atomicity guarantee."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-053.json",
+          "key": "g082/c4",
+          "proposal": "claim-checks/claims-053/result.json",
+          "parent_proposal": "source-refuted-removal-induced-application-ShiftEnter-message-splitting",
+          "final_independent_gate": "required-before-original-unintended-submission-drop",
+          "reason": "Full053 replacement sends one key event, server encodes ESC-CR as one frame/OneOff. Deleted browser merger therefore does not newly split the application message. PTY short writes and program reads can still split bytes; original overly strong physical single-write inference was withdrawn, and010f1 separate contract defect remains retained. Preserve possible unintended submission/high consequence with no established work loss for fresh gate; do not certify transport atomicity or AltGraph behavior."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "deleted-browser-shift-enter-prefix-merge",
+        "destination": null
+      }
+    },
+    {
+      "key": "g082/c5",
+      "owner": "g082",
+      "id": "c5",
+      "domain": "terminal-view-rendering",
+      "purpose": "terminal-view-rendering: crates/farhelm-ui/assets/terminal.js; phases -        function buildXtermSurface() {",
+      "history": [
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c5",
+            "state": "open",
+            "summary": "Removing the xterm clipboard provider does not expose clipboard reads",
+            "location": "crates/farhelm-ui/assets/terminal.js:3389",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: Considered whether removing xterm's deliberately write-only clipboard provider enables a terminal program to read the user's clipboard. Details: deleted buildXtermSurface used a custom ClipboardAddon provider to refuse OSC 52 reads. Replacement terminal.js:4326–4330 only receives completed clipboard writes; both those and local copies feed enqueueClipboardWrite at 764–773, which uses only native write or navigator.clipboard.writeText. grid-terminal.js:1982–1983 consumes model.takeClipboard through that write callback. On the host, farhelm-terminal-emulator/src/effects.rs:171–192 maps ClipboardStore to clipboard effects and explicitly drops ClipboardLoad; route at 205–218 only emits clipboard-write notices for Live input. SPEC.md:3063–3066 expressly forbids answering OSC 52 reads with clipboard content. Suggested bucket if real: highest (clipboard exfiltration). Confidence: confirmed source refutation; no execution. proposed_drop: true, both the browser-side API and emulator event path are write-only; the removed xterm read boundary has not become a grid read route. possible_cover: none; coverage sources not searched. Could-be-highest: true, so the parent's independent drop check must retain this candidate and source basis. Caveat: this is a removal/replacement check, not a claim to have audited every clipboard endpoint."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c5",
+            "state": "open",
+            "summary": "Removing the xterm clipboard provider does not expose clipboard reads",
+            "location": "crates/farhelm-ui/assets/terminal.js:3389",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: Considered whether deleting xterm's write-only provider lets terminal programs read the user's clipboard or makes a pending clipboard write stall terminal rendering. Details: the surviving grid component delivers completed writes through terminal.js:4326–4333; clipboard and local-copy callbacks feed enqueueClipboardWrite at 764–773, using only native write or navigator.clipboard.writeText. grid-terminal.js:1982–1983 invokes onClipboard synchronously without awaiting a result. This synthesis read clipboard-writer.js in full: createClipboardWriter immediately returns from enqueue after starting one request; an unresolved write retains at most one replaceable pending value, and neither the grid receive path nor terminal input waits for it. The host evidence remains effects.rs:171–192, which maps ClipboardStore to effects and drops ClipboardLoad; route at 205–218 emits clipboard notices only for Live writes. SPEC.md, Terminal experience, forbids clipboard reads and permits best-effort silent writes while requiring everything else to remain unstalled. Suggested bucket if clipboard-read route existed: highest (clipboard exfiltration). Confidence: confirmed bounded source refutation of this deletion-specific read/stall suspicion; no execution. proposed_drop: true, the replacement callback and queue remain write-only and do not await writes in the rendering/input path. This remains a proposal: the parent has accepted no drop, and independent highest review is still required. possible_cover: caller reports g081 independently checked write-only clipboard; no queue coverage sources searched. Could-be-highest: true, preserving the original clipboard-exfiltration consequence for independent check. Caveats: this checks the removed provider's replacement wiring and the immediate queue behavior, not every clipboard endpoint, hostile bridge implementation, browser policy, or wider emulator correctness. No new clipboard-read route was established."
+          }
+        }
+      ],
+      "latest": {
+        "line": 11,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c5",
+          "state": "open",
+          "summary": "Removing the xterm clipboard provider does not expose clipboard reads",
+          "location": "crates/farhelm-ui/assets/terminal.js:3389",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: Considered whether deleting xterm's write-only provider lets terminal programs read the user's clipboard or makes a pending clipboard write stall terminal rendering. Details: the surviving grid component delivers completed writes through terminal.js:4326–4333; clipboard and local-copy callbacks feed enqueueClipboardWrite at 764–773, using only native write or navigator.clipboard.writeText. grid-terminal.js:1982–1983 invokes onClipboard synchronously without awaiting a result. This synthesis read clipboard-writer.js in full: createClipboardWriter immediately returns from enqueue after starting one request; an unresolved write retains at most one replaceable pending value, and neither the grid receive path nor terminal input waits for it. The host evidence remains effects.rs:171–192, which maps ClipboardStore to effects and drops ClipboardLoad; route at 205–218 emits clipboard notices only for Live writes. SPEC.md, Terminal experience, forbids clipboard reads and permits best-effort silent writes while requiring everything else to remain unstalled. Suggested bucket if clipboard-read route existed: highest (clipboard exfiltration). Confidence: confirmed bounded source refutation of this deletion-specific read/stall suspicion; no execution. proposed_drop: true, the replacement callback and queue remain write-only and do not await writes in the rendering/input path. This remains a proposal: the parent has accepted no drop, and independent highest review is still required. possible_cover: caller reports g081 independently checked write-only clipboard; no queue coverage sources searched. Could-be-highest: true, preserving the original clipboard-exfiltration consequence for independent check. Caveats: this checks the removed provider's replacement wiring and the immediate queue behavior, not every clipboard endpoint, hostile bridge implementation, browser policy, or wider emulator correctness. No new clipboard-read route was established."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g082/findings.jsonl",
+        "id": "c5",
+        "line": 11,
+        "disposition": "under-investigation",
+        "group": "g082-c5",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-053",
+          "key": "g082/c5",
+          "latest_line": 11,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "deleted-xterm-clipboard-provider-read-or-stall",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The surviving replacement path is write-only and enqueues without awaiting clipboard completion. No new program clipboard-read or render-stall route arises from deleting the xterm provider.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/assets/terminal.js:764-773 uses native write or navigator.clipboard.writeText; :4326-4334 supplies program/local-copy callbacks. grid-terminal.js:1982-1983 invokes onClipboard synchronously.",
+            "Same revision clipboard-writer.js read in full: enqueue starts one request, keeps one replaceable pending value and returns; promise settlement continues independently. farhelm-terminal-emulator/src/effects.rs:173-193 drops ClipboardLoad and :199-212 emits clipboard-write notices only from Live effects."
+          ],
+          "coverage_checked": [
+            "SPEC.md:3053-3074 and SPEC_impl.md:1728-1746 forbid clipboard reads and accept silent best-effort writes while forbidding other work stalling. They do not accept exfiltration. TODO Planned empty; no exact removal-created read/stall plan, BUGS item, INDEX entry or active ledger decision. clipboard-notice-drain-lacks-per-turn-work-bound is a distinct supervisor notice-drain issue, not awaiting a browser write. No full FILTER match applies to security."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No runtime observation. This does not audit all endpoints, hostile bridge implementations, browser policy or wider emulator correctness.",
+          "original_stronger_consequence": "Terminal programs might read/exfiltrate the viewer clipboard (highest), or a pending clipboard write might stall rendering. The original highest concern and independent-check requirement remain despite the bounded source refutation.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Propose source refutation of this removed-provider replacement boundary; do not drop without independent agreement."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-053.json",
+          "key": "g082/c5",
+          "proposal": "claim-checks/claims-053/result.json",
+          "parent_proposal": "source-refuted-replacement-clipboard-read-or-render-await-stall",
+          "final_independent_gate": "required-before-highest-private-data-drop",
+          "reason": "Full053 callbacks only write, enqueue returns with one active/replaceable pending item rather than awaiting clipboard completion; emulator drops ClipboardLoad and emits writes from Live effects. Refute removed-provider replacement read/stall route only, not hostile bridge/all endpoints/browser policy. Original clipboard exfiltration and separate stall concern remain for gate; supervisor clipboard notice-drain work-bound finding is different."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "deleted-xterm-clipboard-provider-read-or-stall",
+        "destination": null
+      }
+    },
+    {
+      "key": "g082/c6",
+      "owner": "g082",
+      "id": "c6",
+      "domain": "terminal-view-rendering",
+      "purpose": "terminal-view-rendering: crates/farhelm-ui/assets/terminal.js; phases -        function buildXtermSurface() {",
+      "history": [
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c6",
+            "state": "open",
+            "summary": "Removed browser watermarks are replaced by helm-owned grid flow control",
+            "location": "crates/farhelm-ui/assets/terminal.js:3432",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: Considered whether deleting xterm's browser backlog watermarks makes a slow terminal viewer lose output or stop the agent's work. Details: assigned patch deletes pendingWrite/paused and the high/low watermarks used for raw byte streams. Grid streams have another owner: farhelm-helm/src/client.rs:860–876 starts grid flow on the accepted attachment, 881–900 computes pause at either upper threshold and resume below both lower thresholds, and 4155–4179 sends the resulting PauseOutput/ResumeOutput decisions. The attach success path at 4063–4069 unconditionally starts this flow after terminal-kind removal. terminal.js:4165 forwards each nonempty data message to receiveGrid, whose component applies it; no deleted xterm write callback is needed. SPEC_impl.md:1715–1720 assigns browser application and helm flow control separately, and Grid streams at 3028–3054 documents the bounded queue and visible stall-detach fallback. Suggested bucket if real: high for a broken viewer; highest only if actual unrecoverable user-owned output loss were established. Confidence: confirmed source refutation of a missing-flow-control regression; no execution. proposed_drop: true, the replacement retains helm-owned pause/resume independently of deleted browser watermarks. possible_cover: none; coverage sources not searched. Could-be-highest: true because silent unrecoverable history loss was considered, but no such route was found. Caveat: this check establishes the owner and wiring; it is not a complete independent audit of grid queue capacity or terminal-host recovery."
+          }
+        },
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c6",
+            "state": "open",
+            "summary": "Removed browser watermarks are replaced by helm-owned grid flow control",
+            "location": "crates/farhelm-ui/assets/terminal.js:3432",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: Considered whether deleting byte-renderer watermarks lets a slow viewer silently lose terminal history or stop the agent. Details: original source checks establish independent grid accounting in client.rs:860–900, unconditional activation on Attached at 4063–4069, and pause/resume transmission at 4155–4179. This synthesis checked the browser-facing integration: terminal.rs:762–775 forwards each binary input frame through send_grid_input unchanged; 776–797 handles resize and ping but ignores former browser pause/resume rather than letting them override the helm's pause state. The page still applies nonempty output via receiveGrid. SPEC_impl.md, Terminal widget and Grid streams, assigns viewer bounds to the helm, and requires current-screen skipping, retained history or visible detach rather than silent terminal-output loss. Suggested bucket if real: high for broken viewing; highest if unrecoverable user-owned history loss were established. Confidence: confirmed bounded source refutation of the claim that this deletion removes grid flow-control wiring; no execution. proposed_drop: true for the deletion-specific missing-watermarks suspicion, not an accepted parent disposition. Independent highest review remains required. possible_cover: caller reports g083 confirmed deleted byte limits followed grid dispatch; no queue coverage searched. Could-be-highest: true, retaining the original potential irreversible-history-loss consequence. Caveats: source wiring does not prove all queue capacities, scheduling fairness, host checkpoint/recovery, malformed streams, or every slow-viewer scenario safe. No actual loss route was established by this review."
+          }
+        }
+      ],
+      "latest": {
+        "line": 13,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c6",
+          "state": "open",
+          "summary": "Removed browser watermarks are replaced by helm-owned grid flow control",
+          "location": "crates/farhelm-ui/assets/terminal.js:3432",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: Considered whether deleting byte-renderer watermarks lets a slow viewer silently lose terminal history or stop the agent. Details: original source checks establish independent grid accounting in client.rs:860–900, unconditional activation on Attached at 4063–4069, and pause/resume transmission at 4155–4179. This synthesis checked the browser-facing integration: terminal.rs:762–775 forwards each binary input frame through send_grid_input unchanged; 776–797 handles resize and ping but ignores former browser pause/resume rather than letting them override the helm's pause state. The page still applies nonempty output via receiveGrid. SPEC_impl.md, Terminal widget and Grid streams, assigns viewer bounds to the helm, and requires current-screen skipping, retained history or visible detach rather than silent terminal-output loss. Suggested bucket if real: high for broken viewing; highest if unrecoverable user-owned history loss were established. Confidence: confirmed bounded source refutation of the claim that this deletion removes grid flow-control wiring; no execution. proposed_drop: true for the deletion-specific missing-watermarks suspicion, not an accepted parent disposition. Independent highest review remains required. possible_cover: caller reports g083 confirmed deleted byte limits followed grid dispatch; no queue coverage searched. Could-be-highest: true, retaining the original potential irreversible-history-loss consequence. Caveats: source wiring does not prove all queue capacities, scheduling fairness, host checkpoint/recovery, malformed streams, or every slow-viewer scenario safe. No actual loss route was established by this review."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g082/findings.jsonl",
+        "id": "c6",
+        "line": 13,
+        "disposition": "under-investigation",
+        "group": "g082-c6",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-053",
+          "key": "g082/c6",
+          "latest_line": 13,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "deleted-byte-renderer-watermarks-grid-flow-control",
+          "aliases": [
+            "g083/c1"
+          ],
+          "target_queue_file": null,
+          "why": "The removed browser watermarks never governed the grid path; the helm independently starts and drives grid pause/resume.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-helm/src/client.rs:861-899 creates queue-driven pause/resume; :4063-4069 starts it on Attached; :4155-4179 sends PauseOutput/ResumeOutput. terminal.rs:762-798 forwards grid binary input and ignores old browser pause/resume controls.",
+            "Parent terminal.js:5737-5741 dispatched to grid before byte backlog/write paths at :5742-5763. Reviewed terminal.js:4164-4165 still dispatches grid directly; :4465-4475 calls grid.receive. grid-terminal.js:1973-1994 applies frames and schedules bounded history drains."
+          ],
+          "coverage_checked": [
+            "SPEC_impl.md:1715-1719 and Grid streams :2958-2982 assign flow control to helm and describe visible stall detach; SPEC.md slow-viewer contract forbids silent retained-output loss. These explain the correct replacement, not acceptance of the suspected loss. TODO Planned empty; plans/queue tmux removal criteria describe this deletion but no separate missing-grid-flow repair. BUGS, full INDEX and active ledger have no exact deletion-loss claim. FILTER extreme cumulative resize exception has a different recovery-journal trigger; it does not cover slow-viewer loss."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No actual loss route found. Wiring checks do not certify all queue capacities, fairness, malformed streams or host recovery; no runtime test.",
+          "original_stronger_consequence": "A slow viewer could silently lose unrecoverable retained terminal history or stop the agent; highest was possible for proven irreversible output loss, high for a broken viewer. Those consequences remain in the drop register even though the deletion-specific premise is refuted.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Source-refute missing grid flow control caused by deleted byte-renderer watermarks. Same-root alias g083/c1 adds parent-dispatch evidence; independently check any drop/deduplication of the highest concern."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-053.json",
+          "key": "g082/c6",
+          "proposal": "claim-checks/claims-053/result.json",
+          "parent_proposal": "source-refuted-deleted-byte-watermarks-remove-grid-flow-control",
+          "final_independent_gate": "required-before-original-highest-history-loss-drop",
+          "reason": "Full053 parent grid dispatch already bypassed byte backlog, while helm attached client owns queue-driven Pause/Resume and grid page still applies/history-drains. Refute deleted byte watermarks as missing grid protection, not all queue capacity/fairness/malformed/recovery behavior. Preserve silent unrecoverable history/agent-stop possibility for fresh gate. Exact same narrow083c1 with independent parent dispatch proof, not accepted journal-resize filter."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "deleted-byte-renderer-watermarks-grid-flow-control",
+        "destination": null
+      }
+    },
+    {
+      "key": "g082/l1",
+      "owner": "g082",
+      "id": "l1",
+      "domain": "terminal-view-rendering",
+      "purpose": "terminal-view-rendering: crates/farhelm-ui/assets/terminal.js; phases -        function buildXtermSurface() {",
+      "history": [
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Grid multi-button presses may replace a withheld primary-link gesture",
+            "location": "crates/farhelm-ui/assets/grid-terminal.js:1752",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: A primary link press withheld from a mouse-reporting program may lose that ownership if another mouse button is pressed before primary release, potentially sending the program part of a click Farhelm promised to withhold. Details: the deleted xterm driver keeps withheldPrimary across other-button presses (assigned patch 372–377,762–770). Replacement grid-terminal.js builds a fresh per-press state at 1778–1790, and startGesture at 1746–1751 stops the previous gesture before installing that state. onDocumentMouseUp at 1666–1670 filters primary release using only ending.withheld. A second non-primary press appears able to replace the withheld=true state with withheld=false, after which primary release can report to the program. SPEC.md, Terminal experience: 'By default, a primary-button press on a web link Farhelm would open is withheld from a program with mouse reporting active, together with its release and any drag starting there'. Checks made: read assigned removed xterm driver and grid press/move/release/startGesture implementation at the reviewed revision; no execution. Exact missing premises: whether the relevant mouse mode's release path actually sends an event for this sequence, and whether this is an in-scope removal regression versus an existing grid bug unchanged by the commit. Next source checks: compare grid gesture code to the parent revision; inspect modeReports and mouse encoding; determine whether any surviving branch preserves primary ownership. Suggested bucket: other or high depending on user-visible effect; no established loss-of-work/security route. Confidence: unverified lead under active source investigation. proposed_drop: false pending checks. possible_cover: none; coverage sources not searched. Could-be-highest: false on the established route."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Multi-button link interception issue is inherited by the replacement grid",
+            "location": "crates/farhelm-ui/assets/grid-terminal.js:1777",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: A second mouse-button press during a withheld primary-link press can replace the grid's ownership state, allowing the eventual primary release or drag to reach the terminal program without its primary press. Details: grid-terminal.js:1773–1792 creates a new state on every mousedown, marks only primary web-link presses withheld, and starts a new gesture at 1809. startGesture (1746–1751) replaces the old gesture; onDocumentMouseUp (1666–1670) and onDocumentMouseMove (1649–1658) consult only the replacement state's withheld flag. grid-input.js:555–560 admits an up event under click/drag/motion reporting; grid_input.rs:688–749 encodes that release in the program's mouse format. SPEC.md, Terminal experience: 'By default, a primary-button press on a web link Farhelm would open is withheld from a program with mouse reporting active, together with its release and any drag starting there'. Source checks establish a mismatch for ordinary 1000/1002/1003 modes, but the relevant grid implementation is unchanged from parent revision f560058da19e02716e6f943883a9508b447aff4e^ (parent grid-terminal.js:1677,1690,1768,1799,1829 contain the same filters/state replacement). git log for this file in the assigned review range shows only f560058da19e02716e6f943883a9508b447aff4e; its changes in this block are comment rewording. The grid was already the active renderer for terminal-host sessions, and earlier commits ended old tmux terminals before this removal. The assigned deletion's separate withheldPrimary safety did not protect grid terminals. Suggested bucket: other, for a partial mouse gesture reaching the program; no concrete severe user impact or loss route established. Confidence: confirmed source analysis of the state replacement and baseline inheritance; no execution. proposed_drop: true for this assigned pass because it is a pre-existing grid issue, not caused by removing the unreachable xterm renderer; retain the source-supported consequence for the parent's scope judgment. possible_cover: none; coverage sources not searched. Could-be-highest: false on established premises. Missing premises: none for state replacement; an application-specific material consequence is not established. The earlier open lead is closed to candidate by this event."
+          }
+        },
+        {
+          "line": 14,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Multi-button link interception issue is inherited by the replacement grid",
+            "location": "crates/farhelm-ui/assets/grid-terminal.js:1777",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: A second button pressed during a withheld primary web-link gesture replaces its grid ownership state; the subsequent primary release or drag can reach the terminal program without the corresponding primary press. Details: current grid-terminal.js:1773–1792 makes a fresh state for every mousedown, and 1809 starts it; startGesture at 1747–1752 replaces the previous gesture. Move/release handlers at 1649–1670 filter using only that current withheld flag. A non-primary press has no link and hence withheld=false. grid-input.js:555–560 admits the later release for ordinary click/drag/motion reporting, and grid_input.rs:688–749 encodes it. SPEC.md, Terminal experience: 'By default, a primary-button press on a web link Farhelm would open is withheld from a program with mouse reporting active, together with its release and any drag starting there'. Changed-versus-inherited check refined this turn: immediate parent is 1ed482dde220452e424973faf38a5e1318986333. Its grid-terminal.js:1768–1773 and 1790–1829 have the same startGesture replacement and mousedown logic; the selected commit changes comments in those blocks, not their behavior. Parent terminal.js:4658–4666 already mounts this grid for spec.kind=host. The removed xterm driver's distinct withheldPrimary flag never protected that host-grid path. The selected range's grid-terminal.js log lists only f560058da19e02716e6f943883a9508b447aff4e. Suggested bucket: other on the established consequence (partial mouse gesture sent); no application-specific severe outcome or loss route shown. Confidence: confirmed source analysis and parent inheritance; no execution. proposed_drop: true for this assigned deletion pass because the issue is inherited, subject to the parent's coverage/scope judgment; this is not a finding that the grid satisfies multi-button ownership. possible_cover: caller reports an apparently matching pre-existing grid ownership claim; this is unverified identity information from the caller, not a queue search or accepted drop. Could-be-highest: false on established premises. Open-lead status: closed to candidate; readily checkable state replacement, mode encoding and inheritance premises are settled. Caveats: this preserves the original consequence; it neither certifies surrounding pointer code nor claims to have observed the sequence in a running browser."
+          }
+        },
+        {
+          "line": 20,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Multi-button link interception issue predates the whole review range",
+            "location": "crates/farhelm-ui/assets/grid-terminal.js:1777",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. Original consequence preserved: a second button pressed during a withheld primary web-link gesture replaces the grid's ownership state, allowing its primary release or drag to reach the program without the corresponding primary press. Original source basis preserved: grid-terminal.js:1773–1809 creates/replaces the gesture and move/up handlers at 1649–1670 consult only the new withheld flag; grid-input.js:555–560 and grid_input.rs:688–749 admit and encode the resulting release. SPEC.md, Terminal experience, requires withholding the primary press with its release and drag. This turn checks whole-range attribution rather than relying only on the immediate parent: exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a already has the same gesture.withheld move filter at grid-terminal.js:1677, ending.withheld release filter at :1690, startGesture replacement at :1768, fresh withheld computation at :1799, and unconditional startGesture(state) at :1829. Immediate parent 1ed482dde220452e424973faf38a5e1318986333 has those same locations/logic. Full pinned-range file history shows f560058da19e02716e6f943883a9508b447aff4e and later 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e; earlier diff review of the selected commit established only comment changes in these gesture blocks. Thus parent inheritance is supplemented by direct base evidence, not treated alone as proof of predating the range. Suggested bucket: other on established partial-input consequence; application-specific serious harm is unestablished. Confidence: source-confirmed mechanism and pre-range presence; no runtime observation. proposed_drop: retained as a pre-range issue outside this assigned deletion's introduced behavior, pending parent scope/coverage judgment; not accepted here. possible_cover: caller supplied matching pre-existing grid ownership claim; exact queue identity was not searched. Could-be-highest: false on established premises. Caveats: old xterm had its own surviving-primary flag but never used it for host-grid sessions. No test or documentation defect is dismissed by this production inheritance; none is newly claimed here. No open source lead remains."
+          }
+        }
+      ],
+      "latest": {
+        "line": 20,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l1",
+          "state": "open",
+          "summary": "Multi-button link interception issue predates the whole review range",
+          "location": "crates/farhelm-ui/assets/grid-terminal.js:1777",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. Original consequence preserved: a second button pressed during a withheld primary web-link gesture replaces the grid's ownership state, allowing its primary release or drag to reach the program without the corresponding primary press. Original source basis preserved: grid-terminal.js:1773–1809 creates/replaces the gesture and move/up handlers at 1649–1670 consult only the new withheld flag; grid-input.js:555–560 and grid_input.rs:688–749 admit and encode the resulting release. SPEC.md, Terminal experience, requires withholding the primary press with its release and drag. This turn checks whole-range attribution rather than relying only on the immediate parent: exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a already has the same gesture.withheld move filter at grid-terminal.js:1677, ending.withheld release filter at :1690, startGesture replacement at :1768, fresh withheld computation at :1799, and unconditional startGesture(state) at :1829. Immediate parent 1ed482dde220452e424973faf38a5e1318986333 has those same locations/logic. Full pinned-range file history shows f560058da19e02716e6f943883a9508b447aff4e and later 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e; earlier diff review of the selected commit established only comment changes in these gesture blocks. Thus parent inheritance is supplemented by direct base evidence, not treated alone as proof of predating the range. Suggested bucket: other on established partial-input consequence; application-specific serious harm is unestablished. Confidence: source-confirmed mechanism and pre-range presence; no runtime observation. proposed_drop: retained as a pre-range issue outside this assigned deletion's introduced behavior, pending parent scope/coverage judgment; not accepted here. possible_cover: caller supplied matching pre-existing grid ownership claim; exact queue identity was not searched. Could-be-highest: false on established premises. Caveats: old xterm had its own surviving-primary flag but never used it for host-grid sessions. No test or documentation defect is dismissed by this production inheritance; none is newly claimed here. No open source lead remains."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g082/findings.jsonl",
+        "id": "l1",
+        "line": 20,
+        "disposition": "duplicate",
+        "group": "secondary-button-erases-intercepted-primary-ownership",
+        "reason": "Parent corrects its consolidation conflict after reading complete claims053. This record's runtime chorded-gesture leak exists at exclusive base and exactly matches the existing queue item read in full; it supplies no additional runtime caller. But g010/f4 under this same root retains the newly false in-range withholding explanation as useful extension evidence. Join that verified group as a duplicate, preserving this older-runtime attribution and not treating production correctness or existing runtime coverage as a refutation of the new documentation defect. No highest consequence asserted."
+      },
+      "accepted_parent_decision": {
+        "key": "g082/l1",
+        "line": 20,
+        "disposition": "duplicate",
+        "group": "secondary-button-erases-intercepted-primary-ownership",
+        "bucket": "other",
+        "recording": "existing-runtime-covered-new-comment-retained",
+        "queue_target_candidate": "review_feedback_queue/secondary-button-erases-intercepted-primary-ownership.md",
+        "needs_independent_drop_check": false,
+        "reason": "Parent corrects its consolidation conflict after reading complete claims053. This record's runtime chorded-gesture leak exists at exclusive base and exactly matches the existing queue item read in full; it supplies no additional runtime caller. But g010/f4 under this same root retains the newly false in-range withholding explanation as useful extension evidence. Join that verified group as a duplicate, preserving this older-runtime attribution and not treating production correctness or existing runtime coverage as a refutation of the new documentation defect. No highest consequence asserted."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-053",
+          "key": "g082/l1",
+          "latest_line": 20,
+          "recommendation": "out-of-range",
+          "bucket": "other",
+          "underlying_key": "secondary-button-erases-intercepted-primary-ownership",
+          "aliases": [
+            "review_feedback_queue/secondary-button-erases-intercepted-primary-ownership.md"
+          ],
+          "target_queue_file": "review_feedback_queue/secondary-button-erases-intercepted-primary-ownership.md",
+          "why": "The partial-gesture leak is real in source but already exists at the exclusive base, and an existing queue item records the exact trigger and consequence. No useful new extension is required.",
+          "checks": [
+            "6e423e30068b62c6cfa276c6d720ee35bb70387a:crates/farhelm-ui/assets/grid-terminal.js:1677,1690,1768-1772,1795-1829 already filters by one gesture's withheld flag and replaces it on every reporting press.",
+            "f560058da19e02716e6f943883a9508b447aff4e:grid-terminal.js:1651-1674,1747-1758,1773-1807 retains that mechanism; non-primary link=null, withheld=false replaces the original state. grid-input.js:555-559 admits up in tracking modes. Full pinned-range file history lists f560058da19e02716e6f943883a9508b447aff4e and 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e; selected-patch gesture changes are commentary, not a newly introduced ownership path."
+          ],
+          "coverage_checked": [
+            "SPEC.md:3077-3083 and SPEC_impl.md:1778-1784 require withheld press/drag/release; they do not accept the issue. Existing secondary-button-erases-intercepted-primary-ownership.md read in full matches exact mouse-reporting/default-intercept/hovered-primary-then-secondary trigger and forwarded primary drag/release plus lost link activation.",
+            "TODO Planned empty; no separate repair or acceptance found in plans/queue, BUGS.md or active TRIAGE_OUTCOMES.md. Full INDEX contains the exact existing item at :1267-1269. No FILTER used; this is ordinary chorded input, not a demonstrated rare timing boundary."
+          ],
+          "exact_cover_quotes": [
+            "Existing queue TLDR: 'Holding a web-link click and pressing a second mouse button loses the primary click's interception, so its subsequent drag/release reaches the terminal program and its original link no longer opens.'",
+            "Existing queue Details: 'Exact trigger: mouse-reporting program, default intercept setting, hovered web link, primary press followed by another button press in the terminal before primary release.'"
+          ],
+          "missing_premise": "No application-specific severe harm or loss-of-work route established. No runtime/native mouse sequence observed.",
+          "original_stronger_consequence": "Initial lead asked whether a second button replaces withheld-primary state; later source checks established leaked release/drag. Immediate-parent inheritance was initially the only scope argument, then latest event supplied direct exclusive-base evidence. The real consequence is preserved, not refuted as correct behavior.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Outside introduced behavior in the full pinned range, with exact existing queue coverage as an additional basis. Do not infer that grid multi-button ownership is correct or dismiss separate tests/docs defects."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "secondary-button-erases-intercepted-primary-ownership",
+        "destination": "secondary-button-erases-intercepted-primary-ownership.md"
+      }
+    },
+    {
+      "key": "g082/c7",
+      "owner": "g082",
+      "id": "c7",
+      "domain": "terminal-view-rendering",
+      "purpose": "terminal-view-rendering: crates/farhelm-ui/assets/terminal.js; phases -        function buildXtermSurface() {",
+      "history": [
+        {
+          "line": 21,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c7",
+            "state": "open",
+            "summary": "Removed browser query suppressors are unnecessary on the grid-only surface",
+            "location": "crates/farhelm-ui/assets/terminal.js:3389",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: Considered whether deleting xterm's DECRQM/DECRQSS parser interceptors lets delayed automatic query replies reach the program as stray keystrokes. Details: assigned deletion removes swallowDecrqm and the DCS handler because it removes the entire browser byte emulator. The replacement at terminal.js:3389–3393 mounts the grid, and its receiveGrid dispatch calls grid.receive; grid-terminal.js:1970–1996 decodes/applies GridModel protocol messages, rather than parsing program VT bytes or invoking an xterm automatic responder. Browser-generated focus state remains explicitly handled there and is not a terminal-query reply. The host-side queries.rs:98–127 owns mode-query responses; its header at :94–97 separately notes unanswered DECRQSS, not a browser responder to be suppressed. No surviving path in this replacement invokes the deleted xterm query generator. Suggested bucket if duplicate replies were established: other/high depending on the affected program; no loss-of-work route shown. Confidence: confirmed bounded source refutation of a new duplicate-query-reply mechanism caused by deleting these browser suppressors; no execution. proposed_drop: true, the active grid receives structured output and cannot run the removed byte-parser responder. possible_cover: none for this considered deletion-specific concern; supplied g178-l1 concerns distinct earlier removal of old-renderer regression tests and is not refuted by this conclusion. Could-be-highest: false on established premises. Caveats: this does not claim all terminal queries are answered, certify host-side query timing or protocol fidelity, or dismiss a separate documentation/test-oracle defect. No runtime tests or reproductions performed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 21,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c7",
+          "state": "open",
+          "summary": "Removed browser query suppressors are unnecessary on the grid-only surface",
+          "location": "crates/farhelm-ui/assets/terminal.js:3389",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: Considered whether deleting xterm's DECRQM/DECRQSS parser interceptors lets delayed automatic query replies reach the program as stray keystrokes. Details: assigned deletion removes swallowDecrqm and the DCS handler because it removes the entire browser byte emulator. The replacement at terminal.js:3389–3393 mounts the grid, and its receiveGrid dispatch calls grid.receive; grid-terminal.js:1970–1996 decodes/applies GridModel protocol messages, rather than parsing program VT bytes or invoking an xterm automatic responder. Browser-generated focus state remains explicitly handled there and is not a terminal-query reply. The host-side queries.rs:98–127 owns mode-query responses; its header at :94–97 separately notes unanswered DECRQSS, not a browser responder to be suppressed. No surviving path in this replacement invokes the deleted xterm query generator. Suggested bucket if duplicate replies were established: other/high depending on the affected program; no loss-of-work route shown. Confidence: confirmed bounded source refutation of a new duplicate-query-reply mechanism caused by deleting these browser suppressors; no execution. proposed_drop: true, the active grid receives structured output and cannot run the removed byte-parser responder. possible_cover: none for this considered deletion-specific concern; supplied g178-l1 concerns distinct earlier removal of old-renderer regression tests and is not refuted by this conclusion. Could-be-highest: false on established premises. Caveats: this does not claim all terminal queries are answered, certify host-side query timing or protocol fidelity, or dismiss a separate documentation/test-oracle defect. No runtime tests or reproductions performed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g082/findings.jsonl",
+        "id": "c7",
+        "line": 21,
+        "disposition": "excluded",
+        "group": "deleted-browser-terminal-query-suppressors",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-053 after inspecting it. The replacement browser receives grid protocol records, so it cannot invoke the deleted xterm VT responder merely because its suppressors were removed. Source-refute only duplicate browser replies caused by deleting these suppressors. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/assets/terminal.js:3389-3393 mounts grid and :4164-4165/:4465-4475 dispatches frames there. grid-terminal.js:1973-1994 decodes/applies GridModel messages; its explicit focus report is not a VT query response.\",\"Same revision farhelm-terminal-emulator/src/queries.rs:95-123 leaves DECRQSS unanswered and owns mode-report query behavior. Removing the whole xterm parser removes its automatic responder, not just the swallow hooks.\"] Current coverage/results: [\"Both current specs place terminal interpretation/query answers in supervisor and structured drawing in the grid client. TODO Planned empty; plans/queue query/removal matches describe retained supervisor answers, not a surviving browser responder. No exact BUGS, full INDEX or active ledger match. No full FILTER match used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Delayed automatic browser query replies could reach a program as stray keystrokes (other/high depending on application), with no established work-loss route. The supplied g178-l1 old-renderer regression-test removal concern is distinct and remains untouched.\"; \"No observed stray reply, program impact or runtime test. No certification of all host queries, timing or protocol fidelity.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g082/c7",
+        "line": 21,
+        "disposition": "excluded",
+        "group": "deleted-browser-terminal-query-suppressors",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-053 after inspecting it. The replacement browser receives grid protocol records, so it cannot invoke the deleted xterm VT responder merely because its suppressors were removed. Source-refute only duplicate browser replies caused by deleting these suppressors. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/assets/terminal.js:3389-3393 mounts grid and :4164-4165/:4465-4475 dispatches frames there. grid-terminal.js:1973-1994 decodes/applies GridModel messages; its explicit focus report is not a VT query response.\",\"Same revision farhelm-terminal-emulator/src/queries.rs:95-123 leaves DECRQSS unanswered and owns mode-report query behavior. Removing the whole xterm parser removes its automatic responder, not just the swallow hooks.\"] Current coverage/results: [\"Both current specs place terminal interpretation/query answers in supervisor and structured drawing in the grid client. TODO Planned empty; plans/queue query/removal matches describe retained supervisor answers, not a surviving browser responder. No exact BUGS, full INDEX or active ledger match. No full FILTER match used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Delayed automatic browser query replies could reach a program as stray keystrokes (other/high depending on application), with no established work-loss route. The supplied g178-l1 old-renderer regression-test removal concern is distinct and remains untouched.\"; \"No observed stray reply, program impact or runtime test. No certification of all host queries, timing or protocol fidelity.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-053",
+          "key": "g082/c7",
+          "latest_line": 21,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "deleted-browser-terminal-query-suppressors",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The replacement browser receives grid protocol records, so it cannot invoke the deleted xterm VT responder merely because its suppressors were removed.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/assets/terminal.js:3389-3393 mounts grid and :4164-4165/:4465-4475 dispatches frames there. grid-terminal.js:1973-1994 decodes/applies GridModel messages; its explicit focus report is not a VT query response.",
+            "Same revision farhelm-terminal-emulator/src/queries.rs:95-123 leaves DECRQSS unanswered and owns mode-report query behavior. Removing the whole xterm parser removes its automatic responder, not just the swallow hooks."
+          ],
+          "coverage_checked": [
+            "Both current specs place terminal interpretation/query answers in supervisor and structured drawing in the grid client. TODO Planned empty; plans/queue query/removal matches describe retained supervisor answers, not a surviving browser responder. No exact BUGS, full INDEX or active ledger match. No full FILTER match used."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No observed stray reply, program impact or runtime test. No certification of all host queries, timing or protocol fidelity.",
+          "original_stronger_consequence": "Delayed automatic browser query replies could reach a program as stray keystrokes (other/high depending on application), with no established work-loss route. The supplied g178-l1 old-renderer regression-test removal concern is distinct and remains untouched.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source-refute only duplicate browser replies caused by deleting these suppressors."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "deleted-browser-terminal-query-suppressors",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete; all 949 assigned lines reviewed.\n\nNo confirmed in-scope findings. Recorded candidates `c1`–`c6`; investigated `l1` and closed it as a pre-existing issue. No open leads or unread assigned material remain. No runtime tests or reproductions performed.\n\n[Findings log]([private-run]/g082/findings.jsonl) and progress updated."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised `c1`, `c4`, `c5`, `c6`, and `l1` with additional mount-ordering, input-handoff, clipboard-queue, flow-control, and exact-parent evidence.\n\nNo new findings. `l1` remains inherited; `c5`/`c6` still require independent highest-impact drop checks. No drops accepted.\n\nUnresolved lead IDs: none."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass complete.\n\n- Checked helper references, mount readiness/teardown, query-response ownership, and legacy paste decoding.\n- Revised `c2`, `c4`, and `l1`; recorded source-refuted candidate `c7`.\n- New independent verified findings: none.\n- New unverified-after-investigation findings: none.\n- Open leads: none.\n\nNo additional independent defect found. `c2` now preserves the neighbour’s potentially highest-impact paste consequence. No runtime execution performed."
+    }
+  ],
+  "progress": "# g082 progress\n\nInitial review complete, turn 1. Discovery-pass count: 0 (initial assigned pass; no later synthesis or discovery pass performed).\n\nRead brief fully and only the complete commits field of inventory.json. Delivered all 949 assigned patch lines through evidence read, in packets 1–180, 181–360, 361–540, 541–720, 721–900, 901–949. No assigned material is unread. The first packet was repeated to deliver the shell stdout directly. One exploratory grid diff was clipped; reread the entire zero-context diff in bounded 1–200 and 201–399 packets. No omitted assigned material.\n\nReviewed f560058da19e02716e6f943883a9508b447aff4e at its recorded revision. Governing contracts read: root AGENTS.md through End sentinel, queue Priority buckets, recording What goes in a feedback file, pinned SPEC.md Terminal experience in full, pinned SPEC_impl.md Terminal widget: the grid island in full (including The grid client), Grid streams framing/flow-control and compatibility paragraphs, and GUI Answers bind to what was drawn. Root machine, skillette, scripts and scode-voice instructions were also read. No forbidden coverage sources or excluded inventory metadata were read.\n\nInterface checks: unconditional grid construction and guarded initial resize; live attachment input encodings, Shift+Enter and paste/selection clearing; retained grid link provider, click-time disclosure and scheme policy; local/OSC clipboard writes and dropped clipboard reads; helm-owned grid queue pause/resume. Browser input becomes grid messages and host-side encoding, not raw bytes. Terminal-host sessions already used this grid before the assigned removal. Old-page compatibility across protocol 77 is explicitly accepted as requiring reload.\n\nDurable records appended: c1–c6 are considered candidates with proposed_drop and source refutation or exact specification acceptance. c1 and c2 have corrective revisions. l1 was opened as a lead, investigated through parent comparison and mouse encoding, then closed as a candidate: the grid's multi-button ownership issue is inherited, not introduced by this removal. No in-scope finding is confirmed. No open leads remain. c5 and c6 explicitly preserve could-be-highest considerations for the parent's independent drop check; no highest route was established.\n\nNew verified finding IDs this pass: none. New unverified finding IDs: none. Candidate IDs: c1, c2, c3, c4, c5, c6, l1. All conclusions are from source/contract analysis, not observed execution. No runtime tests, reproductions, builds, repository edits, or helper agents.\n\nNext action: return to caller for the later synthesis turn. Parent owns queue coverage and final rendering. The pre-existing l1 candidate retains its exact consequence and source basis for the parent's scope judgment.\n\n## Synthesis turn 2\n\nLater-turn synthesis complete. Turn count: 2. Discovery-pass count: 0. No new assigned patch material; all 949 assigned lines remain covered, with no unread scope. No second discovery pass was performed.\n\nRevised c1 with the component-side initial-fit ordering: fitted is stored before the resize callback, grid is assigned before fit, and the first hello can request the fit again. The conclusion is limited to this constructor/fit/URL ordering. Revised c4 after following the actual grid sender: decoded key bytes become one QueuedInput::OneOff, the pump's input_frames keeps ESC CR together, and InputSequence.send queues that slice under the host client's atomic-input contract. Revised c5 after reading clipboard-writer.js in full: the callbacks do not await its write, and the queue holds only one replaceable pending value; clipboard-read and write-stall refutations remain limited to the deleted provider's replacement path. Revised c6 after checking browser ingress: old pause/resume controls are ignored and cannot override the helm-owned state.\n\nRevised l1 with exact immediate-parent hash 1ed482dde220452e424973faf38a5e1318986333 and before/after pointer references. Multi-button ownership replacement is unchanged; parent terminal.js already mounts that grid for host sessions. The inherited defect's consequence is preserved. Caller supplied possible matching pre-existing ownership coverage; this is recorded as possible_cover, not verified identity or an accepted drop. No coverage files were searched.\n\nCaller interface evidence incorporated as attributed: g079 retired-container guards; g081 identical sanitizer, write-only clipboard, frozen-grid selection and path/generation identity; g083 deleted byte bounds occur after grid dispatch. These do not broaden this group's source checks into surrounding-code certification.\n\nIDs revised this turn: c1, c4, c5, c6, l1. No new finding or candidate IDs. New verified findings: none. New unverified findings: none. Open lead IDs: none. c5/c6 remain potentially-highest candidate proposals awaiting the parent's independent check; no parent drop is accepted. No runtime execution, reproductions, checkout writes, or helper agents.\n\nNext action: return synthesis delta to parent. Any further discovery pass requires the caller's later-turn prompt.\n\n## Discovery turn 3\n\nSeparate discovery pass complete. Turn count: 3. Discovery-pass count: 1. Read discovery-neighbours.json completely in bounded chunks, lines 1–120, 121–180, 181–240, 241–300, 301–360, 361–420, 421–476. These were novelty/interface context, not mandatory source credit or queue coverage. All assigned patch material remains covered; no unread assigned scope.\n\nBefore the new search, incorporated supplied neighbour corrections under original IDs. Reopened then promoted c2 to a finding matching g196/l1: parent unknown-kind listing/spec chooses xterm; literal text paste reaches its default-unbracketed one-message path; current GridInput Text JSON decoding can turn escaped CR into real unbracketed input. Directly read the parent listing default, agent_spec_kind/caller, paste insertion/sanitizer, minified vendored paste routine/default mode, removed sender, current decoder/validator/encoder and relay. Its exact reload-acceptance basis and ordinary-input detach remain in the record, but the earlier no-highest characterization is superseded. Confidence is likely with explicit runtime trigger conditions, no missing source path, and no execution. This is supplied cross-group corroboration, not an independently new defect.\n\nRevised c4 to distinguish one queued ESC CR input from one successful physical PTY write or one program read. Direct terminal-host/SPEC.md:399–403 and host.rs:570–617 allow short writes and later suffixes. The deletion-specific sender refutation remains narrow; g010/f1's distinct inaccurate implementation documentation is not dismissed. A follow-up c4 event corrects quotation apostrophes only.\n\nRevised l1 with direct exclusive-base evidence, supplementing immediate-parent inheritance. Base 6e423e30068b62c6cfa276c6d720ee35bb70387a grid-terminal.js:1768–1773,1790–1829 already replaces the gesture on another press, with the same filters. Thus the issue predates the whole range, rather than merely the assigned commit. No parent scope/drop decision is assumed.\n\nIndependent new search within the deletion: checked removed helper/state names against pinned production UI assets/src (no surviving references returned); reviewed readiness dependencies, per-island publication and teardown, snapshot freeze/dispose callbacks; checked whether deleting the browser DECRQM/DECRQSS suppressors introduces a duplicate-reply path. Recorded new candidate c7 immediately: the grid receives decoded model messages and does not retain the removed byte-parser automatic responder. This is a bounded source refutation, not certification that all host queries work and not a dismissal of earlier removed test coverage. No additional actionable defect found beyond supplied/known neighbour concerns. No surrounding-code certification.\n\nIDs revised this turn: c2, c4, l1. New candidate ID: c7 (source-refuted). New independently verified finding IDs: none. New unverified-after-investigation finding IDs: none. c2 is an existing ID strengthened to the supplied likely highest finding, not a new independent count. Open lead IDs: none. All candidate/drop proposals remain pending; no parent drop or lowering accepted. Potentially highest clipboard/history proposals c5/c6 remain subject to independent check.\n\nChecks were source/contract only. No runtime tests, reproductions, builds, checkout edits, live-install actions, helper agents, or prohibited coverage searches. Next: return discovery delta to caller.\n"
+}

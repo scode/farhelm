@@ -1,0 +1,777 @@
+{
+  "group": {
+    "id": "g058",
+    "domain": "environment-recipes",
+    "purpose": "environment-recipes: crates/farhelm-helm/src/environment/recipes.rs, crates/farhelm-helm/src/environment/recipes_tests.rs, crates/farhelm-helm/src/tensorlake/recipes.rs, crates/farhelm-helm/src/tensorlake/recipes_tests.rs, crates/farhelm-proto/src/tensorlake/recipes.rs, crates/farhelm-proto/src/recipes.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g049",
+      "g050",
+      "g051",
+      "g059",
+      "g060",
+      "g061",
+      "g064",
+      "g065",
+      "g066",
+      "g067",
+      "g068",
+      "g069",
+      "g070",
+      "g077",
+      "g078",
+      "g085",
+      "g086",
+      "g087"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00122-000.patch",
+        "ranges": [
+          [
+            1,
+            274
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/environment/recipes.rs",
+        "commit": "56040bb964270bb40d191902173dbb84b3ba78fc",
+        "notes": "patch header; patch character offsets [0,12882)",
+        "lines": 274,
+        "bytes": 12882,
+        "start": 0,
+        "end": 12882,
+        "original": "[private-run]/prep/originals/00122.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00123-000.patch",
+        "ranges": [
+          [
+            1,
+            112
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/environment/recipes_tests.rs",
+        "commit": "56040bb964270bb40d191902173dbb84b3ba78fc",
+        "notes": "patch header; patch character offsets [0,4824)",
+        "lines": 112,
+        "bytes": 4824,
+        "start": 0,
+        "end": 4824,
+        "original": "[private-run]/prep/originals/00123.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00133-000.patch",
+        "ranges": [
+          [
+            1,
+            195
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/tensorlake/recipes.rs",
+        "commit": "56040bb964270bb40d191902173dbb84b3ba78fc",
+        "notes": "patch header; patch character offsets [0,9082)",
+        "lines": 195,
+        "bytes": 9082,
+        "start": 0,
+        "end": 9082,
+        "original": "[private-run]/prep/originals/00133.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00134-000.patch",
+        "ranges": [
+          [
+            1,
+            93
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/tensorlake/recipes_tests.rs",
+        "commit": "56040bb964270bb40d191902173dbb84b3ba78fc",
+        "notes": "patch header; patch character offsets [0,4393)",
+        "lines": 93,
+        "bytes": 4393,
+        "start": 0,
+        "end": 4393,
+        "original": "[private-run]/prep/originals/00134.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00140-000.patch",
+        "ranges": [
+          [
+            1,
+            810
+          ]
+        ],
+        "original_path": "crates/farhelm-proto/src/tensorlake/recipes.rs",
+        "commit": "56040bb964270bb40d191902173dbb84b3ba78fc",
+        "notes": "patch header; patch character offsets [0,32894)",
+        "lines": 810,
+        "bytes": 32900,
+        "start": 0,
+        "end": 32894,
+        "original": "[private-run]/prep/originals/00140.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00219-000.patch",
+        "ranges": [
+          [
+            1,
+            11
+          ]
+        ],
+        "original_path": "crates/farhelm-proto/src/recipes.rs",
+        "commit": "56659839785691f76da3af5d8f51b511cff4ba8b",
+        "notes": "patch header; patch character offsets [0,482)",
+        "lines": 11,
+        "bytes": 482,
+        "start": 0,
+        "end": 482,
+        "original": "[private-run]/prep/originals/00219.patch"
+      }
+    ],
+    "lines": 1495,
+    "bytes": 64563
+  },
+  "records": [
+    {
+      "key": "g058/l1",
+      "owner": "g058",
+      "id": "l1",
+      "domain": "environment-recipes",
+      "purpose": "environment-recipes: crates/farhelm-helm/src/environment/recipes.rs, crates/farhelm-helm/src/environment/recipes_tests.rs, crates/farhelm-helm/src/tensorlake/recipes.rs, crates/farhelm-helm/src/tensorlake/recipes_tests.rs, crates/farhelm-proto/src/tensorlake/recipes.rs, crates/farhelm-proto/src/recipes.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Check literal container-image input against Podman argument boundaries",
+            "location": "crates/farhelm-proto/src/recipes.rs:783",
+            "detail": "Reviewed commit: 56040bb964270bb40d191902173dbb84b3ba78fc. TLDR: Container recipe image references accept leading hyphens and arbitrary non-NUL text; determine whether shipped command construction keeps them positional rather than interpreting them as Podman options. Source basis: replacement shared check_recipe accepts ContainerImage reference/user when nonempty and without NUL (recipes.rs:783 onward); compatibility module now re-exports it. Checks made: read the full replacement validation and strict decoding, and SPEC_impl Shared recipes and prepared artifacts / Podman places, creation and images. Exact missing premise: Podman pull/run/inspection argument construction for the literal image and user. Next check: provider module map and Podman command constructors at this commit. Suspected consequence: possible host-option injection or ordinary invalid-input refusal, depending on command boundaries. Suggested bucket: unresolved; could-be-highest if host command options can be injected. Confidence: uninvestigated lead. proposed_drop: false. possible_cover: none. Source-only; no execution."
+          }
+        },
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "No executable Podman image argument path at the reviewed recipe move",
+            "location": "crates/farhelm-proto/src/recipes.rs:788",
+            "detail": "Reviewed commit: 56040bb964270bb40d191902173dbb84b3ba78fc. TLDR: The new container-image input accepts literal non-NUL text, but this commit cannot execute it through Podman. Original suspected consequence preserved: leading-hyphen image references could become host-affecting Podman options if a later consumer lacks a positional boundary. Checks/results: read full shared recipes.rs; git grep ContainerImage/container_image across helm and proto finds only declaration/validation/tests and Tensorlake refusal; environment/mod.rs:65-68 has only a Tensorlake ProviderHandle and :186-190 initializes no Podman provider. tensorlake/build.rs:1017-1025 exhaustively refuses ContainerImage before any create, and its start admission checks supports at :589-590; provisioning/tensorlake_add.rs has the corresponding support check at :440. Source refutes a shipped command route at the reviewed revision. Suggested bucket: no established defect; could-be-highest: yes for the original hypothetical host-option route, which is not present here. Confidence: confirmed source conclusion confined to this commit. proposed_drop: source-refuted at assigned revision; there is no Podman executor to receive this input. possible_cover: none. No runtime behavior claimed. Later Podman command implementations belong to interface groups and require their own review; this conclusion does not claim those implementations are safe."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Trace literal image and login arguments through later Podman consumers",
+            "location": "crates/farhelm-proto/src/recipes.rs:788",
+            "detail": "Reviewed commit: 56040bb964270bb40d191902173dbb84b3ba78fc; synthesis consumer revision: 56659839785691f76da3af5d8f51b511cff4ba8b and pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: Reopened the original image/user argument lead across its later implementation rather than treating the foundation commit's absent executor as a complete resolution. Original potentially highest consequence preserved: shell or option injection could execute or alter commands on the container host. Literal-field contract: both fields are nonempty, exclude only NUL, and retain all other bytes; consumers must shell-quote each parse layer and terminate options before free positional references/users, or pass the user as a single consumed option value. Checks made this turn: read g060/c4 latest record, which cites getent -- before user and pull/inspect -- before image at 56659839785691f76da3af5d8f51b511cff4ba8b. Exact remaining premise: directly inspect those consumers plus any other literal-image/user paths and later changes in the pinned range; trace whether canonical IDs/observed login identities replace raw inputs downstream. Suggested bucket: unresolved; could-be-highest: yes, original host-command consequence remains under review. Confidence: open source investigation. proposed_drop: false; no earlier drop is accepted. possible_cover: none. Source-only, no runtime reproduction."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Later image/user consumers preserve positional boundaries",
+            "location": "crates/farhelm-helm/src/environment/podman/build.rs:808",
+            "detail": "Reviewed foundation commit: 56040bb964270bb40d191902173dbb84b3ba78fc; consumer commit checked directly: 56659839785691f76da3af5d8f51b511cff4ba8b; range tip checked: 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: The literal container image and login fields do reach later executable consumers, but the checked consumers keep them as data. Original potentially highest consequence preserved: shell or option injection could execute or alter commands on the container host. Contract and required boundary: shared recipes.rs:726-729,788-798 requires only nonempty/non-NUL and preserves spelling; each free positional image/user must follow --, shell parsing layers must quote individual arguments, and downstream user values must stay one consumed option argument. Direct checks/results: podman/build.rs:137-151 sends reference through pull_base then helper/run, and requested user through login; :338-345 repeats login for the recorded built base. login :65-73 uses getent passwd -- plus shell_quote(requested), validates exactly one seven-field passwd entry and records observed name/home/uid at :74-90. pull_base :808-832 places -- before the reference in pull and inspect; its earlier exists check uses podman.rs:206-212, also with --. helper :564-566 reaches run; podman.rs:430-452 has -- immediately before the image. Downstream observed login reaches access.rs:207-230 as one --user value, one --workdir value and complete --env values; the container follows --. Place command lowering in podman_probe.rs:143-157 passes argv through CLEAN_PLACE_EXEC's exec positional argv; local BaseRoute retains literal argv (access.rs:73-80), and SSH serializes with quote_argv (access.rs:343-374), whose shell_quote implementation always single-quotes and escapes embedded quotes (proto/text.rs:82-99). No raw recipe user becomes an executable/script fragment. g060/c4's immediate checks were verified and extended to exists, helper/run and route lowering. Git history and endpoint diff show no later behavior changes to these relevant paths through the pinned tip: build.rs unchanged, access/probe changes comments only, podman.rs changes an unrelated lifecycle lock. Suggested bucket: no established defect in this route; could-be-highest: yes, preserving the original consequence for independent checking. Confidence: confirmed source refutation of the traced literal-input route. proposed_drop: source-refuted at the later consumers named above; proposal only, no drop accepted. possible_cover: none. Limits: this is not certification of every Podman command or provider behavior; no reproduction or runtime execution."
+          }
+        }
+      ],
+      "latest": {
+        "line": 6,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l1",
+          "state": "open",
+          "summary": "Later image/user consumers preserve positional boundaries",
+          "location": "crates/farhelm-helm/src/environment/podman/build.rs:808",
+          "detail": "Reviewed foundation commit: 56040bb964270bb40d191902173dbb84b3ba78fc; consumer commit checked directly: 56659839785691f76da3af5d8f51b511cff4ba8b; range tip checked: 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: The literal container image and login fields do reach later executable consumers, but the checked consumers keep them as data. Original potentially highest consequence preserved: shell or option injection could execute or alter commands on the container host. Contract and required boundary: shared recipes.rs:726-729,788-798 requires only nonempty/non-NUL and preserves spelling; each free positional image/user must follow --, shell parsing layers must quote individual arguments, and downstream user values must stay one consumed option argument. Direct checks/results: podman/build.rs:137-151 sends reference through pull_base then helper/run, and requested user through login; :338-345 repeats login for the recorded built base. login :65-73 uses getent passwd -- plus shell_quote(requested), validates exactly one seven-field passwd entry and records observed name/home/uid at :74-90. pull_base :808-832 places -- before the reference in pull and inspect; its earlier exists check uses podman.rs:206-212, also with --. helper :564-566 reaches run; podman.rs:430-452 has -- immediately before the image. Downstream observed login reaches access.rs:207-230 as one --user value, one --workdir value and complete --env values; the container follows --. Place command lowering in podman_probe.rs:143-157 passes argv through CLEAN_PLACE_EXEC's exec positional argv; local BaseRoute retains literal argv (access.rs:73-80), and SSH serializes with quote_argv (access.rs:343-374), whose shell_quote implementation always single-quotes and escapes embedded quotes (proto/text.rs:82-99). No raw recipe user becomes an executable/script fragment. g060/c4's immediate checks were verified and extended to exists, helper/run and route lowering. Git history and endpoint diff show no later behavior changes to these relevant paths through the pinned tip: build.rs unchanged, access/probe changes comments only, podman.rs changes an unrelated lifecycle lock. Suggested bucket: no established defect in this route; could-be-highest: yes, preserving the original consequence for independent checking. Confidence: confirmed source refutation of the traced literal-input route. proposed_drop: source-refuted at the later consumers named above; proposal only, no drop accepted. possible_cover: none. Limits: this is not certification of every Podman command or provider behavior; no reproduction or runtime execution."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g058/findings.jsonl",
+        "id": "l1",
+        "line": 6,
+        "disposition": "under-investigation",
+        "group": "g058-l1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-037",
+          "key": "g058/l1",
+          "latest_line": 6,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "podman-literal-image-user-argument-injection",
+          "aliases": [
+            "g059/l1"
+          ],
+          "target_queue_file": null,
+          "why": "The implemented consumers preserve argument and shell boundaries. The foundation's absent executor is not the whole-range basis. This refutes the named literal-input injection route, not arbitrary image behavior or semantic cleanup effects.",
+          "checks": [
+            "56659839785691f76da3af5d8f51b511cff4ba8b: proto recipes.rs:726-729,788-798 preserves nonempty NUL-free reference/user; podman/build.rs:137-151 sends the reference to pull_base and helper/run and the user to login.",
+            "Same revision: podman.rs:206-215 puts -- before image-exists input; build.rs:808-832 puts -- before pull/inspect references; podman.rs:430-452 puts -- before run's image. build.rs:65-90 uses getent passwd -- with shell_quote(requested), then retains observed account coordinates.",
+            "Same revision: access.rs:207-230 puts observed account/home in consumed --user/--workdir/--env values; podman_probe.rs:143-157 keeps command argv positional; access.rs:73-80 retains local argv and :343-374 quotes SSH argv; proto text.rs:82-99 always single-quotes and escapes embedded quotes.",
+            "Diff from 56659839785691f76da3af5d8f51b511cff4ba8b to 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db: build.rs unchanged; access/probe only comments; podman.rs only an unrelated lifecycle lock helper. No execution."
+          ],
+          "coverage_checked": {
+            "specifications": "Current SPEC.md:450-488 and SPEC_impl.md:5985-6007,6010-6092 describe literal account/reference inputs and layered quoting; no accepted injection exception.",
+            "planned_and_plans": "TODO.md:25-26 Planned is empty. plans/queue/INDEX.md has no unlanded entries. Recipe/provider plan files found by search do not supply an active exact repair.",
+            "bugs": "BUGS.md has only the local-SSH-output-held-open install hang; unrelated trigger and consequence.",
+            "queue": "INDEX.md searched for literal image/account, Podman, injection and recipe terms; nearby image-inspection and routing entries concern ambient configuration, not argument injection. No exact item.",
+            "triage": "Active TRIAGE_OUTCOMES.md searched for recipe, Podman, image, injection and credential references. The settings-save delivery outcome concerns file replacement, not this route. Archive not read.",
+            "filter": "No filter used; this is source refutation of a security hypothesis, not rarity-based omission."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "No injection premise remains in the checked path; an unrelated consumer or external-engine parsing defect is not established by this claim.",
+          "original_stronger_consequence": "Leading-hyphen image/account or shell syntax could execute or alter commands on the container host. The initial foundation-only refutation was reopened and replaced by checking executable consumers; no earlier drop was accepted.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Source-refute only literal-input option/shell injection at the named consumers; submit the security drop to the independent check."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-037.json",
+          "key": "g058/l1",
+          "proposal": "claim-checks/claims-037/result.json",
+          "parent_proposal": "source-refuted-named-literal-image-account-injection",
+          "final_independent_gate": "required-before-highest-security-drop",
+          "reason": "Parent read full037 in bounded058 and059/060 outputs. Foundation absence of an executor was superseded by actual566 consumers: image exists/pull/inspect/run terminate options, getent user is quoted after--, observed account/home stay option values, and local argv/SSH quoting preserve separate words. Behavior persists to tip. Refute only these literal input consumers, not arbitrary image behavior, engine defects or semantic cleanup; retain original host command-execution consequence for the fresh gate. Same059l1 route, with both histories."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "podman-literal-image-user-argument-injection",
+        "destination": null
+      }
+    },
+    {
+      "key": "g058/c2",
+      "owner": "g058",
+      "id": "c2",
+      "domain": "environment-recipes",
+      "purpose": "environment-recipes: crates/farhelm-helm/src/environment/recipes.rs, crates/farhelm-helm/src/environment/recipes_tests.rs, crates/farhelm-helm/src/tensorlake/recipes.rs, crates/farhelm-helm/src/tensorlake/recipes_tests.rs, crates/farhelm-proto/src/tensorlake/recipes.rs, crates/farhelm-proto/src/recipes.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Shared recipe saves and final deletion retain recorded resources",
+            "location": "crates/farhelm-helm/src/environment/recipes.rs:249",
+            "detail": "Reviewed commit: 56040bb964270bb40d191902173dbb84b3ba78fc. TLDR: Considered whether moving build state into the shared recipe type lets an edit or delete forget another provider's resource ownership. Source refutation: tensorlake/recipes.rs:333-335 updates only spec_json and updated_at, while :399-417 checks decoded aggregate needs_cleanup inside its immediate deletion transaction. environment/recipes.rs:249-263 includes all prior Tensorlake ownership/start fields plus podman.values().any(PodmanRecipeState::needs_cleanup); :58-66 includes built/prepared images, both helper IDs, both interrupted starts and retired images. The new field uses serde default for older rows and omits an empty map on serialization. Tests in environment/recipes_tests.rs:7-106 assert old JSON, place map round trips and each ownership obligation; tensorlake/recipes_tests.rs:147 onward plants both providers before editing. Contract: SPEC_impl.md:6782-6791 states separate writers prevent dropping resource IDs; :6518-6523 requires final aggregate cleanup recheck. Suggested bucket: no established defect; could-be-highest: yes, the considered consequence was losing resource ownership, but source preserves it. Confidence: confirmed by source, not runtime execution. proposed_drop: source-refuted, saves do not write build state and final deletion refuses recorded Podman resources. possible_cover: none. Caveat: this checks the data model and final store guard, not later provider cleanup engines or cross-place writer synchronization."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Later writers retain each place's ownership through confirmed cleanup",
+            "location": "crates/farhelm-helm/src/tensorlake/build.rs:320",
+            "detail": "Reviewed foundation commit: 56040bb964270bb40d191902173dbb84b3ba78fc; later writers checked at 56659839785691f76da3af5d8f51b511cff4ba8b, unchanged through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: The moved cleanup fields remain part of later transactional writers and deletion admission, rather than only round-trip model tests. Original potentially highest consequence preserved: an edit/delete could forget another provider's resource ownership and lose control of billed resources or other work. Direct checks/results: tensorlake/build.rs:295-315 funnels both old and place-guarded writers into write_recipe_state :320-367; one Immediate transaction reads the full state, applies the closure and reserializes all places. Podman build.rs:488-499 mutates only state.podman.entry(place), and helpers record pending names/starts before run (:554-566), then canonical IDs after success (:594-602). commit in podman.rs:505-549 records a pending tag before sending and canonical ID before publication; build.rs:218-224 publishes replacement before retiring a predecessor in ordinary software publication. Cleanup checks ownership, nonforcing image deletion and absence before clearing records (:689-757); helper cleanup confirms removal before clearing ID/start (:606-625). Shared delete route tensorlake/recipes.rs:594-617 holds begin_delete admission through providers.clean_recipe and final store deletion; environment/mod.rs:426-445 attempts both providers even on failure. clean_images :769-788 waits/cancels and checks needs_cleanup before removing the one place entry. Tensorlake cleanup :1821 uses tensorlake_needs_cleanup before key admission, while aggregate RecipeState::needs_cleanup retains all Podman obligations. A targeted search found no production state.podman.clear or whole-state default assignment; sole place removal is after that cleanup check. Model/state writer/definition route files are unchanged after this consumer commit through the pinned tip. Contract remains SPEC_impl Shared recipes and prepared artifacts: separate definition/state writers, all-provider cleanup under one guard, final aggregate use/cleanup recheck. Suggested bucket: no established untracked-ownership defect; could-be-highest: yes, original possible ownership-loss impact retained for independent checking. Confidence: confirmed source refutation of cross-place clobber/forgetting. proposed_drop: source refutation above, proposal only; no drop accepted. possible_cover: none. Distinct finding l2 records premature confirmed retirement of the old fallback on failed Rebuild, which this retention conclusion does not excuse or lower. No execution."
+          }
+        },
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c2",
+            "state": "open",
+            "summary": "Recheck cleanup ownership boundary against implicit parent pruning",
+            "location": "crates/farhelm-helm/src/tensorlake/build.rs:320",
+            "detail": "Reviewed foundation commit: 56040bb964270bb40d191902173dbb84b3ba78fc; later writers checked at 56659839785691f76da3af5d8f51b511cff4ba8b, unchanged through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: The moved cleanup fields remain part of later transactional writers and deletion admission, rather than only round-trip model tests. Original potentially highest consequence preserved: an edit/delete could forget another provider's resource ownership and lose control of billed resources or other work. Direct checks/results: tensorlake/build.rs:295-315 funnels both old and place-guarded writers into write_recipe_state :320-367; one Immediate transaction reads the full state, applies the closure and reserializes all places. Podman build.rs:488-499 mutates only state.podman.entry(place), and helpers record pending names/starts before run (:554-566), then canonical IDs after success (:594-602). commit in podman.rs:505-549 records a pending tag before sending and canonical ID before publication; build.rs:218-224 publishes replacement before retiring a predecessor in ordinary software publication. Cleanup checks ownership, nonforcing image deletion and absence before clearing records (:689-757); helper cleanup confirms removal before clearing ID/start (:606-625). Shared delete route tensorlake/recipes.rs:594-617 holds begin_delete admission through providers.clean_recipe and final store deletion; environment/mod.rs:426-445 attempts both providers even on failure. clean_images :769-788 waits/cancels and checks needs_cleanup before removing the one place entry. Tensorlake cleanup :1821 uses tensorlake_needs_cleanup before key admission, while aggregate RecipeState::needs_cleanup retains all Podman obligations. A targeted search found no production state.podman.clear or whole-state default assignment; sole place removal is after that cleanup check. Model/state writer/definition route files are unchanged after this consumer commit through the pinned tip. Contract remains SPEC_impl Shared recipes and prepared artifacts: separate definition/state writers, all-provider cleanup under one guard, final aggregate use/cleanup recheck. Suggested bucket: no established untracked-ownership defect; could-be-highest: yes, original possible ownership-loss impact retained for independent checking. Confidence: confirmed source refutation of cross-place clobber/forgetting. proposed_drop: source refutation above, proposal only; no drop accepted. possible_cover: none. Distinct finding l2 records premature confirmed retirement of the old fallback on failed Rebuild, which this retention conclusion does not excuse or lower. No execution. LATE INTERFACE REOPENING, synthesis turn 4: complete g061 history read, including l8 latest line26. Parent and owner independently source-checked Podman 4.9.3 recursive pruning: explicit image ownership verification does not constrain unnamed parent deletion unless --no-prune is passed. This invalidates any broader reading of the prior nonforcing/explicit-ID proof as protecting all user base content; its narrow full-state transactional preservation result and every original proposed-drop basis remain preserved, not accepted. Concrete supplied highest route: accepted ContainerImage local untagged user-authored base ID, ordinary committed owned children, cleanup after containers are gone, default rmi recursively removes now-dangling original base and can lose its sole copy. Exact checks pending in this reopened identity: directly re-read assigned literal-base admission, stored base/state separation, later cleanup caller/argv, and explicit preservation contract. Primary engine semantics are supplied as source-verified conditional evidence by g061/l8 and parent, not runtime observation. Original cross-place clobber consequence remains source-refuted only in that narrow mechanism; no source check of serialization or explicit target labels refutes this distinct highest cleanup effect. proposed_drop for the newly supplied pruning route: false. possible_cover: alias g061/l8; preserve for parent consolidation, not a novel independent-image audit."
+          }
+        },
+        {
+          "line": 14,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c2",
+            "state": "open",
+            "summary": "Recipe cleanup ownership guards do not protect untagged user bases",
+            "location": "crates/farhelm-helm/src/environment/podman/build.rs:740",
+            "detail": "Reviewed foundation commit: 56040bb964270bb40d191902173dbb84b3ba78fc; later writers checked at 56659839785691f76da3af5d8f51b511cff4ba8b, unchanged through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: The moved cleanup fields remain part of later transactional writers and deletion admission, rather than only round-trip model tests. Original potentially highest consequence preserved: an edit/delete could forget another provider's resource ownership and lose control of billed resources or other work. Direct checks/results: tensorlake/build.rs:295-315 funnels both old and place-guarded writers into write_recipe_state :320-367; one Immediate transaction reads the full state, applies the closure and reserializes all places. Podman build.rs:488-499 mutates only state.podman.entry(place), and helpers record pending names/starts before run (:554-566), then canonical IDs after success (:594-602). commit in podman.rs:505-549 records a pending tag before sending and canonical ID before publication; build.rs:218-224 publishes replacement before retiring a predecessor in ordinary software publication. Cleanup checks ownership, nonforcing image deletion and absence before clearing records (:689-757); helper cleanup confirms removal before clearing ID/start (:606-625). Shared delete route tensorlake/recipes.rs:594-617 holds begin_delete admission through providers.clean_recipe and final store deletion; environment/mod.rs:426-445 attempts both providers even on failure. clean_images :769-788 waits/cancels and checks needs_cleanup before removing the one place entry. Tensorlake cleanup :1821 uses tensorlake_needs_cleanup before key admission, while aggregate RecipeState::needs_cleanup retains all Podman obligations. A targeted search found no production state.podman.clear or whole-state default assignment; sole place removal is after that cleanup check. Model/state writer/definition route files are unchanged after this consumer commit through the pinned tip. Contract remains SPEC_impl Shared recipes and prepared artifacts: separate definition/state writers, all-provider cleanup under one guard, final aggregate use/cleanup recheck. Suggested bucket: no established untracked-ownership defect; could-be-highest: yes, original possible ownership-loss impact retained for independent checking. Confidence: confirmed source refutation of cross-place clobber/forgetting. proposed_drop: source refutation above, proposal only; no drop accepted. possible_cover: none. Distinct finding l2 records premature confirmed retirement of the old fallback on failed Rebuild, which this retention conclusion does not excuse or lower. No execution. LATE INTERFACE REOPENING, synthesis turn 4: complete g061 history read, including l8 latest line26. Parent and owner independently source-checked Podman 4.9.3 recursive pruning: explicit image ownership verification does not constrain unnamed parent deletion unless --no-prune is passed. This invalidates any broader reading of the prior nonforcing/explicit-ID proof as protecting all user base content; its narrow full-state transactional preservation result and every original proposed-drop basis remain preserved, not accepted. Concrete supplied highest route: accepted ContainerImage local untagged user-authored base ID, ordinary committed owned children, cleanup after containers are gone, default rmi recursively removes now-dangling original base and can lose its sole copy. Exact checks pending in this reopened identity: directly re-read assigned literal-base admission, stored base/state separation, later cleanup caller/argv, and explicit preservation contract. Primary engine semantics are supplied as source-verified conditional evidence by g061/l8 and parent, not runtime observation. Original cross-place clobber consequence remains source-refuted only in that narrow mechanism; no source check of serialization or explicit target labels refutes this distinct highest cleanup effect. proposed_drop for the newly supplied pruning route: false. possible_cover: alias g061/l8; preserve for parent consolidation, not a novel independent-image audit. LATE SYNTHESIS CONCLUSION, same original ID c2: Reviewed integrated commit 56659839785691f76da3af5d8f51b511cff4ba8b and foundation input contract 56040bb964270bb40d191902173dbb84b3ba78fc. TLDR: deleting a recipe can also delete a user-owned untagged local base selected by image ID; if it is the only retained copy, user work outside Farhelm-owned artifacts can be lost. Directly re-read source this turn: check_recipe in proto recipes.rs:726-729,788-797 preserves any nonempty NUL-free ContainerImage reference, so existing local IDs are admitted. pull_base in podman/build.rs:808-837 uses exists to skip pull and performs inspection without tagging/protecting that reference. Cleanup :690-743 verifies only the explicit retired image labels, then passes image rm -- ID without --no-prune; the any-container check at :721-736 does not limit implicit ancestor deletion when no containers remain. clean_images :781-788 invokes this ordinary retirement before the aggregate store guard. Named external-engine evidence is source-verified by owner g061/l8 latest line26 AND parent, not a local execution: Podman v4.9.3 vendored libimage/image.go:496-518 recursively removes a now-dangling unnamed parent unless NoPrune, without the Farhelm predicate; oci.go:66-99 and layer_tree.go:263-340 recognize the ordinary committed child ancestry documented in that record. Thus recorded IDs, complete state transactions, explicit target ownership labels, absence checks and nonforcing removal do NOT prove the command affects only recorded/owned images. A saved base reference in spec_json is not a Podman image name/container reference and does not protect the original. Exact contract re-read: SPEC.md:4811 says User-owned base images are retained; SPEC_impl.md:6527-6529 separates user bases from committed owned layers, and :6566-6568 says Never delete a user base. FINAL suggested bucket: highest for the source-supported conditional sole-copy user-base loss route; could-be-highest: yes. FINAL confidence: confirmed conditional source/contract route based on own app checks plus named owner/parent primary-engine source verification; no runtime harm observed. FINAL proposed_drop: false for this cleanup crossing. Preserve the earlier source-refutation proposals only for their narrow claims (no cross-place serialization clobber or unrecorded explicit target deletion); no proposal is accepted, and those proofs cannot drop this ancestor-pruning route. possible_cover: exact alias g061/l8, supplied by parent; consolidate without dropping. Fix direction: --no-prune on explicit owned-image removal, retaining separate recorded/ownership-verified cleanup for other owned IDs. Caveats: needs an untagged local user base, ordinary committed owned descendants, no other protecting image/container references, and sole retained copy for actual work loss; tagged or still-protected bases are not asserted affected. No new independent engine audit, reproduction, test, build or live-install action. No readily checkable assigned-input/caller premise remains open."
+          }
+        },
+        {
+          "line": 16,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c2",
+            "state": "open",
+            "summary": "Recipe cleanup ownership guards do not protect untagged user bases",
+            "location": "crates/farhelm-helm/src/environment/podman/build.rs:740",
+            "detail": "Reviewed foundation commit: 56040bb964270bb40d191902173dbb84b3ba78fc; later writers checked at 56659839785691f76da3af5d8f51b511cff4ba8b, unchanged through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: The moved cleanup fields remain part of later transactional writers and deletion admission, rather than only round-trip model tests. Original potentially highest consequence preserved: an edit/delete could forget another provider's resource ownership and lose control of billed resources or other work. Direct checks/results: tensorlake/build.rs:295-315 funnels both old and place-guarded writers into write_recipe_state :320-367; one Immediate transaction reads the full state, applies the closure and reserializes all places. Podman build.rs:488-499 mutates only state.podman.entry(place), and helpers record pending names/starts before run (:554-566), then canonical IDs after success (:594-602). commit in podman.rs:505-549 records a pending tag before sending and canonical ID before publication; build.rs:218-224 publishes replacement before retiring a predecessor in ordinary software publication. Cleanup checks ownership, nonforcing image deletion and absence before clearing records (:689-757); helper cleanup confirms removal before clearing ID/start (:606-625). Shared delete route tensorlake/recipes.rs:594-617 holds begin_delete admission through providers.clean_recipe and final store deletion; environment/mod.rs:426-445 attempts both providers even on failure. clean_images :769-788 waits/cancels and checks needs_cleanup before removing the one place entry. Tensorlake cleanup :1821 uses tensorlake_needs_cleanup before key admission, while aggregate RecipeState::needs_cleanup retains all Podman obligations. A targeted search found no production state.podman.clear or whole-state default assignment; sole place removal is after that cleanup check. Model/state writer/definition route files are unchanged after this consumer commit through the pinned tip. Contract remains SPEC_impl Shared recipes and prepared artifacts: separate definition/state writers, all-provider cleanup under one guard, final aggregate use/cleanup recheck. Suggested bucket: no established untracked-ownership defect; could-be-highest: yes, original possible ownership-loss impact retained for independent checking. Confidence: confirmed source refutation of cross-place clobber/forgetting. proposed_drop: source refutation above, proposal only; no drop accepted. possible_cover: none. Distinct finding l2 records premature confirmed retirement of the old fallback on failed Rebuild, which this retention conclusion does not excuse or lower. No execution. LATE INTERFACE REOPENING, synthesis turn 4: complete g061 history read, including l8 latest line26. Parent and owner independently source-checked Podman 4.9.3 recursive pruning: explicit image ownership verification does not constrain unnamed parent deletion unless --no-prune is passed. This invalidates any broader reading of the prior nonforcing/explicit-ID proof as protecting all user base content; its narrow full-state transactional preservation result and every original proposed-drop basis remain preserved, not accepted. Concrete supplied highest route: accepted ContainerImage local untagged user-authored base ID, ordinary committed owned children, cleanup after containers are gone, default rmi recursively removes now-dangling original base and can lose its sole copy. Exact checks pending in this reopened identity: directly re-read assigned literal-base admission, stored base/state separation, later cleanup caller/argv, and explicit preservation contract. Primary engine semantics are supplied as source-verified conditional evidence by g061/l8 and parent, not runtime observation. Original cross-place clobber consequence remains source-refuted only in that narrow mechanism; no source check of serialization or explicit target labels refutes this distinct highest cleanup effect. proposed_drop for the newly supplied pruning route: false. possible_cover: alias g061/l8; preserve for parent consolidation, not a novel independent-image audit. LATE SYNTHESIS CONCLUSION, same original ID c2: Reviewed integrated commit 56659839785691f76da3af5d8f51b511cff4ba8b and foundation input contract 56040bb964270bb40d191902173dbb84b3ba78fc. TLDR: deleting a recipe can also delete a user-owned untagged local base selected by image ID; if it is the only retained copy, user work outside Farhelm-owned artifacts can be lost. Directly re-read source this turn: check_recipe in proto recipes.rs:726-729,788-797 preserves any nonempty NUL-free ContainerImage reference, so existing local IDs are admitted. pull_base in podman/build.rs:808-837 uses exists to skip pull and performs inspection without tagging/protecting that reference. Cleanup :690-743 verifies only the explicit retired image labels, then passes image rm -- ID without --no-prune; the any-container check at :721-736 does not limit implicit ancestor deletion when no containers remain. clean_images :781-788 invokes this ordinary retirement before the aggregate store guard. Named external-engine evidence is source-verified by owner g061/l8 latest line26 AND parent, not a local execution: Podman v4.9.3 vendored libimage/image.go:496-518 recursively removes a now-dangling unnamed parent unless NoPrune, without the Farhelm predicate; oci.go:66-99 and layer_tree.go:263-340 recognize the ordinary committed child ancestry documented in that record. Thus recorded IDs, complete state transactions, explicit target ownership labels, absence checks and nonforcing removal do NOT prove the command affects only recorded/owned images. A saved base reference in spec_json is not a Podman image name/container reference and does not protect the original. Exact contract re-read: SPEC.md:4811 says User-owned base images are retained; SPEC_impl.md:6527-6529 separates user bases from committed owned layers, and :6566-6568 says Never delete a user base. FINAL suggested bucket: highest for the source-supported conditional sole-copy user-base loss route; could-be-highest: yes. FINAL confidence: confirmed conditional source/contract route based on own app checks plus named owner/parent primary-engine source verification; no runtime harm observed. FINAL proposed_drop: false for this cleanup crossing. Preserve the earlier source-refutation proposals only for their narrow claims (no cross-place serialization clobber or unrecorded explicit target deletion); no proposal is accepted, and those proofs cannot drop this ancestor-pruning route. possible_cover: exact alias g061/l8, supplied by parent; consolidate without dropping. Fix direction: --no-prune on explicit owned-image removal, retaining separate recorded/ownership-verified cleanup for other owned IDs. Caveats: needs an untagged local user base, ordinary committed owned descendants, no other protecting image/container references, and sole retained copy for actual work loss; tagged or still-protected bases are not asserted affected. No new independent engine audit, reproduction, test, build or live-install action. No readily checkable assigned-input/caller premise remains open. Final readily checkable caller closure in this reopened turn: directly re-read podman/build.rs:137-151 (the admitted literal base creates the build helper), :203-224 (commit and owned-image publication retain the base only as provenance), and tensorlake/recipes.rs:593-614 (ordinary shared recipe Delete invokes provider cleanup before final row deletion). Directly re-read full SPEC_impl Podman places section :6537-6570, including the exact :6568 sentence: Never delete a user's base image. The final aggregate state check runs after the destructive provider command, so its correctness cannot prevent or repair this implicit ancestor removal. These checks add no new mechanism; they close the shared input/model/Delete premises of the supplied g061/l8 alias. Existing l1 argument-boundary and c3 schema proposals remain confined to their stated mechanisms and are not evidence against this valid-input semantic cleanup crossing."
+          }
+        }
+      ],
+      "latest": {
+        "line": 16,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "c2",
+          "state": "open",
+          "summary": "Recipe cleanup ownership guards do not protect untagged user bases",
+          "location": "crates/farhelm-helm/src/environment/podman/build.rs:740",
+          "detail": "Reviewed foundation commit: 56040bb964270bb40d191902173dbb84b3ba78fc; later writers checked at 56659839785691f76da3af5d8f51b511cff4ba8b, unchanged through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: The moved cleanup fields remain part of later transactional writers and deletion admission, rather than only round-trip model tests. Original potentially highest consequence preserved: an edit/delete could forget another provider's resource ownership and lose control of billed resources or other work. Direct checks/results: tensorlake/build.rs:295-315 funnels both old and place-guarded writers into write_recipe_state :320-367; one Immediate transaction reads the full state, applies the closure and reserializes all places. Podman build.rs:488-499 mutates only state.podman.entry(place), and helpers record pending names/starts before run (:554-566), then canonical IDs after success (:594-602). commit in podman.rs:505-549 records a pending tag before sending and canonical ID before publication; build.rs:218-224 publishes replacement before retiring a predecessor in ordinary software publication. Cleanup checks ownership, nonforcing image deletion and absence before clearing records (:689-757); helper cleanup confirms removal before clearing ID/start (:606-625). Shared delete route tensorlake/recipes.rs:594-617 holds begin_delete admission through providers.clean_recipe and final store deletion; environment/mod.rs:426-445 attempts both providers even on failure. clean_images :769-788 waits/cancels and checks needs_cleanup before removing the one place entry. Tensorlake cleanup :1821 uses tensorlake_needs_cleanup before key admission, while aggregate RecipeState::needs_cleanup retains all Podman obligations. A targeted search found no production state.podman.clear or whole-state default assignment; sole place removal is after that cleanup check. Model/state writer/definition route files are unchanged after this consumer commit through the pinned tip. Contract remains SPEC_impl Shared recipes and prepared artifacts: separate definition/state writers, all-provider cleanup under one guard, final aggregate use/cleanup recheck. Suggested bucket: no established untracked-ownership defect; could-be-highest: yes, original possible ownership-loss impact retained for independent checking. Confidence: confirmed source refutation of cross-place clobber/forgetting. proposed_drop: source refutation above, proposal only; no drop accepted. possible_cover: none. Distinct finding l2 records premature confirmed retirement of the old fallback on failed Rebuild, which this retention conclusion does not excuse or lower. No execution. LATE INTERFACE REOPENING, synthesis turn 4: complete g061 history read, including l8 latest line26. Parent and owner independently source-checked Podman 4.9.3 recursive pruning: explicit image ownership verification does not constrain unnamed parent deletion unless --no-prune is passed. This invalidates any broader reading of the prior nonforcing/explicit-ID proof as protecting all user base content; its narrow full-state transactional preservation result and every original proposed-drop basis remain preserved, not accepted. Concrete supplied highest route: accepted ContainerImage local untagged user-authored base ID, ordinary committed owned children, cleanup after containers are gone, default rmi recursively removes now-dangling original base and can lose its sole copy. Exact checks pending in this reopened identity: directly re-read assigned literal-base admission, stored base/state separation, later cleanup caller/argv, and explicit preservation contract. Primary engine semantics are supplied as source-verified conditional evidence by g061/l8 and parent, not runtime observation. Original cross-place clobber consequence remains source-refuted only in that narrow mechanism; no source check of serialization or explicit target labels refutes this distinct highest cleanup effect. proposed_drop for the newly supplied pruning route: false. possible_cover: alias g061/l8; preserve for parent consolidation, not a novel independent-image audit. LATE SYNTHESIS CONCLUSION, same original ID c2: Reviewed integrated commit 56659839785691f76da3af5d8f51b511cff4ba8b and foundation input contract 56040bb964270bb40d191902173dbb84b3ba78fc. TLDR: deleting a recipe can also delete a user-owned untagged local base selected by image ID; if it is the only retained copy, user work outside Farhelm-owned artifacts can be lost. Directly re-read source this turn: check_recipe in proto recipes.rs:726-729,788-797 preserves any nonempty NUL-free ContainerImage reference, so existing local IDs are admitted. pull_base in podman/build.rs:808-837 uses exists to skip pull and performs inspection without tagging/protecting that reference. Cleanup :690-743 verifies only the explicit retired image labels, then passes image rm -- ID without --no-prune; the any-container check at :721-736 does not limit implicit ancestor deletion when no containers remain. clean_images :781-788 invokes this ordinary retirement before the aggregate store guard. Named external-engine evidence is source-verified by owner g061/l8 latest line26 AND parent, not a local execution: Podman v4.9.3 vendored libimage/image.go:496-518 recursively removes a now-dangling unnamed parent unless NoPrune, without the Farhelm predicate; oci.go:66-99 and layer_tree.go:263-340 recognize the ordinary committed child ancestry documented in that record. Thus recorded IDs, complete state transactions, explicit target ownership labels, absence checks and nonforcing removal do NOT prove the command affects only recorded/owned images. A saved base reference in spec_json is not a Podman image name/container reference and does not protect the original. Exact contract re-read: SPEC.md:4811 says User-owned base images are retained; SPEC_impl.md:6527-6529 separates user bases from committed owned layers, and :6566-6568 says Never delete a user base. FINAL suggested bucket: highest for the source-supported conditional sole-copy user-base loss route; could-be-highest: yes. FINAL confidence: confirmed conditional source/contract route based on own app checks plus named owner/parent primary-engine source verification; no runtime harm observed. FINAL proposed_drop: false for this cleanup crossing. Preserve the earlier source-refutation proposals only for their narrow claims (no cross-place serialization clobber or unrecorded explicit target deletion); no proposal is accepted, and those proofs cannot drop this ancestor-pruning route. possible_cover: exact alias g061/l8, supplied by parent; consolidate without dropping. Fix direction: --no-prune on explicit owned-image removal, retaining separate recorded/ownership-verified cleanup for other owned IDs. Caveats: needs an untagged local user base, ordinary committed owned descendants, no other protecting image/container references, and sole retained copy for actual work loss; tagged or still-protected bases are not asserted affected. No new independent engine audit, reproduction, test, build or live-install action. No readily checkable assigned-input/caller premise remains open. Final readily checkable caller closure in this reopened turn: directly re-read podman/build.rs:137-151 (the admitted literal base creates the build helper), :203-224 (commit and owned-image publication retain the base only as provenance), and tensorlake/recipes.rs:593-614 (ordinary shared recipe Delete invokes provider cleanup before final row deletion). Directly re-read full SPEC_impl Podman places section :6537-6570, including the exact :6568 sentence: Never delete a user's base image. The final aggregate state check runs after the destructive provider command, so its correctness cannot prevent or repair this implicit ancestor removal. These checks add no new mechanism; they close the shared input/model/Delete premises of the supplied g061/l8 alias. Existing l1 argument-boundary and c3 schema proposals remain confined to their stated mechanisms and are not evidence against this valid-input semantic cleanup crossing."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g058/findings.jsonl",
+        "id": "c2",
+        "line": 16,
+        "disposition": "duplicate",
+        "group": "podman-owned-image-rm-default-prunes-user-base",
+        "reason": "Parent read full claims037 in separate058 and059/060 outputs after clipped combined output. Same already-retained061l8 root: explicit owned-target labels/nonforcing rm do not constrain default dangling-parent pruning. Valid untagged local user base by ID, committed owned descendants, no protecting name/container/other-image/copy establish conditional sole-copy user-work loss, highest; no runtime harm claimed. Preserve independent Podman4.9.3 source and specification prohibitions, later tip unchanged. This retention/alias does NOT accept c2's earlier separate cross-provider bookkeeping/clobber refutations; those remain in the final independent register. Exact source/coverage/caveats are claims037 and retained061l8 manual014."
+      },
+      "accepted_parent_decision": {
+        "key": "g058/c2",
+        "line": 16,
+        "disposition": "duplicate",
+        "group": "podman-owned-image-rm-default-prunes-user-base",
+        "bucket": "highest",
+        "recording": "supporting-provenance",
+        "needs_independent_drop_check": false,
+        "reason": "Parent read full claims037 in separate058 and059/060 outputs after clipped combined output. Same already-retained061l8 root: explicit owned-target labels/nonforcing rm do not constrain default dangling-parent pruning. Valid untagged local user base by ID, committed owned descendants, no protecting name/container/other-image/copy establish conditional sole-copy user-work loss, highest; no runtime harm claimed. Preserve independent Podman4.9.3 source and specification prohibitions, later tip unchanged. This retention/alias does NOT accept c2's earlier separate cross-provider bookkeeping/clobber refutations; those remain in the final independent register. Exact source/coverage/caveats are claims037 and retained061l8 manual014."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-037",
+          "key": "g058/c2",
+          "latest_line": 16,
+          "recommendation": "retain-verified",
+          "bucket": "highest",
+          "underlying_key": "podman-owned-image-removal-prunes-user-base",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Cleanup verifies only the explicitly removed owned image, then invokes Podman's default parent-pruning removal. An accepted untagged user base can therefore be removed with its last owned descendant. Sole-copy loss is conditional, but the source route is established. The earlier serialization refutation does not cover this mechanism.",
+          "checks": [
+            "56659839785691f76da3af5d8f51b511cff4ba8b: proto recipes.rs:788-798 accepts a local image ID; podman/build.rs:808-839 reuses an existing base without assigning it a protecting tag. :137-151 creates the helper from it; :208-224 commits and publishes an owned child, retaining the base only as provenance.",
+            "Same revision: tensorlake/recipes.rs:593-615 dispatches provider cleanup before final row deletion. podman/build.rs:781-788 retires current images; :690-743 checks explicit target labels and container users, then sends image rm -- ID without --no-prune. :744-757 confirms only that explicit image's absence.",
+            "Primary engine source checked directly: https://raw.githubusercontent.com/containers/podman/v4.9.3/cmd/podman/images/rm.go:55-70 defaults NoPrune false. Its vendored github.com/containers/common/libimage/image.go:470-518 recursively removes a dangling parent unless NoPrune is set. oci.go:60-94 and layer_tree.go:263-340 recognize committed ancestry using layers and history. These are source semantics, not runtime observations.",
+            "Earlier narrow proposal remains supported: 56659839785691f76da3af5d8f51b511cff4ba8b tensorlake/build.rs:320-367 transactionally reads/modifies/serializes full state; tensorlake/recipes.rs save updates only spec_json and final deletion checks aggregate needs_cleanup. That protects recorded bookkeeping from the alleged cross-provider clobber, not implicitly pruned ancestors.",
+            "Relevant build/state/recipe files are unchanged through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. No reproduction, build or test."
+          ],
+          "coverage_checked": {
+            "specifications": "Current SPEC.md:4885-4889 explicitly retains user-owned bases. SPEC_impl.md:6039-6050 requires ownership retention and separation; :6087-6092 requires replacement before retirement and forbids deleting a user's base. At reviewed revision the corresponding prohibition is SPEC_impl.md:6566-6570. These contradict rather than accept the behavior.",
+            "planned_and_plans": "TODO.md Planned is empty; plans/queue/INDEX.md has no unlanded plan. The historical Podman plan's Superseded images paragraph also says user images are never removed; it is not active repair coverage.",
+            "bugs": "BUGS.md's sole SSH install-hang entry does not cover image pruning.",
+            "queue": "INDEX.md searched for user/base images, pruning, retirement, cleanup and recipes. Read snapshot-cleanup-spec-omits-unrecorded-builder-exception.md and snapshot-cleanup-races-new-host-registration.md: both concern Tensorlake-generated snapshots, not untagged user-owned Podman bases. No exact queue item or useful extension of those roots.",
+            "triage": "Active TRIAGE_OUTCOMES.md searched for pruning, Podman, image/base and recipe cleanup; no matching outcome. Archive not read.",
+            "filter": "No filter matches the whole consequence: user-owned sole-copy loss is outside rare diagnostic/retry filters, and no older-release upgrade is needed."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "Actual loss needs an untagged local user base recognized as an ancestor, removal of its owned descendants, no other protecting image/container references, and no other retained copy. Tagged or protected bases are not claimed affected. No runtime harm observed.",
+          "original_stronger_consequence": "Initially considered edits/deletes forgetting another provider's ownership and losing control of billed resources or work; narrow cross-place clobber/explicit-target refutations remain proposed only. Reopened c2 now establishes conditional user-base loss through implicit pruning. The history reports g061/l8 as an alias supplied by the parent; that outside-batch record was not independently inspected here.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Retain the pruning finding at highest. Any separate dismissal of c2's original ownership-clobber mechanism needs the independent check; its transactional proof must not dismiss the pruning route."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-037.json",
+          "key": "g058/c2",
+          "proposal": "claim-checks/claims-037/result.json",
+          "parent_proposal": "retain-highest-pruning-alias-and-separate-original-clobber-refutation",
+          "final_independent_gate": "required-only-for-original-clobber-dismissal-not-retention",
+          "reason": "Full037 confirms explicit owned-image rm can prune an unnamed user base outside the label check. Manual041 now retains this as an exact highest alias of already verified061l8, preserving sole-copy/protection conditions and Podman ancestry source. Earlier full-state transactional serialization and separate spec_json updates refute only cross-provider bookkeeping clobber, not implicit pruning. That original destructive ownership hypothesis still needs a narrow independent verdict; never use labels/nonforcing removal to dismiss the retained route."
+        }
+      ],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "podman-owned-image-rm-default-prunes-user-base",
+        "destination": "trailing-podman-owned-image-rm-default-prunes-user-base.md"
+      }
+    },
+    {
+      "key": "g058/c3",
+      "owner": "g058",
+      "id": "c3",
+      "domain": "environment-recipes",
+      "purpose": "environment-recipes: crates/farhelm-helm/src/environment/recipes.rs, crates/farhelm-helm/src/environment/recipes_tests.rs, crates/farhelm-helm/src/tensorlake/recipes.rs, crates/farhelm-helm/src/tensorlake/recipes_tests.rs, crates/farhelm-proto/src/tensorlake/recipes.rs, crates/farhelm-proto/src/recipes.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Recipe type relocation preserves existing stored spellings and strict save decoding",
+            "location": "crates/farhelm-proto/src/tensorlake/recipes.rs:4",
+            "detail": "Reviewed commits: 56040bb964270bb40d191902173dbb84b3ba78fc and 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: Considered whether replacing the Tensorlake recipe module with a shared re-export invalidates existing saved recipes or silently drops fields on writes. Source refutation: the replacement recipes.rs:75-93 assigns explicit serde spellings tensorlake_ubuntu, image and snapshot to the renamed Rust variants; its strict save mirror :186-289 retains deny_unknown_fields at the top level and in nested size/base/tunnel, including the empty-struct managed base case, plus EndpointSave's own strict decoding. tensorlake/recipes.rs:4 re-exports the same shared types rather than defining a second schema. environment/recipes.rs preserves the persisted definition's fields, and tensorlake/build.rs:190-204 still defaults missing historical snapshot provenance to ManagedUbuntu. Existing migration tests at tensorlake/recipes_tests.rs:715-805 and :842-888 retain their assertions while using the new Rust names. At 56659839785691f76da3af5d8f51b511cff4ba8b the only assigned addition is recipes.rs:861 re-exporting environment::RecipePlaceView, whose fields use the already public Place vocabulary; both modules are public in proto/lib.rs. No SPEC.md or SPEC_impl.md text changes between these reviewed commits. Contract: SPEC_impl.md:6491-6494 requires keeping the existing stored spellings; :6778-6802 preserves storage compatibility and old snapshot defaults. Suggested bucket: no established defect; could-be-highest: yes if old ownership/provenance became unreadable, but source preserves those fields and defaults. Confidence: confirmed source conclusion. proposed_drop: source-refuted for existing stored payloads and strict decoding; no schema-breaking change found. possible_cover: none. Caveat: this does not assert that an older client understands the newly introduced container_image variant. No runtime tests or decoding experiments run."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Later artifact writers keep the shared base and stored-state vocabulary",
+            "location": "crates/farhelm-helm/src/environment/recipes.rs:97",
+            "detail": "Reviewed foundation commit: 56040bb964270bb40d191902173dbb84b3ba78fc; consumer/schema commit checked: 56659839785691f76da3af5d8f51b511cff4ba8b; pinned tip: 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: Later writers use the same base enum and full state serializer, so the type move and renamed Rust variants do not change existing stored recipe spellings or discard historical snapshot provenance. Original potentially highest consequence preserved: unreadable ownership/provenance could prevent safe resource cleanup. Checks/results beyond initial pass: diff from foundation to consumer adds Podman last_failure with containing serde(default), required prepared-image login, shared resource projections and freshness; existing Tensorlake fields and stored spellings remain unchanged. software publisher podman/build.rs:208-224 stores recipe.base.clone in BuiltImage. Prepared publisher :368-375 writes the newly required login together with all prepared facts. At the foundation revision git grep for PreparedImage constructors finds only its declaration, with no executable producer, so no preceding shipped writer in this range can create a login-less prepared record that the new consumer refuses. Both provider writers now funnel through tensorlake/build.rs:320-367, decoding and serializing the same shared RecipeState. Provider-specific resource projection (environment/recipes.rs:272-316) leaves aggregate needs_cleanup intact. proto recipes.rs diff to the consumer adds only RecipePlaceView's re-export; its enum serde spellings and strict mirror are unchanged, and git diff from the consumer to the pinned tip is empty for proto recipes.rs, environment/recipes.rs, tensorlake/build.rs and tensorlake/recipes.rs. Contract: SPEC_impl Shared recipes and prepared artifacts requires retaining tensorlake_ubuntu/image/snapshot spellings and separate definition/state writes; Tensorlake recipes requires default historical snapshot base/provenance. Suggested bucket: no established schema incompatibility in the reviewed range; could-be-highest: yes, original ownership/provenance consequence retained. Confidence: confirmed source conclusion for recorded schemas and actual producers in the pinned range. proposed_drop: source refutation above, proposal only; no drop accepted. possible_cover: none. Limits: old clients' knowledge of new enum variants is not asserted; handcrafted/future foundation-only Podman state is not a shipped producer. No runtime decoding experiments or reproductions."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Later artifact writers keep the shared base and stored-state vocabulary",
+          "location": "crates/farhelm-helm/src/environment/recipes.rs:97",
+          "detail": "Reviewed foundation commit: 56040bb964270bb40d191902173dbb84b3ba78fc; consumer/schema commit checked: 56659839785691f76da3af5d8f51b511cff4ba8b; pinned tip: 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: Later writers use the same base enum and full state serializer, so the type move and renamed Rust variants do not change existing stored recipe spellings or discard historical snapshot provenance. Original potentially highest consequence preserved: unreadable ownership/provenance could prevent safe resource cleanup. Checks/results beyond initial pass: diff from foundation to consumer adds Podman last_failure with containing serde(default), required prepared-image login, shared resource projections and freshness; existing Tensorlake fields and stored spellings remain unchanged. software publisher podman/build.rs:208-224 stores recipe.base.clone in BuiltImage. Prepared publisher :368-375 writes the newly required login together with all prepared facts. At the foundation revision git grep for PreparedImage constructors finds only its declaration, with no executable producer, so no preceding shipped writer in this range can create a login-less prepared record that the new consumer refuses. Both provider writers now funnel through tensorlake/build.rs:320-367, decoding and serializing the same shared RecipeState. Provider-specific resource projection (environment/recipes.rs:272-316) leaves aggregate needs_cleanup intact. proto recipes.rs diff to the consumer adds only RecipePlaceView's re-export; its enum serde spellings and strict mirror are unchanged, and git diff from the consumer to the pinned tip is empty for proto recipes.rs, environment/recipes.rs, tensorlake/build.rs and tensorlake/recipes.rs. Contract: SPEC_impl Shared recipes and prepared artifacts requires retaining tensorlake_ubuntu/image/snapshot spellings and separate definition/state writes; Tensorlake recipes requires default historical snapshot base/provenance. Suggested bucket: no established schema incompatibility in the reviewed range; could-be-highest: yes, original ownership/provenance consequence retained. Confidence: confirmed source conclusion for recorded schemas and actual producers in the pinned range. proposed_drop: source refutation above, proposal only; no drop accepted. possible_cover: none. Limits: old clients' knowledge of new enum variants is not asserted; handcrafted/future foundation-only Podman state is not a shipped producer. No runtime decoding experiments or reproductions."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g058/findings.jsonl",
+        "id": "c3",
+        "line": 10,
+        "disposition": "under-investigation",
+        "group": "g058-c3",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-037",
+          "key": "g058/c3",
+          "latest_line": 10,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "shared-recipe-move-breaks-existing-schema",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Existing stored spellings and historical snapshot defaults survive the move, and later writers use the same full-state serializer. Required prepared-image login has no predecessor runtime writer in the checked history. This does not promise old-client support for the new container base or arbitrary fabricated state.",
+          "checks": [
+            "56659839785691f76da3af5d8f51b511cff4ba8b proto recipes.rs:75-92 explicitly retains tensorlake_ubuntu/image/snapshot spellings; :187-289 keeps strict save mirrors and deny_unknown_fields, including ManagedUbuntu {}.",
+            "56040bb964270bb40d191902173dbb84b3ba78fc proto tensorlake/recipes.rs reexports crate::recipes::*; foundation-to-consumer proto recipes.rs diff adds only RecipePlaceView reexport.",
+            "Consumer tensorlake/build.rs:198-204 defaults historical BuiltSnapshot, with RecipeBase default ManagedUbuntu; :320-367 serializes the whole shared state. Podman build.rs:208-224 stores base.clone and :368-375 writes login with prepared facts.",
+            "git grep for PreparedImage { at the foundation and exact pre-consumer parent 52cc5d7250d262f93b730d91a07c240d33c2ea5f returns only its type declaration in helm source. That parent's environment tree has no Podman build/runtime module. Relevant proto/state/Tensorlake files remain unchanged through review tip. No decoding experiment."
+          ],
+          "coverage_checked": {
+            "specifications": "Current SPEC_impl.md:6010-6050 and :6396-6428 require legacy spellings, separate writers, historical defaults and retained ownership; SPEC.md:450-488,550-564 describes recipe retention. No accepted schema-loss exception.",
+            "planned_and_plans": "TODO.md Planned and unlanded plans index are empty; no active schema compatibility repair.",
+            "bugs": "BUGS.md contains no recipe schema exception.",
+            "queue": "INDEX.md searched for recipe schema, migration, defaults and ownership. Read detached-recipe-write-crosses-recreated-generation.md and old-recipe-admission-builds-same-name-replacement.md: they concern name-generation races, not type-move serde compatibility. No exact item.",
+            "triage": "Active TRIAGE_OUTCOMES.md searched for recipe persistence, schema, migration and provenance; no same trigger/consequence. Archive not read.",
+            "filter": "No filter used; source refutation, not an upgrade-plus-rare-condition exception."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "No supported prior payload or production writer is shown that the changed serializer invalidates. Downgrade and unknown new-variant compatibility are outside the narrow claim.",
+          "original_stronger_consequence": "Existing recipes or ownership/provenance might become unreadable or lose fields on writes, preventing safe resource cleanup. The later required-login subcase was checked rather than silently omitted.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Source-refute compatibility loss from this type move and the checked production writer transition; independent check required for the ownership-loss hypothesis."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-037.json",
+          "key": "g058/c3",
+          "proposal": "claim-checks/claims-037/result.json",
+          "parent_proposal": "source-refuted-shared-recipe-serde-move-and-predecessor-login-writer",
+          "final_independent_gate": "required-before-original-ownership-loss-drop",
+          "reason": "Full037 preserves legacy enum spellings, strict save mirrors, historical snapshot defaults and whole shared-state writes. Required prepared login first accompanies a production constructor; exact foundation and pre-consumer sources have only its declaration, no runtime writer. Refute the checked type-move/writer transition, not arbitrary fabricated records, downgrades or old clients understanding new variants. Preserve unreadable ownership/provenance and cleanup consequence for the fresh gate; name-generation races are separate."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "shared-recipe-move-breaks-existing-schema",
+        "destination": null
+      }
+    },
+    {
+      "key": "g058/l2",
+      "owner": "g058",
+      "id": "l2",
+      "domain": "environment-recipes",
+      "purpose": "environment-recipes: crates/farhelm-helm/src/environment/recipes.rs, crates/farhelm-helm/src/environment/recipes_tests.rs, crates/farhelm-helm/src/tensorlake/recipes.rs, crates/farhelm-helm/src/tensorlake/recipes_tests.rs, crates/farhelm-proto/src/tensorlake/recipes.rs, crates/farhelm-proto/src/recipes.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l2",
+            "state": "open",
+            "summary": "Podman Rebuild retires its previous images before replacement succeeds",
+            "location": "crates/farhelm-helm/src/environment/podman/build.rs:250",
+            "detail": "Reviewed consumer commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: A failed explicit container recipe rebuild may discard the previous usable image and checkpoint, making subsequent launches rebuild instead of using their last working software. Source basis: prepare_images with rebuild=true takes state.image and state.prepared into retired_images at :250-260 before prepare_images_owned; on any error, :267-279 calls retire_images, whose :689-757 removes unused owned images and forgets their records. Contract: SPEC_impl.md, Podman places, creation and images, says 'After successful build/preparation replacement, remove a superseded owned image once no container uses it.' The original c2 ownership-loss candidate is preserved separately: these paths retain ownership until confirmed deletion, so this is an earlier retirement/fallback concern, not proven untracked leakage. Checked: software cache checks state.image before building; fresh_image requires both image and prepared records. Exact missing premise: confirm the shipped Rebuild route passes true and whether any later code restores fallback images or the contract explicitly permits losing Podman fallback on a failed Rebuild. Suggested bucket: likely high/material UX if a formerly usable recipe cannot launch after a failed rebuild; could-be-highest: no established user data/process loss, as cleanup is nonforcing and excludes images used by containers. Confidence: open source lead. proposed_drop: false. possible_cover: none. No execution or reproduction."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l2",
+            "state": "open",
+            "summary": "Failed container Rebuild discards the previous usable images",
+            "location": "crates/farhelm-helm/src/environment/podman/build.rs:250",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b; unchanged relevant implementation through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: If rebuilding a previously usable container recipe fails, Farhelm removes its last working software image and installation checkpoint instead of retaining them. New sessions then have to rebuild; if the same package/base/installer failure persists, the recipe can no longer launch despite having worked before. Details: environment/podman.rs:913-941 implements the shipped provider Rebuild operation and passes rebuild=true to prepare_images. podman/build.rs:248-260 moves BOTH current image and prepared into retired_images before calling prepare_images_owned. software :128-132 therefore cannot reuse the old image and a later failure can occur before any replacement is published. On error :267-279 calls reconcile_helpers and retire_images; retire_images_unlocked :689-757 removes unused Farhelm-owned images and clears their ownership records. This removes the prior fallback even when the replacement failed in base pulling, readiness, packages or an installer. No restoration exists on the error path; it only records last_failure at :280-286. fresh_image :510-529 requires both current image and prepared, and ensure_prepared in podman.rs:992-1015 starts another build when absent. Contract: SPEC_impl.md, Podman places, creation and images: 'After successful build/preparation replacement, remove a superseded owned image once no container uses it.' Here the previous images are superseded and deleted before a successful replacement. Keep the old current records while forcing a fresh build, publish the replacement before retiring them, and clean only the failed attempt's resources on failure. Suggested bucket: high/material UX: a failed maintenance action disables new launches of a previously working recipe and may require resolving an unrelated external outage before use can resume. Could-be-highest: no established route; cleanup is nonforcing and skips images referenced by containers, so this finding does not claim loss of container files, processes or unpushed work. The original c2 potentially highest ownership-loss candidate remains independently preserved; this finding concerns premature confirmed deletion of cached build artifacts. Confidence: confirmed source/contract analysis, no runtime reproduction. proposed_drop: false. possible_cover: none. Interface routing: this is later Podman build implementation, so send to the parent for the owning provider/build group's synthesis; preserve this ID and consequence if deduplicated."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l2",
+            "state": "open",
+            "summary": "Failed container Rebuild discards the previous usable images",
+            "location": "crates/farhelm-helm/src/environment/podman/build.rs:250",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b; unchanged relevant implementation through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: If rebuilding a previously usable container recipe fails, Farhelm removes its last working software image and installation checkpoint instead of retaining them. New sessions then have to rebuild; if the same package/base/installer failure persists, the recipe can no longer launch despite having worked before. Details: environment/podman.rs:913-941 implements the shipped provider Rebuild operation and passes rebuild=true to prepare_images. podman/build.rs:248-260 moves BOTH current image and prepared into retired_images before calling prepare_images_owned. software :128-132 therefore cannot reuse the old image and a later failure can occur before any replacement is published. On error :267-279 calls reconcile_helpers and retire_images; retire_images_unlocked :689-757 removes unused Farhelm-owned images and clears their ownership records. This removes the prior fallback even when the replacement failed in base pulling, readiness, packages or an installer. No restoration exists on the error path; it only records last_failure at :280-286. fresh_image :510-529 requires both current image and prepared, and ensure_prepared in podman.rs:992-1015 starts another build when absent. Contract: SPEC_impl.md, Podman places, creation and images: 'After successful build/preparation replacement, remove a superseded owned image once no container uses it.' Here the previous images are superseded and deleted before a successful replacement. Keep the old current records while forcing a fresh build, publish the replacement before retiring them, and clean only the failed attempt's resources on failure. Suggested bucket: high/material UX: a failed maintenance action disables new launches of a previously working recipe and may require resolving an unrelated external outage before use can resume. Could-be-highest: no established route; cleanup is nonforcing and skips images referenced by containers, so this finding does not claim loss of container files, processes or unpushed work. The original c2 potentially highest ownership-loss candidate remains independently preserved; this finding concerns premature confirmed deletion of cached build artifacts. Confidence: confirmed source/contract analysis, no runtime reproduction. proposed_drop: false. possible_cover: none. Interface routing: this is later Podman build implementation, so send to the parent for the owning provider/build group's synthesis; preserve this ID and consequence if deduplicated. Synthesis alias reconciliation for discovery turn 3: parent-supplied g061/l1 latest line13 independently reports this same defect, so g058/l2 is an alias for consolidation, not a new discovery or an accepted drop. Its fix guidance clarifies that force intent must bypass both software and prepared reuse shortcuts while retaining active-job joining; retaining old records alone would conceal admitted Rebuild work. The confirmed fallback-loss boundary is failure before successful replacement software publication; a preparation failure after successful software replacement need not roll software back. These clarifications preserve the original availability consequence and high recommendation."
+          }
+        },
+        {
+          "line": 15,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l2",
+            "state": "open",
+            "summary": "Failed container Rebuild discards the previous usable images",
+            "location": "crates/farhelm-helm/src/environment/podman/build.rs:250",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b; unchanged relevant implementation through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: If rebuilding a previously usable container recipe fails, Farhelm removes its last working software image and installation checkpoint instead of retaining them. New sessions then have to rebuild; if the same package/base/installer failure persists, the recipe can no longer launch despite having worked before. Details: environment/podman.rs:913-941 implements the shipped provider Rebuild operation and passes rebuild=true to prepare_images. podman/build.rs:248-260 moves BOTH current image and prepared into retired_images before calling prepare_images_owned. software :128-132 therefore cannot reuse the old image and a later failure can occur before any replacement is published. On error :267-279 calls reconcile_helpers and retire_images; retire_images_unlocked :689-757 removes unused Farhelm-owned images and clears their ownership records. This removes the prior fallback even when the replacement failed in base pulling, readiness, packages or an installer. No restoration exists on the error path; it only records last_failure at :280-286. fresh_image :510-529 requires both current image and prepared, and ensure_prepared in podman.rs:992-1015 starts another build when absent. Contract: SPEC_impl.md, Podman places, creation and images: 'After successful build/preparation replacement, remove a superseded owned image once no container uses it.' Here the previous images are superseded and deleted before a successful replacement. Keep the old current records while forcing a fresh build, publish the replacement before retiring them, and clean only the failed attempt's resources on failure. Suggested bucket: high/material UX: a failed maintenance action disables new launches of a previously working recipe and may require resolving an unrelated external outage before use can resume. Could-be-highest: no established route; cleanup is nonforcing and skips images referenced by containers, so this finding does not claim loss of container files, processes or unpushed work. The original c2 potentially highest ownership-loss candidate remains independently preserved; this finding concerns premature confirmed deletion of cached build artifacts. Confidence: confirmed source/contract analysis, no runtime reproduction. proposed_drop: false. possible_cover: none. Interface routing: this is later Podman build implementation, so send to the parent for the owning provider/build group's synthesis; preserve this ID and consequence if deduplicated. Synthesis alias reconciliation for discovery turn 3: parent-supplied g061/l1 latest line13 independently reports this same defect, so g058/l2 is an alias for consolidation, not a new discovery or an accepted drop. Its fix guidance clarifies that force intent must bypass both software and prepared reuse shortcuts while retaining active-job joining; retaining old records alone would conceal admitted Rebuild work. The confirmed fallback-loss boundary is failure before successful replacement software publication; a preparation failure after successful software replacement need not roll software back. These clarifications preserve the original availability consequence and high recommendation. LATE INTERFACE QUALIFICATION, synthesis turn 4: c2 now carries the exact user-base pruning route supplied as alias g061/l8. Preserve this l2 original high availability/fallback-deletion consequence and all its prior bases; this is not a drop or lowering of c2/g061/l8. The earlier rationale that removal is nonforcing and skips container users establishes no forced deletion of existing containers, but cannot establish protection of untagged user-base image contents: default recursive parent pruning can cross that boundary when no protecting references remain. That separate highest conditional loss route can run through the same retirement helper after failed Rebuild as well as recipe deletion; it is consolidated under c2/g061/l8 rather than counted as a new l2 mechanism. No unchanged high bucket here may be used to downgrade that separate established user-owned-image route. Source/contract analysis only; no runtime observation."
+          }
+        }
+      ],
+      "latest": {
+        "line": 15,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l2",
+          "state": "open",
+          "summary": "Failed container Rebuild discards the previous usable images",
+          "location": "crates/farhelm-helm/src/environment/podman/build.rs:250",
+          "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b; unchanged relevant implementation through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: If rebuilding a previously usable container recipe fails, Farhelm removes its last working software image and installation checkpoint instead of retaining them. New sessions then have to rebuild; if the same package/base/installer failure persists, the recipe can no longer launch despite having worked before. Details: environment/podman.rs:913-941 implements the shipped provider Rebuild operation and passes rebuild=true to prepare_images. podman/build.rs:248-260 moves BOTH current image and prepared into retired_images before calling prepare_images_owned. software :128-132 therefore cannot reuse the old image and a later failure can occur before any replacement is published. On error :267-279 calls reconcile_helpers and retire_images; retire_images_unlocked :689-757 removes unused Farhelm-owned images and clears their ownership records. This removes the prior fallback even when the replacement failed in base pulling, readiness, packages or an installer. No restoration exists on the error path; it only records last_failure at :280-286. fresh_image :510-529 requires both current image and prepared, and ensure_prepared in podman.rs:992-1015 starts another build when absent. Contract: SPEC_impl.md, Podman places, creation and images: 'After successful build/preparation replacement, remove a superseded owned image once no container uses it.' Here the previous images are superseded and deleted before a successful replacement. Keep the old current records while forcing a fresh build, publish the replacement before retiring them, and clean only the failed attempt's resources on failure. Suggested bucket: high/material UX: a failed maintenance action disables new launches of a previously working recipe and may require resolving an unrelated external outage before use can resume. Could-be-highest: no established route; cleanup is nonforcing and skips images referenced by containers, so this finding does not claim loss of container files, processes or unpushed work. The original c2 potentially highest ownership-loss candidate remains independently preserved; this finding concerns premature confirmed deletion of cached build artifacts. Confidence: confirmed source/contract analysis, no runtime reproduction. proposed_drop: false. possible_cover: none. Interface routing: this is later Podman build implementation, so send to the parent for the owning provider/build group's synthesis; preserve this ID and consequence if deduplicated. Synthesis alias reconciliation for discovery turn 3: parent-supplied g061/l1 latest line13 independently reports this same defect, so g058/l2 is an alias for consolidation, not a new discovery or an accepted drop. Its fix guidance clarifies that force intent must bypass both software and prepared reuse shortcuts while retaining active-job joining; retaining old records alone would conceal admitted Rebuild work. The confirmed fallback-loss boundary is failure before successful replacement software publication; a preparation failure after successful software replacement need not roll software back. These clarifications preserve the original availability consequence and high recommendation. LATE INTERFACE QUALIFICATION, synthesis turn 4: c2 now carries the exact user-base pruning route supplied as alias g061/l8. Preserve this l2 original high availability/fallback-deletion consequence and all its prior bases; this is not a drop or lowering of c2/g061/l8. The earlier rationale that removal is nonforcing and skips container users establishes no forced deletion of existing containers, but cannot establish protection of untagged user-base image contents: default recursive parent pruning can cross that boundary when no protecting references remain. That separate highest conditional loss route can run through the same retirement helper after failed Rebuild as well as recipe deletion; it is consolidated under c2/g061/l8 rather than counted as a new l2 mechanism. No unchanged high bucket here may be used to downgrade that separate established user-owned-image route. Source/contract analysis only; no runtime observation."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g058/findings.jsonl",
+        "id": "l2",
+        "line": 15,
+        "disposition": "verified",
+        "group": "podman-rebuild-retires-fallback-before-success",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-037 after inspecting it. A failed maintenance Rebuild can remove the last usable software/prepared images before replacement succeeds. A continuing base/package/installer outage then prevents new launches of a previously working recipe. This is distinct from implicit user-base pruning. Retain high for established recipe availability loss; preserve the separate highest pruning route without using this bucket to lower it. Checked source/results: [\"56659839785691f76da3af5d8f51b511cff4ba8b podman.rs:913-941 is the shipped Rebuild implementation and passes true into prepare_images.\",\"Same revision podman/build.rs:250-260 takes both image and prepared into retired_images before replacement work. :128-132 would otherwise reuse the software image, but its record has already been removed. :267-286 reconciles helpers, retires images on error, and records failure without restoration.\",\"Same revision :689-757 removes unused retired images and clears records. :505-531 requires both current source and preparation for freshness; podman.rs:992-1015 starts fresh work when absent. build.rs is unchanged through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db.\",\"Boundary preserved: failure before successful replacement software publication discards fallback; failure during preparation after successful software publication need not roll software back. A fix must force actual rebuilding while retaining prior records and preserve active-job joining. No runtime reproduction.\"] Current coverage/results: {\"specifications\":\"Current SPEC.md:4885-4889 and SPEC_impl.md:6087-6092 require retiring superseded images after successful replacement; reviewed SPEC_impl.md:6566-6570 says the same. Tensorlake's explicit failure fallback at SPEC.md:550-564 is consistent context, not a Podman exception.\",\"planned_and_plans\":\"TODO.md Planned is empty; plans/queue/INDEX.md contains no unlanded plan. Historical Superseded images paragraph requires success before retirement; not active repair coverage.\",\"bugs\":\"BUGS.md has no failed-Rebuild fallback exception.\",\"queue\":\"Searched INDEX.md for failed Rebuild, fallback, prior images and retirement. Read packages-build-result-retired-under-changed-image-source.md and snapshot-cleanup-races-new-host-registration.md: different Tensorlake source/admission races, not failed explicit Podman Rebuild. No exact item or useful same-root extension.\",\"triage\":\"Active TRIAGE_OUTCOMES.md searched for Rebuild, fallback, prior images and recipe cleanup; no exact outcome. Archive not read.\",\"filter\":\"No full filter match: explicit Rebuild is ordinary; the missing durable fallback and continued launch failure are not merely a rare diagnostic or next-refresh glitch.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Previous working software and installation checkpoints are removed after failed Rebuild, forcing rebuilds or blocking launches. The history reports g061/l1 as a parent-supplied alias, not inspected in this batch. Earlier nonforcing-removal rationale does not establish protection from implicit ancestor pruning; that separate route is retained under c2.\"; \"Loss of container files/processes is not established by this fallback mechanism. Its high consequence needs replacement failure and a later launch, and becomes prolonged if the dependency failure continues. Separate user-base loss remains highest under g058/c2.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g058/l2",
+        "line": 15,
+        "disposition": "verified",
+        "group": "podman-rebuild-retires-fallback-before-success",
+        "bucket": "high",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-037 after inspecting it. A failed maintenance Rebuild can remove the last usable software/prepared images before replacement succeeds. A continuing base/package/installer outage then prevents new launches of a previously working recipe. This is distinct from implicit user-base pruning. Retain high for established recipe availability loss; preserve the separate highest pruning route without using this bucket to lower it. Checked source/results: [\"56659839785691f76da3af5d8f51b511cff4ba8b podman.rs:913-941 is the shipped Rebuild implementation and passes true into prepare_images.\",\"Same revision podman/build.rs:250-260 takes both image and prepared into retired_images before replacement work. :128-132 would otherwise reuse the software image, but its record has already been removed. :267-286 reconciles helpers, retires images on error, and records failure without restoration.\",\"Same revision :689-757 removes unused retired images and clears records. :505-531 requires both current source and preparation for freshness; podman.rs:992-1015 starts fresh work when absent. build.rs is unchanged through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db.\",\"Boundary preserved: failure before successful replacement software publication discards fallback; failure during preparation after successful software publication need not roll software back. A fix must force actual rebuilding while retaining prior records and preserve active-job joining. No runtime reproduction.\"] Current coverage/results: {\"specifications\":\"Current SPEC.md:4885-4889 and SPEC_impl.md:6087-6092 require retiring superseded images after successful replacement; reviewed SPEC_impl.md:6566-6570 says the same. Tensorlake's explicit failure fallback at SPEC.md:550-564 is consistent context, not a Podman exception.\",\"planned_and_plans\":\"TODO.md Planned is empty; plans/queue/INDEX.md contains no unlanded plan. Historical Superseded images paragraph requires success before retirement; not active repair coverage.\",\"bugs\":\"BUGS.md has no failed-Rebuild fallback exception.\",\"queue\":\"Searched INDEX.md for failed Rebuild, fallback, prior images and retirement. Read packages-build-result-retired-under-changed-image-source.md and snapshot-cleanup-races-new-host-registration.md: different Tensorlake source/admission races, not failed explicit Podman Rebuild. No exact item or useful same-root extension.\",\"triage\":\"Active TRIAGE_OUTCOMES.md searched for Rebuild, fallback, prior images and recipe cleanup; no exact outcome. Archive not read.\",\"filter\":\"No full filter match: explicit Rebuild is ordinary; the missing durable fallback and continued launch failure are not merely a rare diagnostic or next-refresh glitch.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Previous working software and installation checkpoints are removed after failed Rebuild, forcing rebuilds or blocking launches. The history reports g061/l1 as a parent-supplied alias, not inspected in this batch. Earlier nonforcing-removal rationale does not establish protection from implicit ancestor pruning; that separate route is retained under c2.\"; \"Loss of container files/processes is not established by this fallback mechanism. Its high consequence needs replacement failure and a later launch, and becomes prolonged if the dependency failure continues. Separate user-base loss remains highest under g058/c2.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-037",
+          "key": "g058/l2",
+          "latest_line": 15,
+          "recommendation": "retain-verified",
+          "bucket": "high",
+          "underlying_key": "podman-rebuild-retires-fallback-before-success",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "A failed maintenance Rebuild can remove the last usable software/prepared images before replacement succeeds. A continuing base/package/installer outage then prevents new launches of a previously working recipe. This is distinct from implicit user-base pruning.",
+          "checks": [
+            "56659839785691f76da3af5d8f51b511cff4ba8b podman.rs:913-941 is the shipped Rebuild implementation and passes true into prepare_images.",
+            "Same revision podman/build.rs:250-260 takes both image and prepared into retired_images before replacement work. :128-132 would otherwise reuse the software image, but its record has already been removed. :267-286 reconciles helpers, retires images on error, and records failure without restoration.",
+            "Same revision :689-757 removes unused retired images and clears records. :505-531 requires both current source and preparation for freshness; podman.rs:992-1015 starts fresh work when absent. build.rs is unchanged through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db.",
+            "Boundary preserved: failure before successful replacement software publication discards fallback; failure during preparation after successful software publication need not roll software back. A fix must force actual rebuilding while retaining prior records and preserve active-job joining. No runtime reproduction."
+          ],
+          "coverage_checked": {
+            "specifications": "Current SPEC.md:4885-4889 and SPEC_impl.md:6087-6092 require retiring superseded images after successful replacement; reviewed SPEC_impl.md:6566-6570 says the same. Tensorlake's explicit failure fallback at SPEC.md:550-564 is consistent context, not a Podman exception.",
+            "planned_and_plans": "TODO.md Planned is empty; plans/queue/INDEX.md contains no unlanded plan. Historical Superseded images paragraph requires success before retirement; not active repair coverage.",
+            "bugs": "BUGS.md has no failed-Rebuild fallback exception.",
+            "queue": "Searched INDEX.md for failed Rebuild, fallback, prior images and retirement. Read packages-build-result-retired-under-changed-image-source.md and snapshot-cleanup-races-new-host-registration.md: different Tensorlake source/admission races, not failed explicit Podman Rebuild. No exact item or useful same-root extension.",
+            "triage": "Active TRIAGE_OUTCOMES.md searched for Rebuild, fallback, prior images and recipe cleanup; no exact outcome. Archive not read.",
+            "filter": "No full filter match: explicit Rebuild is ordinary; the missing durable fallback and continued launch failure are not merely a rare diagnostic or next-refresh glitch."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "Loss of container files/processes is not established by this fallback mechanism. Its high consequence needs replacement failure and a later launch, and becomes prolonged if the dependency failure continues. Separate user-base loss remains highest under g058/c2.",
+          "original_stronger_consequence": "Previous working software and installation checkpoints are removed after failed Rebuild, forcing rebuilds or blocking launches. The history reports g061/l1 as a parent-supplied alias, not inspected in this batch. Earlier nonforcing-removal rationale does not establish protection from implicit ancestor pruning; that separate route is retained under c2.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain high for established recipe availability loss; preserve the separate highest pruning route without using this bucket to lower it."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "podman-rebuild-retires-fallback-before-success",
+        "destination": "trailing-podman-rebuild-retires-fallback-before-success.md"
+      }
+    },
+    {
+      "key": "g058/c4",
+      "owner": "g058",
+      "id": "c4",
+      "domain": "environment-recipes",
+      "purpose": "environment-recipes: crates/farhelm-helm/src/environment/recipes.rs, crates/farhelm-helm/src/environment/recipes_tests.rs, crates/farhelm-helm/src/tensorlake/recipes.rs, crates/farhelm-helm/src/tensorlake/recipes_tests.rs, crates/farhelm-proto/src/tensorlake/recipes.rs, crates/farhelm-proto/src/recipes.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Moving save/view helpers does not bypass credential admission",
+            "location": "crates/farhelm-helm/src/environment/recipes.rs:137",
+            "detail": "Reviewed commit: 56040bb964270bb40d191902173dbb84b3ba78fc. TLDR: Considered whether the moved save constructor's wider crate visibility or the shared read shape bypasses credential-reference checks or exposes endpoint secrets. Source refutation: environment/recipes.rs:137-154 still runs check_recipe, keeps agent modes and credential names, and resolves only endpoint URLs; it never resolves a credential value. :158-180 projects only base URLs and names into RecipeView. StoredEndpoint :94-99 contains no token value, while secret-bearing ResolvedEndpoint :101-110 has no Serialize/Debug derive and remains separate. Actual constructor consumers in tensorlake/recipes.rs:259 and :322 are create/update; both check every required credential kind inside the same Immediate transaction as their write (:267-282, :307-335, with checks at :75-122). Actual secret resolution remains transient at :347-370 and returns token/revision/incarnation together. The relocation patch copies saved/view/resolve_endpoint behavior without removing these checks. Contract: SPEC.md Recipes says recipes store only credential names and create/update refuse missing or wrong-kind credentials; named-value delivery is separate. Suggested bucket: no established defect. Could-be-highest: yes for the considered secret-disclosure/boundary-bypass consequence, but the checked call/data paths refute it. Confidence: confirmed source analysis at this revision, not execution. proposed_drop: source-refuted for the helper relocation, proposal only; no parent drop accepted. possible_cover: none. This is a newly recorded rejected candidate, not a new verified or unverified finding, and does not certify unrelated delivery code."
+          }
+        }
+      ],
+      "latest": {
+        "line": 12,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c4",
+          "state": "open",
+          "summary": "Moving save/view helpers does not bypass credential admission",
+          "location": "crates/farhelm-helm/src/environment/recipes.rs:137",
+          "detail": "Reviewed commit: 56040bb964270bb40d191902173dbb84b3ba78fc. TLDR: Considered whether the moved save constructor's wider crate visibility or the shared read shape bypasses credential-reference checks or exposes endpoint secrets. Source refutation: environment/recipes.rs:137-154 still runs check_recipe, keeps agent modes and credential names, and resolves only endpoint URLs; it never resolves a credential value. :158-180 projects only base URLs and names into RecipeView. StoredEndpoint :94-99 contains no token value, while secret-bearing ResolvedEndpoint :101-110 has no Serialize/Debug derive and remains separate. Actual constructor consumers in tensorlake/recipes.rs:259 and :322 are create/update; both check every required credential kind inside the same Immediate transaction as their write (:267-282, :307-335, with checks at :75-122). Actual secret resolution remains transient at :347-370 and returns token/revision/incarnation together. The relocation patch copies saved/view/resolve_endpoint behavior without removing these checks. Contract: SPEC.md Recipes says recipes store only credential names and create/update refuse missing or wrong-kind credentials; named-value delivery is separate. Suggested bucket: no established defect. Could-be-highest: yes for the considered secret-disclosure/boundary-bypass consequence, but the checked call/data paths refute it. Confidence: confirmed source analysis at this revision, not execution. proposed_drop: source-refuted for the helper relocation, proposal only; no parent drop accepted. possible_cover: none. This is a newly recorded rejected candidate, not a new verified or unverified finding, and does not certify unrelated delivery code."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g058/findings.jsonl",
+        "id": "c4",
+        "line": 12,
+        "disposition": "under-investigation",
+        "group": "g058-c4",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-037",
+          "key": "g058/c4",
+          "latest_line": 12,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "shared-recipe-helper-move-bypasses-credential-boundary",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The moved save/view helpers retain credential names only. Their actual create/update consumers still check credential existence and kind inside the immediate write transaction; secret resolution remains separate and transient.",
+          "checks": [
+            "56040bb964270bb40d191902173dbb84b3ba78fc environment/recipes.rs:94-110 separates StoredEndpoint names/URL from non-Serialize/non-Debug ResolvedEndpoint; :137-180 validates the save and projects names/URLs only.",
+            "Same revision tensorlake/recipes.rs:75-122 checks all required credential kinds; create :259-282 and update :307-335 perform these checks in their write transactions. :347-370 resolves actual token/revision/incarnation separately for setup.",
+            "Consumer 56659839785691f76da3af5d8f51b511cff4ba8b retains these shared types and writers; recipe/state files unchanged through review tip. This checks relocation, not all delivery machinery. No execution."
+          ],
+          "coverage_checked": {
+            "specifications": "Current SPEC.md:450-488 requires names-only recipe storage and missing/wrong-kind refusal. SPEC_impl.md:5848-5865 explicitly requires transactional credential metadata checks and transient secret resolution. No accepted bypass/disclosure exception.",
+            "planned_and_plans": "TODO.md Planned and unlanded plans index are empty. Historical endpoint-credential-ownership plan concerns credentials retained in agent configuration, not metadata admission by recipe writes.",
+            "bugs": "BUGS.md's install hang is unrelated.",
+            "queue": "INDEX.md searched for recipe credential admission, secret exposure and references. Its settings-save-races-final-replacement.md concerns delivery overwriting a settings edit, not save/view helpers or credential catalog admission. No exact item.",
+            "triage": "Read active settings-save-races-final-replacement.md ledger entry at TRIAGE_OUTCOMES.md:1756-1785; it plans delivery/spec changes for a different file-write race. Other searched recipe credential terms provide no exact coverage. Archive not read.",
+            "filter": "No filter used; source-refuted security premise."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "No actual consumer bypassing transactional credential checks or returning a secret through the moved view is shown.",
+          "original_stronger_consequence": "Wider constructor visibility or shared read shape could bypass credential-reference checks or disclose endpoint secrets. The source proposal closes only that relocation route, not unrelated delivery code.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Source-refute the moved-helper credential bypass/disclosure claim; independent security drop check required."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-037.json",
+          "key": "g058/c4",
+          "proposal": "claim-checks/claims-037/result.json",
+          "parent_proposal": "source-refuted-moved-recipe-helper-credential-admission-or-view-disclosure",
+          "final_independent_gate": "required-before-highest-security-drop",
+          "reason": "Full037 stored endpoint and projected view retain names/URLs only; transient ResolvedEndpoint lacks Serialize/Debug. Actual create/update consumers still check required credential existence/kind in their immediate write transactions, and separately resolve secret/revision/incarnation for setup. Wider helper visibility alone supplies no actual bypass. Refute relocation only, not all delivery or file replacement; original reference bypass/endpoint secret exposure remains for the fresh check."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "shared-recipe-helper-move-bypasses-credential-boundary",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete: all 1,495 assigned patch lines reviewed. No reportable findings; three rejected candidates recorded, with no unresolved leads.\n\nUpdated `findings.jsonl` and `progress.md`. Conclusions are source-based; no tests or reproductions run, and no checkout files changed."
+    },
+    {
+      "turn": 2,
+      "reply": "- **l2 added, high:** failed container Rebuild deletes previous usable images, potentially blocking new launches. Source-confirmed; route to the Podman build owner for synthesis.\n- **l1/c2/c3 revised:** checked later argument boundaries, transactional writers, cleanup, and schema compatibility. Original potentially highest consequences remain recorded; no drops accepted.\n- **Unresolved lead IDs:** none.\n\nLog and progress updated. No runtime execution."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 found no new reportable issue.\n\n- Checked helper relocation, credential transactions, changed test assertions, body limits, refusal handling, and re-exports.\n- Recorded rejected candidate **c4**; reconciled **l2 ↔ g061/l1** as aliases.\n- New verified findings: none.\n- New unverified-after-investigation findings: none.\n- Open leads: none.\n\nProgress updated. Source analysis only; no runtime execution."
+    },
+    {
+      "turn": 4,
+      "reply": "- **c2 revised to highest**, aliasing g061/l8: cleanup can prune an untagged user-owned base, conditionally losing its sole copy. Original proposals remain preserved and narrowed to their proven mechanisms.\n- **l2 qualified:** nonforcing removal does not establish user-base safety; its separate availability finding remains intact.\n\nSource-supported, not runtime-observed. No drops accepted. **Unresolved lead IDs: none.**"
+    },
+    {
+      "turn": 5,
+      "reply": "Discovery pass 2 found nothing new.\n\nChecked relocation equivalence, changed test claims and assertions, fixture updates, and whole-range attribution.\n\n- New verified IDs: none.\n- New unverified-after-investigation IDs: none.\n- Open leads: none.\n\nProgress updated. No runtime execution."
+    }
+  ],
+  "progress": "# g058 environment-recipes progress\n\nInitial source review complete. Turn type: initial; turn count: 1. Discovery-pass count: 0; no later synthesis or discovery pass performed in this turn.\n\nRead the full brief and the complete inventory commits field only. Root AGENTS.md End sentinel was present. Read required priority/recording guidance, machine rules, skillette and scode-voice instructions. No coverage metadata or excluded coverage sources read.\n\nAll assigned material delivered through evidence read: 00122-000.patch 1-200 and 201-274; 00123-000.patch 1-112; 00133-000.patch 1-195; 00134-000.patch 1-93; 00140-000.patch 1-180, 181-360, 361-540, 541-720 and 721-810; 00219-000.patch 1-11. Total 1,495 assigned patch lines. Unread assigned scope: none.\n\nReviewed at 56040bb964270bb40d191902173dbb84b3ba78fc, plus the assigned re-export at 56659839785691f76da3af5d8f51b511cff4ba8b. Context read at those revisions: complete replacement proto recipes.rs (1-858); complete helm environment/mod.rs (1-230); helm tensorlake/recipes.rs 1-715; tensorlake/build.rs 55-342, 563-613 and 970-1040; provisioning/tensorlake_add.rs 411-457; tensorlake/recipes_tests.rs 130-235 and 706-900; proto environment.rs 1-270 at the second revision; targeted proto lib.rs module exports. Targeted source searches covered ContainerImage consumers and Tensorlake support admission. Governing specifications read: SPEC.md 435-600 and 4739-4818; SPEC_impl.md 6408-6592 and 6776-6816, plus Answers bind to what was drawn 1068-1090. The specifications are unchanged between the two assigned revisions.\n\nDurable log: l1 opened as an image-argument lead and revised to a source-refuted candidate; c2 records rejected shared ownership-loss concern; c3 records rejected stored-shape/strict-decoding concern. New verified findings: none. New unverified findings: none. Verified candidate IDs this pass: l1, c2, c3. Open lead IDs: none. No reportable finding established.\n\nInterface assumptions and limits: storage and final cleanup admission preserve Podman place records, and Tensorlake consumers reject unsupported bases. At the recipe-move revision there is no Podman executor, so l1 does not certify later Podman command argument safety. Provider cleanup implementations, later UI behavior, and actual runtime execution remain outside this assigned pass. Candidate records state possible highest consequences and their source refutation for the parent's independent drop check.\n\nNo reproductions, builds or runtime tests run; conclusions are source/contract analysis only. No checkout files changed. One evidence record attempt rejected state=closed; the same event was immediately corrected to state=open and successfully appended as a candidate, preserving the earlier lead event. No evidence read failed or clipped.\n\nNext action: await caller's later synthesis or discovery prompt; do not repeat the later-turn protocol inside this initial turn.\n\nSynthesis turn 2 in progress; reopened l1 across later Podman consumers. c2/c3 preserved for later writer and schema checks. No drops accepted. Next: consumer boundaries and cross-provider state writers at their introduction revisions and pinned tip.\n\n## Synthesis turn 2 complete\n\nTurn type: later-turn synthesis. Turn count: 2. Discovery-pass count remains 0. All 1,495 mandatory lines remain audited; unread assigned scope: none.\n\nRead exact supplied g060/c4 record (line 6), then verified and extended its consumers directly at 56659839785691f76da3af5d8f51b511cff4ba8b. Context read: podman/build.rs 1-395, 395-448, 450-676 and 650-841; podman.rs 1-260, 280-561 and 902-1036; access.rs 1-100, 100-285 and 315-380; podman_probe.rs 137-177 and 400-438; proto/text.rs 1-135; updated environment module map 1-75 and clean_recipe 407-457; tensorlake/build.rs 281-374 and 1730-1855; hosts.rs 4370-4414. Read foundation-to-consumer diffs for shared recipes, store routes and proto types; checked subsequent histories/diffs through pinned tip. Source searches inspected raw ContainerImage use, command construction, full-state writes, whole-state reset/place removal and foundation PreparedImage producers.\n\nRevisions appended under original IDs l1/c2/c3. Their original potentially highest consequences remain intact and all proposed drops still require the parent's independent checks; none accepted. l1 was reopened, traced across actual later image/user consumers and revised to candidate on direct source refutation of the literal-argument injection route. c2 now covers the actual transactional writer and provider cleanup path. c3 now covers later artifact producers and required login schema, in addition to original serde spellings.\n\nNew lead l2 was immediately recorded, investigated and revised to a finding: explicit Podman Rebuild takes current software and prepared records into retirement before replacement and deletes the fallback images on failure. Shipped Rebuild caller passes true; subsequent launch requires a new build. Suggested high, source-confirmed; no established highest consequence because removal is nonforcing and respects in-use images. Route l2 to the parent for the owning Podman build group's synthesis. It is distinct from c2's untracked ownership-loss concern. New verified finding IDs: l2. New unverified finding IDs: none. Open unresolved lead IDs: none.\n\nOne malformed JSON event attempt for l1 was rejected and immediately corrected; the valid revision then appended successfully. No evidence reads were omitted or clipped. No checkout files changed; no builds, tests or runtime reproductions run. All conclusions are source/contract analysis.\n\nNext: parent routes l2 to its provider/build owner and conducts independent checks of l1/c2/c3 proposals; await the next turn prompt. A substantive new discovery occurred, so a later discovery pass remains required by the brief rather than being simulated in this turn.\n\nDiscovery turn 3/pass 1 in progress. Read discovery-neighbours.json fully in bounded chunks (1-344), exact supplied g059/l1 line8 and g061/l1 line13. g059 corroborates l1 without a new conclusion; g058/l2 revised to record alias g061/l1 and its force/join fix constraints. No drops accepted. Next: search original assigned model, storage-route move, changed tests and compatibility re-exports for fresh issues.\n\n## Discovery turn 3 / pass 1 complete\n\nTurn type: discovery. Turn count: 3. Discovery-pass count: 1. Result: no new reportable issue found. New verified finding IDs: none. New unverified-after-investigation finding IDs: none. Remaining unresolved lead IDs: none. New rejected candidate ID: c4 (save/view relocation preserves credential admission and secret separation). No parent drops or lowerings accepted.\n\nRead all discovery-neighbours.json lines 1-344 before source searching, in bounded chunks: 1-40, 41-70, 71-100, 101-130, 131-160, 161-190, 191-220, 221-250, 251-280, 281-310, 311-344. These were novelty/context inputs only, not mandatory source credit. Read the exact supplied g059/l1 line8 and g061/l1 line13. g059 corroborates the already traced l1 literal-input boundary without a new conclusion. Revised original l2 to preserve g061/l1 as an alias and capture its force/reuse/job-joining fix constraints; alias reconciliation is not a new discovery and does not drop the issue.\n\nFresh assigned-scope checks: re-examined the foundation's shared Recipe/StoredEndpoint/ResolvedEndpoint data separation and save/view/URL helper relocation; the only actual saved constructor callers are the two existing store writes. Re-read those transaction and credential-kind checks directly (tensorlake/recipes.rs 73-123, 248-374; environment/recipes.rs 93-205). They still validate all credential kinds in the same Immediate transaction as persistence and project only names, not resolved values. Recorded c4 immediately on concluding source refutation, preserving its considered potentially highest secret/boundary consequence for independent judgment.\n\nRevisited assigned state-model tests (environment/recipes_tests.rs 1-106), their map-key/provenance/empty-state assertions and the changed recipe update fixture's explicit pre-action state premise; no new concrete test defect established. Re-read route test context 900-1075, where the moved EndpointView import keeps the existing named-endpoint response assertion. Rechecked compatibility module re-export (complete four lines), the assigned RecipePlaceView re-export (proto recipes.rs 840-861), its public type's data-only shape (environment.rs 125-162; earlier context includes its leading fields), and public module wiring (proto/lib.rs 60-145). Rechecked UnsupportedBase route handling directly at tensorlake/recipes.rs 646-682. Actual POST and PUT router wiring at helm/lib.rs 938-970 applies the same BODY_LIMIT claimed by the moved module; no new unbounded-write entry introduced by the relocation.\n\nAll original 1,495 mandatory lines remain audited; unread assigned scope: none. No runtime tests, reproductions, builds or live-install actions. No checkout files changed. Source-only conclusions; no claim of observed behavior. No new substantive discovery requiring another pass was made in this discovery turn. Parent still owns independent judgments and alias consolidation.\n\nIdentity reopened for synthesis turn 4, late g061/l8 interface. Read complete own history 1-12 and complete g061 history 1-26 in bounded chunks. Reopened c2 before further source reads: serialization/explicit-label proof does not settle implicit unowned ancestor pruning. No drops accepted; discovery count stays 1. Next: assigned input/model and shared deletion contracts, plus exact supplied consumer argv/caller only.\n\n## Reopened synthesis turn 4 complete\n\nOriginal reviewer identity explicitly reopened by parent for late g061/l8 interface; no replacement reviewer. Turn type: later synthesis only. Turn count: 4. Discovery-pass count remains 1; no discovery search performed this turn.\n\nRead complete own history (12 existing events, chunks 1-4, 5-8, 9-12) and complete g061 history (26 events, chunks 1-5, 6-10, 11-15, 16-20, 21-24, 25-26), including l8 latest line26. Owner and parent supply primary Podman 4.9.3 pruning/ancestry evidence as source-verified conditional harm, not an executed reproduction. Did not broaden into independent engine/image audit.\n\nReopened c2 immediately upon recognizing that the prior explicit-owned-ID/nonforcing proof did not settle implicit ancestor deletion; then revised c2 to a finding after the assigned/caller checks. It is an alias of g061/l8, not an independent new defect to double-count. Suggested highest, conditional on a valid untagged local user base with no protecting references and sole retained copy for actual work loss. Original c2 history and every proposed-drop basis remain intact: cross-place serialization clobber is source-refuted narrowly, but cannot justify dropping the now-established user-base cleanup crossing. No parent drop or lowering accepted. c2's current proposed_drop is false for this pruning route.\n\nDirect source checks at pinned revisions: foundation proto recipes.rs 716-805 confirms literal nonempty NUL-free image-ID admission; integrated podman/build.rs 678-841 confirms pull_base skips pull for an existing ID without tagging it, labels protect only the explicit image rm target, rm omits --no-prune, ordinary clean_images calls it, and the final place-state clearing follows it. Also read build.rs 117-151 and 203-227 (custom base to helper to owned child publication), and tensorlake/recipes.rs 580-621 (ordinary shared Delete dispatches provider cleanup before final store deletion). Contract re-read: SPEC.md 4795-4817; SPEC_impl.md complete Shared recipes and prepared artifacts 6489-6535 and complete Podman places, creation and images 6537-6570. User bases are expressly retained and never deleted; the aggregate state guard comes too late to constrain implicit removals by the engine.\n\nRevised l2 under its original ID to qualify the earlier nonforcing/no-user-work inference: it protects no claim about untagged base contents, and the same cleanup helper can expose the c2/g061/l8 route after failed Rebuild. l2's distinct availability consequence and alias g061/l1 remain high; this does not lower or drop the separate highest route. l1 argument-boundary and c3 schema refutations remain narrow, with no accepted proposals.\n\nVerified finding ID revised this turn: c2 (source-supported conditional highest route, alias g061/l8). Other existing finding revision: l2 (caveat qualification only). New independent finding IDs: none. New unverified-after-investigation IDs: none. Remaining unresolved lead IDs: none. All readily checkable assigned-input/model/caller premises resolved. Original mandatory scope stays complete, 1,495 audited lines, unread assigned scope none.\n\nNo runtime test, build, reproduction, nested agent, live-install action, prohibited coverage-source search or checkout edit. Evidence is own app/contract source plus explicitly attributed owner/parent engine-source verification. Next action: return synthesis delta; await parent's separate audit and discovery queue decision.\n\nDiscovery turn 5/pass 2 in progress. Read updated discovery-neighbours.json fully (489 lines; SHA256 1112d9f810b31f209ad1e47f4d8bc65604ada2bbb8d8f7c28d77df1534a81462) in bounded chunks before source searches. No named pending interface questions. Reused complete own append-only history, including c2/l2 late revisions. No drops or lowerings accepted. Search stays within original six assigned patches; focus: exact relocation equivalence, test-oracle claims and re-export/type contracts.\n\n## Discovery turn 5 / pass 2 complete\n\nTurn type: separate discovery after audited reopened synthesis. Turn count: 5. Discovery-pass count: 2. Result: empty; nothing new found beyond durable issues and supplied aliases. New verified finding IDs: none. New unverified-after-investigation finding IDs: none. New candidate IDs: none. Remaining unresolved lead IDs: none. No original finding, consequence or proposed-drop basis changed; no parent drop/lowering accepted.\n\nRead the updated neighbour projection completely before source search: 489 lines, 176300 bytes, SHA256 1112d9f810b31f209ad1e47f4d8bc65604ada2bbb8d8f7c28d77df1534a81462. Bounded chunks: 1-40, then successive 30-line chunks 41-70 through 431-460, then 461-489. These exact interface records are context/novelty inputs only, not assigned-source credit. No pending named interface questions were supplied. Existing complete own append-only history was reused, including c2's late highest alias and l2's narrowed caveat; no history was replaced.\n\nUseful fresh checks/results: directly compared the parent revision's entire proto tensorlake/recipes.rs with its replacement proto recipes.rs at 56040bb964270bb40d191902173dbb84b3ba78fc. The bounded direct difference consists of shared vocabulary/module docs, explicit base variant spelling preservation and provider support, the new literal container branch and moved test path; no other validation/field/tunnel logic was lost. Read full original new environment/recipes_tests.rs 1-106 against the model contract, update-test body and claim at tensorlake/recipes_tests.rs 137-226, and migration assertions 758-805. The update test establishes the planted state before mutation and compares the entire raw state afterward; the round-trip test compares complete parsed place state with its decoded result, and resource-presence cases isolate each model obligation. These source checks found no separate changed-test oracle or documentation defect; no production correctness result was used to dismiss an independent test claim.\n\nWhole-range attribution check: git log over exclusive 6e423e30068b62c6cfa276c6d720ee35bb70387a through inclusive 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db for the assigned test/proto paths identifies only the 560 foundation and 566 integration. Read the complete 560-to-566 diff for environment/recipes_tests.rs: it adds the required observed login fields to its prepared fixtures without weakening assertions or changing the tested old Tensorlake shape. No suspected pre-existing code was dismissed merely because it preceded one assigned commit. Existing c2/l2 and neighbour implementation findings were treated as known, not rediscovered.\n\nOriginal mandatory coverage stays complete (1,495 audited lines across six sources), unread assigned material none. No runtime tests, reproductions, builds, synthetic input experiments, prohibited coverage-source searches, nested agents, live-install actions or checkout edits. All checks are static source/contract comparisons. Next: return this empty-discovery result and await caller disposition.\n"
+}

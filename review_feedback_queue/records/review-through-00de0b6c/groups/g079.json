@@ -1,0 +1,793 @@
+{
+  "group": {
+    "id": "g079",
+    "domain": "terminal-view-rendering",
+    "purpose": "terminal-view-rendering: crates/farhelm-ui/assets/app.css, crates/farhelm-ui/assets/terminal.js, crates/farhelm-ui/assets/grid-buffer.js, crates/farhelm-ui/assets/grid-model.js, crates/farhelm-ui/assets/grid-style.js, crates/farhelm-ui/js-tests/grid-buffer.test.js; phases @@ -3079,20 +2749,6 @@ | @@ -6556,44 +4805,39 @@",
+    "interfaces": [
+      "g001",
+      "g002",
+      "g005",
+      "g006",
+      "g007",
+      "g008",
+      "g009",
+      "g010",
+      "g011",
+      "g052",
+      "g053",
+      "g054",
+      "g080",
+      "g081",
+      "g082",
+      "g083",
+      "g088",
+      "g089",
+      "g117",
+      "g118",
+      "g119",
+      "g120",
+      "g121",
+      "g135",
+      "g136",
+      "g174",
+      "g175",
+      "g176",
+      "g177",
+      "g178",
+      "g179",
+      "g180",
+      "g181",
+      "g182",
+      "g184",
+      "g186",
+      "g187",
+      "g188",
+      "g189",
+      "g190",
+      "g191",
+      "g192",
+      "g193",
+      "g194",
+      "g195",
+      "g196",
+      "g197"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00226-000.patch",
+        "ranges": [
+          [
+            1,
+            29
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/assets/app.css",
+        "commit": "350a4b33b6d4476f4a78e43cea124bc2b828f462",
+        "notes": "patch header; patch character offsets [0,901)",
+        "lines": 29,
+        "bytes": 901,
+        "start": 0,
+        "end": 901,
+        "original": "[private-run]/prep/originals/00226.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00306-000.patch",
+        "ranges": [
+          [
+            1,
+            37
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/assets/app.css",
+        "commit": "04d85f0c98a9b635709d00b056719a0baa7fd3fc",
+        "notes": "patch header; patch character offsets [0,1785)",
+        "lines": 37,
+        "bytes": 1785,
+        "start": 0,
+        "end": 1785,
+        "original": "[private-run]/prep/originals/00306.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00308-000.patch",
+        "ranges": [
+          [
+            1,
+            78
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/assets/terminal.js",
+        "commit": "04d85f0c98a9b635709d00b056719a0baa7fd3fc",
+        "notes": "patch header; patch character offsets [0,3691)",
+        "lines": 78,
+        "bytes": 3691,
+        "start": 0,
+        "end": 3691,
+        "original": "[private-run]/prep/originals/00308.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00779-000.patch",
+        "ranges": [
+          [
+            1,
+            22
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/assets/terminal.js",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,1321)",
+        "lines": 22,
+        "bytes": 1325,
+        "start": 0,
+        "end": 1321,
+        "original": "[private-run]/prep/originals/00779.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00965-000.patch",
+        "ranges": [
+          [
+            1,
+            15
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/assets/terminal.js",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,940)",
+        "lines": 15,
+        "bytes": 940,
+        "start": 0,
+        "end": 940,
+        "original": "[private-run]/prep/originals/00965.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01055-000.patch",
+        "ranges": [
+          [
+            1,
+            261
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/assets/app.css",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,12794)",
+        "lines": 261,
+        "bytes": 12810,
+        "start": 0,
+        "end": 12794,
+        "original": "[private-run]/prep/originals/01055.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01060-000.patch",
+        "ranges": [
+          [
+            1,
+            128
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/assets/grid-buffer.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,7106)",
+        "lines": 128,
+        "bytes": 7106,
+        "start": 0,
+        "end": 7106,
+        "original": "[private-run]/prep/originals/01060.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01062-000.patch",
+        "ranges": [
+          [
+            1,
+            16
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/assets/grid-model.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,989)",
+        "lines": 16,
+        "bytes": 989,
+        "start": 0,
+        "end": 989,
+        "original": "[private-run]/prep/originals/01062.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01064-000.patch",
+        "ranges": [
+          [
+            1,
+            53
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/assets/grid-style.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,2609)",
+        "lines": 53,
+        "bytes": 2609,
+        "start": 0,
+        "end": 2609,
+        "original": "[private-run]/prep/originals/01064.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01073-001.patch",
+        "ranges": [
+          [
+            1,
+            269
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/assets/terminal.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "@@ -3079,20 +2749,6 @@; patch character offsets [58559,74421)",
+        "lines": 269,
+        "bytes": 15890,
+        "start": 58559,
+        "end": 74421,
+        "original": "[private-run]/prep/originals/01073.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01073-004.patch",
+        "ranges": [
+          [
+            1,
+            69
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/assets/terminal.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "@@ -6556,44 +4805,39 @@; patch character offsets [192440,196047)",
+        "lines": 69,
+        "bytes": 3611,
+        "start": 192440,
+        "end": 196047,
+        "original": "[private-run]/prep/originals/01073.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01091-000.patch",
+        "ranges": [
+          [
+            1,
+            14
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/js-tests/grid-buffer.test.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,873)",
+        "lines": 14,
+        "bytes": 873,
+        "start": 0,
+        "end": 873,
+        "original": "[private-run]/prep/originals/01091.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01491-000.patch",
+        "ranges": [
+          [
+            1,
+            85
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/assets/app.css",
+        "commit": "61e632323dbc6b4a35ed27bf5b9833102ffd5a4e",
+        "notes": "patch header; patch character offsets [0,4301)",
+        "lines": 85,
+        "bytes": 4305,
+        "start": 0,
+        "end": 4301,
+        "original": "[private-run]/prep/originals/01491.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01492-000.patch",
+        "ranges": [
+          [
+            1,
+            140
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/assets/grid-buffer.js",
+        "commit": "61e632323dbc6b4a35ed27bf5b9833102ffd5a4e",
+        "notes": "patch header; patch character offsets [0,8116)",
+        "lines": 140,
+        "bytes": 8116,
+        "start": 0,
+        "end": 8116,
+        "original": "[private-run]/prep/originals/01492.patch"
+      }
+    ],
+    "lines": 1216,
+    "bytes": 64951
+  },
+  "records": [
+    {
+      "key": "g079/c1",
+      "owner": "g079",
+      "id": "c1",
+      "domain": "terminal-view-rendering",
+      "purpose": "terminal-view-rendering: crates/farhelm-ui/assets/app.css, crates/farhelm-ui/assets/terminal.js, crates/farhelm-ui/assets/grid-buffer.js, crates/farhelm-ui/assets/grid-model.js, crates/farhelm-ui/assets/grid-style.js, crates/farhelm-ui/js-tests/grid-buffer.test.js; phases @@ -3079,20 +2749,6 @@ | @@ -6556,44 +4805,39 @@",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Retired container file-link admission removal is specified",
+            "location": "crates/farhelm-ui/assets/terminal.js:1357",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc\n\n## TLDR\nRemoving container checkout admission could expose host-file links if legacy container terminals remained attachable. The product specification explicitly retires these terminals.\n\n## Details\nThe patch removes containerized from FileLinks construction and removes asynchronous checkoutLinks admission in provider.row, offering OSC and prose paths directly. Could-be-highest: yes, if a retired container terminal could still expose an out-of-container host file through this path. Proposed bucket: highest only with that missing route; no established shipped security consequence yet. Confidence: source-confirmed removal; acceptance currently rests on the specification pending caller checks. proposed_drop: SPEC.md at this revision, lines 4818–4823: ‘The earlier experimental model, whose supervisor stayed outside the container and bind-mounted a host checkout, is retired. Existing sessions support Delete only. Opening terminals or tabs, exec, Stop, Restart, Clone, Replace and Replace with are refused.’ The new disposable-environment model must still be checked for ordinary in-container supervisor filesystem ownership. possible_cover: none; excluded coverage sources were not read. Next source checks: terminal spec producers and attachment admission for retired sessions, plus new environment host semantics. No execution or reproduction performed."
+          }
+        },
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Retired container file-link admission removal is specified and guarded",
+            "location": "crates/farhelm-ui/assets/terminal.js:1357",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc\n\n## TLDR\nRemoving the old container checkout filter would expose host-file targets if those terminals remained attachable. Source and specification both retire those terminals; new container sessions use their own supervisor inside the container.\n\n## Details\nThe patch removes containerized from FileLinks construction and asynchronous checkoutLinks filtering from provider.row. Could-be-highest: yes: without retirement, an old supervisor-outside container terminal could offer host files outside its bind-mounted checkout. Proposed bucket: no report; the potentially highest consequence is refuted for supported current sessions. Confidence: confirmed by source and contract, not execution. proposed_drop: SPEC.md:4818–4823 at this revision says exactly: ‘The earlier experimental model, whose supervisor stayed outside the container and bind-mounted a host checkout, is retired. Existing sessions support Delete only. Opening terminals or tabs, exec, Stop, Restart, Clone, Replace and Replace with are refused.’ Source checks: session_view.rs:3723–3734 keep_terminal_surface immediately returns false for a retired container; service/handlers.rs:1525–1528 rejects attachment through require_active_launch before resolve_terminal or takeover; service/core.rs:3731–3739 rejects launches identified by container::is_retired. SPEC_impl.md:6408–6414 states: ‘Every environment runs an ordinary supervisor’ and ‘The supervisor has no provider-specific launch, terminal or lifecycle mechanism.’ Its transport contract at 6462–6488 routes Podman exec into the container and runs farhelm internal stdio there, so new container paths are interpreted by that supervisor rather than an external host supervisor. No missing current-route premise remains in this group. An already open pre-upgrade client belongs to the old asset version and is not changed by this patch. possible_cover: none; excluded coverage sources were not read. No execution or reproduction performed. Preserve for independent review because the rejected consequence could have been highest."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Retired container file-link admission removal is specified and guarded",
+            "location": "crates/farhelm-ui/assets/terminal.js:1357",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc\n\n## TLDR\nRemoving the legacy container checkout filter would expose host-file targets if those terminals remained attachable. The source prevents their terminals from mounting or attaching. New container sessions instead use an ordinary supervisor inside the container.\n\n## Details\nOriginal consequence preserved: without retirement, an old supervisor-outside container terminal could offer host files outside its bind-mounted checkout. Could-be-highest: yes; preserve this refutation for independent review. Suggested bucket: highest if that route were established; proposed no report under the current source and contract. Confidence: confirmed by source/contract, not execution. proposed_drop: SPEC.md:4818–4823 says exactly: ‘The earlier experimental model, whose supervisor stayed outside the container and bind-mounted a host checkout, is retired. Existing sessions support Delete only. Opening terminals or tabs, exec, Stop, Restart, Clone, Replace and Replace with are refused.’ Source: session_view.rs:3723–3734 keep_terminal_surface returns false for retired containers. container.rs:18–22 recognizes the stored agent_selection.container, independent of whether an image or account still exists. service/core.rs:3731–3739 require_active_launch rejects that classification. Synthesis rechecked the whole attach admission at service/handlers.rs:1451–1534: agent and tab selectors both reach the same unconditional require_active_launch before resolve_terminal, and the grid boolean does not bypass it. Thus neither byte/grid choice nor selector weakens the guard. SPEC_impl.md:6408–6414 states ‘Every environment runs an ordinary supervisor’ and ‘The supervisor has no provider-specific launch, terminal or lifecycle mechanism.’ Its route at 6462–6488 runs farhelm internal stdio through Podman exec in the container, so new file paths belong to that supervisor's filesystem. Newer grid-only renderer removal does not restore a retired-session path; the earlier UI guard and server guard remain the relevant boundaries. An already-open client with old assets is not changed by this asset patch. possible_cover: none; no excluded coverage sources searched. No readily checkable premise remains for the refutation; parent has not accepted this potentially highest proposed drop. No tests, reproductions or runtime observations."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Retired container file-link admission removal is specified and guarded",
+            "location": "crates/farhelm-ui/assets/terminal.js:1357",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc; later renderer interaction checked at f560058da19e02716e6f943883a9508b447aff4e.\n\n## TLDR\nRemoving the legacy container checkout filter would expose host-file targets if those terminals remained attachable. Both source guards survive grid-only rendering, and new containers have their own supervisor inside the environment.\n\n## Details\nOriginal potentially highest consequence preserved: an external-supervisor legacy container terminal could expose host files outside the bind-mounted checkout. Could-be-highest: yes. Suggested bucket: highest if this route were established; proposed no report under the current contract and source. Confidence: confirmed source/contract refutation, not execution. proposed_drop: SPEC.md at 04d85f0:4818–4823 says exactly: ‘The earlier experimental model, whose supervisor stayed outside the container and bind-mounted a host checkout, is retired. Existing sessions support Delete only. Opening terminals or tabs, exec, Stop, Restart, Clone, Replace and Replace with are refused.’ At that revision session_view.rs:3723–3734 suppresses retired terminal surfaces; container.rs:18–22 identifies retirement from stored agent_selection.container; core.rs:3731–3739 rejects it; handlers.rs:1451–1534 sends both agent/tab and byte/grid attaches through that unconditional check before resolution or takeover. New synthesis checks at f560058 confirm the guard survives: session_view.rs:3714–3724 still returns false for retired containers; service/core.rs:3482–3490 still rejects their stored launch; service/handlers.rs:1590–1603 is grid-only and 1652–1674 rejects through the same require_active_launch before resolving any terminal. Thus the renderer removal does not create an alternate legacy attachment route. SPEC_impl.md at 04d85f0:6408–6414 states ‘Every environment runs an ordinary supervisor’ and ‘The supervisor has no provider-specific launch, terminal or lifecycle mechanism.’ Its 6462–6488 route runs farhelm internal stdio through Podman exec inside the environment. An already-open old-asset client is not changed by this asset patch. possible_cover: none; no excluded coverage sources searched. No readily checkable missing premise remains in this group's refutation. Preserve for independent review; parent has accepted no drop. No tests, reproductions or runtime observations."
+          }
+        }
+      ],
+      "latest": {
+        "line": 9,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Retired container file-link admission removal is specified and guarded",
+          "location": "crates/farhelm-ui/assets/terminal.js:1357",
+          "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc; later renderer interaction checked at f560058da19e02716e6f943883a9508b447aff4e.\n\n## TLDR\nRemoving the legacy container checkout filter would expose host-file targets if those terminals remained attachable. Both source guards survive grid-only rendering, and new containers have their own supervisor inside the environment.\n\n## Details\nOriginal potentially highest consequence preserved: an external-supervisor legacy container terminal could expose host files outside the bind-mounted checkout. Could-be-highest: yes. Suggested bucket: highest if this route were established; proposed no report under the current contract and source. Confidence: confirmed source/contract refutation, not execution. proposed_drop: SPEC.md at 04d85f0:4818–4823 says exactly: ‘The earlier experimental model, whose supervisor stayed outside the container and bind-mounted a host checkout, is retired. Existing sessions support Delete only. Opening terminals or tabs, exec, Stop, Restart, Clone, Replace and Replace with are refused.’ At that revision session_view.rs:3723–3734 suppresses retired terminal surfaces; container.rs:18–22 identifies retirement from stored agent_selection.container; core.rs:3731–3739 rejects it; handlers.rs:1451–1534 sends both agent/tab and byte/grid attaches through that unconditional check before resolution or takeover. New synthesis checks at f560058 confirm the guard survives: session_view.rs:3714–3724 still returns false for retired containers; service/core.rs:3482–3490 still rejects their stored launch; service/handlers.rs:1590–1603 is grid-only and 1652–1674 rejects through the same require_active_launch before resolving any terminal. Thus the renderer removal does not create an alternate legacy attachment route. SPEC_impl.md at 04d85f0:6408–6414 states ‘Every environment runs an ordinary supervisor’ and ‘The supervisor has no provider-specific launch, terminal or lifecycle mechanism.’ Its 6462–6488 route runs farhelm internal stdio through Podman exec inside the environment. An already-open old-asset client is not changed by this asset patch. possible_cover: none; no excluded coverage sources searched. No readily checkable missing premise remains in this group's refutation. Preserve for independent review; parent has accepted no drop. No tests, reproductions or runtime observations."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g079/findings.jsonl",
+        "id": "c1",
+        "line": 9,
+        "disposition": "under-investigation",
+        "group": "g079-c1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-052",
+          "key": "g079/c1",
+          "latest_line": 9,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "legacy-container-file-admission-removal-with-retired-terminal-guards",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The suspected new host-file disclosure depends on opening a retired external-supervisor container terminal. Both the view and attachment admission reject that terminal; the replacement environment uses an in-container supervisor. This is a bounded source refutation, not a runtime observation or an audit of other file routes.",
+          "checks": [
+            "04d85f0c98a9b635709d00b056719a0baa7fd3fc: session_view.rs:3723-3731 returns false for retired containers; supervisor container.rs:18-22 recognizes the stored container selection; service/core.rs:3731-3739 rejects it; handlers.rs:1495-1535 applies the rejection after agent/tab selection and before terminal resolution.",
+            "f560058da19e02716e6f943883a9508b447aff4e: session_view.rs:1709-1710 and 3714-3723 preserve the UI refusal; supervisor service/core.rs:3482-3490 and handlers.rs:1652-1674 preserve unconditional rejection before resolving the terminal.",
+            "04d85f0 SPEC_impl.md:6410-6414 requires ordinary environment supervisors; :6464-6476 runs farhelm internal stdio through Podman exec inside the environment. An already-open old-asset page is outside the changed new-bundle route."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:2173-2174 and 4892-4900 explicitly forbid retired terminal/tab access; SPEC_impl.md:3598-3613, 5931-5937 and 8313-8326 describe ordinary in-container file rules and retirement.",
+            "TODO.md Planned:25-26 is empty; plans/queue/INDEX.md contains no unlanded plan entries. Residual plan files are not indexed pending plans.",
+            "BUGS.md has only an SSH-output-pipe provisioning hang. Full queue INDEX.md and targeted queue searches found no exact disclosure item; container hover/admission-cost items describe distinct older behaviors. Active TRIAGE_OUTCOMES.md searches found no same-trigger decision. FILTER.md supplies no security exception."
+          ],
+          "exact_cover_quotes": [
+            "SPEC.md:4894-4896: The earlier experimental model, whose supervisor stayed outside the container and bind-mounted a host checkout, is retired. Existing sessions support Delete only. Opening terminals or tabs, exec, Stop, Restart, Clone, Replace and Replace with are refused.",
+            "SPEC_impl.md:8313-8314: Their supervisor runs inside the container, and every session and terminal uses its ordinary host paths."
+          ],
+          "missing_premise": "No surviving retired-terminal admission route was established. That route would be needed to restore the hypothesized disclosure consequence.",
+          "original_stronger_consequence": "A legacy container terminal backed by an outside supervisor could expose host-file targets outside its bind-mounted checkout; potentially highest security impact.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Source-refuted changed route, supported by explicit retirement contract. Preserve the original disclosure hypothesis in the drop register; this consultation does not approve dropping it."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-052.json",
+          "key": "g079/c1",
+          "proposal": "claim-checks/claims-052/result.json",
+          "parent_proposal": "source-refuted-new-bundle-retired-terminal-host-file-disclosure-route",
+          "final_independent_gate": "required-before-highest-file-disclosure-drop",
+          "reason": "Parent read full052. New view and supervisor agent/tab attachment admission reject stored retired container choice before terminal resolution, through tip; replacement supported environments run ordinary supervisor/file paths inside the container. Refute the changed new-bundle legacy outside-supervisor terminal route, not every independent file API or an already-open old-asset page. Preserve outside-checkout host-file disclosure hypothesis and old-page limitation for a narrow fresh verdict; no runtime/all-file-route certification."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "legacy-container-file-admission-removal-with-retired-terminal-guards",
+        "destination": null
+      }
+    },
+    {
+      "key": "g079/c2",
+      "owner": "g079",
+      "id": "c2",
+      "domain": "terminal-view-rendering",
+      "purpose": "terminal-view-rendering: crates/farhelm-ui/assets/app.css, crates/farhelm-ui/assets/terminal.js, crates/farhelm-ui/assets/grid-buffer.js, crates/farhelm-ui/assets/grid-model.js, crates/farhelm-ui/assets/grid-style.js, crates/farhelm-ui/js-tests/grid-buffer.test.js; phases @@ -3079,20 +2749,6 @@ | @@ -6556,44 +4805,39 @@",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Grid-only mounting keeps restart identity and snapshot ownership",
+            "location": "crates/farhelm-ui/assets/terminal.js:2863",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\nRemoving the pending terminal-kind gate could have left a terminal attached to an old run after Restart, or discarded the last readable screen during recovery. Source checks show the independent restart generation and snapshot ownership remain intact.\n\n## Details\nConsidered the removal of kindPending from sync and mountWhenReady and keepTerm→keepScreen cleanup. Could-be-highest: no established loss-of-work or security route; the considered effect was a blank/stale terminal view, high if present. Confidence: confirmed source refutation. proposed_drop: source refutation, plus SPEC.md:3005–3016 explicitly ends old tmux terminals and makes every current terminal a terminal host. session_view.rs:535–564 use_restart_observation increments mount_generation for every new restart_revision, independent of detail payload retirement; terminal_specs at 1702–1784 assigns that generation to the agent only and tabs gen 0. terminal.js:2863 still rebuilds on path or gen change; thus kindPending is no longer needed to distinguish the removed tmux→host transition. The mount gate at 3190–3230 waits for farhelmPasteSanitizer and all grid helpers; lib.rs:1445,1473–1483,1914–1925 registers and injects those exact assets, and paste-sanitizer.js:37 exports the expected name. runReconnect at 1556–1565 sets keepScreen and captures island.grid before unmount; unmount at 4786–4832 tears down notice/deferred drivers, freezes and moves that same grid when keepScreen is set, and otherwise disposes it. No orphaned keepTerm, stopCopyOnSelect, kindPending, spec.kind or farhelmTermBytes reference remains in terminal.js at this revision (git grep checked). possible_cover: none. No execution or reproduction performed. The checked lifecycle preserves the non-live snapshot required by SPEC.md:3018–3019 and does not change the program's lifecycle."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Grid-only mounting keeps restart identity and snapshot ownership",
+            "location": "crates/farhelm-ui/assets/terminal.js:2863",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\nThe removed terminal-kind gate does not replace the restart generation, and recovery still retains the last readable grid. This conclusion covers those paths, not constructor-failure cleanup, which has a pre-existing bug recorded under l1.\n\n## Details\nOriginal considered consequence preserved: removing kindPending could leave a terminal attached to an old run after Restart, or discard the last readable screen during recovery (high if established). Could-be-highest: no established loss-of-work or security route. Confidence: confirmed source refutation for the named changes, not runtime execution or certification of the replacement. proposed_drop: session_view.rs:535–564 increments mount_generation for every new restart_revision; terminal_specs:1702–1784 assigns that generation to the agent and tabs gen 0. terminal.js:2863 still rebuilds on path/gen; kindPending distinguished only the removed tmux→host transition. SPEC.md:3005–3016 ends old tmux terminals and makes every current terminal a terminal host. mountWhenReady:3190–3230 waits for the exact helper names registered/injected by lib.rs:1445,1473–1483,1914–1925; paste-sanitizer.js:37 exports the matching name. runReconnect:1556–1565 captures island.grid and sets keepScreen; unmount:4786–4832 removes drivers before freezing and moving the retained grid, or disposes an unretained grid. grid-terminal.js:2080–2085 freeze nulls send/onResize without removing selection/link callbacks; cancelReconnect:1607–1633 restores held grids as tombstones or disposes them. Parent-supplied g081 source facts independently agree on paste equivalence/readiness, clipboard write-only paths, restart identity and frozen selection; g083's source observation is limited to deleted byte limits never guarding grid dispatch, and its supported-delivery repair is still pending. These inputs do not prove unrelated rendering or resource bounds. l1 confirms the unguarded precreation element getter and failed-mount disposal bug already existed in the parent; the changed misleading test is assigned to g136, and does not justify claiming complete rollback here. possible_cover: g136/l1 for that separate test finding only, supplied by parent; no coverage sources searched. No tests or reproductions. No unresolved premise for the specific kindPending/keepScreen refutation. Parent has not accepted this proposed drop."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Grid-only identity and retained-screen refutation is narrower than Restart admission",
+            "location": "crates/farhelm-ui/assets/terminal.js:2863",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\nThe removed terminal-kind gate leaves the numerical restart identity and retained-screen ownership intact. That does not establish that every successful Restart admits a terminal: supplied neighboring findings identify a separate completion-success retirement race.\n\n## Details\nOriginal consequences preserved: removing kindPending could leave the viewer attached to an old run after Restart or discard the last readable screen during recovery; either would be high if established. Could-be-highest: no established loss-of-work or security route for those hypotheses. Confidence: source-confirmed refutation only of the named identity/freeze changes. proposed_drop remains narrow: session_view.rs:535–564 increments mount_generation for a changed restart_revision, terminal_specs:1702–1784 assigns agent generation and tab gen 0, and terminal.js:2863 still rebuilds on path/gen. runReconnect:1556–1565 retains island.grid; unmount:4786–4832 freezes/moves that same grid after removing notice/deferred drivers; grid-terminal.js:2080–2085 preserves selection callbacks while stopping sends; cancelReconnect:1607–1633 restores/disposes the retained grid. Helper readiness checks and g081 interface facts remain as in earlier c2 revisions. New synthesis qualification from the fully read discovery-neighbours.json: g088/l1 and g089/l1 show that sidebar retirement can erase restart_succeeded before the view sets relaunched, so an empty desired set can persist despite the generation increment. This is a different source contract (terminal admission, not numerical identity) and supersedes any reading of c2 as a blanket refutation of missing-terminal-after-Restart behavior. possible_cover: those exact parent-supplied records for admission, g136/l1 for the separate failed-mount-test gap; no coverage sources searched. l1 already excludes constructor-failure rollback from c2. No new g079 finding or independent discovery is claimed from supplied records. Proposed drop has not been accepted by parent. No runtime tests or reproductions; historical original consequence and proposed-drop source basis remain preserved."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Grid-only identity and retained-screen refutation is narrower than Restart admission",
+          "location": "crates/farhelm-ui/assets/terminal.js:2863",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\nThe removed terminal-kind gate leaves the numerical restart identity and retained-screen ownership intact. That does not establish that every successful Restart admits a terminal: supplied neighboring findings identify a separate completion-success retirement race.\n\n## Details\nOriginal consequences preserved: removing kindPending could leave the viewer attached to an old run after Restart or discard the last readable screen during recovery; either would be high if established. Could-be-highest: no established loss-of-work or security route for those hypotheses. Confidence: source-confirmed refutation only of the named identity/freeze changes. proposed_drop remains narrow: session_view.rs:535–564 increments mount_generation for a changed restart_revision, terminal_specs:1702–1784 assigns agent generation and tab gen 0, and terminal.js:2863 still rebuilds on path/gen. runReconnect:1556–1565 retains island.grid; unmount:4786–4832 freezes/moves that same grid after removing notice/deferred drivers; grid-terminal.js:2080–2085 preserves selection callbacks while stopping sends; cancelReconnect:1607–1633 restores/disposes the retained grid. Helper readiness checks and g081 interface facts remain as in earlier c2 revisions. New synthesis qualification from the fully read discovery-neighbours.json: g088/l1 and g089/l1 show that sidebar retirement can erase restart_succeeded before the view sets relaunched, so an empty desired set can persist despite the generation increment. This is a different source contract (terminal admission, not numerical identity) and supersedes any reading of c2 as a blanket refutation of missing-terminal-after-Restart behavior. possible_cover: those exact parent-supplied records for admission, g136/l1 for the separate failed-mount-test gap; no coverage sources searched. l1 already excludes constructor-failure rollback from c2. No new g079 finding or independent discovery is claimed from supplied records. Proposed drop has not been accepted by parent. No runtime tests or reproductions; historical original consequence and proposed-drop source basis remain preserved."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g079/findings.jsonl",
+        "id": "c2",
+        "line": 10,
+        "disposition": "under-investigation",
+        "group": "g079-c2",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-052",
+          "key": "g079/c2",
+          "latest_line": 10,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "grid-only-kind-gate-removal-preserves-identity-and-held-grid",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The removed renderer-kind gate did not supply Restart identity or retained-grid ownership. Those mechanisms remain. This does not refute missing admission after Restart, constructor-failure rollback, or any general decoder/resource concern.",
+          "checks": [
+            "f560058: session_view.rs:532-564 increments mount_generation for each new restart_revision; :1702-1780 assigns it to the agent and gen=0 to tabs. terminal.js:2853-2867 removes changed path/gen identities; :2904-2911 updates surviving controller.spec before expedited recovery.",
+            "f560058: terminal.js:1556-1565 captures island.grid before unmount; :4769-4832 removes observers/socket callbacks, freezes and moves that grid when retained, and deletes its island entry. :1607-1633 restores it as a tombstone or disposes it. grid-terminal.js:2080-2085 clears send/onResize while preserving local selection/link state.",
+            "f560058: terminal.js:3203-3221 gates mounting on the sanitizer and every named grid helper. The asset diff replaces TERM_BYTES_JS with PASTE_SANITIZER_JS and injects it. Constructor cleanup remains separately defective as g079/l1 records.",
+            "The supplied g088/l1 and g089/l1 admission qualification remains: generation can advance while restart_succeeded is unavailable to the view. This consultation does not independently re-review those records or treat them as duplicates."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md Terminal experience:2896-2913, 3011-3052 requires terminal hosts, non-live takeover snapshots and controlled reconnect; SPEC_impl.md:1836-1870 describes grid-only ownership and pre-socket sizing. None explicitly accepts a missing admitted terminal after successful Restart.",
+            "TODO Planned and the unlanded-plan index are empty. BUGS.md is unrelated. Full queue INDEX.md plus identity/frozen/kind searches and active-ledger searches found no exact kind-gate regression item. Existing retained-restart-hides-reboot-card and detached-grid guidance items have different causes/consequences. No filter is used."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No changed path/gen or held-screen ownership failure is established. Do not infer terminal admission from the numerical generation check.",
+          "original_stronger_consequence": "Removing kindPending might leave a viewer on an old run after Restart or discard its last readable recovery screen; high material UX if established. No concrete security or work-loss route was shown.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Narrow source refutation only. A stale attachment could concern user input/work, so conservatively preserve this dismissal for independent checking. g081/c5 overlaps the identity reasoning and g081/c4 the held-grid reasoning, but neither is an exact whole-record alias."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-052.json",
+          "key": "g079/c2",
+          "proposal": "claim-checks/claims-052/result.json",
+          "parent_proposal": "source-refuted-kind-gate-removal-breaks-path-generation-or-held-grid-ownership",
+          "final_independent_gate": "required-by-conservative-stale-input-work-flag",
+          "reason": "Full052 current path/gen changes retire controllers, surviving specs refresh before recovery, Restart revision increments agent generation; held grid captured before unmount then frozen/moved, restored as tombstone or disposed, with local interactions but cleared send/resize. Sanitizer/grid helpers remain mount gates. Numeric generation does NOT establish successful Restart admission (088/089 separate), constructor rollback079l1 remains, old-page196 separate. Refute only removed-kind gate as cause of these identity/held-screen failures; preserve high UX and possible stale-input concerns for gate."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "grid-only-kind-gate-removal-preserves-identity-and-held-grid",
+        "destination": null
+      }
+    },
+    {
+      "key": "g079/l1",
+      "owner": "g079",
+      "id": "l1",
+      "domain": "terminal-view-rendering",
+      "purpose": "terminal-view-rendering: crates/farhelm-ui/assets/app.css, crates/farhelm-ui/assets/terminal.js, crates/farhelm-ui/assets/grid-buffer.js, crates/farhelm-ui/assets/grid-model.js, crates/farhelm-ui/assets/grid-style.js, crates/farhelm-ui/js-tests/grid-buffer.test.js; phases @@ -3079,20 +2749,6 @@ | @@ -6556,44 +4805,39 @@",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Reconcile failed-grid-mount cleanup with renderer-removal scope",
+            "location": "crates/farhelm-ui/assets/terminal.js:4302",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\nA failure while constructing a terminal may be replaced by another error during link cleanup. The neighboring review reports that this production bug predates renderer removal and that a changed test models a safer hosting shape. This needs a parent-revision check before attributing it to this group's changes.\n\n## Details\nSource at terminal.js:4302–4315 constructs gridLinks using getGrid: () => created before declaring/assigning created; 4356–4358 calls gridLinks.dispose() on failed grid creation. The neighbor g136/l1 reports createGridLinks view.element dereferences getGrid().element and FileLinks.dispose→clearHover reads it, while its changed test supplies host.element directly. Suspected consequence: the original construction error is masked and link teardown may stop early; no execution observed. Could-be-highest: no established security or loss-of-work route; bucket other for misleading failure/cleanup evidence unless material retained-resource or user impact is established. Confidence: unverified after initial source inspection; readily checkable missing premise is whether the getGrid dereference and disposal order are unchanged from f560058's parent, and whether the changed test is assigned to this group (the brief assigns only a comment-only grid-buffer test patch). Checks already made: read current createGridSurface and outer mount catch; outer catch rolls back around grid only after creation returns. Next: inspect createGridLinks/FileLinks dispose at current and parent revisions, and the test diff solely to locate ownership. proposed_drop: not yet; likely unchanged-source scope, to be established. possible_cover: interface report g136/l1 supplied by parent; no coverage sources searched. Neighbor g081's frozen-grid callbacks and helper checks settle only the named paths, not all mount-failure rollback."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Failed-grid-mount cleanup bug predates this renderer removal",
+            "location": "crates/farhelm-ui/assets/terminal.js:4357",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\nA grid constructor failure can be masked by another error during file-link cleanup. This production defect already exists in the parent revision. A separately assigned test now describes this lifecycle but models a safer object shape; g136/l1 owns that changed-test finding.\n\n## Details\nConfidence: confirmed by source comparison, not execution. terminal.js:946–947 reads getGrid().element without checking getGrid(); createGridSurface:4302–4315 passes () => created before creation completes and 4356–4358 disposes links on creation failure. terminal-files.js:641–645 dispose calls clearHover; clearHover:460–468 reads this.view?.element, whose getter dereferences undefined. Optional chaining on view does not guard the getter's internal getGrid().element. This can mask the original creation error and stop link disposal early; retained-resource impact is not established. Could-be-highest: no established security or loss-of-work route; bucket other for the established diagnostic/cleanup defect and misleading changed test. proposed_drop for this group's new-production-change attribution: unchanged-source scope. The parent has the same unguarded element getter at terminal.js:1200–1201, same forwarding disposer at 1369–1373, and same preassignment closure and catch at 5954–6018. The relevant FileLinks clearHover/dispose bodies are unchanged by this commit (diff inspected). The changed test is terminal-files.test.js, with view.element returning host.element where host always exists; its newly rewritten docstring claims the real before-component lifecycle. That test is not g079's assigned grid-buffer.test.js comment patch. possible_cover: parent-supplied interface g136/l1, whose changed-test report is independently corroborated here; no coverage files searched. This candidate closes the lead as a scope/refutation record, not as a claim the production path is safe. It limits c2 to successful-mount restart/snapshot ownership and helper readiness; c2 does not certify constructor-failure rollback. No reproduction or runtime observation. No missing readily checkable premise remains for the scope decision."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Failed-grid-mount cleanup bug predates this renderer removal",
+            "location": "crates/farhelm-ui/assets/terminal.js:4357",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\nA grid constructor failure can be masked by another error during file-link cleanup. This defect already affected direct grid mounts in the parent. A changed test models a safer object shape; g136/l1 owns the changed-test finding.\n\n## Details\nConfidence: confirmed by source comparison, not execution. terminal.js:946–947 dereferences getGrid().element; createGridSurface:4302–4315 passes () => created before creation completes; 4356–4358 disposes links on construction failure. FileLinks.dispose at terminal-files.js:641–645 calls clearHover:460–468, which accesses the getter even when created remains undefined. This masks the original construction error and stops that cleanup early. Could-be-highest: no established security or loss-of-work route; bucket other for the established diagnostic/cleanup defect and misleading test, with no demonstrated retained-resource consequence. proposed_drop for a new-production-change finding here: unchanged-source scope. Parent terminal.js:1200–1201 has the same getter, 1369–1373 the same disposer, and 5954–6018 the same preassignment closure and catch. Final source check confirms parent:4658–4662 already calls this createGridSurface for spec.kind === host before constructing its socket, so this was not confined to a retired or unused migration path. The full terminal-files.js diff changes comments and removes the old adapter; the relevant clearHover and FileLinks.dispose bodies do not change. Current createGridSurface also runs before its socket at terminal.js:3389–3394. The rewritten terminal-files.test.js fixture at 671–678 always has host and returns host.element, making absent-element disposal safe; test/docstring at 834–844 claims the before-component lifecycle. This changed test is not in g079's assigned grid-buffer.test.js comment patch. possible_cover: parent-supplied g136/l1, independently corroborated by these source checks; no coverage files searched. This closes the lead as a scope record, not as certification that rollback is safe. c2 remains limited to restart/snapshot ownership after successful construction and helper readiness. No unresolved premise for this scope decision, no runtime reproduction, and no drop accepted by the parent."
+          }
+        },
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Failed-grid-mount cleanup source defect predates the whole review range",
+            "location": "crates/farhelm-ui/assets/terminal.js:4357",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e; whole-range base checked at 6e423e30068b62c6cfa276c6d720ee35bb70387a.\n\n## TLDR\nFailed grid construction can lose its original diagnostic when cleanup dereferences the missing component. This production defect predates the entire assigned range. The in-range test-fixture/coverage claim remains a distinct finding owned by g136/l1 and is not refuted by that attribution.\n\n## Details\nOriginal consequence preserved: creation failure is masked and link disposal stops early; no retained-resource consequence is established. At f560058 terminal.js:946–947 reads getGrid().element, :4302–4315 passes () => created before constructor completion, and :4356–4358 disposes links on failure; FileLinks.dispose at terminal-files.js:641–645 calls clearHover:460–468 and evaluates the throwing getter. Confidence: source-confirmed, no runtime observation. Suggested bucket other; Could-be-highest: no established security or loss-of-work route. proposed_drop for attributing a new production failure to g079's removal: entire-range source refutation. Exclusive-base terminal.js:1194–1207 already contains the same unguarded getter, :5981–5999 the same deferred created closure, and :6038–6048 the same dispose-before-rethrow. The parent comparison and direct-host call at parent:4658–4662 recorded earlier independently establish this was a supported path, not a retired-only branch. This scope conclusion does not drop the distinct rewritten test defect: current terminal-files.test.js:671–678 always provides an existing host object and safely returns host.element, while :834–844 describes actual before-component cleanup. That fixture change is assigned outside g079. possible_cover: supplied g136/l1, g135/l2 and g083/l1 corroborate the changed-test finding and narrower masked-diagnostic impact; no prohibited sources searched. c2 remains limited to identity/snapshot paths after successful creation. No unresolved readily checkable source premise; no test, build or reproduction. No parent drop accepted."
+          }
+        }
+      ],
+      "latest": {
+        "line": 13,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l1",
+          "state": "open",
+          "summary": "Failed-grid-mount cleanup source defect predates the whole review range",
+          "location": "crates/farhelm-ui/assets/terminal.js:4357",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e; whole-range base checked at 6e423e30068b62c6cfa276c6d720ee35bb70387a.\n\n## TLDR\nFailed grid construction can lose its original diagnostic when cleanup dereferences the missing component. This production defect predates the entire assigned range. The in-range test-fixture/coverage claim remains a distinct finding owned by g136/l1 and is not refuted by that attribution.\n\n## Details\nOriginal consequence preserved: creation failure is masked and link disposal stops early; no retained-resource consequence is established. At f560058 terminal.js:946–947 reads getGrid().element, :4302–4315 passes () => created before constructor completion, and :4356–4358 disposes links on failure; FileLinks.dispose at terminal-files.js:641–645 calls clearHover:460–468 and evaluates the throwing getter. Confidence: source-confirmed, no runtime observation. Suggested bucket other; Could-be-highest: no established security or loss-of-work route. proposed_drop for attributing a new production failure to g079's removal: entire-range source refutation. Exclusive-base terminal.js:1194–1207 already contains the same unguarded getter, :5981–5999 the same deferred created closure, and :6038–6048 the same dispose-before-rethrow. The parent comparison and direct-host call at parent:4658–4662 recorded earlier independently establish this was a supported path, not a retired-only branch. This scope conclusion does not drop the distinct rewritten test defect: current terminal-files.test.js:671–678 always provides an existing host object and safely returns host.element, while :834–844 describes actual before-component cleanup. That fixture change is assigned outside g079. possible_cover: supplied g136/l1, g135/l2 and g083/l1 corroborate the changed-test finding and narrower masked-diagnostic impact; no prohibited sources searched. c2 remains limited to identity/snapshot paths after successful creation. No unresolved readily checkable source premise; no test, build or reproduction. No parent drop accepted."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g079/findings.jsonl",
+        "id": "l1",
+        "line": 13,
+        "disposition": "excluded",
+        "group": "grid-construction-failure-link-cleanup-dereferences-uncreated-component",
+        "reason": "Parent explicitly accepted named out-of-range proposal from claims-052 after inspecting it. The masked constructor diagnostic and interrupted cleanup are source-established, but the same production route exists at the exclusive base. The separately rewritten test's safer object shape is an in-range test finding, not refuted by this attribution. Entire-range attribution excludes the production defect, not production correctness. Keep the changed-test issue with its separate owner; do not discard it as a duplicate of this out-of-range production record. Checked source/results: [\"f560058: terminal.js:940-950 dereferences getGrid().element; :4302-4313 passes a closure over created before assignment; :4356-4358 disposes links before rethrow. terminal-files.js:641-647 reaches clearHover:460-468, which evaluates that getter and can throw before later cleanup.\",\"Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a already has terminal.js:1194-1207 unguarded getter, :5981-6000 preassignment closure, :6042-6044 disposal before rethrow. Base terminal-files.js:541-550 and :722-730 have the same throwing getter access in cleanup.\",\"f560058 terminal-files.test.js:671-678 always creates host and returns host.element; :834-844 claims before-component failed-mount disposal. That does not model getGrid() itself being undefined. Preserve supplied g136/l1, g135/l2 and g083/l1 as distinct test evidence; they were not assigned for new review here.\"] Current coverage/results: [\"Current SPEC.md/SPEC_impl.md searches for constructor/failed construction/before-component cleanup found no explicit acceptance; the grid-client ownership section does not accept masking the failure.\",\"TODO Planned and unlanded-plan index are empty; BUGS.md is unrelated. Full queue INDEX.md and constructor/construction/missing-component searches found no exact queued production item; active TRIAGE_OUTCOMES.md has no matching decision. FILTER.md rare diagnostic rule cannot be selected merely from an unspecified constructor-failure trigger.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A grid constructor failure loses its original diagnostic when file-link cleanup throws, and later disposal steps stop early; no material retained-resource, security or user-work-loss route was shown.\"; \"No in-range introduction or changed contract for this production defect was established. Retained-resource impact beyond interrupted cleanup remains unestablished.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g079/l1",
+        "line": 13,
+        "disposition": "excluded",
+        "group": "grid-construction-failure-link-cleanup-dereferences-uncreated-component",
+        "bucket": "other",
+        "recording": "out-of-range",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named out-of-range proposal from claims-052 after inspecting it. The masked constructor diagnostic and interrupted cleanup are source-established, but the same production route exists at the exclusive base. The separately rewritten test's safer object shape is an in-range test finding, not refuted by this attribution. Entire-range attribution excludes the production defect, not production correctness. Keep the changed-test issue with its separate owner; do not discard it as a duplicate of this out-of-range production record. Checked source/results: [\"f560058: terminal.js:940-950 dereferences getGrid().element; :4302-4313 passes a closure over created before assignment; :4356-4358 disposes links before rethrow. terminal-files.js:641-647 reaches clearHover:460-468, which evaluates that getter and can throw before later cleanup.\",\"Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a already has terminal.js:1194-1207 unguarded getter, :5981-6000 preassignment closure, :6042-6044 disposal before rethrow. Base terminal-files.js:541-550 and :722-730 have the same throwing getter access in cleanup.\",\"f560058 terminal-files.test.js:671-678 always creates host and returns host.element; :834-844 claims before-component failed-mount disposal. That does not model getGrid() itself being undefined. Preserve supplied g136/l1, g135/l2 and g083/l1 as distinct test evidence; they were not assigned for new review here.\"] Current coverage/results: [\"Current SPEC.md/SPEC_impl.md searches for constructor/failed construction/before-component cleanup found no explicit acceptance; the grid-client ownership section does not accept masking the failure.\",\"TODO Planned and unlanded-plan index are empty; BUGS.md is unrelated. Full queue INDEX.md and constructor/construction/missing-component searches found no exact queued production item; active TRIAGE_OUTCOMES.md has no matching decision. FILTER.md rare diagnostic rule cannot be selected merely from an unspecified constructor-failure trigger.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A grid constructor failure loses its original diagnostic when file-link cleanup throws, and later disposal steps stop early; no material retained-resource, security or user-work-loss route was shown.\"; \"No in-range introduction or changed contract for this production defect was established. Retained-resource impact beyond interrupted cleanup remains unestablished.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-052",
+          "key": "g079/l1",
+          "latest_line": 13,
+          "recommendation": "out-of-range",
+          "bucket": "other",
+          "underlying_key": "grid-construction-failure-link-cleanup-dereferences-uncreated-component",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The masked constructor diagnostic and interrupted cleanup are source-established, but the same production route exists at the exclusive base. The separately rewritten test's safer object shape is an in-range test finding, not refuted by this attribution.",
+          "checks": [
+            "f560058: terminal.js:940-950 dereferences getGrid().element; :4302-4313 passes a closure over created before assignment; :4356-4358 disposes links before rethrow. terminal-files.js:641-647 reaches clearHover:460-468, which evaluates that getter and can throw before later cleanup.",
+            "Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a already has terminal.js:1194-1207 unguarded getter, :5981-6000 preassignment closure, :6042-6044 disposal before rethrow. Base terminal-files.js:541-550 and :722-730 have the same throwing getter access in cleanup.",
+            "f560058 terminal-files.test.js:671-678 always creates host and returns host.element; :834-844 claims before-component failed-mount disposal. That does not model getGrid() itself being undefined. Preserve supplied g136/l1, g135/l2 and g083/l1 as distinct test evidence; they were not assigned for new review here."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md/SPEC_impl.md searches for constructor/failed construction/before-component cleanup found no explicit acceptance; the grid-client ownership section does not accept masking the failure.",
+            "TODO Planned and unlanded-plan index are empty; BUGS.md is unrelated. Full queue INDEX.md and constructor/construction/missing-component searches found no exact queued production item; active TRIAGE_OUTCOMES.md has no matching decision. FILTER.md rare diagnostic rule cannot be selected merely from an unspecified constructor-failure trigger."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No in-range introduction or changed contract for this production defect was established. Retained-resource impact beyond interrupted cleanup remains unestablished.",
+          "original_stronger_consequence": "A grid constructor failure loses its original diagnostic when file-link cleanup throws, and later disposal steps stop early; no material retained-resource, security or user-work-loss route was shown.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Entire-range attribution excludes the production defect, not production correctness. Keep the changed-test issue with its separate owner; do not discard it as a duplicate of this out-of-range production record."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "grid-construction-failure-link-cleanup-dereferences-uncreated-component",
+        "destination": null
+      }
+    },
+    {
+      "key": "g079/l2",
+      "owner": "g079",
+      "id": "l2",
+      "domain": "terminal-view-rendering",
+      "purpose": "terminal-view-rendering: crates/farhelm-ui/assets/app.css, crates/farhelm-ui/assets/terminal.js, crates/farhelm-ui/assets/grid-buffer.js, crates/farhelm-ui/assets/grid-model.js, crates/farhelm-ui/assets/grid-style.js, crates/farhelm-ui/js-tests/grid-buffer.test.js; phases @@ -3079,20 +2749,6 @@ | @@ -6556,44 +4805,39 @@",
+      "history": [
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l2",
+            "state": "open",
+            "summary": "Check stale FitAddon hidden-pane rationale at renderer-removal revision",
+            "location": "crates/farhelm-ui/assets/app.css:8569",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\nThe terminal-pane comment still explains hidden sizing through FitAddon after this commit removes that component. Its claimed zero-column failure also does not describe the replacement grid. The later assigned documentation patch corrects this paragraph, so any finding is intermediate documentation accuracy rather than a current renderer defect.\n\n## Details\nSource checked: app.css:8569–8582 still says ‘FitAddon.fit() would size an unselected terminal to zero columns’; grid-terminal.js:462–496 says no layout or font metrics proposes nothing and returns on invalid dimensions instead of assigning a zero-size fit. The assigned 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e app.css patch replaces this explanation with the grid's no-proposal contract. Could-be-highest: no, this is internal CSS maintenance rationale, with no established security or loss-of-work instruction. Suggested bucket other if retained. Confidence: substantive source-supported lead; next checks are parent and exclusive-base text plus exact removal of the FitAddon asset/runtime to establish in-range attribution, and the later correction's location. This should remain distinct from supplied g182/c1, which reports the separately changed browser test's two-column rationale. proposed_drop: not yet; production's correct fit does not by itself refute a newly stale explanation. possible_cover: none for this comment; g182/c1 is adjacent context only. No reproduction or runtime tests."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l2",
+            "state": "open",
+            "summary": "Renderer removal leaves hidden-pane rationale pointing at removed FitAddon",
+            "location": "crates/farhelm-ui/assets/app.css:8573",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\nThe intermediate grid-only release still explains hidden terminal sizing through a component it has removed. Its zero-column explanation does not describe the grid's retained-size/no-proposal behavior, giving maintainers the wrong model for the visibility rule. A later assigned commit corrects it.\n\n## Details\nAt app.css:8571–8580 the rationale for visibility rather than display:none still says ‘FitAddon.fit() would size an unselected terminal to zero columns’. This commit removes the FitAddon asset registration and injection from lib.rs (VENDOR_FIT_JS) and removes its construction/use from terminal.js, leaving no FitAddon runtime for this comment to describe. SPEC_impl.md:1835–1865 defines the replacement as the grid's deterministic fit, not an add-on. Actual grid-terminal.js:462–496 documents that an unmeasurable container proposes nothing and returns before assigning fitted on nonfinite dimensions; :161 and :404–407 initialize that retained size to 80x24. Production sizing can be correct while this independent maintenance explanation remains stale. Fix direction was in fact implemented later: 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e app.css:8571–8575 changes the rationale to the grid being unable to propose a fit without a layout box. The discovery finding is therefore historical/intermediate and does not request another fix at the pinned endpoint.\n\nWhole-range attribution checked: exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a app.css:8630–8634 and immediate parent app.css:8611–8615 already contain this sentence, but both still ship and invoke FitAddon. f560058 removes that live referent while preserving the rationale in its assigned stylesheet. The claim that zero columns accurately described the old add-on is not newly validated or asserted here; the in-range defect is failing to replace the explanation when that implementation is removed. This is distinct from supplied g182/c1's separately changed test comment about a two-column floor. Suggested bucket: other, internal documentation accuracy only. Could-be-highest: no established or suspected security/loss-of-work route from this comment. Confidence: confirmed through introducing removal, current and base source, replacement contract and later corrective patch; no execution. proposed_drop: false for the reviewed intermediate revision. possible_cover: source-confirmed correction at 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e, within the assigned range; no prohibited coverage sources searched. No missing premise or runtime reproduction."
+          }
+        }
+      ],
+      "latest": {
+        "line": 12,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l2",
+          "state": "open",
+          "summary": "Renderer removal leaves hidden-pane rationale pointing at removed FitAddon",
+          "location": "crates/farhelm-ui/assets/app.css:8573",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\nThe intermediate grid-only release still explains hidden terminal sizing through a component it has removed. Its zero-column explanation does not describe the grid's retained-size/no-proposal behavior, giving maintainers the wrong model for the visibility rule. A later assigned commit corrects it.\n\n## Details\nAt app.css:8571–8580 the rationale for visibility rather than display:none still says ‘FitAddon.fit() would size an unselected terminal to zero columns’. This commit removes the FitAddon asset registration and injection from lib.rs (VENDOR_FIT_JS) and removes its construction/use from terminal.js, leaving no FitAddon runtime for this comment to describe. SPEC_impl.md:1835–1865 defines the replacement as the grid's deterministic fit, not an add-on. Actual grid-terminal.js:462–496 documents that an unmeasurable container proposes nothing and returns before assigning fitted on nonfinite dimensions; :161 and :404–407 initialize that retained size to 80x24. Production sizing can be correct while this independent maintenance explanation remains stale. Fix direction was in fact implemented later: 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e app.css:8571–8575 changes the rationale to the grid being unable to propose a fit without a layout box. The discovery finding is therefore historical/intermediate and does not request another fix at the pinned endpoint.\n\nWhole-range attribution checked: exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a app.css:8630–8634 and immediate parent app.css:8611–8615 already contain this sentence, but both still ship and invoke FitAddon. f560058 removes that live referent while preserving the rationale in its assigned stylesheet. The claim that zero columns accurately described the old add-on is not newly validated or asserted here; the in-range defect is failing to replace the explanation when that implementation is removed. This is distinct from supplied g182/c1's separately changed test comment about a two-column floor. Suggested bucket: other, internal documentation accuracy only. Could-be-highest: no established or suspected security/loss-of-work route from this comment. Confidence: confirmed through introducing removal, current and base source, replacement contract and later corrective patch; no execution. proposed_drop: false for the reviewed intermediate revision. possible_cover: source-confirmed correction at 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e, within the assigned range; no prohibited coverage sources searched. No missing premise or runtime reproduction."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g079/findings.jsonl",
+        "id": "l2",
+        "line": 12,
+        "disposition": "rejected",
+        "group": "grid-only-removal-leaves-hidden-pane-fitaddon-rationale-stale",
+        "reason": "Parent read full claims052. Removing FitAddon at f560058 makes app.css8567-8580's old hidden-pane rationale inaccurate, independently of the correct new grid sizing. The later61e63232 comment explicitly replaces the removed-component rationale and endpoint8571-8575 retains it. Historical defect confirmed and corrected within range, so preserve both in audit without an obsolete queue item. No higher consequence or unresolved premise; separate g182/c1 two-column explanation not covered."
+      },
+      "accepted_parent_decision": {
+        "key": "g079/l2",
+        "line": 12,
+        "disposition": "rejected",
+        "group": "grid-only-removal-leaves-hidden-pane-fitaddon-rationale-stale",
+        "bucket": "other",
+        "recording": "repaired-in-range",
+        "needs_independent_drop_check": false,
+        "reason": "Parent read full claims052. Removing FitAddon at f560058 makes app.css8567-8580's old hidden-pane rationale inaccurate, independently of the correct new grid sizing. The later61e63232 comment explicitly replaces the removed-component rationale and endpoint8571-8575 retains it. Historical defect confirmed and corrected within range, so preserve both in audit without an obsolete queue item. No higher consequence or unresolved premise; separate g182/c1 two-column explanation not covered."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-052",
+          "key": "g079/l2",
+          "latest_line": 12,
+          "recommendation": "needs-parent",
+          "bucket": "other",
+          "underlying_key": "grid-only-removal-leaves-hidden-pane-fitaddon-rationale-stale",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The stale explanation is a real in-range maintenance-documentation defect at f560058, independently of correct sizing. Commit 61e63232 corrects it before the review endpoint. It is neither out-of-range nor source-refuted at its reviewed revision; the result schema has no resolved-in-range disposition.",
+          "checks": [
+            "f560058 app.css:8567-8580 still explains hidden sizing with FitAddon.fit() and zero columns. Its lib.rs diff removes VENDOR_FIT_JS registration/injection, and mounting at terminal.js:3387-3393 constructs and fits only the grid.",
+            "f560058 grid-terminal.js:462-497 says no layout box/font metrics proposes nothing, returns for nonfinite dimensions, and retains fitted until a usable changed fit. Correct production behavior does not validate the stale comment.",
+            "61e632323dbc6b4a35ed27bf5b9833102ffd5a4e app.css:8571-8575 replaces the rationale with the grid being unable to propose a fit without a layout box. The same corrected text is present at endpoint 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:8571-8575. git log for the range lists both introducing renderer removal and corrective comment commit."
+          ],
+          "coverage_checked": [
+            "Current SPEC_impl.md:1836-1870 specifies deterministic grid fitting and no retained sizing across visits; current SPEC.md's hidden-tab/text-size and terminal-host contract supplies context, not acceptance of the stale explanation.",
+            "TODO Planned and unlanded-plan index are empty; no plan omission is used as cover. BUGS.md unrelated. Full queue INDEX.md and FitAddon/hidden-pane rationale searches found no exact current item. Active TRIAGE_OUTCOMES.md found no same comment decision. FILTER.md does not clearly cover this persistent maintenance explanation."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No factual premise remains for the historical defect or its correction. Parent must choose its bookkeeping treatment for an established defect resolved within the reviewed range.",
+          "original_stronger_consequence": "Maintainers are taught a removed component and the wrong sizing behavior as the reason hidden panes need layout boxes. Other priority; no security or user-work-loss consequence was suspected.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Historical defect confirmed; corrected by 61e63232 before endpoint. Preserve both facts and do not request another code fix. The supplied g182/c1 two-column test-comment issue is distinct."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "grid-only-removal-leaves-hidden-pane-fitaddon-rationale-stale",
+        "destination": "trailing-grid-only-removal-leaves-hidden-pane-fitaddon-rationale-stale.md"
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete: all 14 assigned patch parts read; no unread scope.\n\nNo reportable findings or open leads. Logged rejected candidates `c1` and `c2`, with source and contract evidence. Updated `progress.md`.\n\nSource-only review; no tests or reproductions run."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised `c1` with checks confirming the legacy-container guards survive grid-only rendering. Narrowed `c2` to the verified restart and snapshot paths.\n\nResolved `l1`: the production cleanup bug predates removal; the changed-test finding belongs to `g136/l1`.\n\nNo new reportable findings. Unresolved lead IDs: none. All conclusions are source-based; no reproduction run."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass complete. Rechecked assigned CSS, helper readiness/cancellation, teardown, rewritten comments, and whole-range attribution.\n\n- New verified: `l2` — stale FitAddon sizing rationale after renderer removal; corrected later in-range.\n- New unverified: none.\n- Open leads: none.\n\nSomething new was found. Source-only checks; no execution."
+    },
+    {
+      "turn": 4,
+      "reply": "Checked placement markup/CSS, style rules and hidden-text painting, buffer contracts, and mount/teardown ownership at pinned revisions.\n\n- New verified IDs: none.\n- New unverified IDs: none.\n- Open leads: none.\n\nNothing new found. Discovery count updated to 2. Source-only; no execution."
+    }
+  ],
+  "progress": "Group g079 — terminal-view-rendering.\n\nInitial review turn 1 complete. Discovery passes: 0 (the initial pass is not a subsequent discovery turn).\n\nCoverage: read the brief fully and inventory.json's complete commits field only. Read all 14 assigned source parts, 1,216 lines, in 16 evidence packets. No assigned patch material omitted or unread. Root AGENTS.md End sentinel was present. Read the priority and feedback-format rules, governing terminal/grid and retired-container contracts at the recorded revisions, and the test-review checklist in the brief. No excluded coverage sources read.\n\nSource checks: traced removed legacy container path admission through UI terminal eligibility, supervisor attach admission and new environment transport; traced grid mount readiness to registered/exported helper assets; traced Restart generation from the Rust view through JS reconciliation; traced retained recovery screens through freeze, restoration and disposal; inspected placement CSS against launcher markup and wrapping controls. The remaining changes in grid-buffer.js, grid-model.js, grid-style.js, the JS test, and the two earlier terminal.js comment patches change comments only. Removed legacy CSS classes have no surviving UI/asset callers at the removal revision.\n\nDurable records: c1 appended and revised (rejected container file-link candidate; could-be-highest, source/specification basis preserved for independent checking); c2 appended (rejected restart/snapshot lifecycle candidate). New verified findings: none. New unverified findings: none. Open leads: none. Candidates remain in the append-only log with proposed_drop reasons, not promoted to findings.\n\nInterface assumptions: each patch judged at its recorded commit; current terminals use supervisor-interpreted grids; old supervisor-outside container sessions are Delete-only and cannot attach; new environment supervisors run inside their environment. Restart identity remains path/gen; terminal-kind transition state belonged to removed tmux migration. Snapshot grid remains selectable but sends no program input. These are source/contract conclusions, not runtime observations.\n\nValidation: source-only review as assigned. No tests, builds, reproductions, live-install actions or checkout writes. Only private group artifacts written.\n\nNext action: return to the parent for its later synthesis/discovery prompt. Initial pass complete; no later-turn protocol performed inside this turn.\n\nSynthesis turn 2 complete. Turn type: later-turn synthesis; synthesis passes 1; discovery passes remain 0. New verified findings this turn: none. New unverified findings: none. New lead l1 was investigated and revised to a candidate; unresolved lead IDs: none.\n\nChanges this turn: revised c1 under its original ID with the shared byte/grid agent/tab admission check and the surviving grid-only guards at f560058. The potentially highest original consequence and exact specification acceptance remain in its detail for independent checking. Revised c2 under its original ID to limit the conclusion to the named restart/snapshot/readiness paths and explicitly exclude constructor-failure rollback. Recorded l1 immediately on receipt of the concrete lifecycle concern, then checked current and parent getters, creation order, disposal bodies, the rewritten fixture and the supported parent direct-grid path. l1 is now a source-confirmed pre-existing production defect with its changed-test attribution left to parent-supplied g136/l1, not a new g079 finding. No proposed drop has been accepted by the parent.\n\nInterface reconciliation: g081's supplied paste/readiness, clipboard, restart-identity and frozen-selection source facts support only those named interfaces. g083's byte-limit observation is treated as source input with its delivery repair pending, not replacement certification. Failed-grid-mount test safety cannot establish production rollback safety because its host object always exists while production's getGrid() result may be undefined. Legacy-container admission remains independently guarded before terminal resolution and does not depend on renderer choice.\n\nChecks were source/contract comparisons only; no execution or reproduction. No new unread assigned scope. All readily checkable premises raised this turn were settled. Next action: await the parent's next synthesis/discovery or independent-drop-check instruction.\n\nDiscovery turn 3 complete. Discovery-pass count: 1. The supplied discovery-neighbours.json was fully read in eleven repaired bounded ranges (1–54, 55–102, 103–172, 173–242, 243–312, 313–363, 364–401, 402–449, 450–519, 520–589, 590–608); the first oversized preview was clipped and was not relied upon for complete delivery. No neighbor log paths or prohibited coverage sources were opened.\n\nSynthesis before search: c2 was revised under its original ID to separate numerical restart identity from terminal admission. Supplied g088/l1 and g089/l1 prevent treating a generation increment as proof that Restart always shows a terminal. The supplied g196 old-page input concern remains distinct from c1's retired-container admission guard; no general old-page safety assertion is inferred from c1. Supplied g186's primary-clipboard guidance finding is distinct from clipboard read confidentiality. Known neighbor findings were not counted as new discoveries.\n\nNew search checked the assigned CSS placement selectors against grid/label ancestry and wrapping control rules; terminal padding, hidden-input and cursor styles against grid structure; mount helper gate cancellation and teardown field names; and the whole pinned-range comment-only diffs for grid-buffer/model/style and grid-buffer.test. Rechecked the two earlier terminal.js comment changes at their own revisions. No new executable rendering/placement/cleanup defect established by those checks.\n\nNew verified ID: l2 (lead immediately recorded, then resolved to finding): after f560058 removes FitAddon, app.css still explains visibility with that removed add-on and its zero-column model. Parent and exclusive-base still shipped the referent; the intermediate stale rationale is corrected by assigned 61e6323. This is an other-bucket historical documentation defect, not a current sizing bug. Source cites, attribution limits and later correction are in the durable event.\n\nExisting l1 revised with exclusive-base source checks, settling whole-range attribution of the constructor-failure getter rather than merely checking one commit's parent. The changed-test defect remains separately attributed to g136/l1, not refuted by production pre-existence. No parent drop accepted.\n\nNew verified findings this pass: l2. New unverified-after-investigation findings: none. Open lead IDs: none. Explicit discovery result: something new was found, limited to intermediate documentation drift already fixed later in-range. All assigned patch scope remains read; no omitted scope. No tests, builds, reproductions, live-install actions or checkout writes. All conclusions are source/contract-based.\n\nNext action: return the discovery delta to parent. A new substantive discovery requires a later pass if parent requests continuation; no second discovery pass was folded into this turn.\n\nDiscovery turn 4 complete. Discovery-pass count: 2. Read the refreshed discovery-neighbours.json fully before the new source search, in bounded ranges 1–54, 55–102, 103–172, 173–242, 243–287, 288–357, 358–410, 411–458, 459–494, 495–542, 543–612, 613–665, 666–710 and 711–761. No clipping remained. No neighbour log files or prohibited coverage sources opened.\n\nPre-search synthesis: refreshed caller/compatibility, failed-mount fixture, formatting and documentation records do not invalidate this group's already narrowed c1/c2/l1/l2 boundaries. The supplied formatting gaps are not evidence that the changed style comments certify complete renderer parity. Previously supplied Restart admission and stale-page input findings remain distinct from numerical identity, retained snapshots and retired-container admission. No known interface issue was claimed as a new local discovery, and no parent drop/lowering was inferred.\n\nIndependent new search inspected placement controls' actual recipe/host label ancestry and disabled/native control semantics against the added flex/block selectors; the changed style-rule explanations against resolveStyle/styleCss and the renderer's hidden-text substitution; column-selection and link-line documentation against their concrete row/width/tag adapters; and reconciliation across all four ownership maps against mount registration and changed teardown fields. Source confirmed hidden characters are substituted with spaces in the painter, style declarations implement the documented explicit flags, placement labels remain native labels around their selects, and terminal cleanup reads the same fields the successful mount publishes. Those checks add no new reportable consequence or substantive unresolved lead in the assigned patches.\n\nNew verified IDs this pass: none. New unverified-after-investigation IDs: none. Open lead IDs: none. Explicit discovery result: nothing new found. Existing findings/candidates and their proposed-drop bases remain intact; no log events invented for activity. No assigned scope omitted. No runtime test, reproduction, build, live-install action or checkout write. All checks were source/contract analysis. Next action: return the empty discovery delta to parent.\n"
+}

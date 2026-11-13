@@ -1,0 +1,253 @@
+[
+  {
+    "key": "g049/l1",
+    "latest_line": 12,
+    "recommendation": "needs-parent",
+    "bucket": "other",
+    "underlying_key": "environment-history-obsolete-claim-after-adoption",
+    "aliases": ["g050/c1"],
+    "target_queue_file": null,
+    "why": "This record contains two distinct roots. Its original obsolete-completion suspicion is source-refuted on the checked production path. Its latest provenance synthesis corroborates g050/l1, which should be retained once. Do not turn either conclusion into a whole-record dismissal.",
+    "checks": [
+      "52cc5d7250d262f93b730d91a07c240d33c2ea5f:store/environment_history.rs:60-99 has bounded independent source keys; store.rs:8282-8299 purges ordinary partitions on adoption but preserves this projection. These facts alone do not establish production replay admission.",
+      "52cc5d7250d262f93b730d91a07c240d33c2ea5f:store.rs:8789-8830 separates storage-only ingress from captured-operation ingress; :8863-8885 invokes current() under the database connection and checks durable identity; :9121 commits before the closure and _guard leave scope.",
+      "56659839785691f76da3af5d8f51b511cff4ba8b:sessions.rs:2065-2108 and 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:sessions.rs:2202-2244 acquire the host writer and return it only when entry UUID, incarnation, connected identity and live client match. Endpoint db.rs:230-244 owns the SQLite mutex throughout work; manager.rs:2940-3004 commits adoption then withdraws the client and changes incarnation. This closes the stated obsolete A-to-B-to-A route, including a cancelled async waiter after blocking submission.",
+      "190d844e58c96cf197aa838d0b0eea8062f48435:sessions.rs:2051-2060 withholds explicit_selection for agents, but :2204-2233 independently supplies environment_target. The current-claim guard supplies no GUI-origin bit. The resulting distinct default/history effects are checked under g050/l1. All conclusions are source-only."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:5122-5127 excludes agent creates from GUI defaults and recents; SPEC_impl.md:5133-5140 requires GUI selection provenance and :6020-6023 forbids replay changing intent/frequency. Neither accepts the agent-origin effect.",
+      "TODO.md Planned is empty (:25-26). Searches of unlanded plans, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no exact obsolete-completion or agent-origin convenience-bookkeeping cover. Podman/environment-agent plans are recorded landed in plans/REPORTS.md:21,28.",
+      "Read canonical-folder-history-contract-conflict.md and history-reply-lacks-installation-provenance.md: they concern host canonical reply spelling and response relabeling, not this guarded write or agent-origin admission. No exact alias or useful extension established.",
+      "FILTER.md supplies no full match: the established agent-origin effect is durable and does not require a human subsecond race. Replay refutation rests on source, not rarity."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No missing source premise remains for the narrow obsolete-claim refutation or g050/l1 corroboration. A stronger security-default consequence would require an actual production ingress bypassing the checked claim/identity boundary; none is established here.",
+    "original_stronger_consequence": "Obsolete create completion after identity A-to-B-to-A and bounded-key eviction could restore older permission/wrapper defaults or launch authority without current confirmation. Preserve this conditional security concern and the initial absence-of-caller withdrawal; the later provenance finding does not replace it.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Split at recording: put the obsolete-claim source refutation together with g050/c1 into the independent drop register; retain g050/l1 once and cite this record as corroboration. This consultation authorizes neither dismissal nor consequence lowering."
+  },
+  {
+    "key": "g049/c2",
+    "latest_line": 3,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "podman-place-removal-before-artifact-fence",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The intermediate storage patch omits the recipe-artifact fence, but has no shipped artifact producer. The provider-stage implementation adds the fence before the checked production capability. This is narrower than claiming every later cleanup path is safe.",
+    "checks": [
+      "04ffdbb35773cef36e73eb798c005ddbeb9a9de6:store/podman.rs:183-195 checks environment rows only. git grep for register_session_container, BuiltImage/PreparedImage construction and podman.insert/entry finds declarations and test fixtures, not production artifact creation; the sole podman.insert is environment/recipes_tests.rs:104.",
+      "56659839785691f76da3af5d8f51b511cff4ba8b:store/podman.rs:215-250 additionally reads every recipe state, refuses unreadable ownership state and checks PodmanRecipeState::needs_cleanup for the place. This is an actual recipe-resource fence, not a later cosmetic repair. No runtime test was run."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md Container sessions:4866-4871 and SPEC_impl.md Environment rows and provider state:5964-5970 require retaining cleanup access while rows or recipe artifacts refer to the place; they do not accept losing it.",
+      "TODO Planned is empty. Searches of plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no exact same trigger/consequence item. The matching podman-environments plan is already landed (plans/REPORTS.md:21), so it is not unlanded-plan cover.",
+      "Read confirmation-rollback-omits-container-cleanup.md: its supervisor borrowed-checkout rollback and missing failure producer are a different root. FILTER supplies no cleanup-access-loss acceptance."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "The claimed intermediate-revision consequence requires a shipped producer of retained Podman recipe resources; the focused symbol searches find none.",
+    "original_stronger_consequence": "Removing or retargeting a place could lose cleanup access to retained recipe resources. The primary record did not establish loss of user-owned work or a security route; resource-ownership implications are preserved conservatively.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Absent production artifact creation at 04ffdbb35773cef36e73eb798c005ddbeb9a9de6, followed by a transactional needs_cleanup fence at the provider integration. Independent checking should agree only to this staged omission, not a general cleanup guarantee."
+  },
+  {
+    "key": "g049/c3",
+    "latest_line": 10,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "environment-history-deleted-place-id-reuse",
+    "aliases": ["g050/c2"],
+    "target_queue_file": null,
+    "why": "Ordinary deletion/addition does not recycle the numeric place ID. Retaining reusable place intent is specified. This conclusion says nothing about changing the endpoint of a surviving row or answering an old approval.",
+    "checks": [
+      "52cc5d7250d262f93b730d91a07c240d33c2ea5f:store.rs:2714-2715 declares hosts.id INTEGER PRIMARY KEY AUTOINCREMENT. environment_history.rs:23-34 retains a serialized target without a host foreign key. A deleted host's ordinary replacement therefore cannot acquire that saved ID.",
+      "00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:create_form/draft.rs:1948-2043 restores recent intent into an editable draft, including target at :2005; environment_ui.rs:716-732 uses remembered place only as a picker default. Neither is the approval endpoint-binding mechanism.",
+      "190d844e58c96cf197aa838d0b0eea8062f48435:agent_requests.rs:4485-4515 captures place name plus numeric place before approval; :4519-4548 rechecks clone source then passes place to start_session_environment without a route snapshot. This supports the supplied distinction; the complete cold-place retarget/credential consequence remains attributed to the parent-supplied g020/l1, not independently re-proved here. No runtime observation."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:4873-4875 expressly requires missing recent targets to remain unavailable. SPEC_impl.md:6015-6023 separates reusable recipe/place intent from installed identity.",
+      "Current SPEC_impl.md:9090-9098 separately requires the confirmed machine to stay the same while approval waits. This is no acceptance of a changed-endpoint approval.",
+      "TODO Planned is empty. Searches of unlanded plans, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no exact deleted-ID reuse or pending-environment approval cover. Matching historical environment plans are landed. Read history-reply-lacks-installation-provenance.md: it concerns relabeling an already-read history response, not ID reuse or pending place approval. No filter fully covers wrong-target credential/execution harm."
+    ],
+    "exact_cover_quotes": [
+      "SPEC.md:4873-4875: Recent setups retain the recipe, container host when applicable, explicit agent selection and repository-or-home intent after Delete removes the environment. Applying one creates a fresh environment. A missing recipe or container host stays unavailable until the user changes that choice."
+    ],
+    "missing_premise": "Deleted-ID reuse is refuted for ordinary row operations. The separately supplied changed-endpoint finding needs its own complete retarget/dispatch evidence and independent handling; reusable-history storage is not that authority boundary.",
+    "original_stronger_consequence": "Original suspicion: a deleted place ID could select another host and deliver credentials there. Later supplied g020/l1 asserts credential copying and execution on a retargeted surviving SSH row after an old approval; that highest consequence is explicitly preserved and is not dismissed by this recommendation.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Refute deleted-row ID aliasing only; cover deliberate missing-place retention by the exact specification. Keep the separately owned changed-endpoint approval finding intact."
+  },
+  {
+    "key": "g049/c4",
+    "latest_line": 9,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "environment-destruction-proof-extraction-lifetime",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The provider-proof extraction preserves the row-specific removal gate, and the inspected callers construct and consume evidence within one serialized cleanup/removal operation. No stale reusable proof route is established.",
+    "checks": [
+      "ee39aeacdaccfeaa0cea25246540b20008c868f0:store.rs:7883-7913 requires matching proof.host() for Tensorlake removal; environment/mod.rs:197-210 wraps the opaque provider proof and delegates host identity.",
+      "Same revision hosts.rs:1377-1385,1420-1478 holds the provisioning guard across captured-binding destruction, immediate delete_registered_host and actor/tunnel retirement. provisioning/service.rs:2055-2091 documents that prerequisite and retains the host writer across store removal and actor removal.",
+      "Same revision tensorlake/hosts.rs:48-71 keeps successful attestation private; :240-308 uses saved ID or pending-create evidence, saves recovered IDs, confirms termination and removes snapshots before attestation. Errors return without proof. The no-saved-ID/no-pending-create path at :242-243 is the explicit never-created exception.",
+      "Same revision provisioning/tensorlake_add.rs:530-568 serializes registration with add_confirmations and constructs never_created only after registration/reconciliation failure before starting run setup. It immediately removes that new row. No proof cache or arbitrary delayed consumption was found in these named callers; no runtime reproduction."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md:5969-5970 requires provider-confirmed cleanup before forgetting a row; :6273-6275 documents pre-create registration rollback. SPEC.md Container sessions requires confirmed absence before forgetting resources. No acceptance of arbitrary stale proof or forgotten live resources was found.",
+      "TODO Planned is empty. Searches of unlanded plans, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no exact provider-proof extraction/lifetime item. confirmation-rollback-omits-container-cleanup.md concerns a different supervisor row-removal mechanism. No filter supplies the source-refutation basis."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No supported caller retaining or reusing a proof across resource replacement is established by the named extraction. This conclusion is limited to the checked construction and consumption paths.",
+    "original_stronger_consequence": "A weakened destruction gate could forget a still-owned resource, lose its cleanup record or affect user work. Preserve this could-be-highest suspicion even though the checked extraction does not weaken the gate.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Unchanged host-bound gate plus actual locked provider construction and immediate consumption, including the separately contracted pre-create rollback. Obtain an independent narrow source-refutation agreement before dropping."
+  },
+  {
+    "key": "g049/c5",
+    "latest_line": 13,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "environment-history-pruning-rowid-reuse",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Ordinary pruning retains the greatest admission key, so omission of AUTOINCREMENT does not cause the proposed key reuse and recency inversion.",
+    "checks": [
+      "52cc5d7250d262f93b730d91a07c240d33c2ea5f:environment_history.rs:23-34 uses INTEGER PRIMARY KEY; :93-99 deletes only keys below the newest MAX_LAUNCH_HISTORY entries. store.rs:101 fixes that cap at 100. The maximum therefore survives each ordinary prune.",
+      "The same projection has no host-deletion foreign key; store.rs:8282-8299 adoption deletion names only ordinary history tables. git grep finds this projection's sole DELETE at environment_history.rs:94, and git diff from the foundation to 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db shows no change to that file. No ordinary maximum-removal/reset route is present. No execution."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md:6020-6023 requires shared admission ordering and stable replay frequency; SPEC.md:4873-4875 requires retained reusable intent. Neither accepts misordering, but source does not establish it.",
+      "TODO Planned is empty. Searches of plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md for pruning, admission, replay and environment recents found no exact same issue. Existing terminal replay/history items have different data and consequences. No filter is needed."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "The posited implicit-key reuse requires removing the current maximum or emptying/resetting the table; no ordinary path does that in the checked range.",
+    "original_stronger_consequence": "Wrong ordering of convenience suggestions only; no stronger security or user-work-loss consequence was claimed. This does not refute agent-origin window eviction in g050/l1.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "The nonzero newest-first pruning cap preserves the maximum, which is the premise the suspected ordinary ROWID reuse lacks."
+  },
+  {
+    "key": "g050/c1",
+    "latest_line": 6,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "environment-history-obsolete-claim-after-adoption",
+    "aliases": ["g049/l1"],
+    "target_queue_file": null,
+    "why": "Actual introducing and endpoint callers satisfy the guarded history-write contract. The early absence of production callers is only a foundation-stage observation, not the whole-range refutation.",
+    "checks": [
+      "52cc5d7250d262f93b730d91a07c240d33c2ea5f:store.rs:8789-8830 restricts the unguarded wrapper to storage-only use; :8863-8885 calls current() while owning SQLite and verifies durable identity; :9121 commits before the returned guard leaves scope.",
+      "56659839785691f76da3af5d8f51b511cff4ba8b:sessions.rs:2065-2108 and 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:sessions.rs:2202-2244 acquire host_write_lock and check captured entry UUID, never-reused incarnation, live client and Connected identity inside the storage closure. The closure moves and returns the owned writer guard.",
+      "Endpoint supervisor/db.rs:230-244 locks the shared connection throughout the blocking closure. manager.rs:2940-3004 commits adopt_identity before withdrawing its client and bumping incarnation; :2539-2564 specifies writer-lock survival across actor replacement. Thus adoption cannot interleave between guard check and SQL commit, durable identity closes commit-before-publication, and a later identity return cannot reuse the captured connection token. No runtime execution."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md:6020-6023 forbids replay from changing captured intent/frequency; SPEC.md:5122-5127 requires GUI-choice provenance. No accepted stale-operation exception found.",
+      "TODO Planned is empty. Targeted searches of unlanded plans, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no exact guarded-history-write concern. Read history-reply-lacks-installation-provenance.md: it concerns an unbound client response, not this serialized server write. FILTER is not the proposed basis."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No missing premise remains for this narrow production-history-path refutation. Any stronger route would require another shipped ingress bypassing these authority checks; none is shown by this named claim.",
+    "original_stronger_consequence": "A delayed obsolete create after A-to-B-to-A adoption and bounded-key eviction could replace newer remembered permission/wrapper settings, potentially restoring security-relevant defaults. Preserve the initial withdrawal and later integration investigation; the original stronger concern still needs independent drop agreement.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Same narrow refutation as g049/l1's replay portion: actual authority check runs under SQLite and its returned guard lives through commit. This does not refute g050/l1's current agent-origin effect or the separately supplied changed-place approval concern."
+  },
+  {
+    "key": "g050/c2",
+    "latest_line": 5,
+    "recommendation": "covered",
+    "bucket": "other",
+    "underlying_key": "environment-history-deleted-place-id-reuse",
+    "aliases": ["g049/c3"],
+    "target_queue_file": null,
+    "why": "The original unavailable-retained-place behavior is expressly required. Deleted-ID reuse is independently refuted. Neither statement excuses a pending approval following a changed physical endpoint of an existing row.",
+    "checks": [
+      "52cc5d7250d262f93b730d91a07c240d33c2ea5f:store.rs:2714-2715 uses AUTOINCREMENT; environment_history.rs:23-34,82-88 intentionally retains target/default IDs independently of disposable host deletion.",
+      "00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:create_form/draft.rs:1978-2005 separates installed-host history from reusable targets and restores the latter into a fresh draft; environment_ui.rs:716-732 uses a remembered host only as a current-place picker default. These are reusable intent consumers, not proof that a pending approval's machine stayed unchanged.",
+      "190d844e58c96cf197aa838d0b0eea8062f48435:agent_requests.rs:4485-4515,4519-4548 confirms the separate name/place capture versus after-Allow launch boundary. The parent-supplied g020/l1 owns the complete harmful retarget route; it was not independently re-proved or lowered here. Source-only."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:4873-4875 exactly covers retained but unavailable missing place intent; SPEC_impl.md:6015-6023 requires recipe/place targets separately from installed-host identity. SPEC_impl.md:9090-9098 separately requires approval to stay bound to the shown machine.",
+      "TODO Planned is empty. Targeted searches of unlanded plans, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no additional exact cover. The matching Podman and agent-environment plans are landed (plans/REPORTS.md:21,28). Existing history reply/canonical-path queue items are distinct. No filter is used."
+    ],
+    "exact_cover_quotes": [
+      "SPEC.md:4873-4875: Recent setups retain the recipe, container host when applicable, explicit agent selection and repository-or-home intent after Delete removes the environment. Applying one creates a fresh environment. A missing recipe or container host stays unavailable until the user changes that choice.",
+      "SPEC_impl.md:6015-6018: Recipe templates, Clone, quick launch and recent setups carry a recipe/place target separately from installed-host identity, never both. Missing recipes or place hosts are inapplicable."
+    ],
+    "missing_premise": "No missing premise for unavailable-place retention. Endpoint stability of a surviving row is a separate action-interface obligation, not established by retained numeric identity.",
+    "original_stronger_consequence": "Initial concern was unavailable remembered placement, without an established highest route. Later history preserves the supplied g020/l1 highest consequence: recipe credentials and commands may reach a changed endpoint after stale approval. This recommendation does not dismiss that external finding.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Apply specification cover only to missing-place retention and source refutation only to deleted-ID reuse. Require a scoped independent check because the history explicitly carries the separate wrong-machine security concern."
+  },
+  {
+    "key": "g050/l1",
+    "latest_line": 8,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "agent-environment-launch-mutates-gui-convenience-history",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "A successful approved current agent environment launch supplies environment_target but no explicit GUI selection. The projection still changes container-place memory and ages the shared recent window. This contradicts the explicit agent-origin exclusion for GUI suggestions.",
+    "checks": [
+      "190d844e58c96cf197aa838d0b0eea8062f48435:agent_requests.rs:4477-4483 builds an agent request and :4541-4548 passes it to start_session_environment. provisioning/tensorlake_add.rs:357-361 attaches the target without origin filtering; :465-469 retains that request; :1007-1013 sends it to session creation.",
+      "Same revision sessions.rs:1243-1252 preserves Agent origin; :1848-1863 propagates it and :1893 captures target. :2051-2060 supplies no explicit_selection for agents. :2099-2109 puts target and selection into acceptance; :2152-2154 records history; :2204-2233 allows session-owned environment targets and supplies no GUI-origin discriminator to storage.",
+      "52cc5d7250d262f93b730d91a07c240d33c2ea5f:store/environment_history.rs:49-75 accepts target plus NULL selection, :82-88 changes last_container_host and :93-99 ages the shared window; :111-115 hides NULL rows only on reading structured recents. The file is unchanged through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db.",
+      "Endpoint environment_ui.rs:716-732 chooses the remembered usable place and :781-792 applies it to New container. Foundation store.rs:10555-10598 explicitly demonstrates by fixture/assertion that NULL-selection launches at distinct hosts evict structured recents. Tests were inspected, not executed."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:5122-5127 and introducing 190d844e58c96cf197aa838d0b0eea8062f48435:SPEC.md:5158-5163 expressly exclude anything an agent creates from GUI defaults and recent suggestions. Current SPEC_impl.md:5133-5140 also requires explicit GUI provenance. Its general bounded-history paragraph (:6020-6023) does not create an agent-origin exception.",
+      "SPEC.md Creation:959-965 says New container defaults to the last container host used. Read with the explicit remote-input provenance rule, this does not authorize agent-created history markers to evict GUI suggestions; that effect remains unambiguously excluded even if place-default wording is interpreted broadly.",
+      "TODO Planned is empty. The Mid-term deferred sandbox-conveniences entry (:325-329) is neither Planned nor agent-origin contamination coverage. Targeted searches of unlanded plans, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no exact trigger/consequence/scope match. Podman and agent-environment plans are landed.",
+      "Read canonical-folder-history-contract-conflict.md and history-reply-lacks-installation-provenance.md: they concern different source/response provenance roots, not successful current agent launch markers. No useful exact-item extension established.",
+      "FILTER.md has no full match: no human subsecond action is needed; successful launches durably change place memory and bounded suggestions. Convenience history alone is not user-owned work, but that does not satisfy a filter's trigger."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No missing source premise for these conditional effects. Actual occurrence/frequency is unmeasured. Requires approved successful agent environment creation on a current connection; evicting the entire 100-entry window requires enough fresh creates. No execution, credential exposure or loss of user-owned work follows from the established convenience effects alone.",
+    "original_stronger_consequence": "The lead proposed changed GUI place preselection; the completed finding adds shared-window suggestion eviction. It never established a security or user-work-loss route. The obsolete-completion suspicion under g049/l1 and changed-endpoint approval under parent-supplied g020/l1 remain separate roots.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Record one other-priority finding for missing GUI-choice provenance in environment convenience bookkeeping. Preserve raw GUI command launches as eligible; target presence or an agent card's Allow is insufficient provenance. Cite g049/l1's latest synthesis as corroboration without merging its independently checked replay concern."
+  },
+  {
+    "key": "g050/c3",
+    "latest_line": 9,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "sparse-preference-upsert-resets-container-place",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Unrelated preference updates do not replace the row or reset omitted columns. The explicit conflict-update list leaves remembered container place untouched.",
+    "checks": [
+      "52cc5d7250d262f93b730d91a07c240d33c2ea5f:store.rs:6100-6130 uses INSERT ... ON CONFLICT(singleton) DO UPDATE with explicit SET assignments, none for last_container_host. Existing rows preserve that column; a newly inserted row has no prior memory to lose.",
+      "The same revision environment_history.rs:82-88 independently updates only last_container_host. git grep of helm source finds no REPLACE INTO preferences or DELETE FROM preferences. The proposed accidental replacement/reset mechanism is absent. No execution."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md Creation:961-962 requires remembering the last used container host; SPEC_impl.md:6020-6023 places environment intent in successful-create bookkeeping. Neither accepts erasure, but source does not perform it.",
+      "TODO Planned is empty. Targeted searches of plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no exact unrelated-preference-reset cover. Existing preference-fixture races concern separate asynchronous writers, not SQL conflict semantics. No filter is used."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "The hypothesized reset requires row replacement or assignment of last_container_host during unrelated preference updates; neither occurs in the checked SQL.",
+    "original_stronger_consequence": "Wrong convenience preselection only. No security or user-owned-work route was claimed; g050/l1 concerns intentional agent-origin writes and is not refuted here.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Explicit sparse UPSERT semantics preserve the omitted column."
+  },
+  {
+    "key": "g050/c4",
+    "latest_line": 10,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "environment-history-selection-test-oracle-indistinguishable",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Although the named provenance test has one equal-selection fixture, a sibling newly added test supplies a command peer reply and separately asserts the explicit structured choice. The added test set can distinguish the posited wrong-source mutation.",
+    "checks": [
+      "52cc5d7250d262f93b730d91a07c240d33c2ea5f:store.rs:9957-9973 makes session() return SessionLaunch::plain_command, with no peer agent selection. :10253-10263 constructs the independent Codex/model/effort choice; :10268-10287 passes it explicitly to history.",
+      "Same revision :10296-10308 builds that command reply, records it through the explicit-selection helper and asserts the resulting structured choice. Taking selection from the peer after merely checking explicit_selection presence would fail this assertion. This is test-fixture/assertion evidence, not an inference from correct production behavior. No tests or mutation runs were executed."
+    ],
+    "coverage_checked": [
+      "SPEC.md:5122-5127 and SPEC_impl.md:5133-5140 require explicit request choice rather than supervisor reply. The sibling assertion directly distinguishes that contract.",
+      "TODO Planned is empty. Targeted searches of unlanded plans, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md for environment-history selection/oracle/provenance found no exact same test defect. Existing history-fixture-reset-races-selection-save.md concerns browser preference-write ordering and is not this test oracle. No filter is used."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No missing source premise for refuting the claimed absence of a distinguishing test in the added set. This does not assert mutation-test execution or completeness against every possible provenance regression.",
+    "original_stronger_consequence": "A possible blind spot in regression coverage only; no current product security/work-loss defect was claimed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Actual distinct command-peer versus explicit structured-selection fixture plus the saved-selection equality assertion in the sibling test."
+  }
+]

@@ -1,0 +1,85 @@
+[
+  {
+    "key": "g059/l5",
+    "latest_line": 19,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "shared-recipe-container-base-summary-raw-presentation",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The shared recipe summary relays saved container image reference and login-user text without visibly escaping presentation-unsafe characters. This violates the renderer's explicit authorship boundary. Saving and listing a recipe precede provider resolution, so an image reference accepted by Podman is unnecessary for this display route. The established consequence is misleading spelling or surrounding summary text, not wrong-target execution, HTML execution, credential disclosure or loss of user-owned work.",
+    "checks": [
+      {
+        "source": "g059/findings.jsonl:17-19",
+        "result": "Read all three l5 events. Line 17 is an open lead; line 18 establishes the rendering/validation mismatch but leaves save/list, attribution and persistence to check; line 19 supplies those checks and closes the lead as a finding. All three keep the consequence at misleading presentation and suggest other. No withdrawal, proposed drop or stronger established consequence appears in this own-ID history."
+      },
+      {
+        "source": "56040bb964270bb40d191902173dbb84b3ba78fc:crates/farhelm-ui/src/tensorlake/recipes.rs:54-81,458-464",
+        "result": "recipe_summary interpolates reference and user directly into one UI-authored sentence; RecipeList places that String directly in recipe-row-summary. The introducing branch is actually at lines 72-74, rather than the latest record's approximate 74-76. No display_peer or separately isolated peer run intervenes. The source establishes the missing visible escaping; physical bidi layout and frequency were not measured."
+      },
+      {
+        "source": "56040bb964270bb40d191902173dbb84b3ba78fc:crates/farhelm-proto/src/recipes.rs:75-92,716-734,758-798; crates/farhelm-proto/src/tensorlake/recipes.rs:1-4; crates/farhelm-proto/src/text.rs:14-79",
+        "result": "ContainerImage holds ordinary String fields. Its validator rejects empty reference/user and NUL, while deliberately leaving reference syntax and account resolution to Podman/inspection. U+200B and U+202E therefore pass this branch and are both classified presentation-unsafe. The canonical validator is src/recipes.rs; the old tensorlake path only re-exports it. The earlier image/snapshot branches have restrictive ASCII grammars."
+      },
+      {
+        "source": "56040bb964270bb40d191902173dbb84b3ba78fc:crates/farhelm-helm/src/environment/recipes.rs:133-181; crates/farhelm-helm/src/tensorlake/recipes.rs:248-284,485-548; crates/farhelm-ui/src/api/tensorlake_recipes.rs:45-57",
+        "result": "Recipe::saved runs check_recipe and moves save.base unchanged into the stored definition; view clones it unchanged. Create serializes that definition into spec_json and returns its view without starting a build. GET maps stored rows to views locally, explicitly without calling Tensorlake. The UI decodes RecipesView directly. Credential-name and owned-snapshot checks do not require a container image or account to resolve. This is a shipped save/list route before provider execution, not a hypothetical successful engine input."
+      },
+      {
+        "source": "56040bb964270bb40d191902173dbb84b3ba78fc:crates/farhelm-ui/src/tensorlake/recipe_editor.rs:128-153,217-228",
+        "result": "The staged editor's from_view/to_save paths clone the raw container reference/user. Raw round trips are correct and are not the defect. The display repair should escape each visible value while retaining raw bytes for storage and provider arguments; this consultation does not request stricter provider syntax."
+      },
+      {
+        "source": "56040bb964270bb40d191902173dbb84b3ba78fc:crates/farhelm-ui/src/peer.rs:1-66,159-180; SPEC.md:4825-4867",
+        "result": "peer.rs explicitly draws the boundary by authorship, covers every relayed value including values generated locally, requires the same presentation/raw distinction for directly decoded proto types and plain-string snapshots, and includes any surface mixing UI words with someone else's. display_peer emits visible <U+XXXX> spellings. The module explicitly distinguishes Dioxus text-node markup safety from visual bidi/invisible-character effects. SPEC.md's narrower host-supplied-text rule supports visible escaping but does not establish that a remote agent can edit recipes; this local catalog finding rests on the broader renderer contract."
+      },
+      {
+        "source": "6e423e30068b62c6cfa276c6d720ee35bb70387a:crates/farhelm-proto/src/tensorlake/recipes.rs:713-744; full-range git log -G 'ContainerImage|base: container image' over UI/proto; 56040bb964270bb40d191902173dbb84b3ba78fc parent diff",
+        "result": "The exclusive base has only the ASCII-restricted image/snapshot choices and no ContainerImage case. The complete pinned-range matching history identifies 56040bb964270bb40d191902173dbb84b3ba78fc as the relevant introduction; its UI diff adds the raw container reference/user summary branch. The named defect is in range."
+      },
+      {
+        "source": "56040bb964270bb40d191902173dbb84b3ba78fc..00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db diffs for UI summary/API, proto validator and helm save/list files; 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:crates/farhelm-ui/src/tensorlake/recipes.rs:55-82,478-485; those files and peer.rs through 24bc058066fd57848e788b465719b0e6da2f98f7",
+        "result": "The entire summary/API diff leaves the raw composition and span intact; the proto diff adds only RecipePlaceView export; helm changes affect build state/deletion rather than the checked save/list projection. Tip lines 73-74 and 484 still contain the route. The checked files have no later difference through recording-time main. No runtime, reproduction, tests, builds, process operations or checkout mutations were performed."
+      }
+    ],
+    "coverage_checked": [
+      {
+        "source": "SPEC.md at recording-time main, recipe catalog paragraphs:449-488 and Local authority and trust between hosts:4903-4948",
+        "result": "Searched recipe/container reference, summary/display, invisible and direction-changing terms; read the governing catalog and trust passages. Catalog scope requires displaying base/provider facts and accepts custom container reference/user choices. The trust passage requires visible escapes for host-supplied text and does not explicitly accept raw invisible formatting in local recipe summaries. No exact accepted-behavior cover."
+      },
+      {
+        "source": "SPEC_impl.md at recording-time main, Shared recipes and prepared artifacts:6011-6056, Tensorlake recipes:6396-6436, peer-presentation references:1277-1300 and diagnostic normalization:2869-2894",
+        "result": "Searched both recipe-summary/container-reference terms and peer/presentation/escaping terms; read matching governing passages. Shared raw storage and provider syntax are operational contracts, not authorization to render those values verbatim. Diagnostic normalization and host-name presentation are different scopes. No explicit exception accepting this summary behavior."
+      },
+      {
+        "source": "TODO.md:23-27, Planned bucket",
+        "result": "The current Planned bucket is empty. No planned item covers the trigger, consequence or summary sink. Read-only coverage check of the supplied recording-time main; no fetch/rebase or TODO mutation."
+      },
+      {
+        "source": "plans/queue/, all queued plan text searched; matching sections in podman-environments.md:250-276,370-418, approval-cards-fit.md:125-147,185-200 and host-progress-hover.md:112-126",
+        "result": "Searched all queued plans, which includes every unlanded plan, for recipe_summary, ContainerImage, reference/login user, recipe summary/display, Unicode/bidi/invisible/direction changes and display_peer/PeerLine. Podman's plan introduces the shared container-base catalog but does not promise a recipe-summary presentation repair. Escaping requirements in approval-card and host-progress plans apply to those separate surfaces. No queued plan states work removing this recipe-summary cause, regardless of the broader Podman plan's landing status."
+      },
+      {
+        "source": "BUGS.md, entire file",
+        "result": "Its sole known-bug entry concerns an SSH helper retaining provisioning output. No recipe or presentation coverage."
+      },
+      {
+        "source": "review_feedback_queue/INDEX.md, entire file in bounded chunks; matching queue-file searches; remote-version-display-retains-format-characters.md and peer-text-normalization-contract-overstates-retained-scope.md, entire files",
+        "result": "No item describes saved container base/reference/user summary text. The remote-version item is the closest display-policy relative, but its producer is remote --version stdout and its sink is recipe build-status text, not recipe_summary. The normalization item is a specification wording defect about retained raw operational text, not raw GUI display. Other indexed direction/escaping issues concern host hover/rail grouping, copied paths or diagnostics. No exact alias or existing item whose stated scope covers this trigger and consequence. A shared escaping fix might touch the same UI module as the version item; that is repair context, not duplicate coverage."
+      },
+      {
+        "source": "TRIAGE_OUTCOMES.md, active ledger only; matching sections removal-copy-hidden-unicode-warning-unresolved.md:1664-1677 and settings-save-races-final-replacement.md:1756-end",
+        "result": "Searched recipe, container image, Unicode, invisible/bidi/direction-changing, display_peer/PeerLine and peer-text terms. The hidden-Unicode decision concerns copying an uninstall path; the recipe decision concerns remote credential file-write races. Neither settles recipe-summary display. No archive read."
+      },
+      {
+        "source": "review_feedback_queue/FILTER.md, entire file",
+        "result": "No full match. This is repeated summary display from saved literal fields, not a brief display that corrects itself on refresh, a safe retry failure or an imprecise diagnostic. No timing, older-release, unsupported-harness, systemd-hang or other narrow filter trigger is needed. Unsafe characters alone being unusual is not a filter."
+      }
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "None for the source-confirmed visible-escaping contract defect. Exact physical bidi rendering, observed frequency and any harmful downstream action were not tested. A stronger bucket would need an established route from this summary to security harm, acting on a wrong target, or loss of user-owned work; neither this own-ID history nor the checked source supplies one. Successful Podman resolution is not a missing premise for saving/listing.",
+    "original_stronger_consequence": "No stronger consequence was asserted in l5 events 17-19. The original suspicion was misleading visible spelling or adjacent text; all events explicitly disclaim an established security, wrong-target execution or user-work-loss route and HTML execution. Preserve those disclaimers and the progression from lead to verified source finding.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain a new verified other finding for the container-base recipe-summary display boundary. Keep raw save/storage/provider values intact. No dismissal, coverage claim, withdrawal or lowering from an earlier stronger consequence is proposed. This focused check is not an independent drop gate."
+  }
+]

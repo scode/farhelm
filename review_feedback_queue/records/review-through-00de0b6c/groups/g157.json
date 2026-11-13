@@ -1,0 +1,696 @@
+{
+  "group": {
+    "id": "g157",
+    "domain": "rust-terminal-host-regressions",
+    "purpose": "rust-terminal-host-regressions: crates/farhelm/tests/e2e/terminal_tabs.rs, crates/farhelm/tests/e2e/old_terminals.rs, crates/farhelm/tests/e2e/host_creates.rs, crates/farhelm/tests/e2e/host_processes.rs, crates/farhelm/tests/e2e/host_terminals.rs; phases -        fn drop(&mut self) {",
+    "interfaces": [
+      "g005",
+      "g006",
+      "g007",
+      "g009",
+      "g010",
+      "g011",
+      "g144",
+      "g145",
+      "g146",
+      "g151",
+      "g153",
+      "g154",
+      "g155",
+      "g156",
+      "g158",
+      "g159",
+      "g160",
+      "g161",
+      "g162",
+      "g163",
+      "g164",
+      "g165",
+      "g166",
+      "g167",
+      "g168",
+      "g169",
+      "g170",
+      "g171",
+      "g172",
+      "g173"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00802-002.patch",
+        "ranges": [
+          [
+            1,
+            566
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/terminal_tabs.rs",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "-        fn drop(&mut self) {; patch character offsets [118328,142846)",
+        "lines": 566,
+        "bytes": 24540,
+        "start": 118328,
+        "end": 142846,
+        "original": "[private-run]/prep/originals/00802.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00882-000.patch",
+        "ranges": [
+          [
+            1,
+            598
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/old_terminals.rs",
+        "commit": "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4",
+        "notes": "patch header; patch character offsets [0,24549)",
+        "lines": 598,
+        "bytes": 24549,
+        "start": 0,
+        "end": 24549,
+        "original": "[private-run]/prep/originals/00882.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01128-000.patch",
+        "ranges": [
+          [
+            1,
+            83
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/host_creates.rs",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,3667)",
+        "lines": 83,
+        "bytes": 3667,
+        "start": 0,
+        "end": 3667,
+        "original": "[private-run]/prep/originals/01128.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01129-000.patch",
+        "ranges": [
+          [
+            1,
+            159
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/host_processes.rs",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,6958)",
+        "lines": 159,
+        "bytes": 6958,
+        "start": 0,
+        "end": 6958,
+        "original": "[private-run]/prep/originals/01129.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01132-000.patch",
+        "ranges": [
+          [
+            1,
+            57
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/host_terminals.rs",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,2691)",
+        "lines": 57,
+        "bytes": 2691,
+        "start": 0,
+        "end": 2691,
+        "original": "[private-run]/prep/originals/01132.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01400-000.patch",
+        "ranges": [
+          [
+            1,
+            50
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/old_terminals.rs",
+        "commit": "d751ff1633bb479c7bf53920f2e4ea4ba932a1c2",
+        "notes": "patch header; patch character offsets [0,2841)",
+        "lines": 50,
+        "bytes": 2841,
+        "start": 0,
+        "end": 2841,
+        "original": "[private-run]/prep/originals/01400.patch"
+      }
+    ],
+    "lines": 1513,
+    "bytes": 65246
+  },
+  "records": [
+    {
+      "key": "g157/c1",
+      "owner": "g157",
+      "id": "c1",
+      "domain": "rust-terminal-host-regressions",
+      "purpose": "rust-terminal-host-regressions: crates/farhelm/tests/e2e/terminal_tabs.rs, crates/farhelm/tests/e2e/old_terminals.rs, crates/farhelm/tests/e2e/host_creates.rs, crates/farhelm/tests/e2e/host_processes.rs, crates/farhelm/tests/e2e/host_terminals.rs; phases -        fn drop(&mut self) {",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Linux process oracles are gated away from other platforms",
+            "location": "crates/farhelm/tests/e2e/old_terminals.rs:437",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR: considered whether the new old-terminal tests fail on Macs because they use setsid and /proc. Source refutation: crates/farhelm/tests/e2e/main.rs:126-127 declares old_terminals only under #[cfg(target_os = \"linux\")]; its module documentation explains the Linux-only process-lifetime oracles, and the non-Linux test prints an explicit skip. No unsupported-platform execution route exists for these tests. Suggested bucket: other (test portability only). Confidence: confirmed by source, no execution. proposed_drop: platform-gated, so the suspected portability failure is unreachable. Could-be-highest: no; test-only portability, no user-data or security route. possible_cover: none; coverage sources not consulted. Caveat: this says nothing about production cleanup on Macs, which is outside the assigned test change."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Linux process oracles are gated away from other platforms",
+            "location": "crates/farhelm/tests/e2e/old_terminals.rs:437",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR: considered whether the new old-terminal tests fail on Macs because they use setsid and /proc. Source refutation: crates/farhelm/tests/e2e/main.rs:110-111 declares old_terminals only under #[cfg(target_os = \"linux\")]; its module documentation explains the Linux-only process-lifetime oracles, and the non-Linux test prints an explicit skip. No unsupported-platform execution route exists for these tests. Suggested bucket: other (test portability only). Confidence: confirmed by source, no execution. proposed_drop: platform-gated, so the suspected portability failure is unreachable. Could-be-highest: no; test-only portability, no user-data or security route. possible_cover: none; coverage sources not consulted. Caveat: this says nothing about production cleanup on Macs, which is outside the assigned test change."
+          }
+        }
+      ],
+      "latest": {
+        "line": 5,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Linux process oracles are gated away from other platforms",
+          "location": "crates/farhelm/tests/e2e/old_terminals.rs:437",
+          "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR: considered whether the new old-terminal tests fail on Macs because they use setsid and /proc. Source refutation: crates/farhelm/tests/e2e/main.rs:110-111 declares old_terminals only under #[cfg(target_os = \"linux\")]; its module documentation explains the Linux-only process-lifetime oracles, and the non-Linux test prints an explicit skip. No unsupported-platform execution route exists for these tests. Suggested bucket: other (test portability only). Confidence: confirmed by source, no execution. proposed_drop: platform-gated, so the suspected portability failure is unreachable. Could-be-highest: no; test-only portability, no user-data or security route. possible_cover: none; coverage sources not consulted. Caveat: this says nothing about production cleanup on Macs, which is outside the assigned test change."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g157/findings.jsonl",
+        "id": "c1",
+        "line": 5,
+        "disposition": "excluded",
+        "group": "old-terminal-linux-process-tests-are-not-built-on-macos",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-099 after inspecting it. The module is compiled only on Linux, so the named /proc/setsid portability failure cannot run on macOS. This says nothing about production old-terminal cleanup on macOS. Narrow source refutation via the module's compile-time platform gate and explicit non-Linux skip. Checked source/results: [\"dbfc6975:crates/farhelm/tests/e2e/main.rs:110-111 places mod old_terminals immediately under cfg(target_os = linux). The earlier history's :126-127 coordinate is corrected by the latest record.\",\"dbfc6975:main.rs:4-5 explains Linux-only process-lifetime oracles. :133-140 builds e2e_requires_linux_process_oracles on non-Linux and prints an explicit SKIPPED message. The old_terminals module's real-server fixtures are therefore not compiled there.\"] Current coverage/results: {\"SPEC.md / SPEC_impl.md\":\"Current Testing describes Linux real-stack integration and separate host-crate macOS coverage. No acceptance is needed because the alleged non-Linux test execution route is absent.\",\"TODO.md Planned\":\"Empty.\",\"plans/queue\":\"No unlanded entries; no exact old-terminal test portability repair.\",\"BUGS.md\":\"No match.\",\"INDEX.md / matching queue files\":\"No exact old-terminal /proc-on-macOS test failure item; other Mac process cleanup/tool-format findings concern different executed paths.\",\"TRIAGE_OUTCOMES.md\":\"No matching module-platform-gating decision.\",\"FILTER.md\":\"Not used; unreachable unsupported-platform test execution is source-refuted.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The new old-terminal tests might fail on Macs because they use setsid and /proc. Linux module gating refutes the test portability candidate only; it does not establish production cleanup correctness or Mac test coverage.\"; \"There is no non-Linux compilation/execution route for this module in the reviewed test target.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g157/c1",
+        "line": 5,
+        "disposition": "excluded",
+        "group": "old-terminal-linux-process-tests-are-not-built-on-macos",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-099 after inspecting it. The module is compiled only on Linux, so the named /proc/setsid portability failure cannot run on macOS. This says nothing about production old-terminal cleanup on macOS. Narrow source refutation via the module's compile-time platform gate and explicit non-Linux skip. Checked source/results: [\"dbfc6975:crates/farhelm/tests/e2e/main.rs:110-111 places mod old_terminals immediately under cfg(target_os = linux). The earlier history's :126-127 coordinate is corrected by the latest record.\",\"dbfc6975:main.rs:4-5 explains Linux-only process-lifetime oracles. :133-140 builds e2e_requires_linux_process_oracles on non-Linux and prints an explicit SKIPPED message. The old_terminals module's real-server fixtures are therefore not compiled there.\"] Current coverage/results: {\"SPEC.md / SPEC_impl.md\":\"Current Testing describes Linux real-stack integration and separate host-crate macOS coverage. No acceptance is needed because the alleged non-Linux test execution route is absent.\",\"TODO.md Planned\":\"Empty.\",\"plans/queue\":\"No unlanded entries; no exact old-terminal test portability repair.\",\"BUGS.md\":\"No match.\",\"INDEX.md / matching queue files\":\"No exact old-terminal /proc-on-macOS test failure item; other Mac process cleanup/tool-format findings concern different executed paths.\",\"TRIAGE_OUTCOMES.md\":\"No matching module-platform-gating decision.\",\"FILTER.md\":\"Not used; unreachable unsupported-platform test execution is source-refuted.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The new old-terminal tests might fail on Macs because they use setsid and /proc. Linux module gating refutes the test portability candidate only; it does not establish production cleanup correctness or Mac test coverage.\"; \"There is no non-Linux compilation/execution route for this module in the reviewed test target.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-099",
+          "key": "g157/c1",
+          "latest_line": 5,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "old-terminal-linux-process-tests-are-not-built-on-macos",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The module is compiled only on Linux, so the named /proc/setsid portability failure cannot run on macOS. This says nothing about production old-terminal cleanup on macOS.",
+          "checks": [
+            "dbfc6975:crates/farhelm/tests/e2e/main.rs:110-111 places mod old_terminals immediately under cfg(target_os = linux). The earlier history's :126-127 coordinate is corrected by the latest record.",
+            "dbfc6975:main.rs:4-5 explains Linux-only process-lifetime oracles. :133-140 builds e2e_requires_linux_process_oracles on non-Linux and prints an explicit SKIPPED message. The old_terminals module's real-server fixtures are therefore not compiled there."
+          ],
+          "coverage_checked": {
+            "SPEC.md / SPEC_impl.md": "Current Testing describes Linux real-stack integration and separate host-crate macOS coverage. No acceptance is needed because the alleged non-Linux test execution route is absent.",
+            "TODO.md Planned": "Empty.",
+            "plans/queue": "No unlanded entries; no exact old-terminal test portability repair.",
+            "BUGS.md": "No match.",
+            "INDEX.md / matching queue files": "No exact old-terminal /proc-on-macOS test failure item; other Mac process cleanup/tool-format findings concern different executed paths.",
+            "TRIAGE_OUTCOMES.md": "No matching module-platform-gating decision.",
+            "FILTER.md": "Not used; unreachable unsupported-platform test execution is source-refuted."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "There is no non-Linux compilation/execution route for this module in the reviewed test target.",
+          "original_stronger_consequence": "The new old-terminal tests might fail on Macs because they use setsid and /proc. Linux module gating refutes the test portability candidate only; it does not establish production cleanup correctness or Mac test coverage.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Narrow source refutation via the module's compile-time platform gate and explicit non-Linux skip."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "old-terminal-linux-process-tests-are-not-built-on-macos",
+        "destination": null
+      }
+    },
+    {
+      "key": "g157/c2",
+      "owner": "g157",
+      "id": "c2",
+      "domain": "rust-terminal-host-regressions",
+      "purpose": "rust-terminal-host-regressions: crates/farhelm/tests/e2e/terminal_tabs.rs, crates/farhelm/tests/e2e/old_terminals.rs, crates/farhelm/tests/e2e/host_creates.rs, crates/farhelm/tests/e2e/host_processes.rs, crates/farhelm/tests/e2e/host_terminals.rs; phases -        fn drop(&mut self) {",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Removed terminal-kind assertions follow the grid-only protocol",
+            "location": "crates/farhelm/tests/e2e/host_processes.rs:346",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether deleting the explicit stream-kind assertions, browser stream notice check, bytes-only refusal, and create-reply kind tests stops checking how terminals reach the page. SPEC_impl.md:3009-3026, Grid streams, explicitly says: 'Protocol 77 removed the byte streams with the old terminals and xterm.js: every attachment’s data channel carries a grid stream, so Attach, Attached and the browser’s socket say nothing about it, and SessionInfo and TabInfo no longer report a terminal kind.' (Identifiers styled as code in the source; apostrophe normalized here.) Source checks: host_processes.rs:359-379 still decodes every data message as GridOutput and waits for agent-ready screen content; host_terminals.rs:901-966 still decodes the messages, requires the first one to be Hello, observes ready text and ReplayComplete, and checks the child remains alive. Thus deletion removes assertions about fields and branches that no longer exist, while actual grid behavior remains observed. Suggested bucket: other. Confidence: confirmed by source and contract, no execution. proposed_drop: no defect established; the removed negotiation is explicitly retired and grid decoding remains asserted. Could-be-highest: no; test assertions about an intentionally removed wire distinction do not establish security or work loss. possible_cover: none; no coverage sources consulted. Caveat: the bare-supervisor tab check now only verifies successful attachment; the separate assigned host-agent test and main agent path still inspect real grid output. No claim that this alone proves every tab payload."
+          }
+        },
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Removed terminal-kind assertions follow the grid-only protocol",
+            "location": "crates/farhelm/tests/e2e/host_processes.rs:346",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether deleting the explicit stream-kind assertions, browser stream notice check, bytes-only refusal, and create-reply kind tests stops checking how terminals reach the page. SPEC_impl.md:3014-3016, Grid streams, says exactly: \"Protocol 77 removed the byte streams with the old terminals and xterm.js: every attachment's data channel carries\na grid stream, so `Attach`, `Attached` and the browser's socket say nothing about it, and `SessionInfo` and `TabInfo` no\nlonger report a terminal kind.\" Source checks: host_processes.rs:359-379 still decodes every data message as GridOutput and waits for agent-ready screen content; host_terminals.rs:901-966 still decodes the messages, requires the first one to be Hello, observes ready text and ReplayComplete, and checks the child remains alive. Thus deletion removes assertions about fields and branches that no longer exist, while actual grid behavior remains observed. Suggested bucket: other. Confidence: confirmed by source and contract, no execution. proposed_drop: no defect established; the removed negotiation is explicitly retired and grid decoding remains asserted. Could-be-highest: no; test assertions about an intentionally removed wire distinction do not establish security or work loss. possible_cover: none; no coverage sources consulted. Caveat: the bare-supervisor tab check now only verifies successful attachment; the separate assigned host-agent test and main agent path still inspect real grid output. No claim that this alone proves every tab payload. Revision: replaced normalized contract wording with the exact source quotation."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Removed terminal-kind assertions follow the grid-only protocol",
+            "location": "crates/farhelm/tests/e2e/host_processes.rs:346",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether deleting the explicit stream-kind assertions, browser stream notice check, bytes-only refusal, and create-reply kind tests stops checking how terminals reach the page. SPEC_impl.md:3015-3017, Grid streams, says exactly: \"Protocol 77 removed the byte streams with the old terminals and xterm.js: every attachment's data channel carries\na grid stream, so `Attach`, `Attached` and the browser's socket say nothing about it, and `SessionInfo` and `TabInfo` no\nlonger report a terminal kind.\" Source checks: host_processes.rs:359-379 still decodes every data message as GridOutput and waits for agent-ready screen content; host_terminals.rs:901-966 still decodes the messages, requires the first one to be Hello, observes ready text and ReplayComplete, and checks the child remains alive. Thus deletion removes assertions about fields and branches that no longer exist, while actual grid behavior remains observed. Suggested bucket: other. Confidence: confirmed by source and contract, no execution. proposed_drop: no defect established; the removed negotiation is explicitly retired and grid decoding remains asserted. Could-be-highest: no; test assertions about an intentionally removed wire distinction do not establish security or work loss. possible_cover: none; no coverage sources consulted. Caveat: the bare-supervisor tab check now only verifies successful attachment; the separate assigned host-agent test and main agent path still inspect real grid output. No claim that this alone proves every tab payload. Revision: replaced normalized contract wording with the exact source quotation."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Real agent and tab grid decoding survives removed kind negotiation",
+            "location": "crates/farhelm/tests/e2e/host_processes.rs:346",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: removing assertions about retired terminal-kind fields does not remove the actual grid-output oracles; synthesis now also confirms a direct tab oracle rather than inferring tab behavior from an agent test. SPEC_impl.md:3015-3017 says exactly: \"Protocol 77 removed the byte streams with the old terminals and xterm.js: every attachment's data channel carries\na grid stream, so `Attach`, `Attached` and the browser's socket say nothing about it, and `SessionInfo` and `TabInfo` no\nlonger report a terminal kind.\" Source checks: host_processes.rs:359-379 decodes real supervisor output as GridOutput and waits for agent-ready screen content; BrowserSocket::wait_for at 858-893 decodes every binary WebSocket message as GridOutput, and the real helm test at 911-962 waits for both FAKE-AGENT READY and echo:through-the-helm after sending grid text/key input. host_terminals.rs:901-966 additionally requires the first decoded output to be Hello, observes ready text and ReplayComplete, and checks the child remains alive. For tabs, host_tabs.rs:141-181 attaches the selected terminal and decodes its data as GridOutput until a Rows message contains the requested shell result and ReplayComplete has arrived; a_host_tab_beside_a_host_agent_opens_attaches_and_closes at 288-335 invokes that helper for the actual tab and requires TAB-SAYS-42. The changed bare-supervisor tab subcheck still establishes only successful attachment, but there is direct real-tab grid decoding elsewhere in the same revision. Suggested bucket: other. Confidence: confirmed by source and contract, no execution. proposed_drop: removed wire negotiation is explicitly retired, and actual agent/tab grid payload and readiness checks remain; no concrete missing grid-decoding oracle established. Could-be-highest: no established security or user-work-loss route. possible_cover: none; prohibited coverage sources not consulted. Caveat: this does not claim that successful attachment alone proves output, nor that agent output proves tab output; the added tab citation resolves that earlier limitation. Revision: adds actual helm WebSocket and tab decoding call chains to the prior source refutation, preserving the original concern about lost terminal delivery coverage."
+          }
+        }
+      ],
+      "latest": {
+        "line": 11,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Real agent and tab grid decoding survives removed kind negotiation",
+          "location": "crates/farhelm/tests/e2e/host_processes.rs:346",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: removing assertions about retired terminal-kind fields does not remove the actual grid-output oracles; synthesis now also confirms a direct tab oracle rather than inferring tab behavior from an agent test. SPEC_impl.md:3015-3017 says exactly: \"Protocol 77 removed the byte streams with the old terminals and xterm.js: every attachment's data channel carries\na grid stream, so `Attach`, `Attached` and the browser's socket say nothing about it, and `SessionInfo` and `TabInfo` no\nlonger report a terminal kind.\" Source checks: host_processes.rs:359-379 decodes real supervisor output as GridOutput and waits for agent-ready screen content; BrowserSocket::wait_for at 858-893 decodes every binary WebSocket message as GridOutput, and the real helm test at 911-962 waits for both FAKE-AGENT READY and echo:through-the-helm after sending grid text/key input. host_terminals.rs:901-966 additionally requires the first decoded output to be Hello, observes ready text and ReplayComplete, and checks the child remains alive. For tabs, host_tabs.rs:141-181 attaches the selected terminal and decodes its data as GridOutput until a Rows message contains the requested shell result and ReplayComplete has arrived; a_host_tab_beside_a_host_agent_opens_attaches_and_closes at 288-335 invokes that helper for the actual tab and requires TAB-SAYS-42. The changed bare-supervisor tab subcheck still establishes only successful attachment, but there is direct real-tab grid decoding elsewhere in the same revision. Suggested bucket: other. Confidence: confirmed by source and contract, no execution. proposed_drop: removed wire negotiation is explicitly retired, and actual agent/tab grid payload and readiness checks remain; no concrete missing grid-decoding oracle established. Could-be-highest: no established security or user-work-loss route. possible_cover: none; prohibited coverage sources not consulted. Caveat: this does not claim that successful attachment alone proves output, nor that agent output proves tab output; the added tab citation resolves that earlier limitation. Revision: adds actual helm WebSocket and tab decoding call chains to the prior source refutation, preserving the original concern about lost terminal delivery coverage."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g157/findings.jsonl",
+        "id": "c2",
+        "line": 11,
+        "disposition": "excluded",
+        "group": "retired-terminal-kind-assertions-with-surviving-grid-oracles",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-100 after inspecting it. The removed negotiation fields describe a retired distinction. Actual agent, browser-relay and tab grid decoding remain positively asserted at the reviewed revision. This refutes the named loss-of-grid-delivery-coverage concern, not every possible tab test gap. Source refutation of the precise missing-grid-decoding-oracle concern. Preserve the limited scope: successful attachment alone is insufficient, and this does not certify every grid behavior. Checked source/results: [\"At f560058da19e02716e6f943883a9508b447aff4e, crates/farhelm/tests/e2e/host_processes.rs:363-383 decodes Data as GridOutput before accepting screen text; :861-891 decodes binary WebSocket frames; :909-958 creates a real session through a real helm and requires READY and echo:through-the-helm after input.\",\"At the same hash, host_tabs.rs:154-183 requires decoded Rows containing the target plus ReplayComplete; :290-330 opens an actual tab, obtains TAB-SAYS-42 and invokes that decoder for the tab selector. This resolves the earlier caveat that a bare attach and an agent oracle alone do not prove tab payloads.\",\"At the same hash, SPEC_impl.md:3009-3027 explicitly retires terminal-kind negotiation with protocol 77. Source inspection only; no passing runtime result is inferred.\"] Current coverage/results: [\"Current SPEC.md:2899 onward requires terminal hosts; SPEC_impl.md:2937-2955 explicitly states the grid-only protocol. These support removal of negotiation, not a general exemption from testing actual output.\",\"TODO.md:25-26 has an empty Planned bucket. Focused searches of plans/queue found tmux-end-old-terminals acceptance criterion 3 requiring removal of the exact wire fields, and subsequent tmux plans; no separate missing-grid-oracle repair was identified.\",\"BUGS.md contains only the detached SSH-output-holder issue, which is unrelated. Searches of active TRIAGE_OUTCOMES.md found no decision for this trigger/consequence.\",\"Read INDEX.md in bounded chunks and searched queue Markdown for terminal-kind assertions/grid-oracle terms. No exact current queue item found; generic grid test issues have different triggers. No archive read.\",\"FILTER.md has no complete boundary matching this ordinary test-coverage concern; no filter is used.\"] Exact cited cover: [{\"source\":\"SPEC_impl.md:2943-2945 (also f560058d:3015-3017)\",\"quote\":\"Protocol 77 removed the byte streams with the old terminals and xterm.js: every attachment's data channel carries a grid stream\"}] Original stronger consequence and missing premise remain preserved: \"Deleting kind assertions, stream notices, byte-only refusals and reply-kind checks might remove meaningful terminal-delivery regression coverage. Earlier records correctly left the bare tab attach's payload unproved; the final record supplies a distinct direct tab decoder. No production or highest-priority consequence was claimed.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g157/c2",
+        "line": 11,
+        "disposition": "excluded",
+        "group": "retired-terminal-kind-assertions-with-surviving-grid-oracles",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-100 after inspecting it. The removed negotiation fields describe a retired distinction. Actual agent, browser-relay and tab grid decoding remain positively asserted at the reviewed revision. This refutes the named loss-of-grid-delivery-coverage concern, not every possible tab test gap. Source refutation of the precise missing-grid-decoding-oracle concern. Preserve the limited scope: successful attachment alone is insufficient, and this does not certify every grid behavior. Checked source/results: [\"At f560058da19e02716e6f943883a9508b447aff4e, crates/farhelm/tests/e2e/host_processes.rs:363-383 decodes Data as GridOutput before accepting screen text; :861-891 decodes binary WebSocket frames; :909-958 creates a real session through a real helm and requires READY and echo:through-the-helm after input.\",\"At the same hash, host_tabs.rs:154-183 requires decoded Rows containing the target plus ReplayComplete; :290-330 opens an actual tab, obtains TAB-SAYS-42 and invokes that decoder for the tab selector. This resolves the earlier caveat that a bare attach and an agent oracle alone do not prove tab payloads.\",\"At the same hash, SPEC_impl.md:3009-3027 explicitly retires terminal-kind negotiation with protocol 77. Source inspection only; no passing runtime result is inferred.\"] Current coverage/results: [\"Current SPEC.md:2899 onward requires terminal hosts; SPEC_impl.md:2937-2955 explicitly states the grid-only protocol. These support removal of negotiation, not a general exemption from testing actual output.\",\"TODO.md:25-26 has an empty Planned bucket. Focused searches of plans/queue found tmux-end-old-terminals acceptance criterion 3 requiring removal of the exact wire fields, and subsequent tmux plans; no separate missing-grid-oracle repair was identified.\",\"BUGS.md contains only the detached SSH-output-holder issue, which is unrelated. Searches of active TRIAGE_OUTCOMES.md found no decision for this trigger/consequence.\",\"Read INDEX.md in bounded chunks and searched queue Markdown for terminal-kind assertions/grid-oracle terms. No exact current queue item found; generic grid test issues have different triggers. No archive read.\",\"FILTER.md has no complete boundary matching this ordinary test-coverage concern; no filter is used.\"] Exact cited cover: [{\"source\":\"SPEC_impl.md:2943-2945 (also f560058d:3015-3017)\",\"quote\":\"Protocol 77 removed the byte streams with the old terminals and xterm.js: every attachment's data channel carries a grid stream\"}] Original stronger consequence and missing premise remain preserved: \"Deleting kind assertions, stream notices, byte-only refusals and reply-kind checks might remove meaningful terminal-delivery regression coverage. Earlier records correctly left the bare tab attach's payload unproved; the final record supplies a distinct direct tab decoder. No production or highest-priority consequence was claimed.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-100",
+          "key": "g157/c2",
+          "latest_line": 11,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "retired-terminal-kind-assertions-with-surviving-grid-oracles",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The removed negotiation fields describe a retired distinction. Actual agent, browser-relay and tab grid decoding remain positively asserted at the reviewed revision. This refutes the named loss-of-grid-delivery-coverage concern, not every possible tab test gap.",
+          "checks": [
+            "At f560058da19e02716e6f943883a9508b447aff4e, crates/farhelm/tests/e2e/host_processes.rs:363-383 decodes Data as GridOutput before accepting screen text; :861-891 decodes binary WebSocket frames; :909-958 creates a real session through a real helm and requires READY and echo:through-the-helm after input.",
+            "At the same hash, host_tabs.rs:154-183 requires decoded Rows containing the target plus ReplayComplete; :290-330 opens an actual tab, obtains TAB-SAYS-42 and invokes that decoder for the tab selector. This resolves the earlier caveat that a bare attach and an agent oracle alone do not prove tab payloads.",
+            "At the same hash, SPEC_impl.md:3009-3027 explicitly retires terminal-kind negotiation with protocol 77. Source inspection only; no passing runtime result is inferred."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:2899 onward requires terminal hosts; SPEC_impl.md:2937-2955 explicitly states the grid-only protocol. These support removal of negotiation, not a general exemption from testing actual output.",
+            "TODO.md:25-26 has an empty Planned bucket. Focused searches of plans/queue found tmux-end-old-terminals acceptance criterion 3 requiring removal of the exact wire fields, and subsequent tmux plans; no separate missing-grid-oracle repair was identified.",
+            "BUGS.md contains only the detached SSH-output-holder issue, which is unrelated. Searches of active TRIAGE_OUTCOMES.md found no decision for this trigger/consequence.",
+            "Read INDEX.md in bounded chunks and searched queue Markdown for terminal-kind assertions/grid-oracle terms. No exact current queue item found; generic grid test issues have different triggers. No archive read.",
+            "FILTER.md has no complete boundary matching this ordinary test-coverage concern; no filter is used."
+          ],
+          "exact_cover_quotes": [
+            {
+              "source": "SPEC_impl.md:2943-2945 (also f560058d:3015-3017)",
+              "quote": "Protocol 77 removed the byte streams with the old terminals and xterm.js: every attachment's data channel carries a grid stream"
+            }
+          ],
+          "missing_premise": null,
+          "original_stronger_consequence": "Deleting kind assertions, stream notices, byte-only refusals and reply-kind checks might remove meaningful terminal-delivery regression coverage. Earlier records correctly left the bare tab attach's payload unproved; the final record supplies a distinct direct tab decoder. No production or highest-priority consequence was claimed.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation of the precise missing-grid-decoding-oracle concern. Preserve the limited scope: successful attachment alone is insufficient, and this does not certify every grid behavior."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retired-terminal-kind-assertions-with-surviving-grid-oracles",
+        "destination": null
+      }
+    },
+    {
+      "key": "g157/c3",
+      "owner": "g157",
+      "id": "c3",
+      "domain": "rust-terminal-host-regressions",
+      "purpose": "rust-terminal-host-regressions: crates/farhelm/tests/e2e/terminal_tabs.rs, crates/farhelm/tests/e2e/old_terminals.rs, crates/farhelm/tests/e2e/host_creates.rs, crates/farhelm/tests/e2e/host_processes.rs, crates/farhelm/tests/e2e/host_terminals.rs; phases -        fn drop(&mut self) {",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Deleted tmux test helpers do not leave the new tab contracts unchecked",
+            "location": "crates/farhelm/tests/e2e/terminal_tabs.rs:1593",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: considered whether the assigned deletions remove still-needed checks for terminal cleanup diagnostics, tab geometry and launch environments. The deleted pipe-holder scans and roster-query helpers have no remaining definitions or callers in terminal_tabs.rs at this revision (git grep for stdin_pipe_holder_scan, inspect_stdin_pipe_at and query_control_client_roster returned no matches). Those tests exercised the removed test-only diagnostics, so their removal does not strand a live helper. New tabs always run in hosts: SPEC_impl.md:2370 says exactly, 'every new tab is a terminal host of its own, whatever its session’s agent runs in' (the source uses a straight apostrophe in session's). The host-tabs test at crates/farhelm/tests/e2e/host_tabs.rs:287-315 compares the new tab host's geometry to the agent's, asserts the deliberately non-default size, and observes its distinct host and launch record; terminal_tabs.rs:1484-1593 retains the rc-file-at-each-open test, live shell round trip, both marker boundaries and the known-shell failure assertion. Thus these contracts survive the change in substrate. Suggested bucket: other. Confidence: confirmed by source, no execution. proposed_drop: no concrete behavioral regression established by these deletions; obsolete helper tests are deleted with their subjects and host/environment contracts have direct assertions. Could-be-highest: no established route from the deletions to security or user work loss. possible_cover: none; no coverage sources searched. Caveat: the old tmux-serving path still exists at this intermediate revision, and the commit acknowledges it no longer has running-stack tab tests until the next change retires it; this is a temporary coverage reduction, not evidence that a shipped operation is incorrect. References to deleted tests are against the parent of the reviewed commit: pipe scan tests at 3901-4119, roster tests at 4126-4204, sink-registry test at 4216-4247, geometry at 4387-4434 and reply kinds at 4450 onward. The assigned excerpt begins within the first deleted helper's Drop implementation."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Deleted tmux test helpers do not leave the new tab contracts unchecked",
+            "location": "crates/farhelm/tests/e2e/terminal_tabs.rs:1593",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: considered whether the assigned deletions remove still-needed checks for terminal cleanup diagnostics, tab geometry and launch environments. The deleted pipe-holder scans and roster-query helpers have no remaining definitions or callers in terminal_tabs.rs at this revision (git grep for stdin_pipe_holder_scan, inspect_stdin_pipe_at and query_control_client_roster returned no matches). Those tests exercised the removed test-only diagnostics, so their removal does not strand a live helper. New tabs always run in hosts: SPEC_impl.md:2370 says exactly, 'every new tab is a terminal host of its own, whatever its session's agent runs in'. The host-tabs test at crates/farhelm/tests/e2e/host_tabs.rs:287-315 compares the new tab host's geometry to the agent's, asserts the deliberately non-default size, and observes its distinct host and launch record; terminal_tabs.rs:1484-1593 retains the rc-file-at-each-open test, live shell round trip, both marker boundaries and the known-shell failure assertion. Thus these contracts survive the change in substrate. Suggested bucket: other. Confidence: confirmed by source, no execution. proposed_drop: no concrete behavioral regression established by these deletions; obsolete helper tests are deleted with their subjects and host/environment contracts have direct assertions. Could-be-highest: no established route from the deletions to security or user work loss. possible_cover: none; no coverage sources searched. Caveat: the old tmux-serving path still exists at this intermediate revision, and the commit acknowledges it no longer has running-stack tab tests until the next change retires it; this is a temporary coverage reduction, not evidence that a shipped operation is incorrect. References to deleted tests are against the parent of the reviewed commit: pipe scan tests at 3901-4119, roster tests at 4126-4204, sink-registry test at 4216-4247, geometry at 4387-4434 and reply kinds at 4450 onward. The assigned excerpt begins within the first deleted helper's Drop implementation."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c3",
+            "state": "open",
+            "summary": "Recheck deleted old-terminal lifecycle oracles while old terminals remain supported",
+            "location": "crates/farhelm/tests/e2e/terminal_tabs.rs (parent):4216",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: deletion may leave required cleanup and bounded-memory behavior of still-running old terminals without a regression oracle before the later old-terminal retirement. The earlier proposed_drop was too broad: absence of a demonstrated product bug does not refute a concrete lost test oracle. The assigned excerpt deletes control-client roster tests and the sink-registry nonaccumulation test (parent terminal_tabs.rs:4151-4247), in addition to tests of removed diagnostic helpers and old tab creation. Source already checked: new tabs always use hosts, host_tabs.rs:287-315 checks the new-tab geometry, terminal_tabs.rs retains the environment test, and the 647f0227 commit states old tmux terminals are still adopted and served until the next change. Readily checkable premise remaining: identify which deleted assertions still concern live old-terminal runtime contracts at 647f0227, whether their exact assertions remain elsewhere in the relevant source, and whether the next dbfc6975 revision retires those contracts rather than retroactively refuting the intermediate gap. Suggested bucket: other (test coverage); confidence: unresolved source check, not observed execution. proposed_drop: false pending this check; previous blanket drop is superseded. Could-be-highest: no established shipped failure or user-work-loss route; the retained concern is missing regression coverage. possible_cover: none; prohibited coverage sources have not been consulted. Original consequence preserved: obsolete helper mechanics alone are harmless to delete, but required behavior temporarily lacking an oracle remains a distinct concern. g155 owns detailed retained environment delimiter/readiness analysis; g151 owns processed-resize proof, per the caller; do not duplicate those investigations."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c3",
+            "state": "open",
+            "summary": "Deleted registry churn test may already use host terminals",
+            "location": "crates/farhelm/tests/e2e/terminal_tabs.rs (parent):4216",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: the earlier claim of lost old-terminal registry coverage now has a concrete fixture-premise problem: the deleted churn test calls harness(), while the parent's harness module documents that default as new host terminals and reserves harness_tmux() for old terminals. Source checks this turn: terminal_tabs.rs parent:4216-4247 uses harness(), never proves a sink exists, waits only for sink absence, then checks session_sink_registry_len <= 1. In the reviewed revision, handlers.rs:1872-1882 reaches ensure_session_sink only for AttachTarget::Tmux and explicitly gives host attachments no sink. terminals.rs:4452-4510 separately asserts final-lease registry cleanup for a real registered fixture; single-session unit assertions are not a substitute for a valid full-stack churn test. Remaining readily checkable premise: read the parent's harness() implementation and its default supervisor constructor to confirm the deleted churn test actually used hosts before deletion. If confirmed, removing this test does not itself remove an effective churn oracle, but the pre-existing gap and the still-reachable old path must remain distinct from later retirement. Suggested bucket: other (test coverage); confidence: strong source lead, final constructor check pending; proposed_drop: false pending that check. Could-be-highest: no established security or user-work-loss route. possible_cover: none. Original concern preserved: live old-terminal bounded-memory and lifecycle coverage at the intermediate revision cannot be dismissed by absence of a demonstrated product bug. No execution performed. Other deleted roster/pipe tests concern removed diagnostics, not automatically a required product oracle."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Deleted helper tests and an already-vacuous churn oracle require separate conclusions",
+            "location": "crates/farhelm/tests/e2e/terminal_tabs.rs (parent):4216",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: the assigned deletion does not remove an effective sink-registry churn oracle: that test already creates host terminals before this commit. This source refutation replaces the earlier incorrect rationale that lack of a product failure by itself justified dropping a coverage concern. Exact fixture chain at the parent revision: terminal_tabs.rs:4217 calls harness(); harness.rs:2288-2289 calls harness_with_timeouts, which at 2540-2541 passes SupervisorSeams::default(); core.rs:1366-1383 defines that default with new_terminals: NewTerminals::Host. handlers.rs at the reviewed revision:1872-1882 obtains a session sink only for AttachTarget::Tmux, giving a host target None. The deleted test never asserts that a sink was created: parent terminal_tabs.rs:2512-2519 returns from wait_for_sink_absent immediately when session_sink_pid is None, then the churn test accepts registry length zero (4216-4247). Therefore it did not exercise old-terminal registry churn before removal. This is a pre-existing missing fixture oracle, not a newly lost one in the assigned deletion; no independent historical defect is being reported outside this change. The still-supported old path is separate: 647f0227 handlers.rs:1873 still reaches ensure_session_sink, and terminals.rs:4452-4510 retains a unit oracle that final-lease cleanup removes the registered entry, though that does not claim full-stack multi-session coverage. The pipe-holder scan tests and roster parsing/role-recovery tests concern removed diagnostic helpers; their former callers and helpers are deleted together. Geometry and environment replacements are separate contracts: host_tabs.rs:287-315 asserts a distinct host and matching, non-default agent/tab geometry; terminal_tabs.rs retains its environment-at-each-open test, whose delimiter/readiness adequacy g155 independently owns, and processed-resize proof belongs to g151. At dbfc69751215dbf15e1d31d5bed73c3754c4ebc4, core.rs:6969 takes old tmux rows as no terminal and converts live ones at 7100 onward; retirement ends the old serving contract prospectively and is not the reason for dropping a concern at 647f0227. Suggested bucket: other (test-oracle question). Confidence: confirmed by source and call-chain analysis, no execution. proposed_drop: the asserted effective churn oracle was already vacuous at the parent, while helper-specific checks lose their subjects; no concrete newly missing required oracle was established within this assigned excerpt. Could-be-highest: no established security or work-loss route; original suspected consequence remains a coverage gap for old-terminal lifecycle/bounded-memory behavior, not a proven production failure. possible_cover: none; no prohibited coverage sources searched. Caveat: this does not certify all old-terminal full-stack behavior covered at the intermediate revision; it specifically refutes loss of this churn oracle and preserves that distinction. The old blanket c3 drop is superseded, and the c3 lead is now resolved."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c3",
+            "state": "open",
+            "summary": "Trace the churn fixture's vacuity across the complete pinned range",
+            "location": "crates/farhelm/tests/e2e/terminal_tabs.rs (parent):4216",
+            "detail": "Reviewed deletion commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: the immediate-parent source refutation remains valid for the deletion itself, but does not establish that the churn test's missing sink premise predates the entire reviewed range. The original consequence remains a missing regression oracle for old-terminal registry boundedness/lifecycle, with no established production failure. Earlier check: parent harness() passes default seams that start host terminals; the test never proves a sink exists, accepts immediate sink absence and registry size zero. Proposed-drop basis preserved for deletion attribution only: deleting an already-vacuous assertion does not newly remove an effective one; diagnostic/helper deletion refutations remain separate. Missing readily checkable premise: compare the exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a and trace the actual host-default switch inside the complete pinned range. If introduced there, record its exact provenance under c3 or identify the existing owner, without expanding into unrelated deleted runtime tests. Suggested bucket: other (test-oracle defect). Confidence: pending historical source check, no execution. proposed_drop: not accepted for the whole range; earlier immediate-parent argument is insufficient for that scope. Could-be-highest: no established security/work-loss route. possible_cover: neighbour g156/l1 covers other old-terminal input/connection/sink/crash recovery tests; no exact churn-fixture overlap established. Interface findings were read fully for novelty, including g144/c3's separate failed-restart guard lifetime finding; do not rediscover that issue. No reproduction or live-install action."
+          }
+        },
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Churn fixture gap predates the exclusive base, not just its deletion",
+            "location": "crates/farhelm/tests/e2e/terminal_tabs.rs:4210 at exclusive base",
+            "detail": "Reviewed deletion commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513; exclusive reviewed base: 6e423e30068b62c6cfa276c6d720ee35bb70387a. TLDR: the churn test's missing old-terminal fixture premise already exists at the exclusive base, so it was not introduced anywhere in the pinned range. This resolves the whole-range attribution lead and preserves the original consequence: a vacuous regression oracle for old-terminal registry boundedness, not a proved production memory/lifecycle bug. Exact base source: terminal_tabs.rs:4210-4240 calls harness(), waits only for sink absence, and accepts registry length zero. Base harness.rs:2288-2289 calls harness_with_timeouts; :2540-2541 supplies SupervisorSeams::default. Base core.rs:1344-1363 implements that default with new_terminals: NewTerminals::Host. The already-checked host attach branch creates no sink. Historical git log -S for both the default value and harness documentation identifies f42178f9402ce22c60530360edc10d6721ef5b16, 'test: run Rust tests on new terminals by default (#3100)', as the earlier switch, in the base's ancestry. A bounded in-range git log -G over core.rs and harness.rs found only 647f0227's removal of that selector, not a later introduction of the host default before deletion. The previous immediate-parent-only basis was insufficient on its own; the exclusive-base constructor and test now settle the premise directly. Suggested bucket: other (test-oracle concern). Confidence: confirmed historical source/call-chain analysis, no execution. proposed_drop: source refutation of introduction within the entire reviewed range; the exact ineffective fixture and assertion already exist at its exclusive base. No parent drop is accepted by this record. Could-be-highest: no established security/work-loss route. possible_cover: none for this precise pre-range fixture defect; g156/l1 concerns other lost recovery oracles and is not used as a drop basis. Separate preserved conclusions: pipe/roster diagnostic tests are removed with their helpers; new-host geometry/environment tests have their own oracles and g151/g155 ownership; old serving remains active at 647f0227, while dbfc6975 prospectively retires it. Retirement is not the reason for this churn-fixture attribution refutation. Scope caveat: the historical switch is named only to settle provenance, not reviewed for independent unrelated defects. c3 has no unresolved source premise; original blanket 'no product failure' drop rationale remains superseded."
+          }
+        }
+      ],
+      "latest": {
+        "line": 13,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Churn fixture gap predates the exclusive base, not just its deletion",
+          "location": "crates/farhelm/tests/e2e/terminal_tabs.rs:4210 at exclusive base",
+          "detail": "Reviewed deletion commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513; exclusive reviewed base: 6e423e30068b62c6cfa276c6d720ee35bb70387a. TLDR: the churn test's missing old-terminal fixture premise already exists at the exclusive base, so it was not introduced anywhere in the pinned range. This resolves the whole-range attribution lead and preserves the original consequence: a vacuous regression oracle for old-terminal registry boundedness, not a proved production memory/lifecycle bug. Exact base source: terminal_tabs.rs:4210-4240 calls harness(), waits only for sink absence, and accepts registry length zero. Base harness.rs:2288-2289 calls harness_with_timeouts; :2540-2541 supplies SupervisorSeams::default. Base core.rs:1344-1363 implements that default with new_terminals: NewTerminals::Host. The already-checked host attach branch creates no sink. Historical git log -S for both the default value and harness documentation identifies f42178f9402ce22c60530360edc10d6721ef5b16, 'test: run Rust tests on new terminals by default (#3100)', as the earlier switch, in the base's ancestry. A bounded in-range git log -G over core.rs and harness.rs found only 647f0227's removal of that selector, not a later introduction of the host default before deletion. The previous immediate-parent-only basis was insufficient on its own; the exclusive-base constructor and test now settle the premise directly. Suggested bucket: other (test-oracle concern). Confidence: confirmed historical source/call-chain analysis, no execution. proposed_drop: source refutation of introduction within the entire reviewed range; the exact ineffective fixture and assertion already exist at its exclusive base. No parent drop is accepted by this record. Could-be-highest: no established security/work-loss route. possible_cover: none for this precise pre-range fixture defect; g156/l1 concerns other lost recovery oracles and is not used as a drop basis. Separate preserved conclusions: pipe/roster diagnostic tests are removed with their helpers; new-host geometry/environment tests have their own oracles and g151/g155 ownership; old serving remains active at 647f0227, while dbfc6975 prospectively retires it. Retirement is not the reason for this churn-fixture attribution refutation. Scope caveat: the historical switch is named only to settle provenance, not reviewed for independent unrelated defects. c3 has no unresolved source premise; original blanket 'no product failure' drop rationale remains superseded."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g157/findings.jsonl",
+        "id": "c3",
+        "line": 13,
+        "disposition": "excluded",
+        "group": "sink-churn-test-uses-host-default-and-accepts-zero-sinks",
+        "reason": "Parent explicitly accepted named out-of-range proposal from claims-100 after inspecting it. The precise vacuous churn-fixture defect already exists at the exclusive base. Its deletion therefore did not remove an effective churn oracle, and its introduction is outside this review range. This does not refute the existence of the earlier test gap or certify all intermediate old-terminal behavior. Out of range for the exact host-backed churn-fixture defect, established directly at the exclusive base. No newly lost effective churn oracle is established by deleting that test. Do not revive the superseded no-product-failure rationale. Checked source/results: [\"At exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a, terminal_tabs.rs:4210-4238 calls harness(), never requires sink presence, waits for absence and accepts registry length zero.\",\"At that base, harness.rs:2284-2300 documents harness() as terminal-host-backed; :2288-2289 calls harness_with_timeouts and :2540-2541 supplies SupervisorSeams::default(). core.rs:1344-1363 defaults new_terminals to Host.\",\"At 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513, handlers.rs:1870-1881 assigns no sink to a host target and creates one only for the tmux target.\",\"git log -S for new_terminals: NewTerminals::Host before the exclusive base identifies f42178f9402ce22c60530360edc10d6721ef5b16. git merge-base --is-ancestor of that hash against the exclusive base exits 0.\",\"The 647f0227 commit explicitly says private old servers are still served at that intermediate step. Later retirement is prospective and is not used to deny an intermediate test obligation. No runtime execution.\"] Current coverage/results: [\"Current SPEC.md:2899 and SPEC_impl.md:2780-2822 describe terminal hosts plus startup retirement. Neither retroactively proves adequate pre-retirement testing.\",\"Planned in TODO.md is empty. plans/queue/tmux-end-old-terminals.md:211-234 names sink-churn-without-sinks among queue items removed with their subjects; criterion 2 removes the sink machinery. This is historical coverage context, not an unlanded fix basis for the pre-range defect.\",\"Current INDEX.md and focused queue-file searches contain no sink-churn item. The plan's sink-churn-without-sinks name is a probable historical same-root record, but that file is not currently queued; no archive was read and no exact alias is asserted without its text.\",\"BUGS.md and active TRIAGE_OUTCOMES.md have no matching churn fixture trigger/consequence. The named neighbour g156/l1 is not supplied in this batch and is not assumed to be an alias.\",\"FILTER.md does not apply to this ordinary test-oracle defect.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Deletion might leave live old-terminal registry boundedness/lifecycle without a regression oracle. The original blanket dismissal because no product bug was demonstrated was withdrawn, then the immediate-parent-only refutation was reopened to check whole-range provenance. Preserve all those corrections: production correctness does not refute a test gap; the exclusive-base fixture establishes that this particular gap predates the range. Pipe/roster helper deletion and new-host geometry/environment coverage are separate conclusions, with detailed environment and resize concerns owned elsewhere.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g157/c3",
+        "line": 13,
+        "disposition": "excluded",
+        "group": "sink-churn-test-uses-host-default-and-accepts-zero-sinks",
+        "bucket": "other",
+        "recording": "out-of-range",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named out-of-range proposal from claims-100 after inspecting it. The precise vacuous churn-fixture defect already exists at the exclusive base. Its deletion therefore did not remove an effective churn oracle, and its introduction is outside this review range. This does not refute the existence of the earlier test gap or certify all intermediate old-terminal behavior. Out of range for the exact host-backed churn-fixture defect, established directly at the exclusive base. No newly lost effective churn oracle is established by deleting that test. Do not revive the superseded no-product-failure rationale. Checked source/results: [\"At exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a, terminal_tabs.rs:4210-4238 calls harness(), never requires sink presence, waits for absence and accepts registry length zero.\",\"At that base, harness.rs:2284-2300 documents harness() as terminal-host-backed; :2288-2289 calls harness_with_timeouts and :2540-2541 supplies SupervisorSeams::default(). core.rs:1344-1363 defaults new_terminals to Host.\",\"At 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513, handlers.rs:1870-1881 assigns no sink to a host target and creates one only for the tmux target.\",\"git log -S for new_terminals: NewTerminals::Host before the exclusive base identifies f42178f9402ce22c60530360edc10d6721ef5b16. git merge-base --is-ancestor of that hash against the exclusive base exits 0.\",\"The 647f0227 commit explicitly says private old servers are still served at that intermediate step. Later retirement is prospective and is not used to deny an intermediate test obligation. No runtime execution.\"] Current coverage/results: [\"Current SPEC.md:2899 and SPEC_impl.md:2780-2822 describe terminal hosts plus startup retirement. Neither retroactively proves adequate pre-retirement testing.\",\"Planned in TODO.md is empty. plans/queue/tmux-end-old-terminals.md:211-234 names sink-churn-without-sinks among queue items removed with their subjects; criterion 2 removes the sink machinery. This is historical coverage context, not an unlanded fix basis for the pre-range defect.\",\"Current INDEX.md and focused queue-file searches contain no sink-churn item. The plan's sink-churn-without-sinks name is a probable historical same-root record, but that file is not currently queued; no archive was read and no exact alias is asserted without its text.\",\"BUGS.md and active TRIAGE_OUTCOMES.md have no matching churn fixture trigger/consequence. The named neighbour g156/l1 is not supplied in this batch and is not assumed to be an alias.\",\"FILTER.md does not apply to this ordinary test-oracle defect.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Deletion might leave live old-terminal registry boundedness/lifecycle without a regression oracle. The original blanket dismissal because no product bug was demonstrated was withdrawn, then the immediate-parent-only refutation was reopened to check whole-range provenance. Preserve all those corrections: production correctness does not refute a test gap; the exclusive-base fixture establishes that this particular gap predates the range. Pipe/roster helper deletion and new-host geometry/environment coverage are separate conclusions, with detailed environment and resize concerns owned elsewhere.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-100",
+          "key": "g157/c3",
+          "latest_line": 13,
+          "recommendation": "out-of-range",
+          "bucket": "other",
+          "underlying_key": "sink-churn-test-uses-host-default-and-accepts-zero-sinks",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The precise vacuous churn-fixture defect already exists at the exclusive base. Its deletion therefore did not remove an effective churn oracle, and its introduction is outside this review range. This does not refute the existence of the earlier test gap or certify all intermediate old-terminal behavior.",
+          "checks": [
+            "At exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a, terminal_tabs.rs:4210-4238 calls harness(), never requires sink presence, waits for absence and accepts registry length zero.",
+            "At that base, harness.rs:2284-2300 documents harness() as terminal-host-backed; :2288-2289 calls harness_with_timeouts and :2540-2541 supplies SupervisorSeams::default(). core.rs:1344-1363 defaults new_terminals to Host.",
+            "At 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513, handlers.rs:1870-1881 assigns no sink to a host target and creates one only for the tmux target.",
+            "git log -S for new_terminals: NewTerminals::Host before the exclusive base identifies f42178f9402ce22c60530360edc10d6721ef5b16. git merge-base --is-ancestor of that hash against the exclusive base exits 0.",
+            "The 647f0227 commit explicitly says private old servers are still served at that intermediate step. Later retirement is prospective and is not used to deny an intermediate test obligation. No runtime execution."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:2899 and SPEC_impl.md:2780-2822 describe terminal hosts plus startup retirement. Neither retroactively proves adequate pre-retirement testing.",
+            "Planned in TODO.md is empty. plans/queue/tmux-end-old-terminals.md:211-234 names sink-churn-without-sinks among queue items removed with their subjects; criterion 2 removes the sink machinery. This is historical coverage context, not an unlanded fix basis for the pre-range defect.",
+            "Current INDEX.md and focused queue-file searches contain no sink-churn item. The plan's sink-churn-without-sinks name is a probable historical same-root record, but that file is not currently queued; no archive was read and no exact alias is asserted without its text.",
+            "BUGS.md and active TRIAGE_OUTCOMES.md have no matching churn fixture trigger/consequence. The named neighbour g156/l1 is not supplied in this batch and is not assumed to be an alias.",
+            "FILTER.md does not apply to this ordinary test-oracle defect."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Deletion might leave live old-terminal registry boundedness/lifecycle without a regression oracle. The original blanket dismissal because no product bug was demonstrated was withdrawn, then the immediate-parent-only refutation was reopened to check whole-range provenance. Preserve all those corrections: production correctness does not refute a test gap; the exclusive-base fixture establishes that this particular gap predates the range. Pipe/roster helper deletion and new-host geometry/environment coverage are separate conclusions, with detailed environment and resize concerns owned elsewhere.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Out of range for the exact host-backed churn-fixture defect, established directly at the exclusive base. No newly lost effective churn oracle is established by deleting that test. Do not revive the superseded no-product-failure rationale."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "sink-churn-test-uses-host-default-and-accepts-zero-sinks",
+        "destination": null
+      }
+    },
+    {
+      "key": "g157/l4",
+      "owner": "g157",
+      "id": "l4",
+      "domain": "rust-terminal-host-regressions",
+      "purpose": "rust-terminal-host-regressions: crates/farhelm/tests/e2e/terminal_tabs.rs, crates/farhelm/tests/e2e/old_terminals.rs, crates/farhelm/tests/e2e/host_creates.rs, crates/farhelm/tests/e2e/host_processes.rs, crates/farhelm/tests/e2e/host_terminals.rs; phases -        fn drop(&mut self) {",
+      "history": [
+        {
+          "line": 14,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l4",
+            "state": "open",
+            "summary": "Check whether the converted-session notice test permits losing its old warning",
+            "location": "crates/farhelm/tests/e2e/old_terminals.rs:355",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR: the new converted-session retirement test claims to check that the previous old-terminal warning becomes resolved, but its filtered .all assertion also succeeds if that warning disappears. This may leave the retention-versus-resolution distinction unchecked specifically when the row is converted to Interrupted. Source basis already read: the first test plants an unresolved warning before restart, then check_notices filters OLD_WARNING and requires all matching rows resolved without requiring any match. The second test has a positive .any resolved-warning assertion, but on a row whose agent had already exited and is not converted. Remaining readily checkable premises: exact notification retention contract, the conversion/store notification paths, and any direct assertion of a retained resolved warning for a converted row in the assigned source and immediate relevant notification tests. Suggested bucket: other (maintainer test oracle only); confidence: source lead pending checks, not observed behavior. proposed_drop: false pending scope/sensitivity checks. Could-be-highest: no established security/work-loss route; suspected consequence is loss of regression protection for notification retention. possible_cover: none known from neighbour records. Caveats: this does not allege production currently deletes warnings, and absence of a production defect will not itself refute a missing test oracle. No runtime execution or reproduction."
+          }
+        },
+        {
+          "line": 15,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l4",
+            "state": "open",
+            "summary": "Require the converted session's resolved warning to remain present",
+            "location": "crates/farhelm/tests/e2e/old_terminals.rs:351",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR: the new test can report success when retirement discards the converted session's previous warning, although the required behavior is to retain it as resolved. This is a test-oracle defect, not an observed notification loss in Farhelm. Source: a_dead_old_agents_scoped_job_is_ended_and_the_session_restarts_in_a_host plants an old warning at old_terminals.rs:309, then its check_notices closure at :344-357 filters for OLD_WARNING and calls .all on the result. An empty result passes. Both invocations at :359 and :365 therefore accept that the newly interrupted row's warning vanished on the first restart or disappeared on the second. Only the new ended notice has a presence/count assertion. The other new test's .any resolved-warning assertion at :472-476 concerns the already-exited ended row, which is explicitly not converted, so it does not distinguish discarding warnings only for converted rows. Required contract: SPEC.md:2807 says 'every supervisor start marks any unresolved one resolved'; :2823 says 'Resolved entries remain visible'; :2827-2828 requires notification persistence and the ten-most-recent cap. This fixture plants one old warning and adds one ended notice, so cap eviction is not an explanation. Sensitivity checks: core.rs:7337-7382 separately commits row conversions and builds the ended list before record_ended; core/old_terminals.rs:525-550 records an ended notice for each converted id, then resolves old warnings globally. A regression that drops an old warning only for those converted ids would satisfy the current first test and leave the already-ended-row assertion satisfied. store.rs:11665-11792 checks generic cap/dedup/reopen/deletion; it does not invoke this conversion-and-notice integration path. Targeted OLD_WARNING/record_ended/OldTerminalEnded searches across these e2e and immediate notification/store tests found no positive retained-warning assertion for a converted row. Production currently performs an UPDATE at store.rs:5814-5830; that implementation correctness is not a replacement for a distinguishing regression assertion. Fix: in check_notices, require exactly the planted old warning to be present and resolved (or at least a positive presence assertion alongside all-resolved), on both supervisor starts. Suggested bucket: other (maintainer test correctness/regression protection only). Confidence: confirmed source and assertion logic, no runtime execution or reproduction. proposed_drop: false. Could-be-highest: no established shipped security/work-loss route; original suspected consequence remains missing notification-retention coverage, not a production deletion allegation. possible_cover: none in the supplied neighbour records; prohibited coverage sources not searched. Caveat: absence search is scoped to the relevant named test/caller sources; unrelated notification unit tests may cover other retention mechanisms. Later-tip applicability has not yet been checked and is the next bounded source check. All introduction premises at the reviewed new-file commit are settled."
+          }
+        },
+        {
+          "line": 16,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l4",
+            "state": "open",
+            "summary": "Require the converted session's resolved warning to remain present",
+            "location": "crates/farhelm/tests/e2e/old_terminals.rs:351",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR: the new test can report success when retirement discards the converted session's previous warning, although the required behavior is to retain it as resolved. This is a test-oracle defect, not an observed notification loss in Farhelm. Source: a_dead_old_agents_scoped_job_is_ended_and_the_session_restarts_in_a_host plants an old warning at old_terminals.rs:305, then its check_notices closure at :344-357 filters for OLD_WARNING and calls .all on the result. An empty result passes. Both invocations at :359 and :365 therefore accept that the newly interrupted row's warning vanished on the first restart or disappeared on the second. Only the new ended notice has a presence/count assertion. The other new test's .any resolved-warning assertion at :472-476 concerns the already-exited ended row, which is explicitly not converted, so it does not distinguish discarding warnings only for converted rows. Required contract: SPEC.md:2807 says 'every supervisor start marks any unresolved one resolved'; :2823 says 'Resolved entries remain visible'; :2827-2828 requires notification persistence and the ten-most-recent cap. This fixture plants one old warning and adds one ended notice, so cap eviction is not an explanation. Sensitivity checks: core.rs:7337-7382 separately commits row conversions and builds the ended list before record_ended; core/old_terminals.rs:525-550 records an ended notice for each converted id, then resolves old warnings globally. A regression that drops an old warning only for those converted ids would satisfy the current first test and leave the already-ended-row assertion satisfied. store.rs:11665-11792 checks generic cap/dedup/reopen/deletion; it does not invoke this conversion-and-notice integration path. Targeted OLD_WARNING/record_ended/OldTerminalEnded searches across these e2e and immediate notification/store tests found no positive retained-warning assertion for a converted row. Production currently performs an UPDATE at store.rs:5814-5830; that implementation correctness is not a replacement for a distinguishing regression assertion. Fix: in check_notices, require exactly the planted old warning to be present and resolved (or at least a positive presence assertion alongside all-resolved), on both supervisor starts. Suggested bucket: other (maintainer test correctness/regression protection only). Confidence: confirmed source and assertion logic, no runtime execution or reproduction. proposed_drop: false. Could-be-highest: no established shipped security/work-loss route; original suspected consequence remains missing notification-retention coverage, not a production deletion allegation. possible_cover: none in the supplied neighbour records; prohibited coverage sources not searched. Caveat: absence search is scoped to the relevant named test/caller sources; unrelated notification unit tests may cover other retention mechanisms. Later-tip applicability is confirmed: at 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, old_terminals.rs:355-360 retains the same filter-plus-all assertion, called on both starts at :363 and :369. The only later commits touching this test file are the missing-tmux skip and comment cleanup, not an oracle repair. All introduction premises at the reviewed new-file commit are settled."
+          }
+        }
+      ],
+      "latest": {
+        "line": 16,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l4",
+          "state": "open",
+          "summary": "Require the converted session's resolved warning to remain present",
+          "location": "crates/farhelm/tests/e2e/old_terminals.rs:351",
+          "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR: the new test can report success when retirement discards the converted session's previous warning, although the required behavior is to retain it as resolved. This is a test-oracle defect, not an observed notification loss in Farhelm. Source: a_dead_old_agents_scoped_job_is_ended_and_the_session_restarts_in_a_host plants an old warning at old_terminals.rs:305, then its check_notices closure at :344-357 filters for OLD_WARNING and calls .all on the result. An empty result passes. Both invocations at :359 and :365 therefore accept that the newly interrupted row's warning vanished on the first restart or disappeared on the second. Only the new ended notice has a presence/count assertion. The other new test's .any resolved-warning assertion at :472-476 concerns the already-exited ended row, which is explicitly not converted, so it does not distinguish discarding warnings only for converted rows. Required contract: SPEC.md:2807 says 'every supervisor start marks any unresolved one resolved'; :2823 says 'Resolved entries remain visible'; :2827-2828 requires notification persistence and the ten-most-recent cap. This fixture plants one old warning and adds one ended notice, so cap eviction is not an explanation. Sensitivity checks: core.rs:7337-7382 separately commits row conversions and builds the ended list before record_ended; core/old_terminals.rs:525-550 records an ended notice for each converted id, then resolves old warnings globally. A regression that drops an old warning only for those converted ids would satisfy the current first test and leave the already-ended-row assertion satisfied. store.rs:11665-11792 checks generic cap/dedup/reopen/deletion; it does not invoke this conversion-and-notice integration path. Targeted OLD_WARNING/record_ended/OldTerminalEnded searches across these e2e and immediate notification/store tests found no positive retained-warning assertion for a converted row. Production currently performs an UPDATE at store.rs:5814-5830; that implementation correctness is not a replacement for a distinguishing regression assertion. Fix: in check_notices, require exactly the planted old warning to be present and resolved (or at least a positive presence assertion alongside all-resolved), on both supervisor starts. Suggested bucket: other (maintainer test correctness/regression protection only). Confidence: confirmed source and assertion logic, no runtime execution or reproduction. proposed_drop: false. Could-be-highest: no established shipped security/work-loss route; original suspected consequence remains missing notification-retention coverage, not a production deletion allegation. possible_cover: none in the supplied neighbour records; prohibited coverage sources not searched. Caveat: absence search is scoped to the relevant named test/caller sources; unrelated notification unit tests may cover other retention mechanisms. Later-tip applicability is confirmed: at 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, old_terminals.rs:355-360 retains the same filter-plus-all assertion, called on both starts at :363 and :369. The only later commits touching this test file are the missing-tmux skip and comment cleanup, not an oracle repair. All introduction premises at the reviewed new-file commit are settled."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g157/findings.jsonl",
+        "id": "l4",
+        "line": 16,
+        "disposition": "verified",
+        "group": "converted-old-session-warning-retention-assertion-vacuous-all",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-100 after inspecting it. The test plants an old warning, then accepts an empty filtered warning set on both supervisor starts. It therefore cannot distinguish retention as resolved from deletion specifically for a converted session. This is a test sensitivity defect, not observed production notification loss. Record the test-only defect at other priority. Require a positive exact warning presence/count assertion as well as resolved state on both starts. Preserve source-confirmed confidence and the absence of a runtime reproduction. Checked source/results: [\"At dbfc69751215dbf15e1d31d5bed73c3754c4ebc4, old_terminals.rs:305 plants the warning; :340-343 proves the session was converted to Interrupted; :344-357 requires one new ended notice but uses filter(OLD_WARNING).all(resolved), with no presence check. Calls at :359 and :365 repeat that vacuous assertion.\",\"The same file's :466-476 positively checks retention only on the already-ended row that was not converted. A regression deleting warnings only for converted rows would evade both tests.\",\"At the same hash, core.rs:7337-7382 commits conversions, collects converted Interrupted sessions and calls record_ended; core/old_terminals.rs:525-547 records ended notices then resolves old warnings. store.rs:5814-5830 currently uses UPDATE, so current production deletion is not alleged.\",\"store.rs:11665-11792 checks generic notification deduplication, reopening, capping and delete cleanup; it does not drive this converted-row integration route. Targeted OLD_WARNING/OldTerminalEnded/record_ended searches in the immediate test and notification sources find no positive converted-row retained-warning assertion.\",\"At inclusive tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, old_terminals.rs:348-369 retains the same assertion and both calls. No runtime execution or mutation experiment.\"] Current coverage/results: [\"SPEC.md:2803-2828 requires startup resolution, visible resolved entries, persistence across starts and the ten-entry cap. This two-notice fixture cannot justify warning deletion by cap eviction. SPEC_impl.md:2780-2822 and :5682-5688 describe conversion and resolution; neither accepts discarding the warning or this missing test assertion.\",\"TODO.md's Planned bucket is empty. Focused searches across plans/queue found tmux-end-old-terminals.md:95-100 requiring old-warning resolution and a separate persistent ended notice; this describes intended product behavior and does not fix the new test's presence assertion. Tooling/docs tmux plans leave the startup-shutdown tests in place and do not specify this oracle repair.\",\"Current INDEX.md and queue-file searches found notification-cleanup-row-premise.md. Read it fully: it concerns schema reconstruction and the premise before DELETE, not retention across conversion/startup. It is neither exact coverage nor a same-root alias; extending it would mix distinct defects.\",\"BUGS.md has no matching notification issue. Searches of active TRIAGE_OUTCOMES.md for notification, warning, old-terminal and conversion terms found no matching decision. No archive read.\",\"FILTER.md has no full match: this is a deterministic maintainer-test assertion gap, not a rare runtime diagnostic-loss trigger.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"From its first lead onward, the concern was lost regression protection for retaining the converted session's prior warning as resolved. It never established shipped warning deletion, security harm or loss of user-owned work. Preserve the distinction from the already-ended-row assertion and from correct production UPDATE behavior.\"; \"No source premise is missing for the assertion gap. Runtime frequency and an actual production warning deletion are neither established nor required for this test-only claim. Absence search is limited to the named integration test and immediate notification/store tests.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g157/l4",
+        "line": 16,
+        "disposition": "verified",
+        "group": "converted-old-session-warning-retention-assertion-vacuous-all",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": "review_feedback_queue/converted-warning-retention-oracle.md",
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-100 after inspecting it. The test plants an old warning, then accepts an empty filtered warning set on both supervisor starts. It therefore cannot distinguish retention as resolved from deletion specifically for a converted session. This is a test sensitivity defect, not observed production notification loss. Record the test-only defect at other priority. Require a positive exact warning presence/count assertion as well as resolved state on both starts. Preserve source-confirmed confidence and the absence of a runtime reproduction. Checked source/results: [\"At dbfc69751215dbf15e1d31d5bed73c3754c4ebc4, old_terminals.rs:305 plants the warning; :340-343 proves the session was converted to Interrupted; :344-357 requires one new ended notice but uses filter(OLD_WARNING).all(resolved), with no presence check. Calls at :359 and :365 repeat that vacuous assertion.\",\"The same file's :466-476 positively checks retention only on the already-ended row that was not converted. A regression deleting warnings only for converted rows would evade both tests.\",\"At the same hash, core.rs:7337-7382 commits conversions, collects converted Interrupted sessions and calls record_ended; core/old_terminals.rs:525-547 records ended notices then resolves old warnings. store.rs:5814-5830 currently uses UPDATE, so current production deletion is not alleged.\",\"store.rs:11665-11792 checks generic notification deduplication, reopening, capping and delete cleanup; it does not drive this converted-row integration route. Targeted OLD_WARNING/OldTerminalEnded/record_ended searches in the immediate test and notification sources find no positive converted-row retained-warning assertion.\",\"At inclusive tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, old_terminals.rs:348-369 retains the same assertion and both calls. No runtime execution or mutation experiment.\"] Current coverage/results: [\"SPEC.md:2803-2828 requires startup resolution, visible resolved entries, persistence across starts and the ten-entry cap. This two-notice fixture cannot justify warning deletion by cap eviction. SPEC_impl.md:2780-2822 and :5682-5688 describe conversion and resolution; neither accepts discarding the warning or this missing test assertion.\",\"TODO.md's Planned bucket is empty. Focused searches across plans/queue found tmux-end-old-terminals.md:95-100 requiring old-warning resolution and a separate persistent ended notice; this describes intended product behavior and does not fix the new test's presence assertion. Tooling/docs tmux plans leave the startup-shutdown tests in place and do not specify this oracle repair.\",\"Current INDEX.md and queue-file searches found notification-cleanup-row-premise.md. Read it fully: it concerns schema reconstruction and the premise before DELETE, not retention across conversion/startup. It is neither exact coverage nor a same-root alias; extending it would mix distinct defects.\",\"BUGS.md has no matching notification issue. Searches of active TRIAGE_OUTCOMES.md for notification, warning, old-terminal and conversion terms found no matching decision. No archive read.\",\"FILTER.md has no full match: this is a deterministic maintainer-test assertion gap, not a rare runtime diagnostic-loss trigger.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"From its first lead onward, the concern was lost regression protection for retaining the converted session's prior warning as resolved. It never established shipped warning deletion, security harm or loss of user-owned work. Preserve the distinction from the already-ended-row assertion and from correct production UPDATE behavior.\"; \"No source premise is missing for the assertion gap. Runtime frequency and an actual production warning deletion are neither established nor required for this test-only claim. Absence search is limited to the named integration test and immediate notification/store tests.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-100",
+          "key": "g157/l4",
+          "latest_line": 16,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "converted-old-session-warning-retention-assertion-vacuous-all",
+          "aliases": [],
+          "target_queue_file": "review_feedback_queue/converted-warning-retention-oracle.md",
+          "why": "The test plants an old warning, then accepts an empty filtered warning set on both supervisor starts. It therefore cannot distinguish retention as resolved from deletion specifically for a converted session. This is a test sensitivity defect, not observed production notification loss.",
+          "checks": [
+            "At dbfc69751215dbf15e1d31d5bed73c3754c4ebc4, old_terminals.rs:305 plants the warning; :340-343 proves the session was converted to Interrupted; :344-357 requires one new ended notice but uses filter(OLD_WARNING).all(resolved), with no presence check. Calls at :359 and :365 repeat that vacuous assertion.",
+            "The same file's :466-476 positively checks retention only on the already-ended row that was not converted. A regression deleting warnings only for converted rows would evade both tests.",
+            "At the same hash, core.rs:7337-7382 commits conversions, collects converted Interrupted sessions and calls record_ended; core/old_terminals.rs:525-547 records ended notices then resolves old warnings. store.rs:5814-5830 currently uses UPDATE, so current production deletion is not alleged.",
+            "store.rs:11665-11792 checks generic notification deduplication, reopening, capping and delete cleanup; it does not drive this converted-row integration route. Targeted OLD_WARNING/OldTerminalEnded/record_ended searches in the immediate test and notification sources find no positive converted-row retained-warning assertion.",
+            "At inclusive tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, old_terminals.rs:348-369 retains the same assertion and both calls. No runtime execution or mutation experiment."
+          ],
+          "coverage_checked": [
+            "SPEC.md:2803-2828 requires startup resolution, visible resolved entries, persistence across starts and the ten-entry cap. This two-notice fixture cannot justify warning deletion by cap eviction. SPEC_impl.md:2780-2822 and :5682-5688 describe conversion and resolution; neither accepts discarding the warning or this missing test assertion.",
+            "TODO.md's Planned bucket is empty. Focused searches across plans/queue found tmux-end-old-terminals.md:95-100 requiring old-warning resolution and a separate persistent ended notice; this describes intended product behavior and does not fix the new test's presence assertion. Tooling/docs tmux plans leave the startup-shutdown tests in place and do not specify this oracle repair.",
+            "Current INDEX.md and queue-file searches found notification-cleanup-row-premise.md. Read it fully: it concerns schema reconstruction and the premise before DELETE, not retention across conversion/startup. It is neither exact coverage nor a same-root alias; extending it would mix distinct defects.",
+            "BUGS.md has no matching notification issue. Searches of active TRIAGE_OUTCOMES.md for notification, warning, old-terminal and conversion terms found no matching decision. No archive read.",
+            "FILTER.md has no full match: this is a deterministic maintainer-test assertion gap, not a rare runtime diagnostic-loss trigger."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No source premise is missing for the assertion gap. Runtime frequency and an actual production warning deletion are neither established nor required for this test-only claim. Absence search is limited to the named integration test and immediate notification/store tests.",
+          "original_stronger_consequence": "From its first lead onward, the concern was lost regression protection for retaining the converted session's prior warning as resolved. It never established shipped warning deletion, security harm or loss of user-owned work. Preserve the distinction from the already-ended-row assertion and from correct production UPDATE behavior.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Record the test-only defect at other priority. Require a positive exact warning presence/count assertion as well as resolved state on both starts. Preserve source-confirmed confidence and the absence of a runtime reproduction."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "converted-old-session-warning-retention-assertion-vacuous-all",
+        "destination": "trailing-converted-old-session-warning-retention-assertion-vacuous-all.md"
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete: all six assigned excerpts (1,513 lines) and the complete commit list read.\n\nNo reportable defects established. Logged dropped candidates c1–c3; no open leads. Updated [progress.md]([private-run]/g157/progress.md).\n\nSource-only review; no tests or reproductions run. Checkout unchanged."
+    },
+    {
+      "turn": 2,
+      "reply": "- Revised c3: the deleted churn test already used host terminals, so it had no effective sink-registry oracle. Removed diagnostics and later retirement are now treated separately.\n- Revised c2: confirmed direct agent, tab, and helm WebSocket grid-decoding assertions.\n- No new findings. Unresolved lead IDs: none.\n- Updated findings log and progress; source-only analysis."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 found one new verified finding: **l4**, a test assertion that permits a converted session’s old warning to disappear instead of remaining resolved. Checked contracts, callers, related tests, and persistence at the pinned tip.\n\nRevised **c3**: its fixture gap predates the exclusive base.\n\nNew unverified IDs: none. Open leads: none. Logs updated; source-only checks, no execution."
+    },
+    {
+      "turn": 4,
+      "reply": "Discovery pass 2 found nothing new.\n\nChecked grid frame assembly and ordering, attachment assertions, fixture ownership, skip boundaries, and deletion-adjacent assertions.\n\nNew verified IDs: none. New unverified IDs: none. Open leads: none.\n\nProgress updated. Source-only review; no execution."
+    }
+  ],
+  "progress": "# g157 initial review\nTurn: initial, 1. Discovery passes: 0.\nScope: six assigned patch excerpts, 1513 lines across four revisions.\nState: initial pass complete. All 1513 assigned lines were delivered through ten bounded evidence packets. The complete inventory commits field was read; excluded coverage metadata was not read.\n\nReviewed revisions: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513, dbfc69751215dbf15e1d31d5bed73c3754c4ebc4, f560058da19e02716e6f943883a9508b447aff4e, d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. Contracts checked at their recorded revisions: session-view tab launch, host-only creation and tab sizing, old-terminal retirement and notices, grid-only streams, and test substrate rules. GUI answer-binding rule read; no assigned GUI handlers.\n\nInterface assumptions: this is a source-only review of regression tests and their removals. The e2e module is Linux-gated. A supervisor restart drains the previous owner before constructing its replacement. Old-terminal cleanup sweeps converted agents and individually attributed old tabs, while host-tab launch records exclude current tabs from the scope sweep. Process-ID guards are tooling for one run, not production authority. The post-removal protocol has no terminal-kind negotiation or stream-kind notice; real output still passes through GridOutput decoding.\n\nChecks/results: inspected all selected patches, the retained rc-file test and host-tab geometry assertions, real grid viewers and attachment assertions, the shared restart/process-lifetime helpers, the complete old-terminal cleanup implementation, and the machine-tmux resolver. No reportable defect established. No builds, runtime tests or reproductions run or requested. No checkout files changed.\n\nRecords: c1-c3 are dropped candidates with source refutations or the retired contract; final revisions correct source line references and quote punctuation. New verified findings: none. New unverified findings: none. Open leads: none. No could-be-highest candidate established.\n\nUnread assigned scope: none. Other groups and the rest of the commit range were not reviewed beyond interface context. Next action: return to the caller for the separate later synthesis turn; do not count this initial pass as a discovery pass.\n\nTurn 2: synthesis in progress. c3 reopened as a lead: separate removed helper mechanics from live old-terminal lifecycle coverage before later retirement. Readily checkable premise: surviving runtime and replacement assertions at 647f0227. No new discovery pass.\n\nTurn 2 completed: later-turn synthesis. Discovery passes remain 0.\n\nChanges: c3 was reopened as a lead, investigated, and resolved under the same ID as a candidate with a narrower source refutation. The deleted registry churn test already used host terminals at the parent revision: harness -> harness_with_timeouts -> SupervisorSeams::default -> NewTerminals::Host. Its wait accepted an absent sink and its bound accepted registry size zero. Removal therefore did not lose an effective old-sink churn oracle. This replaces the invalid earlier reasoning that lack of a demonstrated product bug refuted a missing test oracle. The old attachment route still reaches a sink at 647f0227; later dbfc6975 retirement is explicitly prospective, not a retroactive refutation. Removed pipe/roster diagnostic mechanics, required old-runtime behavior, and host-tab replacement assertions are now distinguished in c3.\n\nc2 revised: confirmed both actual helm WebSocket GridOutput decoding with ready/echo results and direct tab GridOutput decoding with shell result plus ReplayComplete. The bare-supervisor tab attach-only subcheck is not treated as proof of tab output. c1 checked across the later tmux-skip revision: the old-terminal module remains Linux-gated, with missing-tmux and missing-systemd substrate limits explicit. No c1 conclusion changed.\n\nGeometry/environment interfaces: the direct host-tab test compares distinct runtimes and matching non-default geometry; this synthesis does not certify that as proof of every processed-resize boundary. g151 owns that proof. The environment-at-each-open test remains, but g155 independently owns delimiter/readiness adequacy. No duplicate findings commissioned or coverage metadata consulted.\n\nNew verified/unverified finding IDs this turn: none. Revised candidate IDs: c2, c3. Open lead IDs: none. All changes are source-supported, with no tests, builds or reproductions executed. Unread assigned scope: none. No checkout changes. Next action: return synthesis delta to caller; any later discovery requires its own requested turn.\n\nTurn 3: discovery pass 1 in progress. All discovery-neighbours.json lines 1-419 read. Pending synthesis settled: c3 fixture gap already exists at the exclusive base; historical switch f42178f9 predates the range. c3 revised with exact base constructor chain. Proceeding to new search within six assigned patch excerpts; no new finding yet.\n\nTurn 3 completed: separate discovery pass 1. Interface-neighbour input was read in full before synthesis/new search. Whole-range synthesis revised c3: the exclusive base already has the host-default constructor and the churn test's missing sink premise; git log -S attributes the switch to pre-range f42178f9402ce22c60530360edc10d6721ef5b16. No in-range introduction of that fixture gap was established. The earlier helper-removal refutations remain separate from product behavior and the later old-path retirement.\n\nDiscovery result: something new was found. New verified source finding: l4 (other, test oracle). The first new old-terminal test's filtered all-resolved assertion accepts loss of the converted row's old warning on either restart; the other positive warning-presence assertion is for an unconverted already-ended row. Checked the exact notification persistence/resolution contract, conversion and record_ended call chain, store UPDATE/cap behavior, and relevant generic notification tests; none supplied the missing converted-row presence assertion. Verified the same oracle remains at pinned tip lines 355-360. l4 was immediately recorded as a lead, resolved as a finding, and revised with the tip check and corrected fixture source line. No production notification loss is alleged or observed.\n\nOther discovery checks: rechecked fabricated-row generation and markers, scope-only job premise, dead-pane boundary, no-server connection-refused premise, mixed-session ignored-HUP premise and host survivor assertions, per-run guard ownership context, and old-server executable selection. The machine-tmux resolver and actual commands share inherited PATH/cwd semantics and handle missing PATH via the platform default. No additional independent finding was established. The failed-restart guard lifetime issue already belongs to neighbour g144/c3 and was not duplicated. Grid-kind, environment and geometry known candidates were not reopened as new issues.\n\nNew verified IDs this discovery pass: l4. New unverified-after-investigation IDs: none. Open lead IDs: none. Existing ID revised for synthesis: c3. All conclusions are source/contract analysis; no tests, builds, reproductions or live-install actions. Unread assigned scope: none. No checkout files changed. Next action: return discovery delta; the substantive new finding warrants a separate later caller-requested pass under the original charter.\n\nTurn 4: discovery pass 2 in progress. Refreshed discovery-neighbours.json lines 1-603 read in bounded chunks before source search. No pending cross-group questions. Novelty exclusions include neighbour-owned restart-failure guard lifetime and newly reported nearby helper-doc issues. Existing local records retained; no conclusion revised yet.\n\nTurn 4 completed: separate discovery pass 2. Refreshed interface records read in full, lines 1-603, before source search. No pending synthesis questions were supplied and no existing disposition was changed.\n\nNew-search checks: inspected the process-test GridScreen consumer and BrowserSocket boundaries, confirming rows are buffered until Frame, stream grammar is checked with GridStreamCheck, and text matching reads the assembled screen. Rechecked the assigned host-agent attach test's first-Hello, ready-row and ReplayComplete assertions against its real-host fixture setup. Inspected the retained create/Stop assertions bordering the deleted terminal-kind tests. Rechecked all three missing-tmux early returns and the mixed-session systemd premise branch. Reviewed the row/marker/job fixtures and guard use, including PidKillGuard's captured starttime and exact session-marker scanning, for an independent failure/ownership issue beyond the supplied guard-lifetime finding. Revisited the deletion boundary around the retained environment test without duplicating g155's delimiter/readiness responsibility.\n\nResult: no additional substantive issue or unresolved lead found. These are source checks only; no runtime observation, build, test, reproduction or live-install action. No new finding/candidate events were needed, and all earlier finding/candidate histories and proposed-drop bases remain unchanged. New verified IDs: none. New unverified-after-investigation IDs: none. Open lead IDs: none. Explicit novelty result: nothing new found in discovery pass 2. Assigned unread scope: none. Checkout unchanged. Next action: return the empty discovery result to the caller.\n"
+}

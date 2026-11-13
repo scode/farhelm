@@ -1,0 +1,283 @@
+[
+  {
+    "key": "g153/l2",
+    "latest_line": 8,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "terminal-tests/broad-stall-isolation-absence",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Source refutes the broad absence-of-isolation-tests claim. This does not refute the separate stale-owner PauseOutput gap, which is outside this batch. The result concerns test protection, not a demonstrated product defect.",
+    "checks": [
+      "At 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513, crates/farhelm/tests/e2e/tab_lifecycle_edges.rs:539-660 attaches an agent and two tabs under one connection/lease, pauses one tab, requires Stalled, then checks fresh agent/sibling output and reattaches for BEFORE-STALL.",
+      "Same revision terminal_tabs.rs:1397-1472 retains a separate paused-tab/agent round-trip test. Its eight-second interval is not a proof of crossing the sixty-second stall deadline; the first cited test supplies the actual detach witness. Neither scenario sends stale-owner pause from a displaced connection. No runtime checks ran."
+    ],
+    "coverage_checked": [
+      "Recording main 24bc058066fd57848e788b465719b0e6da2f98f7: SPEC.md Terminal experience:3013-3031 and SPEC_impl.md Grid streams/transport require attachment isolation; they do not accept its absence from tests.",
+      "TODO.md Planned:25-27 is empty. Searched plans/queue for stall/isolation/backpressure: no unlanded plan for this exact missing oracle. tmux removal plans are marked landed at plans/REPORTS.md:29-32.",
+      "BUGS.md concerns an SSH provisioning-output hang only. Full INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact test-gap coverage. Read host-flood-stall-window-claim.md: its eight-versus-sixty-second documentation issue is adjacent, not this broad absence claim. FILTER.md has no test-coverage-removal filter."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "None for the narrow refutation; no conclusion about displaced-owner pause authorization or every real-stack race follows.",
+    "original_stronger_consequence": "Removing terminal_backpressure might leave cross-attachment stall isolation entirely untested. Latest record explicitly narrows that claim and preserves the separate displaced-owner scenario.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Refute only the broad test-absence candidate using the retained same-revision integration test. Do not dismiss another named claim from this result."
+  },
+  {
+    "key": "g153/c3",
+    "latest_line": 13,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "legacy-test-removal-before-retirement/mixed-session-lifecycle",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The intermediate revision deletes distinct mixed-session ordering, takeover, Delete and last-old-tab survival oracles while still adopting and serving old terminals. Later retirement ends the subject prospectively; it does not restore historical test protection. No production lifecycle defect is established.",
+    "checks": [
+      "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513^:crates/farhelm/tests/e2e/host_tabs.rs:409-600 contains mixed ordering/kind assertions, takeover across both kinds, guarded Delete refusal, host/process/socket cleanup and bystander survival; :603-680 contains last-tmux-tab closure and continuing host-agent/tab assertions.",
+      "At 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513, exact-name/order/migration searches across integration and supervisor core tests found no replacement. core.rs:6428-6433 still adopts the old server and :14562-14589 gates tab opening by the agent's actual terminal kind. SPEC_impl.md:2370-2411 still specifies the mixed-session behavior.",
+      "At dbfc69751215dbf15e1d31d5bed73c3754c4ebc4, core.rs:6426-6438 ends the old server and disables its driver; :6965-6969 resolves old rows as absent. This is retirement, not a test repair. No runtime checks ran."
+    ],
+    "coverage_checked": [
+      "Both current specifications were searched for mixed/old terminals and lifecycle. SPEC.md:2998-3010 now accepts ending old terminals at startup; SPEC_impl.md Terminal host/Ending the old private tmux server describes that retirement, not acceptance of the historical test gap.",
+      "TODO.md Planned is empty. Matching tmux-end-old-terminals and follower plans are landed according to plans/REPORTS.md:29-32, so none is unlanded coverage of this gap. BUGS.md has no matching entry.",
+      "Full INDEX.md, matching terminal-test entries and active TRIAGE_OUTCOMES.md searches found no same trigger/consequence/scope. g154/c3 and g154/l4 concern separate mode and RSS oracles, not exact aliases. FILTER.md's older-upgrade filter does not match test deletion alone: no additional rare trigger is required."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No missing premise for the historical removal of these specific assertions. A shipped loss-of-work route would need separate evidence; restoring obsolete tmux cases at current tip is not the proposed fix.",
+    "original_stronger_consequence": "The first record considered broken upgraded sessions, then proposed dropping because no implementation regression was found and creation fixtures were removed. The later records withdraw that basis for the independent test-only gap. Preserve both the no-product-failure limit and the historical gap.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Retain the intermediate historical test-oracle finding, other priority. The flag preserves independent review of the earlier dismissal of a possible upgraded-session/process consequence; this consultation does not authorize that drop."
+  },
+  {
+    "key": "g154/c1",
+    "latest_line": 5,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "startup-reclaim/empty-store-comment-candidate",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The changed test comment agrees with the missing/empty-store safety rule and unchanged executable assertions. This checks that bounded comment claim, not every partial restored-database case or the entire reclaim implementation.",
+    "checks": [
+      "08399d092d20815ced6619c26df2391944ae2b4a diff for crates/farhelm/tests/e2e/host_reclaim.rs changes only documentation:724-732. Test:738-765 creates a live unrecorded host, asserts absent database, then asserts an empty known-session set before the second serving start and host survival after each.",
+      "Same revision store.rs:4767-4786 queries SELECT id FROM sessions UNION SELECT session_id FROM create_reservations. service/core/host_reclaim.rs:496-509 returns None for an empty union before discovery. hook_identity.rs:214-237 completes the protocol handshake; :243-255 awaits serving-task cancellation. The survival assertion follows reconciliation, not mere socket existence. No runtime checks ran."
+    ],
+    "coverage_checked": [
+      "Both specifications searched for missing/empty database and reclaim. Current SPEC_impl.md:2502-2545 contains the same startup-reclaim safety rule. SPEC.md adds no contrary empty-store behavior.",
+      "TODO.md Planned empty; plans/queue searches for reclaim/missing/empty database found no exact work covering a comment defect. BUGS.md has no matching entry. Full INDEX.md and active TRIAGE_OUTCOMES.md have no exact claim; other reclaim test-premise items concern different fixtures. FILTER.md is not needed for this source refutation."
+    ],
+    "exact_cover_quotes": [
+      "SPEC_impl.md:2522-2528 at 08399d092d20815ced6619c26df2391944ae2b4a, exact excerpt: 'when it has no session and no reservation (at every start while that holds, as after a database went missing)'. This supports comment accuracy; it is not a generic acceptance of lost terminals."
+    ],
+    "missing_premise": "No contrary comment contract shown. Nonempty partial restores are explicitly outside this bounded check.",
+    "original_stronger_consequence": "A wrong reclaim explanation could misdescribe when running terminals are protected after database loss. The record never established an executable route ending work and repeatedly limited itself to the changed comment.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Source-refute the assigned comment defect. Because the subject is destructive startup reclamation of running terminals, preserve the proposed dismissal for an independent drop check."
+  },
+  {
+    "key": "g154/c2",
+    "latest_line": 6,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "terminal-tests/recorder-child-environment-handoff",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The test replaces a removed supervisor flag with its surviving installation environment handoff and verifies that the still-owned child received the exact entry. No introduced fixture-identity or recorder-handoff defect is established.",
+    "checks": [
+      "At 1ed482dde220452e424973faf38a5e1318986333, crates/farhelm/tests/e2e/host_processes.rs:105-121 sets FARHELM_TMUX on Command only, retains Child and waits for readiness. :501-515 proves recorder logging; :522-537 checks complete NUL-delimited environ entry for that Child's PID. No wait/try_wait between spawn and the read reaps it.",
+      "Same test:582 waits for supervisor stop before :588-596 checks the recorder log and missing private socket. SPEC_impl.md:2962-2974 retains FARHELM_TMUX at this revision and says supervisor run no longer takes --tmux. Existing /proc cmdline usage already imposed Linux portability. kill_on_drop is not an awaited cleanup proof. No runtime checks ran."
+    ],
+    "coverage_checked": [
+      "Both current specifications searched for FARHELM_TMUX/recorder/environment. Their later tmux retirement is not used as historical coverage; the reviewed revision's exact handoff contract supplies the factual check.",
+      "TODO.md Planned empty. Matching tmux-removal plans are landed (plans/REPORTS.md:29-32), not unlanded fixes. BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md contain no matching recorder-handoff defect. FILTER.md supplies no applicable filter."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "An arbitrary future executable-selection bypass or failure-path cleanup defect is not ruled out by this sentinel; no such concrete shipped route is supplied here.",
+    "original_stronger_consequence": "Possible invalid recorder handoff or PID reuse could make the no-tmux regression vacuous. The record confines the conclusion to test setup/identity, without certifying every future bypass or all cleanup paths.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Refute only the introduced handoff/identity candidate using the same-revision child ownership, exact environment assertion and recorder positive control."
+  },
+  {
+    "key": "g154/c3",
+    "latest_line": 11,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "legacy-test-removal-before-retirement/recovery-mode-rendering",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Removing the alternate-screen and mode/cursor recovery assertions loses distinct legacy attachment-level test protection while old terminals remain served. Surviving content recovery and grid tests do not assert those mode segments. This is a historical test defect, not an established current mode-restoration failure.",
+    "checks": [
+      "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513^:crates/farhelm/tests/e2e/terminal_backpressure.rs:664-715 requires alternate-buffer entry after reset and before ALT-SCREEN APP; :729-789 checks cursor placement after content and bracketed paste when tmux reports that mode. These tests are deleted at the reviewed revision.",
+      "At 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513, connection.rs:1441-1450 renders pre-content/content/post-content modes and :1853-1871 still performs tmux pause recovery. tmux/stream.rs:2983-3061 and :3385-3438 recover content but discard modes; connection.rs:2420-2482 asserts reset/content/count without nondefault modes. Targeted resume/Recovery/forced-pause searches found no replacement attachment mode oracle.",
+      "SPEC_impl.md:2294-2296,2954-2973 retains earlier-server adoption and serving. dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:core.rs:6426-6438,6965-6969 subsequently retires that path. At tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, core/tests/host_terminals.rs:3729-3798 and :3817-3855 contain the later repaired shared stalled-teardown and repeated-pause tests; do not claim those gaps remain ongoing. No runtime checks ran."
+    ],
+    "coverage_checked": [
+      "Both current specifications searched for old terminals, alternate screen, pause and modes. SPEC.md:2998-3010 and SPEC_impl.md Ending the old private tmux server now retire legacy serving; this does not accept the intermediate missing oracle.",
+      "TODO.md Planned empty; matching tmux-removal plans are landed per plans/REPORTS.md:29-32, with no unlanded exact repair. BUGS.md has no matching entry. Full INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact recovery-mode test-gap item.",
+      "g153/c3 is mixed-session lifecycle and g154/l4 is resident-memory measurement: adjacent, distinct assertions. FILTER.md does not match deletion of regression coverage without an additional rare trigger. No general no-product-bug argument is used to dismiss a test defect."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "None for loss of the two historical mode-sensitive oracles. An actual product corruption, unsafe paste, or lost-work route is not demonstrated. The old race sweep did not prove hitting its race; later host coverage is stronger.",
+    "original_stronger_consequence": "Initial records broadly proposed dropping the removed tmux pause/race/RSS suite because the host grid path differs, shared ownership/anchor guards are correct, and no product failure was established. Later records withdraw that argument for the legacy mode oracle, retain no-runtime/no-host-RSS caveats, and exclude only the retired ongoing legacy claim and later repaired shared tests. UploadAck priority is separately owned and not settled here.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain the specific intermediate mode-restoration test loss. Preserve the initial withdrawal history and the later retirement/repair boundaries without inventing a current product bug or requesting obsolete tmux tests at tip."
+  },
+  {
+    "key": "g154/l4",
+    "latest_line": 15,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "legacy-test-removal-before-retirement/stalled-server-rss",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The removed test measured bounded tmux-server and supervisor resident growth under a live paused-viewer flood. No remaining same-revision test with that stimulus and those metrics was found. Behavioral queue/history assertions and browser-only benchmarks cannot replace those measurements. This proves lost historical protection, not a leak.",
+    "checks": [
+      "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513^:crates/farhelm/tests/e2e/terminal_backpressure.rs:918-1074 binds process identities, warms history, pauses the attachment, gates sustained output, samples seven RSS points beyond the pause allowance, requires producer progress, enforces separate <8 MiB growth bounds, resumes delivery and verifies a controlled producer stop.",
+      "At 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513, ProcessRss/RSS_SAMPLE/smaps_rollup/removed-name search has no matches. Resident/RSS growth searches found files.rs:1542-1608 measuring a 64 MiB file upload, emulator-only memory tests and browser benchmarks, not the old terminal path. e2e/grid-client/BENCHMARK.md:3-6 explicitly excludes Farhelm/helm/SSH/emulator and has no thresholds. tmux/stream.rs:2460-2471 still checks pause-after command syntax; its absence would not go wholly undetected.",
+      "SPEC_impl.md:1766-1768 explicitly describes flat tmux RSS, and :2294-2296,2954-2973 retains legacy serving. dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 subsequently retires it at core.rs:6426-6438,6965-6969. No runtime checks ran."
+    ],
+    "coverage_checked": [
+      "Both current specifications searched for resident/RSS, pause and old terminals: current retirement text does not supply historical RSS coverage. TODO.md Planned empty. Matching tmux-removal plans are already landed at plans/REPORTS.md:29-32; no unlanded exact measurement repair found.",
+      "BUGS.md has no matching entry. Full INDEX.md and active TRIAGE_OUTCOMES.md searches found memory/peak and browser cases but no same paused legacy-server measurement. g154/c3 and g153/c3 are separate oracles. FILTER.md has no applicable test-removal boundary."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "None for removal of the historical metric. Any actual production memory exhaustion or loss of work needs separate evidence. No claim that every conceivable leak escapes every remaining test, or that tmux RSS certifies terminal-host RSS, is made.",
+    "original_stronger_consequence": "The lead asked whether the old path lost its memory-growth oracle despite the legitimate distinction between tmux and terminal-host RSS. The final finding preserves that distinction, the still-present pause-after assertion and the later retirement; it never establishes a product leak or catastrophic tooling harm.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain the historical stalled-viewer RSS test gap, other priority, separately from mode/lifecycle gaps. Do not request revival of an obsolete tmux fixture at current tip."
+  },
+  {
+    "key": "g154/c5",
+    "latest_line": 14,
+    "recommendation": "retain-unverified",
+    "bucket": "other",
+    "underlying_key": "terminal-tests/raw-drain-grid-caller-sensitivity",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The raw-versus-decoded representation mismatch exists, but the supplied claim does not establish an additional vacuous or failing assertion in these callers. Source supports the latest narrow no-demonstrated-regression conclusion; it does not prove all negative-marker assertions sound over arbitrary grid shapes. Preserve that uncertainty if the parent records this candidate.",
+    "checks": [
+      "At 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513, terminal_backpressure.rs:20-43 appends Data bytes and observes detach/closure; its assigned change is documentation. session_lifecycle.rs:693-701,833-841, session_rename.rs:592-598 and tab_lifecycle_edges.rs:281-300 check detach absence and then request distinct fresh markers through grid-aware waits.",
+      "Same revision terminal_tabs.rs:1367-1393 first observes positive agent/tab markers, then uses drain_for before absence checks for cross-stream fixed text. This does not infer liveness from raw byte length. A concrete emitted/frame shape that hides a wrong-stream marker remains unestablished. No runtime checks ran."
+    ],
+    "coverage_checked": [
+      "Both specifications searched for grid text, raw drain and observer framing: current grid-client text explains styled rows, not arbitrary raw-byte transcript correctness. No explicit acceptance of a missed assertion found. TODO.md Planned empty; no matching unlanded plan or BUGS.md item.",
+      "Read full INDEX.md and matching grid-row-is-not-program-line.md and grid-text-omits-blank-columns.md. They concern synthetic row completion and omitted-column reconstruction in the grid-aware decoder, respectively, not raw drain accumulation; no exact alias or useful new consequence extension established. Active TRIAGE_OUTCOMES.md has no exact match. FILTER.md does not match an unproved test oracle by itself."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A concrete named fixture and supported grid/frame shape causing a false negative, false pass or false failure because this drain stores raw bytes, plus attribution within the reviewed range. The current source checks do not supply it.",
+    "original_stronger_consequence": "Keeping raw Data-byte draining after attachments become grids might invalidate surviving regression assertions. The reviewer proposed dropping because no concrete missed assertion was found, while explicitly refusing to certify arbitrary styled-text or split-run needles.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain as investigated uncertainty rather than treating absence of a demonstrated caller failure as complete source refutation. The parent may resolve the narrow candidate; no general decoder guarantee follows."
+  },
+  {
+    "key": "g154/c6",
+    "latest_line": 16,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "terminal-tests/deleted-private-observer-unit-contracts",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The helper-only unit tests disappear together with the private observer implementations and every consumer. No distinct surviving helper contract is left untested by their deletion. This does not refute the separate loss of product-path mode or RSS assertions.",
+    "checks": [
+      "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513^:terminal_backpressure.rs:89-153 implements QuietDeadline and FloodProgress solely for the deleted local drain/progress observers. At the reviewed revision, exact-name searches across crates/farhelm, crates/farhelm-supervisor and crates/farhelm-fixtures for both types and drain_until_quiet, wait_for_flood_marker_with_progress, assert_flood_outstanding, gated_flood_session, start_gated_flood_on_live_attachment and assert_records_consecutive return no matches (exit 1). No runtime checks ran."
+    ],
+    "coverage_checked": [
+      "Both specifications searched for these helpers/timing observer contracts: no surviving public or production helper contract. TODO.md Planned empty; plans/queue, BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact helper-only gap. FILTER.md not used; the basis is removal of both subject and consumers, not rarity or correct production behavior."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A surviving implementation or caller of these exact private observers would be needed for an independent continuing unit-test gap; none found.",
+    "original_stronger_consequence": "Deleting deterministic quiet-deadline and numbered-progress tests might create an additional timing-regression gap. The latest record separates that candidate from the retained production-path test losses and later repaired shared race/pause cases.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Refute the additional helper-contract candidate narrowly. Do not count deleted private helper tests as an extra instance of the distinct historical path-oracle findings."
+  },
+  {
+    "key": "g155/c1",
+    "latest_line": 5,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "terminal-tests/rc-probe-variable-format-capture",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Rust captures the intended constant, preserving the shell dollar prefix. The probe queries FARHELM_RC_MARKER, not a shell variable literally named RC_MARKER_VAR. This is separate from readiness and framing.",
+    "checks": [
+      "At 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513, terminal_tabs.rs:1547 formats printf with ${RC_MARKER_VAR}; restart_with_resume.rs:1466 defines RC_MARKER_VAR as FARHELM_RC_MARKER and :1480 exports it. Rust string interpolation makes the shell argument $FARHELM_RC_MARKER.",
+      "The exclusive review base 6e423e30068b62c6cfa276c6d720ee35bb70387a already has the same test at terminal_tabs.rs:4259 and identical probe at :4314. It is retained material exposed by diff alignment over large deletions, not a new authored probe. No runtime checks ran."
+    ],
+    "coverage_checked": [
+      "Both specifications searched for rc-file/environment behavior: SPEC.md:3488-3503 requires launch-time shell environment evaluation. This supports the test's purpose, not acceptance of a wrong probe. TODO.md Planned empty; no exact unlanded plan or BUGS.md entry.",
+      "Full INDEX.md, matching grid-observer queue entries and active TRIAGE_OUTCOMES.md searches found no exact variable-selection claim. Those decoder issues do not change Rust interpolation. FILTER.md not applied."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "None for variable selection. No conclusion about arbitrary text parsing follows.",
+    "original_stronger_consequence": "The apparently new test might query a literal RC_MARKER_VAR and falsely validate environment behavior. The later record corrects newness and retains the test-only consequence.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source-refute the wrong-variable candidate. Pre-base sameness is additional attribution context, not the sole basis for dismissing a real bug."
+  },
+  {
+    "key": "g155/c2",
+    "latest_line": 11,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "terminal-tests/rc-probe-echo-and-completion-witness",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The bounded first/second ASCII probe waits for an executed closing delimiter that the echoed command cannot contain, then extracts the completed value. This refutes the specific echo/incomplete-output false-pass candidate; it does not certify general terminal decoding or all redraw histories.",
+    "checks": [
+      "At 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513, terminal_tabs.rs:223-263 uses an executed readiness witness; :1541 calls it before the probe. :1547 assembles ENV[value]VNE from EN%s[%s]%s and separate V/VNE arguments, so echo contains neither completed delimiter. :1548 and run_in_shell:268-280 wait for ]VNE before :1553-1559 extraction. write_rc_files at restart_with_resume.rs:1479-1489 supplies controlled exports only.",
+      "Each tab has a separate attachment transcript at terminal_tabs.rs:1527-1540. The same probe already exists at exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:terminal_tabs.rs:4314. Unsupported shell handling is explicit at reviewed :1562-1583; source inspection is not an executed pass."
+    ],
+    "coverage_checked": [
+      "Both specifications searched for launch environment and terminal framing: SPEC.md:3488-3503 supplies the environment contract; grid-client rows do not promise byte transcripts. No explicit acceptance of false passing tests. TODO.md Planned empty; plans/queue and BUGS.md have no exact item.",
+      "Full INDEX.md and matching grid-row-is-not-program-line.md/grid-text-omits-blank-columns.md read: their program-line and gap-reconstruction concerns are different from this closing ASCII delimiter witness. Active TRIAGE_OUTCOMES.md contains no exact claim. FILTER.md not applied."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "None for command-echo/incomplete-delimiter refutation in this fixed probe. Arbitrary styled output, grid redraw histories and byte-stream fidelity remain outside the conclusion.",
+    "original_stronger_consequence": "An apparently new environment test might pass from echoed command text or an incomplete value. Later records correct its unchanged pre-existing status and narrow the conclusion to the actual controlled fixture values.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Refute the specific false-pass route by the completed executed delimiter and controlled fixture, without extending that result to other grid observers."
+  },
+  {
+    "key": "g155/c3",
+    "latest_line": 12,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "terminal-tests/drain-helper-relocation",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The helper is relocated with the same event-draining behavior. Deleting its old module neither deletes that behavior nor creates a new decoding guarantee. This is distinct from g154/c5's question about raw-byte caller sensitivity.",
+    "checks": [
+      "At 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513, terminal_backpressure.rs:20-43 contains deadline-based raw Data accumulation, ignored ReplayComplete, detach reason, closed result and timeout result. At 1ed482dde220452e424973faf38a5e1318986333, harness.rs:2067-2089 contains the same body. It remains reachable after the old module disappears. No runtime checks ran."
+    ],
+    "coverage_checked": [
+      "Both specifications searched for drain/raw-grid helper contracts: no acceptance or removal of a separate public helper contract. TODO.md Planned empty; no matching unlanded plan or BUGS.md entry.",
+      "Full INDEX.md and matching grid-row-is-not-program-line.md/grid-text-omits-blank-columns.md read: they concern decoded transcript defects, not loss through helper relocation. Active TRIAGE_OUTCOMES.md has no exact relocation item. FILTER.md not applied. g154/c5 remains a distinct caller-use question, not an exact alias."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "None for behavior-preserving relocation. Caller-wide correctness, arbitrary text fidelity and lossless raw output are not established by this comparison.",
+    "original_stronger_consequence": "Removing terminal_backpressure might remove or alter the drain helper used by other tests. Synthesis preserves the raw/grid distinction and expressly rejects expanding relocation correctness into caller or decoder certification.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source-refute only helper loss or semantic change from relocation; retain the independent caller-analysis limits."
+  },
+  {
+    "key": "g155/c4",
+    "latest_line": 6,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "terminal-tests/retired-xterm-scrollback-literal-bound",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The removed check compares an xterm browser literal with the old tmux limit. It does not govern the surviving host-grid history capacity, so its deletion alone does not establish the asserted current retention regression. This does not establish adequate independent tests of the default 10,000-line floor.",
+    "checks": [
+      "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:terminal_backpressure.rs:70-99 parses terminal.js scrollback and compares it to tmux::HISTORY_LIMIT plus 10,000. At 1ed482dde220452e424973faf38a5e1318986333, terminal.js:32-40 distinguishes direct grid mounting from the old xterm surface; grid-model.js:792-799 takes historyCap from hello.history_cap.",
+      "Same-revision SPEC_impl.md:1898-1917 explains the grid renderer and :2882-2888 says old terminals end at startup and the driver is gone. The earlier retirement is directly implemented by dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:core.rs:6426-6438,6965-6969. No changed runtime cap, missing-history source route or runtime incident is established. No runtime checks ran."
+    ],
+    "coverage_checked": [
+      "Both current specifications searched for history/scrollback floor and old renderer: SPEC.md Terminal experience retains screen plus 10,000 lines and SPEC_impl.md grid client renders supervisor rows. Neither accepts a lost-history bug; they explain why the deleted xterm comparison is not a host-capacity oracle.",
+      "TODO.md Planned empty; matching tmux-removal plans landed per plans/REPORTS.md:29-32, and no unlanded default-floor repair was found. BUGS.md has no exact entry. Full INDEX.md and active TRIAGE_OUTCOMES.md searches found history/recovery items with different triggers, not this deleted static test. FILTER.md not applied."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A changed surviving host capacity or concrete missing default-floor oracle would need separate evidence. Surviving held-history/pause/eviction tests do not by themselves independently certify the default 10,000-line setting.",
+    "original_stronger_consequence": "Removing the static browser scrollback test might imply current history-retention loss. The reviewer narrows this to a test-applicability conclusion and preserves the absence of an independent default-floor certification; no actual output loss was shown.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Refute only a current product retention regression attributed to deleting the obsolete xterm/tmux literal comparison. Because the original consequence can be read as losing retained user output, route that dismissal independently; do not silently dismiss a separate default-floor test-gap claim."
+  }
+]

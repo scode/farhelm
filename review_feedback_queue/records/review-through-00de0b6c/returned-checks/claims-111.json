@@ -1,0 +1,323 @@
+[
+  {
+    "key": "g177/c2",
+    "latest_line": 9,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "old-xterm-sustained-viewport-tests-removed-before-retirement",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The intermediate loss of useful rendered-viewport regression protection is established. Later removal of the tested renderer makes restoration at tip inappropriate, but does not refute the in-range historical gap. Preserve it for the parent's disposition rather than silently treating retirement as historical coverage.",
+    "checks": [
+      "647f0227^:e2e/tests/terminal-scroll-freeze.spec.ts:1-48,170-191 describes sustained output, cap eviction, DECSTBM, synchronized output and resize, and compares rendered .xterm-rows against term.buffer.active. The 647f0227 deletion removes all 753 lines.",
+      "647f0227:SPEC.md:3013-3038 still supports existing old terminals; SPEC_impl.md:1529-1540 records their stale-paint defect and retained refresh workaround.",
+      "f560058d:terminal.js:4294-4355 builds the grid surface. At 00de0b6c, terminal.js has no new Terminal, swallowDecrqm, registerDcsHandler, refreshIfScrolledBack or scrolledRefreshCount; f560058d is an ancestor of that tip. Exact xterm subject is retired.",
+      "The earlier no-production-defect and commit-acknowledgment dismissal is not a source refutation of deleted test protection. No runtime observation or reproduction was made."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md Terminal experience and SPEC_impl.md Terminal widget/The grid client/Ending the old private tmux server accept present grid-only operation, not premature removal of supported-renderer regression tests.",
+      "TODO.md Planned is empty (25-27). BUGS.md concerns an SSH transfer hang. Active TRIAGE_OUTCOMES.md and INDEX.md searches found no exact viewport-test deletion decision/item.",
+      "plans/queue/tmux-end-old-terminals.md:130-133,308-319 describes the staged test deletion and later ending; plans/REPORTS.md:29 records that plan landed. It is historical intent, not an unlanded fix or specification acceptance of the historical test gap. The docs sweep also landed (REPORTS:32). No unlanded matching plan found.",
+      "FILTER.md: no complete boundary matches a durable missing regression check. No queue alias found; g178/g178-l1 loses different assertions at the same intermediate stage."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Preserve the lost pre-cap/full-cap continuous-output, DECSTBM, synchronized-output and sibling-band resize protection while old terminals remained supported. No grid natural-paint defect or newly introduced product failure was established. The earlier proposed retirement-based drop remains a proposal, not an accepted decision.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Record the historical test defect as other, explicitly stating that its concrete renderer no longer exists at tip. Parent decides whether historical obsolescence warrants a separate disposition."
+  },
+  {
+    "key": "g177/c3",
+    "latest_line": 10,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "removed-replay-helper-dangling-reference-concern",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The retained file has no calls/imports of the removed helpers, and recursive discovery does not retain a deleted suite entry. This is a considered negative check, not a separate defect.",
+    "checks": [
+      "git grep at 647f0227 for setReplayLimits, injectReplayFrames, injectEmptyFrames, OLD_TERMINAL_TAG, newObservedContext and __farhelmEmptyFrameInjection in terminal-replay-rename.spec.ts returned no matches.",
+      "git grep at 647f0227 for terminal-scroll-freeze.spec.ts across e2e and the validation/run-all inventories returned no matches.",
+      "647f0227:e2e/playwright.config.ts:37-50 recursively discovers existing spec files;109-114 builds projects from that list. terminal-replay-rename.spec.ts:43 still installs tabSweep hooks; helpers/terminal-suite.ts:203-222 retains reset, route drain and final directory sweep. These are source checks only."
+    ],
+    "coverage_checked": [
+      "Both specifications searched for replay/test lifecycle and old renderer retirement; neither supplies an additional requirement violated by these removed local names.",
+      "TODO Planned empty; BUGS, active TRIAGE_OUTCOMES, INDEX and plans/queue searches for the file/helper names and dangling replay registration found no matching item. The tmux removal plan is landed and is context only.",
+      "FILTER not used: exact source absence and dynamic discovery refute the claimed dangling reference."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Potential retained-test loading/setup failure after helper and suite deletion. No production, security or user-work loss consequence was claimed. This does not settle g177/c2 or its historical test coverage.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Exclude only the dangling-reference/registration candidate on the pinned source evidence."
+  },
+  {
+    "key": "g178/g178-l1",
+    "latest_line": 8,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "old-xterm-query-selection-unicode-tests-removed-before-retirement",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Useful query-reply, selection and emoji regressions are deleted while their old-renderer production paths remain supported. Grid-specific tests cannot cover those retained paths. Later complete removal ends the present need for them without disproving the historical gap.",
+    "checks": [
+      "647f0227:SPEC.md:3013-3038 retains existing old terminals. terminal.js:4120-4147 still installs DECRQM/DECRQSS duplicate-answer suppression; the deletion patch removes tests that observe their browser WebSocket output with a positive parser control.",
+      "647f0227 deletion patch removes terminal.spec.ts input-dismissal assertions for xterm/native selections and terminal-unicode.spec.ts direct xterm parser/model/DOM tests for wide continuation cells, cursor-addressed redraw and colored-neighbor geometry. It also deletes suite-terminals.ts and the legacy test-run selection.",
+      "At 00de0b6c the old responder/renderer names are absent from terminal.js. f560058d:terminal.js:4294-4355 creates only grids. This establishes retirement, not coverage of the intermediate xterm paths.",
+      "No product malfunction, runtime failure or security/data-loss route was reproduced or established."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md Terminal experience and SPEC_impl.md The grid client accept the current replacement architecture, not test coverage of the formerly supported browser parser.",
+      "TODO Planned empty. BUGS, active TRIAGE_OUTCOMES and INDEX searches for query reply, DECRQM/DECRQSS, old renderer regression coverage, selection/emoji test deletion found no exact cover.",
+      "The tmux-end-old-terminals plan explicitly staged test removal before runtime ending, but it is landed (plans/REPORTS.md:29), not an unlanded fix. No current unlanded matching plan found. The separate landed docs sweep does not retroactively supply missing tests.",
+      "FILTER does not cover removed maintainer regression protection. g177/c2 is related staging history, but its sustained viewport workaround assertions are distinct; no exact alias claimed."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Lost old-renderer query-reply, selection-dismissal and emoji protection at the intermediate revision. Preserve the rejected earlier rationale: 'no actionable defect demonstrated by removing renderer-specific tests; source refutation is the split of query ownership and the surviving independent grid assertions above.' That rationale does not refute useful deleted tests. No current xterm bug is asserted.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain the source-established historical test defect as other, with later retirement explicit. Parent decides historical obsolescence separately."
+  },
+  {
+    "key": "g178/g178-l2",
+    "latest_line": 10,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "mouse-reattach-test-claims-nonexistent-viewer-sgr-encoding-restoration",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The changed comment says the test pins SGR encoding sent to a returning viewer. The viewer receives reporting mode, while the supervisor selects the encoding from retained terminal modes. The test usefully checks post-reattach mouse delivery, not the stated viewer restoration branch.",
+    "checks": [
+      "f560058d:e2e/tests/mouse-modes.spec.ts:390-405 explicitly claims SGR encoding restoration from what the viewer is sent, then counts SGR reports after reattachment. The text remains at 00de0b6c and recording main 24bc0580.",
+      "f560058d:crates/farhelm-proto/src/grid.rs:1098-1108,1127-1153 exposes only mouse reporting mode and no mouse encoding field in complete TerminalState.",
+      "f560058d:grid-terminal.js:1630-1648 constructs coordinate/button reports and explicitly says the client cannot see the encoding. service/grid_stream.rs:1064-1079 reads retained modes and encodes input; grid_input.rs:737-745 chooses SGR.",
+      "The false test explanation is source-established. This supplies no missing product field, encoder defect or runtime failure."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md The grid client:1836-1868 assigns interpretation and input encoding to the supervisor. SPEC.md Terminal experience's mouse behavior does not accept fictitious viewer encoding restoration coverage.",
+      "TODO Planned empty; BUGS, active TRIAGE_OUTCOMES, INDEX and matching queue searches for SGR/viewer restoration and mouse-test rationale found no exact cover.",
+      "plans/queue/tmux-drop-from-docs.md's rationale sweep is related context but already landed (REPORTS:32), and the incorrect text survives at recording main. Other plan hits concern unrelated layout or history numbering. No unlanded fix found.",
+      "FILTER does not cover a persistent misleading test contract. No exact alias or existing item extension identified."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "False confidence that the reconnect test covers SGR viewer replay/restoration. The initial lead was about whether assertions observe that mechanism, not an established product encoding failure. Preserve the related stale DECSET-replay wording caveat; the changed rationale is the finding's target.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Record the misleading test-coverage explanation as other; correct its contract to SGR mouse delivery after a fresh browser attachment."
+  },
+  {
+    "key": "g178/g178-c3",
+    "latest_line": 9,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "grid-only-tests-lost-redundant-renderer-premise-assertions",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The retained positive observations require a grid, and the removed inherited-size test belongs to the retired renderer handoff. Removal of the obsolete readiness hook adds no demonstrated entropy-refusal gap.",
+    "checks": [
+      "f560058d:e2e/tests/grid-flood.spec.ts:115-131 requires __farhelmGrid and an open socket and reads the grid snapshot. grid-terminal.spec.ts:21-30 requires one focused grid with ready output;55-58 requires a newly typed unique echo absent beforehand.",
+      "f560058d:terminal-create-idempotency.spec.ts:541-545 retains explicit high-entropy refusal and zero island count. Pinned git grep finds no __farhelmTermReady anywhere in UI or test helpers. Zero islands is an indirect socket oracle; the removed hook was not a direct network observer either.",
+      "f560058d:terminal.js:4313-4355 supplies no inherited size. grid-terminal.js:473-497 computes direct fit from DEFAULT_SIZE; the grid-fit deletion removes the inherited handoff test. grid-fit.spec.ts:66-73 still loads both weights and263-276 checks pixel ratio, canvas metrics, padding and computed size.",
+      "Source refutation is limited to the changed assertions and removed handoff; it is not certification of every test or lease-security behavior."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md The grid client specifies direct mounts at a fixed 80x24 fit reference; Terminal widget and SPEC.md Terminal experience specify only grid terminals now. No surviving inherited-size compatibility requirement found.",
+      "TODO Planned empty. BUGS, active TRIAGE_OUTCOMES, INDEX, matching queue files and plans/queue searches found no exact changed-assertion defect. Held-font attempt-witness item/decision is different from renderer identity and entropy readiness.",
+      "The tmux removal and docs plans landed; they supply retirement context only. FILTER not needed for the source refutation."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Suspected tests silently exercising the wrong renderer or losing a required handoff/entropy premise. Preserve the indirect zero-island oracle caveat: this check does not establish a direct no-socket witness, but deletion did not remove one.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Exclude the narrow redundant-renderer/handoff assertion candidate. Send the entropy-refusal portion through independent drop review because weak lease/takeover consequences could involve user-owned work; no such production route is claimed here."
+  },
+  {
+    "key": "g178/g178-c4",
+    "latest_line": 11,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "grid-fit-test-rounding-reference-mismatch-concern",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The independently written test formula uses the documented fixed reference and matches production's round-the-reference-canvas arithmetic. It does not feed the previous fitted answer into the next case.",
+    "checks": [
+      "f560058d:e2e/grid-client/grid-fit.spec.ts:196-203 documents the formula;238 fixes from={cols:80,rows:24};245-249 divides and rounds the full canvas before per-cell division, then applies scrollbar and bounds.",
+      "f560058d:grid-terminal.js:222-227 uses the same parenthesization;242-245 applies the same 14-pixel reserve and bounds;493 uses DEFAULT_SIZE rather than the previous answer.",
+      "grid-fit.spec.ts:265,272-276 checks actual pixel ratio, canvas/font metrics, padding, positive character width and observed fitted dimensions. No execution was performed."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md The grid client:1848-1856 explicitly defines a fixed 80-column,24-row proposal reference independent of resize history. SPEC.md Terminal experience supplies no conflicting rounding contract.",
+      "TODO Planned empty. BUGS, active TRIAGE_OUTCOMES, INDEX and plans/queue searches for fit formula, pixel ratio, rounding and fittedSizes found no exact defect/decision. Landed tmux plans retain Farhelm's fit contract.",
+      "FILTER not used; source and contract refute this specific mismatch concern."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Potential wrong pixel-ratio rounding or resize-history feedback in a simplified fit test. No security, user-work loss or production fit malfunction was established.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Exclude only the considered rounding/reference mismatch; agreement with production alone is not a claim that all sizing behavior is tested."
+  },
+  {
+    "key": "g179/c1",
+    "latest_line": 9,
+    "recommendation": "covered",
+    "bucket": "other",
+    "underlying_key": "retired-renderer-swap-kind-notice-test-deletion",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The narrow deletion concern targets renderer swap, terminal-kind selection, pending-kind and stream-notice compatibility mechanisms that the all-grid protocol expressly removes. This acceptance must not be extended to successful old-page command reinterpretation.",
+    "checks": [
+      "f560058d:e2e/grid-client/grid-attach.spec.ts deletion removes xterm/kind/swap compatibility cases. The retained281-315 test requires grid mount before frames, exact grid/ws/test registry, cols/rows URL, replay reveal, binary input and resize.",
+      "f560058d:terminal.js:4294-4355 builds only a grid surface, with paste sanitizer and grid input. The protocol's viewer encoding/stream chooser is no longer a supported mechanism.",
+      "Current SPEC_impl.md Grid streams:2937-2956 explicitly removes kind fields and byte streams at protocol77, requires old pages to reload, and describes misdrawing/malformed-input failure. It does not state acceptance of successful command reinterpretation.",
+      "No independent production compatibility review or runtime reproduction was performed."
+    ],
+    "coverage_checked": [
+      "SPEC.md Terminal experience and SPEC_impl.md Terminal widget/The grid client/Grid streams exactly cover retirement of the removed test subjects.",
+      "TODO Planned empty. BUGS, active TRIAGE_OUTCOMES, INDEX and matching queue searches found no exact test-deletion item. The tmux removal and docs plans are landed, not unlanded fixes.",
+      "FILTER not used. Supplied references to g082/c2,g083/c5,g196/l1 are not included inputs and were not independently checked; they must retain their own potentially highest production route. No alias is asserted with those records."
+    ],
+    "exact_cover_quotes": [
+      {"source":"SPEC_impl.md:2943-2945, Grid streams","quote":"Protocol 77 removed the byte streams with the old terminals and xterm.js: every attachment's data channel carries a grid stream, so `Attach`, `Attached` and the browser's socket say nothing about it, and `SessionInfo` and `TabInfo` no longer report a terminal kind."},
+      {"source":"SPEC_impl.md:2949-2950, Grid streams","quote":"A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working."}
+    ],
+    "missing_premise": null,
+    "original_stronger_consequence": "Preserve loss-of-supported-compatibility-test concern and the interface caveat: valid pasted GridInput-shaped JSON may be reinterpreted as program input according to other supplied records. Correct new-page mounting and reload acceptance do not refute that wider potentially highest route.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Cover only deletion of retired renderer/kind/swap/notice regression cases. Independent check must preserve the boundary against accepting successful command reinterpretation or dropping another owner's production finding."
+  },
+  {
+    "key": "g179/c2",
+    "latest_line": 7,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "grid-paste-tests-remove-noop-client-mode-latch",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The deleted latch resolved immediately on grids. Removing it cannot change server-owned bracketed-paste readiness, and the retained assertions still require actual bracket markers.",
+    "checks": [
+      "f560058d parent-to-commit terminal-attachments.spec.ts diff shows latchBracketedPaste returns immediately when island.grid is present, otherwise injecting mode2004 only into xterm.",
+      "f560058d:terminal-attachments.spec.ts:660-674 still requires sanitized text inside echoed opening/closing paste markers;1997-2000 separately requires an opening marker after attachment insertion.",
+      "f560058d:fake_agent.rs:1628-1637 emits mode2004 enable before its ready banner and flush. service/grid_stream.rs:1064-1079 uses server modes, including bracketed_paste; terminal.js:4354,4365-4371 retains sanitizer and insertion via created.paste.",
+      "This source check concerns removal of a no-op, not proof that every fixture readiness barrier is sound. No browser execution or reproduction was performed."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md The grid client assigns paste encoding to supervisor terminal modes; SPEC.md Attachments says plain text passes through as ordinary terminal input.",
+      "TODO Planned empty; BUGS, active TRIAGE_OUTCOMES, INDEX, matching queue and plans/queue searches for client mode latch/bracketed-paste test removal found no exact cover. Other paste receipt/input findings concern different boundaries.",
+      "FILTER not needed; no-op removal refutes the changed-operation concern."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Potential attachment-test weakening or bracketed-paste readiness race. Preserve the fixture prompt-barrier caveat: seeing READY is not always a safe-to-type barrier, but an already-no-op grid latch cannot repair or change that separate ordering.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Exclude only the removed-latch concern. Independent drop review is prudent because the test protects paste framing and unintended program input; no framing defect or user-work loss is established by this deletion."
+  },
+  {
+    "key": "g179/c3",
+    "latest_line": 6,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "grid-only-tests-removed-kind-assertions-retain-positive-observables",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The retained Unicode/flood observations require the grid and real program results. The narrowed font assertions name the only supported renderer. This does not refute the separate missing mount-attempt witness in the held-font test.",
+    "checks": [
+      "f560058d:terminal-unicode.spec.ts:76-90 checks model rows, painted rows and atTail:true; an absent grid yields atTail:false. terminal-flood.spec.ts:125-148 requires grid.paste success, exact byte count/digest, later keyboard echo and original open socket.",
+      "f560058d:terminal-font.spec.ts:182-189,250-265 retains no-grid/no-element checks while unavailable and real output/font family after release.",
+      "f560058d:helpers/terminal-readiness.ts:124-176 binds the island to decoded session and tab URL, open socket, grid/test registry, replay reveal and actual hidden-input focus. These checks support the intended attachment identity.",
+      "Source-only refutation of changed renderer-kind/selector concerns; no runtime result is claimed."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md Terminal widget:1693-1705 requires a grid and both mono weights before mount; SPEC.md Terminal experience supplies no second-renderer requirement.",
+      "TODO Planned empty. BUGS and plans/queue contain no exact changed-selector defect; landed tmux plans are retirement context. Active ledger/queue exact checks distinguish the held-font witness defect below.",
+      "review_feedback_queue/held-font-test-lacks-mount-attempt-witness.md and TRIAGE_OUTCOMES.md:1337-1349 concern a missing mount-attempt witness, with an active discard decision. They do not cover or refute the narrower renderer-selector question. No extension is needed for this refuted candidate.",
+      "FILTER not used."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Potential tests passing without the intended renderer or attachment after kind assertions/selectors are narrowed. Positive grid observables refute that concern; no claim that the held-font test's independent timing premise is sound.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Exclude the narrow renderer-identity assertion concern while preserving separate existing font-test feedback and its recorded decision."
+  },
+  {
+    "key": "g179/c4",
+    "latest_line": 10,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "synthetic-paste-interception-target-witness-mismatch-concern",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The target witness is attached to the grid's actual paste input element. Ancestor capture interception prevents that witness, while delivery assertions show plain text still reaches the program.",
+    "checks": [
+      "f560058d:terminal-attachments.spec.ts:240-269 adds a witness to the dispatch target and selects .grid-terminal-input. grid-terminal.js:1552-1563 installs its own paste handler on that input.",
+      "f560058d:terminal-attachments.spec.ts:2145-2163 requires default prevention, stopped propagation, reachedTarget:false for intercepted file/text, and subsequent plain-text delivery.",
+      "f560058d:terminal.js:2325-2353 classifies first and prevents/stops only accepted flavors, inserting plain text through the policy path. The changed target therefore observes the relevant DOM boundary, not an unrelated element.",
+      "This establishes synthetic event behavior only, not real OS clipboard/drag delivery. No browser run or reproduction was performed."
+    ],
+    "coverage_checked": [
+      "SPEC.md Attachments:3171-3207 requires file/image interception and ordinary text input; SPEC_impl.md The grid client separates shared interception from grid insertion. Neither accepts accidental bypass.",
+      "TODO Planned empty. BUGS, active TRIAGE_OUTCOMES, INDEX, matching queue and plans/queue searches for paste target/interception witness found no exact cover. Product drop-refusal and paste-receipt items concern different roots.",
+      "FILTER not used because the concrete proposed witness mismatch is source-refuted."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Potential falsely certified capture-phase interception because the target witness misses the terminal's handler. Preserve the synthetic-DOM-only scope; no OS clipboard/drag claim is established.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Exclude only the changed-target witness mismatch; independent check should preserve paste interception/input safety boundaries rather than infer broad clipboard safety."
+  },
+  {
+    "key": "g179/l1",
+    "latest_line": 12,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "grid-reveal-test-documentation-equates-arrival-with-applied-history",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The new all-there-to-reveal inference promises history application that reveal does not guarantee. The executable test checks the current screen and banner, which remain useful. The finding is the false explanation, not demonstrated history loss or a broken assertion.",
+    "checks": [
+      "f560058d:grid-attach.spec.ts:422-450 sends attach.jsonl, confirms hidden, detaches, then checks reveal/banner/current screen row. Newly added435 says the frames are all there to reveal. That sentence survives both00de0b6c and24bc0580.",
+      "f560058d:js-tests/fixtures/grid/attach.jsonl:5-6 contains two two-row history messages. grid-terminal.js:1886-1918 slices/schedules draining;1973-1994 only gives no-backlog arrival one bounded slice;1997-2000 flush only paints.",
+      "f560058d:grid-model.js:971-1005 may yield after each row. terminal.js:3774-3778 explicitly says history may still be applying when the current screen is revealed.",
+      "The parent-to-f560058d diff adds the all-there-to-reveal inference beyond the former applies-as-they-arrive wording. A tiny fixture likely drains promptly, but no unconditional source guarantee exists. No timing observation or reproduction was made."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md The grid client:1867-1869 explicitly applies large history in slices; SPEC.md Terminal experience does not accept false synchronization explanations.",
+      "TODO Planned empty. BUGS, active TRIAGE_OUTCOMES and INDEX searches found no exact false-comment item. plans/queue/empty-scrollback-messages.md fixes zero-row numbering, not reveal/history synchronization; the tmux docs sweep is already landed and leaves this sentence present.",
+      "review_feedback_queue/replacement-history-absence-asserted-before-delivery.md describes a different replacement-test absence oracle, not this newly false documentation inference. Same underlying boundary is useful context but not exact coverage or an alias.",
+      "The supplied g181/c2 reference is outside this batch input; exact consolidation with its held-replay explanation cannot be established here. Parent can reconcile the underlying key. FILTER does not cover persistent inaccurate test-contract prose."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "The initial lead asked whether this fixture/callers needed history completeness; source establishes only a misleading all-frames-applied inference. Preserve that the test's actual screen/reveal checks remain useful, no history-loss or test-oracle behavior regression is asserted, and ordinary small-fixture timing is likely prompt.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Record the false test synchronization explanation as other. Qualify it to current-screen reveal with history potentially pending; do not demand an unnecessary history wait."
+  },
+  {
+    "key": "g180/c1",
+    "latest_line": 3,
+    "recommendation": "covered",
+    "bucket": "other",
+    "underlying_key": "retired-old-terminal-migration-ui-test-deletion",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The removed migration-band/warning/dismissal/kind-display tests assert a UI for terminals the revised specification deliberately ends at startup. The new startup behavior is present. This is limited acceptance of retirement, not approval of an independently defective termination implementation.",
+    "checks": [
+      "f560058d deletion removes all252 lines of terminal-migration.spec.ts. Its SPEC.md:3002-3017 explicitly ends old terminals, preserves host terminals and describes interrupted sessions and closed old tabs.",
+      "f560058d:service/core.rs:6142-6151 invokes OldTerminals::end_private_server while owning the state directory before reload. core/old_terminals.rs:1-85 states cleanup attribution and accepted failure residuals.",
+      "Current SPEC.md:2998-3011 and SPEC_impl.md Ending the old private tmux server retain this retirement contract. No runtime termination test or reproduction was performed."
+    ],
+    "coverage_checked": [
+      "SPEC.md Terminal experience and SPEC_impl.md Ending the old private tmux server cover this exact missing-old-warning/migration-route concern because their subject is retired.",
+      "TODO Planned empty. BUGS, active TRIAGE_OUTCOMES, INDEX and matching queue searches contain no separate decision preserving this retired UI. Existing migration-test cleanup items concern setup/cleanup failures, not the retired product contract.",
+      "plans/queue/tmux-end-old-terminals.md explicitly removes migration band/kind display and ends old terminals; plans/REPORTS.md:29 records it landed. No unlanded fix needed for the retired UI. FILTER not used."
+    ],
+    "exact_cover_quotes": [
+      {"source":"f560058d:SPEC.md:3002-3006, Terminal experience","quote":"Every terminal is new: it runs in a terminal host of its own (above)."},
+      {"source":"f560058d:SPEC.md:3005-3006, Terminal experience","quote":"This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program."},
+      {"source":"SPEC.md:3000-3003, Terminal experience","quote":"A supervisor that finds that tmux server when it starts ends it, and with it everything that still ran in an old terminal, without needing a tmux program."}
+    ],
+    "missing_premise": null,
+    "original_stronger_consequence": "Deleting migration UI tests could leave users without a required warning or route to move running terminals. The specified ending itself can terminate user processes but was expressly outside this test-deletion candidate; retain that boundary and do not infer approval of another termination defect.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Cover only the retired warning/migration UI tests under the explicit product contract. Independent drop check should verify the user-process boundary rather than treating all old-terminal consequences as accepted."
+  }
+]

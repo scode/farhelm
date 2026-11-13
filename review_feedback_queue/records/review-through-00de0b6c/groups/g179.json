@@ -1,0 +1,695 @@
+{
+  "group": {
+    "id": "g179",
+    "domain": "browser-terminal-regressions",
+    "purpose": "browser-terminal-regressions: e2e/grid-client/grid-attach.spec.ts, e2e/tests/terminal-attachments.spec.ts, e2e/tests/terminal-files.spec.ts, e2e/tests/terminal-flood.spec.ts, e2e/tests/terminal-font.spec.ts, e2e/tests/terminal-multihost.spec.ts, e2e/tests/terminal-unicode.spec.ts; phases complete small per-commit changes",
+    "interfaces": [
+      "g009",
+      "g010",
+      "g011",
+      "g079",
+      "g080",
+      "g081",
+      "g082",
+      "g083",
+      "g084",
+      "g091",
+      "g092",
+      "g174",
+      "g175",
+      "g176",
+      "g178",
+      "g180",
+      "g181"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/01140-000.patch",
+        "ranges": [
+          [
+            1,
+            631
+          ]
+        ],
+        "original_path": "e2e/grid-client/grid-attach.spec.ts",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,36733)",
+        "lines": 631,
+        "bytes": 36733,
+        "start": 0,
+        "end": 36733,
+        "original": "[private-run]/prep/originals/01140.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01166-000.patch",
+        "ranges": [
+          [
+            1,
+            333
+          ]
+        ],
+        "original_path": "e2e/tests/terminal-attachments.spec.ts",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,17394)",
+        "lines": 333,
+        "bytes": 17418,
+        "start": 0,
+        "end": 17394,
+        "original": "[private-run]/prep/originals/01166.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01169-000.patch",
+        "ranges": [
+          [
+            1,
+            39
+          ]
+        ],
+        "original_path": "e2e/tests/terminal-files.spec.ts",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,2458)",
+        "lines": 39,
+        "bytes": 2460,
+        "start": 0,
+        "end": 2458,
+        "original": "[private-run]/prep/originals/01169.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01170-000.patch",
+        "ranges": [
+          [
+            1,
+            44
+          ]
+        ],
+        "original_path": "e2e/tests/terminal-flood.spec.ts",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,2613)",
+        "lines": 44,
+        "bytes": 2617,
+        "start": 0,
+        "end": 2613,
+        "original": "[private-run]/prep/originals/01170.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01171-000.patch",
+        "ranges": [
+          [
+            1,
+            38
+          ]
+        ],
+        "original_path": "e2e/tests/terminal-font.spec.ts",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,2138)",
+        "lines": 38,
+        "bytes": 2138,
+        "start": 0,
+        "end": 2138,
+        "original": "[private-run]/prep/originals/01171.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01175-000.patch",
+        "ranges": [
+          [
+            1,
+            16
+          ]
+        ],
+        "original_path": "e2e/tests/terminal-multihost.spec.ts",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,889)",
+        "lines": 16,
+        "bytes": 889,
+        "start": 0,
+        "end": 889,
+        "original": "[private-run]/prep/originals/01175.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01179-000.patch",
+        "ranges": [
+          [
+            1,
+            51
+          ]
+        ],
+        "original_path": "e2e/tests/terminal-unicode.spec.ts",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,3137)",
+        "lines": 51,
+        "bytes": 3137,
+        "start": 0,
+        "end": 3137,
+        "original": "[private-run]/prep/originals/01179.patch"
+      }
+    ],
+    "lines": 1152,
+    "bytes": 65392
+  },
+  "records": [
+    {
+      "key": "g179/c1",
+      "owner": "g179",
+      "id": "c1",
+      "domain": "browser-terminal-regressions",
+      "purpose": "browser-terminal-regressions: e2e/grid-client/grid-attach.spec.ts, e2e/tests/terminal-attachments.spec.ts, e2e/tests/terminal-files.spec.ts, e2e/tests/terminal-flood.spec.ts, e2e/tests/terminal-font.spec.ts, e2e/tests/terminal-multihost.spec.ts, e2e/tests/terminal-unicode.spec.ts; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Retired renderer compatibility tests removed with the compatibility path",
+            "location": "e2e/grid-client/grid-attach.spec.ts:315",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether removing old-terminal, unknown-kind, renderer-swap and pending-kind tests leaves supported terminals uncovered. Source: assigned patch 01140 lines 212–396 removes tests specifically requiring xterm, tmux/unknown/pending kinds and swap sizing. Contract: SPEC.md:3010ff states exactly, ‘Every terminal is new: it runs in a terminal host of its own (above).’ SPEC_impl.md:1506–1510 states ‘Every terminal runs in a terminal host (\"Terminal host\") and is interpreted by the supervisor’s emulator, so the browser draws a grid stream with its own grid client’; SPEC_impl.md:1844–1846 says ‘terminal.js owns the connection and mounts the grid component for every terminal before the socket exists, because the socket URL carries its fitted size.’ Suggested bucket: other; confidence: confirmed contract acceptance. proposed_drop: these tests exercise retired compatibility behavior explicitly superseded by the all-grid contract, rather than required replacement behavior. Could-be-highest: no; removal is confined to maintainer test coverage, and no shipped security or loss-of-work route is established. possible_cover: none (coverage sources not consulted). Caveat: this does not excuse missing coverage for remaining grid behavior; those patches remain under review. Source-only conclusion; no execution."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Retired renderer compatibility tests removed with the compatibility path",
+            "location": "e2e/grid-client/grid-attach.spec.ts:315",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether removing old-terminal, unknown-kind, renderer-swap and pending-kind tests leaves supported terminals uncovered. Source: assigned patch 01140 lines 212–396 removes tests requiring xterm, tmux/unknown/pending kinds and swap sizing; lines 481–566 remove the stream-notice compatibility cases. Governing contract: SPEC_impl.md:3014–3017, Grid streams, says exactly: ‘Protocol 77 removed the byte streams with the old terminals and xterm.js: every attachment’s data channel carries a grid stream, so Attach, Attached and the browser’s socket say nothing about it, and SessionInfo and TabInfo no longer report a terminal kind.’ (Identifiers are backticked in the source.) The section also explicitly says a page loaded from the previous helm must be reloaded and nothing keeps it working. Replacement contract: SPEC_impl.md:1506–1508 requires a grid for every terminal. Production checks: terminal.js:3204–3218 gates only grid and shared scripts plus fonts; :3387–3428 creates and fits the grid before constructing a cols/rows socket URL; :4051ff handles the remaining control messages; :4465–4492 retains visible malformed-grid handling; :4668 publishes precisely grid/ws/test. The revised test at grid-attach.spec.ts:281–315 still verifies mounting before data, URL size, hidden replay, reveal, binary input and resize; :404–415 still checks malformed-grid failure. Suggested bucket: other; confidence: confirmed contract acceptance and source refutation. proposed_drop: deleted cases pin explicitly retired behavior; the replacement contract is still asserted. Could-be-highest: no; test removal has no established shipped security or loss-of-work route. possible_cover: none (coverage sources not consulted). Caveat: this records only the assigned test changes, not an independent review of the terminal migration. Source-only conclusion; no execution. This revision corrects the initial record’s approximate SPEC line references."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Retired renderer compatibility tests removed with the compatibility path",
+            "location": "e2e/grid-client/grid-attach.spec.ts:315",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether removing old-terminal, unknown-kind, renderer-swap, pending-kind and stream-notice tests leaves supported terminals uncovered. Assigned patch 01140:212–396 removes xterm/tmux/pending/swap-specific cases, and :481–566 removes notice compatibility cases. Governing contract, SPEC_impl.md:3014–3017, Grid streams: \"Protocol 77 removed the byte streams with the old terminals and xterm.js: every attachment's data channel carries a grid stream, so `Attach`, `Attached` and the browser's socket say nothing about it, and `SessionInfo` and `TabInfo` no longer report a terminal kind.\" The same section explicitly requires reloading an older loaded page and accepts its failure to draw the new stream. SPEC_impl.md:1506–1508 requires a grid for every terminal. Replacement source checks: terminal.js:3204–3218 gates grid/shared globals and fonts; :3387–3428 creates and fits the grid before the cols/rows socket URL; :4051ff handles controls; :4465–4492 keeps visible malformed-grid handling; :4668 publishes grid/ws/test. grid-attach.spec.ts:281–315 checks pre-data mount, URL size, replay hiding/reveal, binary input and resize; :404–415 keeps malformed-grid failure coverage. Synthesis checked the cross-batch mount assumptions: lib.rs:1914–1926 registers the new paste sanitizer, shared helpers, five grid scripts and terminal.js; the static-page SCRIPTS at grid-attach.spec.ts:79–93 supplies their corresponding mount prerequisites, including tooltip. terminal.js:4152–4165 sends nonempty binary frames straight to receiveGrid, with no stream notice needed, and :3886–3915 ends marker catch-up and reveals through the same path after notice removal. Suggested bucket: other; confidence: confirmed contract acceptance and source refutation. proposed_drop: removed cases pin explicitly retired behavior; the static and live grid paths agree on their remaining mount/data/reveal contracts. Could-be-highest: no; test removal has no established shipped security or loss-of-work route. possible_cover: none (coverage sources not consulted). Caveat: source-only synthesis of the assigned test changes, not an independent migration review; no runtime behavior observed. Original suspected consequence and dismissal are preserved, with script/reveal interactions now explicitly checked."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Retired renderer compatibility tests removed with the compatibility path",
+            "location": "e2e/grid-client/grid-attach.spec.ts:315",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. Discovery interface synthesis: preserve all prior c1 source references, original suspected consequence (loss of supported compatibility regression tests), proposed-drop bases and checks. No drop is accepted. The supplied g082/c2 and g083/c5 records identify a wider production consequence of old-page compatibility removal: valid pasted GridInput-shaped JSON may be reinterpreted as program input. They reference g196/l1 for consolidation. That route is not refuted by correct new-page grid mounting, and the reload acceptance must not be generalized to accept command reinterpretation. The exact original acceptance is SPEC_impl.md, Grid streams: \"A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.\" It describes misdrawing and malformed input, not successful command reinterpretation. c1 remains a test-deletion candidate about removed renderer/swap/pending/notice cases; its proposed drop is limited to those retired mechanisms. Could-be-highest: no established highest route from the test-only removal; the supplied wider production route is explicitly potentially highest and remains unresolved in the supplied interface records. Confidence: confirmed scope limitation by source/contract already read; production route confidence and checks belong to the supplied records and are not independently claimed here. Suggested bucket: other for this test candidate; possible_cover: supplied g082/c2, g083/c5 and their g196/l1 reference for the wider compatibility concern. Caveat: current discovery will inspect only assigned test changes and their replacement/oracle contracts, not broaden into a duplicate production review. No runtime execution."
+          }
+        }
+      ],
+      "latest": {
+        "line": 9,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Retired renderer compatibility tests removed with the compatibility path",
+          "location": "e2e/grid-client/grid-attach.spec.ts:315",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. Discovery interface synthesis: preserve all prior c1 source references, original suspected consequence (loss of supported compatibility regression tests), proposed-drop bases and checks. No drop is accepted. The supplied g082/c2 and g083/c5 records identify a wider production consequence of old-page compatibility removal: valid pasted GridInput-shaped JSON may be reinterpreted as program input. They reference g196/l1 for consolidation. That route is not refuted by correct new-page grid mounting, and the reload acceptance must not be generalized to accept command reinterpretation. The exact original acceptance is SPEC_impl.md, Grid streams: \"A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.\" It describes misdrawing and malformed input, not successful command reinterpretation. c1 remains a test-deletion candidate about removed renderer/swap/pending/notice cases; its proposed drop is limited to those retired mechanisms. Could-be-highest: no established highest route from the test-only removal; the supplied wider production route is explicitly potentially highest and remains unresolved in the supplied interface records. Confidence: confirmed scope limitation by source/contract already read; production route confidence and checks belong to the supplied records and are not independently claimed here. Suggested bucket: other for this test candidate; possible_cover: supplied g082/c2, g083/c5 and their g196/l1 reference for the wider compatibility concern. Caveat: current discovery will inspect only assigned test changes and their replacement/oracle contracts, not broaden into a duplicate production review. No runtime execution."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g179/findings.jsonl",
+        "id": "c1",
+        "line": 9,
+        "disposition": "under-investigation",
+        "group": "g179-c1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-111",
+          "key": "g179/c1",
+          "latest_line": 9,
+          "recommendation": "covered",
+          "bucket": "other",
+          "underlying_key": "retired-renderer-swap-kind-notice-test-deletion",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The narrow deletion concern targets renderer swap, terminal-kind selection, pending-kind and stream-notice compatibility mechanisms that the all-grid protocol expressly removes. This acceptance must not be extended to successful old-page command reinterpretation.",
+          "checks": [
+            "f560058d:e2e/grid-client/grid-attach.spec.ts deletion removes xterm/kind/swap compatibility cases. The retained281-315 test requires grid mount before frames, exact grid/ws/test registry, cols/rows URL, replay reveal, binary input and resize.",
+            "f560058d:terminal.js:4294-4355 builds only a grid surface, with paste sanitizer and grid input. The protocol's viewer encoding/stream chooser is no longer a supported mechanism.",
+            "Current SPEC_impl.md Grid streams:2937-2956 explicitly removes kind fields and byte streams at protocol77, requires old pages to reload, and describes misdrawing/malformed-input failure. It does not state acceptance of successful command reinterpretation.",
+            "No independent production compatibility review or runtime reproduction was performed."
+          ],
+          "coverage_checked": [
+            "SPEC.md Terminal experience and SPEC_impl.md Terminal widget/The grid client/Grid streams exactly cover retirement of the removed test subjects.",
+            "TODO Planned empty. BUGS, active TRIAGE_OUTCOMES, INDEX and matching queue searches found no exact test-deletion item. The tmux removal and docs plans are landed, not unlanded fixes.",
+            "FILTER not used. Supplied references to g082/c2,g083/c5,g196/l1 are not included inputs and were not independently checked; they must retain their own potentially highest production route. No alias is asserted with those records."
+          ],
+          "exact_cover_quotes": [
+            {
+              "source": "SPEC_impl.md:2943-2945, Grid streams",
+              "quote": "Protocol 77 removed the byte streams with the old terminals and xterm.js: every attachment's data channel carries a grid stream, so `Attach`, `Attached` and the browser's socket say nothing about it, and `SessionInfo` and `TabInfo` no longer report a terminal kind."
+            },
+            {
+              "source": "SPEC_impl.md:2949-2950, Grid streams",
+              "quote": "A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working."
+            }
+          ],
+          "missing_premise": null,
+          "original_stronger_consequence": "Preserve loss-of-supported-compatibility-test concern and the interface caveat: valid pasted GridInput-shaped JSON may be reinterpreted as program input according to other supplied records. Correct new-page mounting and reload acceptance do not refute that wider potentially highest route.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Cover only deletion of retired renderer/kind/swap/notice regression cases. Independent check must preserve the boundary against accepting successful command reinterpretation or dropping another owner's production finding."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retired-renderer-swap-kind-notice-test-deletion",
+        "destination": "trailing-retired-renderer-swap-kind-notice-test-deletion.md"
+      }
+    },
+    {
+      "key": "g179/c2",
+      "owner": "g179",
+      "id": "c2",
+      "domain": "browser-terminal-regressions",
+      "purpose": "browser-terminal-regressions: e2e/grid-client/grid-attach.spec.ts, e2e/tests/terminal-attachments.spec.ts, e2e/tests/terminal-files.spec.ts, e2e/tests/terminal-flood.spec.ts, e2e/tests/terminal-font.spec.ts, e2e/tests/terminal-multihost.spec.ts, e2e/tests/terminal-unicode.spec.ts; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Removing the client paste-mode latch preserves grid marker assertions",
+            "location": "e2e/tests/terminal-attachments.spec.ts:665",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether removing latchBracketedPaste weakens the attachment tests or introduces a bracketed-paste readiness race. Source: assigned patch 01166 lines 192–204 shows that the removed helper immediately resolved without changing anything when island.grid existed. The revised tests still require echoed outer markers at terminal-attachments.spec.ts:674 and :2000; missing markers fail rather than pass. The logical-text change at :296–315 retains the previous grid branch, including wrapped-row joining, without changing its semantics. Contract: SPEC_impl.md:1728–1730 says ‘an OSC 52 READ is never answered’ (unrelated clipboard-read behavior remains out of scope); the directly governing paste contract is SPEC_impl.md, Terminal widget, ‘Input goes up as small JSON messages (keys, text, pastes, mouse and focus events), never as encoded bytes: the supervisor encodes them from the terminal’s modes’. SPEC.md, Attachments: ‘Plain text passes through as ordinary terminal input.’ Suggested bucket: other; confidence: confirmed no-op removal by source. proposed_drop: the removed readiness operation did nothing on the only supported grid path, and the marker assertions remain. Could-be-highest: no; this candidate concerns a test-only operation, with no established shipped security or loss-of-work route. possible_cover: none (coverage sources not consulted). Caveat: source analysis only; no browser or runtime execution."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Removing the client paste-mode latch preserves grid marker assertions",
+            "location": "e2e/tests/terminal-attachments.spec.ts:665",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether removing latchBracketedPaste weakens the attachment tests or introduces a bracketed-paste readiness race. Source: assigned patch 01166 lines 192–204 shows the removed helper immediately resolved without changing anything when island.grid existed. The revised tests still require echoed outer markers at terminal-attachments.spec.ts:674 and :2000; missing markers fail rather than pass. The logical-text change at :296–315 retains the previous grid branch, including wrapped-row joining, without changing its semantics. openAttachmentSession at :423–434 waits for reveal and the agent ready banner. Production terminal.js:4354 and :4365–4371 still gives the grid the sanitizer and routes attachment insertions through created.paste. Governing contract: SPEC_impl.md:1858–1859, The grid client, says ‘Input goes up as small JSON messages (keys, text, pastes, mouse and focus events), never as encoded bytes: the supervisor encodes them from the terminal’s modes’ (the source uses a straight apostrophe). SPEC.md, Attachments, says exactly ‘Plain text passes through as ordinary terminal input.’ Suggested bucket: other; confidence: confirmed no-op removal by source. proposed_drop: the removed readiness operation did nothing on the supported grid path, and the marker assertions remain. Could-be-highest: no; the candidate concerns a test-only operation, with no established shipped security or loss-of-work route. possible_cover: none (coverage sources not consulted). Caveat: source analysis only; no browser or runtime execution. This revision replaces the initial record’s extraneous clipboard-read citation with the actual paste contract and caller checks."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Removing the client paste-mode latch preserves grid marker assertions",
+            "location": "e2e/tests/terminal-attachments.spec.ts:665",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether removing latchBracketedPaste weakens attachment tests or introduces a bracketed-paste readiness race. Assigned patch 01166:192–204 shows that the removed helper immediately resolved without changing anything when island.grid existed. The revised tests still require echoed outer markers at terminal-attachments.spec.ts:674 and :2000; missing markers fail rather than pass. The logical-text change at :296–315 preserves the prior grid branch, including wrapped-row joining. openAttachmentSession at :423–434 waits for matching reveal and the agent banner. terminal.js:4354 and :4365–4371 keeps the sanitizer and routes insertions through created.paste. Synthesis resolved the fixture and server-mode premises: terminal-suite.ts:233 uses the basic fixture; createTabSession at :392–408 uses that invocation; fake_agent.rs:1628–1637 writes mode 2004 enable before its ready banner and then flushes. grid_stream.rs:1064–1079 reads modes from the server terminal status, encodes input with those modes and passes bracketed_paste into collection. A client latch cannot supply or replace that authority. Contract: SPEC_impl.md:1858–1859 says \"Input goes up as small JSON messages (keys, text, pastes, mouse and focus events), never as encoded bytes: the supervisor encodes them from the terminal's modes\"; SPEC.md, Attachments, says \"Plain text passes through as ordinary terminal input.\" Suggested bucket: other; confidence: confirmed no-op removal and source refutation. proposed_drop: the deleted operation did nothing on the supported path, the server sees the enable before the ready banner, and marker assertions remain. Could-be-highest: no; considered test-operation removal has no established shipped security or loss-of-work route. possible_cover: none (coverage sources not consulted). Caveats: source-only synthesis; no runtime behavior observed. The fixture’s prompt barrier is a separate concern from mode establishment; removing an already-no-op grid latch cannot change that ordering. Original suspected consequence and dismissal are preserved; no missing premise remains for this candidate."
+          }
+        }
+      ],
+      "latest": {
+        "line": 7,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Removing the client paste-mode latch preserves grid marker assertions",
+          "location": "e2e/tests/terminal-attachments.spec.ts:665",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether removing latchBracketedPaste weakens attachment tests or introduces a bracketed-paste readiness race. Assigned patch 01166:192–204 shows that the removed helper immediately resolved without changing anything when island.grid existed. The revised tests still require echoed outer markers at terminal-attachments.spec.ts:674 and :2000; missing markers fail rather than pass. The logical-text change at :296–315 preserves the prior grid branch, including wrapped-row joining. openAttachmentSession at :423–434 waits for matching reveal and the agent banner. terminal.js:4354 and :4365–4371 keeps the sanitizer and routes insertions through created.paste. Synthesis resolved the fixture and server-mode premises: terminal-suite.ts:233 uses the basic fixture; createTabSession at :392–408 uses that invocation; fake_agent.rs:1628–1637 writes mode 2004 enable before its ready banner and then flushes. grid_stream.rs:1064–1079 reads modes from the server terminal status, encodes input with those modes and passes bracketed_paste into collection. A client latch cannot supply or replace that authority. Contract: SPEC_impl.md:1858–1859 says \"Input goes up as small JSON messages (keys, text, pastes, mouse and focus events), never as encoded bytes: the supervisor encodes them from the terminal's modes\"; SPEC.md, Attachments, says \"Plain text passes through as ordinary terminal input.\" Suggested bucket: other; confidence: confirmed no-op removal and source refutation. proposed_drop: the deleted operation did nothing on the supported path, the server sees the enable before the ready banner, and marker assertions remain. Could-be-highest: no; considered test-operation removal has no established shipped security or loss-of-work route. possible_cover: none (coverage sources not consulted). Caveats: source-only synthesis; no runtime behavior observed. The fixture’s prompt barrier is a separate concern from mode establishment; removing an already-no-op grid latch cannot change that ordering. Original suspected consequence and dismissal are preserved; no missing premise remains for this candidate."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g179/findings.jsonl",
+        "id": "c2",
+        "line": 7,
+        "disposition": "under-investigation",
+        "group": "g179-c2",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-111",
+          "key": "g179/c2",
+          "latest_line": 7,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "grid-paste-tests-remove-noop-client-mode-latch",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The deleted latch resolved immediately on grids. Removing it cannot change server-owned bracketed-paste readiness, and the retained assertions still require actual bracket markers.",
+          "checks": [
+            "f560058d parent-to-commit terminal-attachments.spec.ts diff shows latchBracketedPaste returns immediately when island.grid is present, otherwise injecting mode2004 only into xterm.",
+            "f560058d:terminal-attachments.spec.ts:660-674 still requires sanitized text inside echoed opening/closing paste markers;1997-2000 separately requires an opening marker after attachment insertion.",
+            "f560058d:fake_agent.rs:1628-1637 emits mode2004 enable before its ready banner and flush. service/grid_stream.rs:1064-1079 uses server modes, including bracketed_paste; terminal.js:4354,4365-4371 retains sanitizer and insertion via created.paste.",
+            "This source check concerns removal of a no-op, not proof that every fixture readiness barrier is sound. No browser execution or reproduction was performed."
+          ],
+          "coverage_checked": [
+            "SPEC_impl.md The grid client assigns paste encoding to supervisor terminal modes; SPEC.md Attachments says plain text passes through as ordinary terminal input.",
+            "TODO Planned empty; BUGS, active TRIAGE_OUTCOMES, INDEX, matching queue and plans/queue searches for client mode latch/bracketed-paste test removal found no exact cover. Other paste receipt/input findings concern different boundaries.",
+            "FILTER not needed; no-op removal refutes the changed-operation concern."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Potential attachment-test weakening or bracketed-paste readiness race. Preserve the fixture prompt-barrier caveat: seeing READY is not always a safe-to-type barrier, but an already-no-op grid latch cannot repair or change that separate ordering.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Exclude only the removed-latch concern. Independent drop review is prudent because the test protects paste framing and unintended program input; no framing defect or user-work loss is established by this deletion."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "grid-paste-tests-remove-noop-client-mode-latch",
+        "destination": null
+      }
+    },
+    {
+      "key": "g179/c3",
+      "owner": "g179",
+      "id": "c3",
+      "domain": "browser-terminal-regressions",
+      "purpose": "browser-terminal-regressions: e2e/grid-client/grid-attach.spec.ts, e2e/tests/terminal-attachments.spec.ts, e2e/tests/terminal-files.spec.ts, e2e/tests/terminal-flood.spec.ts, e2e/tests/terminal-font.spec.ts, e2e/tests/terminal-multihost.spec.ts, e2e/tests/terminal-unicode.spec.ts; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Grid-only assertions still require the intended renderer and observable result",
+            "location": "e2e/tests/terminal-unicode.spec.ts:76",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether deleting terminalKind assertions or narrowing selectors could allow terminal regressions to pass unnoticed. Source: terminal-unicode.spec.ts:76–90 requires a grid snapshot, painted grid rows and atTail:true; without a grid atTail is false, so it cannot vacuously pass. At :163–174 it still reads the restored grid cursor and verifies live output at the expected column. terminal-flood.spec.ts:125–148 dereferences __farhelmGrid.paste, verifies the owned receiver’s full byte count and digest, then checks input and the original open socket. terminal-font.spec.ts:182–189 and :250–265 still assert no grid instance or grid element while fonts fail/are held, and real output and family after release. Contract: SPEC_impl.md:1506–1510 requires the grid for every terminal; :1516–1519 requires both bundled mono weights before mount. Exact text: ‘A terminal mounts only once both bundled mono weights have loaded, the same as its bundled scripts, with no fallback font.’ Suggested bucket: other; confidence: confirmed source refutation. proposed_drop: the intended renderer remains necessary to pass the positive observables, while negative font assertions now name the only supported renderer. Could-be-highest: no; considered test coverage weakening has no established security or loss-of-work route. possible_cover: none (coverage sources not consulted). Caveat: source-only review, no execution."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Grid-only assertions still require the intended renderer and observable result",
+            "location": "e2e/tests/terminal-unicode.spec.ts:76",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether deleting terminalKind assertions or narrowing selectors could let terminal regressions pass unnoticed. terminal-unicode.spec.ts:76–90 requires a grid snapshot, painted grid rows and atTail:true; no grid means atTail:false. At :163–174 it still reads the restored cursor and checks subsequent live output at the expected column. terminal-flood.spec.ts:125–148 requires __farhelmGrid.paste, the receiver’s complete byte count and digest, subsequent keyboard input and the original open socket. terminal-font.spec.ts:182–189 and :250–265 asserts no grid instance or element during failed/held font requests, then real output and family after release. Contract: SPEC_impl.md:1506–1510 requires the grid for every terminal; :1518–1519 says exactly: \"A terminal mounts only once both bundled mono weights have loaded, the same as its bundled scripts, with no fallback font.\" Synthesis checks: terminal-readiness.ts:124–176 verifies the grid registry entry, the host-qualified session ID decoded from the socket URL, its tab selector, open socket and reveal, rather than accepting a reused element ID. :292–307 requires these facts for waitForSessionRevealed; :337–353 also requires focus for waitForSessionReady. term.ts:319–336 makes attachSession wait for that matching ready attachment. These shared helpers close the caller-identity premise for both the Unicode reconnect and flood tests after explicit kind assertions were removed. terminal-multihost.spec.ts:3094–3099 establishes matching reveal and grid-only text before saving __farhelmGrid; :3122 dereferences its connected element. terminal-files.spec.ts:245 still requires a grid bounding box before comparing the completed-download notice’s position. Suggested bucket: other; confidence: confirmed source refutation. proposed_drop: positive observables still require the grid and the intended attachment; negative font checks name the sole supported renderer. Could-be-highest: no; considered test coverage weakening has no established shipped security or loss-of-work route. possible_cover: none (coverage sources not consulted). Caveat: source-only synthesis; no runtime behavior observed. No change to the original suspected consequence or dismissal; the attachment-identity and other-selector premises are now explicitly checked."
+          }
+        }
+      ],
+      "latest": {
+        "line": 6,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Grid-only assertions still require the intended renderer and observable result",
+          "location": "e2e/tests/terminal-unicode.spec.ts:76",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether deleting terminalKind assertions or narrowing selectors could let terminal regressions pass unnoticed. terminal-unicode.spec.ts:76–90 requires a grid snapshot, painted grid rows and atTail:true; no grid means atTail:false. At :163–174 it still reads the restored cursor and checks subsequent live output at the expected column. terminal-flood.spec.ts:125–148 requires __farhelmGrid.paste, the receiver’s complete byte count and digest, subsequent keyboard input and the original open socket. terminal-font.spec.ts:182–189 and :250–265 asserts no grid instance or element during failed/held font requests, then real output and family after release. Contract: SPEC_impl.md:1506–1510 requires the grid for every terminal; :1518–1519 says exactly: \"A terminal mounts only once both bundled mono weights have loaded, the same as its bundled scripts, with no fallback font.\" Synthesis checks: terminal-readiness.ts:124–176 verifies the grid registry entry, the host-qualified session ID decoded from the socket URL, its tab selector, open socket and reveal, rather than accepting a reused element ID. :292–307 requires these facts for waitForSessionRevealed; :337–353 also requires focus for waitForSessionReady. term.ts:319–336 makes attachSession wait for that matching ready attachment. These shared helpers close the caller-identity premise for both the Unicode reconnect and flood tests after explicit kind assertions were removed. terminal-multihost.spec.ts:3094–3099 establishes matching reveal and grid-only text before saving __farhelmGrid; :3122 dereferences its connected element. terminal-files.spec.ts:245 still requires a grid bounding box before comparing the completed-download notice’s position. Suggested bucket: other; confidence: confirmed source refutation. proposed_drop: positive observables still require the grid and the intended attachment; negative font checks name the sole supported renderer. Could-be-highest: no; considered test coverage weakening has no established shipped security or loss-of-work route. possible_cover: none (coverage sources not consulted). Caveat: source-only synthesis; no runtime behavior observed. No change to the original suspected consequence or dismissal; the attachment-identity and other-selector premises are now explicitly checked."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g179/findings.jsonl",
+        "id": "c3",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "grid-only-tests-removed-kind-assertions-retain-positive-observables",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-111 after inspecting it. The retained Unicode/flood observations require the grid and real program results. The narrowed font assertions name the only supported renderer. This does not refute the separate missing mount-attempt witness in the held-font test. Exclude the narrow renderer-identity assertion concern while preserving separate existing font-test feedback and its recorded decision. Checked source/results: [\"f560058d:terminal-unicode.spec.ts:76-90 checks model rows, painted rows and atTail:true; an absent grid yields atTail:false. terminal-flood.spec.ts:125-148 requires grid.paste success, exact byte count/digest, later keyboard echo and original open socket.\",\"f560058d:terminal-font.spec.ts:182-189,250-265 retains no-grid/no-element checks while unavailable and real output/font family after release.\",\"f560058d:helpers/terminal-readiness.ts:124-176 binds the island to decoded session and tab URL, open socket, grid/test registry, replay reveal and actual hidden-input focus. These checks support the intended attachment identity.\",\"Source-only refutation of changed renderer-kind/selector concerns; no runtime result is claimed.\"] Current coverage/results: [\"SPEC_impl.md Terminal widget:1693-1705 requires a grid and both mono weights before mount; SPEC.md Terminal experience supplies no second-renderer requirement.\",\"TODO Planned empty. BUGS and plans/queue contain no exact changed-selector defect; landed tmux plans are retirement context. Active ledger/queue exact checks distinguish the held-font witness defect below.\",\"review_feedback_queue/held-font-test-lacks-mount-attempt-witness.md and TRIAGE_OUTCOMES.md:1337-1349 concern a missing mount-attempt witness, with an active discard decision. They do not cover or refute the narrower renderer-selector question. No extension is needed for this refuted candidate.\",\"FILTER not used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Potential tests passing without the intended renderer or attachment after kind assertions/selectors are narrowed. Positive grid observables refute that concern; no claim that the held-font test's independent timing premise is sound.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g179/c3",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "grid-only-tests-removed-kind-assertions-retain-positive-observables",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-111 after inspecting it. The retained Unicode/flood observations require the grid and real program results. The narrowed font assertions name the only supported renderer. This does not refute the separate missing mount-attempt witness in the held-font test. Exclude the narrow renderer-identity assertion concern while preserving separate existing font-test feedback and its recorded decision. Checked source/results: [\"f560058d:terminal-unicode.spec.ts:76-90 checks model rows, painted rows and atTail:true; an absent grid yields atTail:false. terminal-flood.spec.ts:125-148 requires grid.paste success, exact byte count/digest, later keyboard echo and original open socket.\",\"f560058d:terminal-font.spec.ts:182-189,250-265 retains no-grid/no-element checks while unavailable and real output/font family after release.\",\"f560058d:helpers/terminal-readiness.ts:124-176 binds the island to decoded session and tab URL, open socket, grid/test registry, replay reveal and actual hidden-input focus. These checks support the intended attachment identity.\",\"Source-only refutation of changed renderer-kind/selector concerns; no runtime result is claimed.\"] Current coverage/results: [\"SPEC_impl.md Terminal widget:1693-1705 requires a grid and both mono weights before mount; SPEC.md Terminal experience supplies no second-renderer requirement.\",\"TODO Planned empty. BUGS and plans/queue contain no exact changed-selector defect; landed tmux plans are retirement context. Active ledger/queue exact checks distinguish the held-font witness defect below.\",\"review_feedback_queue/held-font-test-lacks-mount-attempt-witness.md and TRIAGE_OUTCOMES.md:1337-1349 concern a missing mount-attempt witness, with an active discard decision. They do not cover or refute the narrower renderer-selector question. No extension is needed for this refuted candidate.\",\"FILTER not used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Potential tests passing without the intended renderer or attachment after kind assertions/selectors are narrowed. Positive grid observables refute that concern; no claim that the held-font test's independent timing premise is sound.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-111",
+          "key": "g179/c3",
+          "latest_line": 6,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "grid-only-tests-removed-kind-assertions-retain-positive-observables",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The retained Unicode/flood observations require the grid and real program results. The narrowed font assertions name the only supported renderer. This does not refute the separate missing mount-attempt witness in the held-font test.",
+          "checks": [
+            "f560058d:terminal-unicode.spec.ts:76-90 checks model rows, painted rows and atTail:true; an absent grid yields atTail:false. terminal-flood.spec.ts:125-148 requires grid.paste success, exact byte count/digest, later keyboard echo and original open socket.",
+            "f560058d:terminal-font.spec.ts:182-189,250-265 retains no-grid/no-element checks while unavailable and real output/font family after release.",
+            "f560058d:helpers/terminal-readiness.ts:124-176 binds the island to decoded session and tab URL, open socket, grid/test registry, replay reveal and actual hidden-input focus. These checks support the intended attachment identity.",
+            "Source-only refutation of changed renderer-kind/selector concerns; no runtime result is claimed."
+          ],
+          "coverage_checked": [
+            "SPEC_impl.md Terminal widget:1693-1705 requires a grid and both mono weights before mount; SPEC.md Terminal experience supplies no second-renderer requirement.",
+            "TODO Planned empty. BUGS and plans/queue contain no exact changed-selector defect; landed tmux plans are retirement context. Active ledger/queue exact checks distinguish the held-font witness defect below.",
+            "review_feedback_queue/held-font-test-lacks-mount-attempt-witness.md and TRIAGE_OUTCOMES.md:1337-1349 concern a missing mount-attempt witness, with an active discard decision. They do not cover or refute the narrower renderer-selector question. No extension is needed for this refuted candidate.",
+            "FILTER not used."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Potential tests passing without the intended renderer or attachment after kind assertions/selectors are narrowed. Positive grid observables refute that concern; no claim that the held-font test's independent timing premise is sound.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Exclude the narrow renderer-identity assertion concern while preserving separate existing font-test feedback and its recorded decision."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "grid-only-tests-removed-kind-assertions-retain-positive-observables",
+        "destination": null
+      }
+    },
+    {
+      "key": "g179/c4",
+      "owner": "g179",
+      "id": "c4",
+      "domain": "browser-terminal-regressions",
+      "purpose": "browser-terminal-regressions: e2e/grid-client/grid-attach.spec.ts, e2e/tests/terminal-attachments.spec.ts, e2e/tests/terminal-files.spec.ts, e2e/tests/terminal-flood.spec.ts, e2e/tests/terminal-font.spec.ts, e2e/tests/terminal-multihost.spec.ts, e2e/tests/terminal-unicode.spec.ts; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Paste interception assertions still observe the grid input handler boundary",
+            "location": "e2e/tests/terminal-attachments.spec.ts:267",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether narrowing dispatchPayload to .grid-terminal-input causes its event witness to miss the terminal’s own handler and falsely certify capture-phase interception. Source checks: the changed target at terminal-attachments.spec.ts:267–269 is exactly the element whose paste listener grid-terminal.js:1552–1563 installs. The test helper’s witness at :249–257 is attached to that event target, and the interception test at :2144–2163 separately requires default prevention, stopped propagation, target non-arrival, and later plain-text delivery. terminal.js:2325–2353 classifies before preventing/stopping and :2386 registers the interceptor in ancestor capture phase. The unsupported projection case at terminal-attachments.spec.ts:1040ff retains the converse reachedTarget:true assertion. Contract: the supplied test-authoring checklist requires an observable distinguishing mechanisms; this is an actual listener/event boundary plus delivery assertions, not only a common success string. Suggested bucket: other; confidence: confirmed source refutation of the changed-target concern. proposed_drop: the revised selector names the actual grid handler’s field, while the interception and pass-through cases retain opposing target witnesses. Could-be-highest: no established security or loss-of-work route; the concern was test-oracle weakening only. possible_cover: none known; prohibited coverage sources not searched. Caveat: this establishes the synthetic DOM-event boundary only; real OS clipboard/drag behavior remains explicitly outside this file’s claimed coverage. No runtime tests or reproduction performed. This is a newly considered and refuted candidate, not a newly discovered defect."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c4",
+          "state": "open",
+          "summary": "Paste interception assertions still observe the grid input handler boundary",
+          "location": "e2e/tests/terminal-attachments.spec.ts:267",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether narrowing dispatchPayload to .grid-terminal-input causes its event witness to miss the terminal’s own handler and falsely certify capture-phase interception. Source checks: the changed target at terminal-attachments.spec.ts:267–269 is exactly the element whose paste listener grid-terminal.js:1552–1563 installs. The test helper’s witness at :249–257 is attached to that event target, and the interception test at :2144–2163 separately requires default prevention, stopped propagation, target non-arrival, and later plain-text delivery. terminal.js:2325–2353 classifies before preventing/stopping and :2386 registers the interceptor in ancestor capture phase. The unsupported projection case at terminal-attachments.spec.ts:1040ff retains the converse reachedTarget:true assertion. Contract: the supplied test-authoring checklist requires an observable distinguishing mechanisms; this is an actual listener/event boundary plus delivery assertions, not only a common success string. Suggested bucket: other; confidence: confirmed source refutation of the changed-target concern. proposed_drop: the revised selector names the actual grid handler’s field, while the interception and pass-through cases retain opposing target witnesses. Could-be-highest: no established security or loss-of-work route; the concern was test-oracle weakening only. possible_cover: none known; prohibited coverage sources not searched. Caveat: this establishes the synthetic DOM-event boundary only; real OS clipboard/drag behavior remains explicitly outside this file’s claimed coverage. No runtime tests or reproduction performed. This is a newly considered and refuted candidate, not a newly discovered defect."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g179/findings.jsonl",
+        "id": "c4",
+        "line": 10,
+        "disposition": "under-investigation",
+        "group": "g179-c4",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-111",
+          "key": "g179/c4",
+          "latest_line": 10,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "synthetic-paste-interception-target-witness-mismatch-concern",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The target witness is attached to the grid's actual paste input element. Ancestor capture interception prevents that witness, while delivery assertions show plain text still reaches the program.",
+          "checks": [
+            "f560058d:terminal-attachments.spec.ts:240-269 adds a witness to the dispatch target and selects .grid-terminal-input. grid-terminal.js:1552-1563 installs its own paste handler on that input.",
+            "f560058d:terminal-attachments.spec.ts:2145-2163 requires default prevention, stopped propagation, reachedTarget:false for intercepted file/text, and subsequent plain-text delivery.",
+            "f560058d:terminal.js:2325-2353 classifies first and prevents/stops only accepted flavors, inserting plain text through the policy path. The changed target therefore observes the relevant DOM boundary, not an unrelated element.",
+            "This establishes synthetic event behavior only, not real OS clipboard/drag delivery. No browser run or reproduction was performed."
+          ],
+          "coverage_checked": [
+            "SPEC.md Attachments:3171-3207 requires file/image interception and ordinary text input; SPEC_impl.md The grid client separates shared interception from grid insertion. Neither accepts accidental bypass.",
+            "TODO Planned empty. BUGS, active TRIAGE_OUTCOMES, INDEX, matching queue and plans/queue searches for paste target/interception witness found no exact cover. Product drop-refusal and paste-receipt items concern different roots.",
+            "FILTER not used because the concrete proposed witness mismatch is source-refuted."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Potential falsely certified capture-phase interception because the target witness misses the terminal's handler. Preserve the synthetic-DOM-only scope; no OS clipboard/drag claim is established.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Exclude only the changed-target witness mismatch; independent check should preserve paste interception/input safety boundaries rather than infer broad clipboard safety."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "synthetic-paste-interception-target-witness-mismatch-concern",
+        "destination": null
+      }
+    },
+    {
+      "key": "g179/l1",
+      "owner": "g179",
+      "id": "l1",
+      "domain": "browser-terminal-regressions",
+      "purpose": "browser-terminal-regressions: e2e/grid-client/grid-attach.spec.ts, e2e/tests/terminal-attachments.spec.ts, e2e/tests/terminal-files.spec.ts, e2e/tests/terminal-flood.spec.ts, e2e/tests/terminal-font.spec.ts, e2e/tests/terminal-multihost.spec.ts, e2e/tests/terminal-unicode.spec.ts; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Check the attach fixture against the new all-frames-ready explanation",
+            "location": "e2e/grid-client/grid-attach.spec.ts:434",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: the changed catch-up explanation says the grid applies frames as they arrive so they are all there to reveal. The supplied g181/c2 establishes that marker arrival alone does not generally prove sliced history applied; this assigned comment/helper needs its own fixture and caller check rather than assuming the same defect. Available source basis: patch 01140:589–601 changes the rationale around openCatchUp, whose assigned doc says fixture frames are delivered with no marker and the terminal remains hidden. Missing premise: whether attach.jsonl has queued history and whether these specific callers require history completeness, or only the current screen and visibility. Next useful checks: read the fixture, local catch-up callers and grid receive/flush/drain boundaries at the pinned revision; compare parent wording/range attribution before reporting. Suggested bucket: other if confirmed, documentation/test synchronization only. Confidence: uninvestigated lead requiring the listed source checks; not an unverified-after-investigation finding. proposed_drop:false pending checks. Could-be-highest: no established security or loss-of-work route from this test explanation. possible_cover: supplied g181/c2 is the related held-replay documentation issue, not proof of this separate fixture’s behavior. No runtime evidence or reproduction."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Qualify the catch-up test’s all-frames-applied rationale",
+            "location": "e2e/grid-client/grid-attach.spec.ts:435",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: the rewritten takeover-test explanation says all received grid frames have been applied and are ready to reveal, although history can still be queued when this test’s reveal occurs. Future readers get an incorrect synchronization guarantee. Details: grid-attach.spec.ts:433–435 newly adds the inference \"The grid applies frames as they arrive, so they are all there to reveal.\" openCatchUp at :422–426 only sends attach.jsonl and checks hidden/unrevealed. The fixture contains two history messages with two rows each. grid-terminal.js:1973–1994 queues model history, gives a no-backlog arrival one bounded slice, and schedules remaining work; :1886–1918 applies later slices by animation frame/task. grid-model.js:971–1005 checks its yield predicate after every row, so even this small fixture has no source guarantee that both rows finish before a yield. terminal.js:3774–3778 expressly says history may still be applying and reveals the current screen via scrollToBottom/flush; grid-terminal.js:1997–2000 flush only paints and does not drain history. The actual test at grid-attach.spec.ts:442–450 waits for revealed, checks the detach banner and visible first screen row, and never asserts drained history. Its executable screen/reveal checks remain useful and are not claimed broken. Governing contract: SPEC_impl.md, The grid client, says history is applied \"in slices between frames so that the screen stays usable\"; the reveal implementation’s explicit caveat agrees. Fix the rationale to say the current screen is applied and can be revealed while received history may still be pending; do not add a history wait unless a caller truly needs that boundary. Range attribution: compared f560058 parent lines738–745, which says the grid applies frames as they arrive but does not add the new all-there-to-reveal inference; the complete base-to-tip diff retains that newly added sentence. Therefore this is a changed documentation claim, not a new history-loss or test-oracle behavior regression. Suggested bucket: other, test synchronization documentation. Confidence: confirmed by source/contract analysis only; no runtime behavior observed. proposed_drop:false. Could-be-highest: no established security or loss-of-work route. possible_cover: caller-supplied g181/c2 is the same underlying applied-history-versus-marker distinction in a different test helper, so consolidation may be appropriate; no prohibited coverage sources searched. Caveats: ordinary tiny fixture drains likely finish immediately; timing likelihood does not establish the unconditional explanation. No reproduction, test, build or live-install action performed. Original lead consequence narrowed to the false documentation inference; fixture/caller/flush/yield premises are now checked, with no unresolved premise."
+          }
+        }
+      ],
+      "latest": {
+        "line": 12,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l1",
+          "state": "open",
+          "summary": "Qualify the catch-up test’s all-frames-applied rationale",
+          "location": "e2e/grid-client/grid-attach.spec.ts:435",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: the rewritten takeover-test explanation says all received grid frames have been applied and are ready to reveal, although history can still be queued when this test’s reveal occurs. Future readers get an incorrect synchronization guarantee. Details: grid-attach.spec.ts:433–435 newly adds the inference \"The grid applies frames as they arrive, so they are all there to reveal.\" openCatchUp at :422–426 only sends attach.jsonl and checks hidden/unrevealed. The fixture contains two history messages with two rows each. grid-terminal.js:1973–1994 queues model history, gives a no-backlog arrival one bounded slice, and schedules remaining work; :1886–1918 applies later slices by animation frame/task. grid-model.js:971–1005 checks its yield predicate after every row, so even this small fixture has no source guarantee that both rows finish before a yield. terminal.js:3774–3778 expressly says history may still be applying and reveals the current screen via scrollToBottom/flush; grid-terminal.js:1997–2000 flush only paints and does not drain history. The actual test at grid-attach.spec.ts:442–450 waits for revealed, checks the detach banner and visible first screen row, and never asserts drained history. Its executable screen/reveal checks remain useful and are not claimed broken. Governing contract: SPEC_impl.md, The grid client, says history is applied \"in slices between frames so that the screen stays usable\"; the reveal implementation’s explicit caveat agrees. Fix the rationale to say the current screen is applied and can be revealed while received history may still be pending; do not add a history wait unless a caller truly needs that boundary. Range attribution: compared f560058 parent lines738–745, which says the grid applies frames as they arrive but does not add the new all-there-to-reveal inference; the complete base-to-tip diff retains that newly added sentence. Therefore this is a changed documentation claim, not a new history-loss or test-oracle behavior regression. Suggested bucket: other, test synchronization documentation. Confidence: confirmed by source/contract analysis only; no runtime behavior observed. proposed_drop:false. Could-be-highest: no established security or loss-of-work route. possible_cover: caller-supplied g181/c2 is the same underlying applied-history-versus-marker distinction in a different test helper, so consolidation may be appropriate; no prohibited coverage sources searched. Caveats: ordinary tiny fixture drains likely finish immediately; timing likelihood does not establish the unconditional explanation. No reproduction, test, build or live-install action performed. Original lead consequence narrowed to the false documentation inference; fixture/caller/flush/yield premises are now checked, with no unresolved premise."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g179/findings.jsonl",
+        "id": "l1",
+        "line": 12,
+        "disposition": "duplicate",
+        "group": "held-replay-helper-misstates-history-drained-boundary",
+        "reason": "Parent read full111,actual179event12 and direct f560 grid-attach410-452. Newly added 'applies frames as they arrive, so they are all there to reveal' does infer whole applied readiness beyond merely transport arrival; history slices may still await tasks while flush paints onlyscreen. Same false applied-history synchronization contract as retained181c2's explicit arrived-and-been-applied helper, different location requiring same qualified current-screen-versus-history explanation. Combine both exact claims in one item, preserve tinyfixture likely prompt, actual current-screen/banner assertions useful and no false pass/history-loss allegation. Do not add universal history wait."
+      },
+      "accepted_parent_decision": {
+        "key": "g179/l1",
+        "line": 12,
+        "disposition": "duplicate",
+        "group": "held-replay-helper-misstates-history-drained-boundary",
+        "bucket": "other",
+        "recording": "new-with-canonical",
+        "needs_independent_drop_check": false,
+        "reason": "Parent read full111,actual179event12 and direct f560 grid-attach410-452. Newly added 'applies frames as they arrive, so they are all there to reveal' does infer whole applied readiness beyond merely transport arrival; history slices may still await tasks while flush paints onlyscreen. Same false applied-history synchronization contract as retained181c2's explicit arrived-and-been-applied helper, different location requiring same qualified current-screen-versus-history explanation. Combine both exact claims in one item, preserve tinyfixture likely prompt, actual current-screen/banner assertions useful and no false pass/history-loss allegation. Do not add universal history wait."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-111",
+          "key": "g179/l1",
+          "latest_line": 12,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "grid-reveal-test-documentation-equates-arrival-with-applied-history",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The new all-there-to-reveal inference promises history application that reveal does not guarantee. The executable test checks the current screen and banner, which remain useful. The finding is the false explanation, not demonstrated history loss or a broken assertion.",
+          "checks": [
+            "f560058d:grid-attach.spec.ts:422-450 sends attach.jsonl, confirms hidden, detaches, then checks reveal/banner/current screen row. Newly added435 says the frames are all there to reveal. That sentence survives both00de0b6c and24bc0580.",
+            "f560058d:js-tests/fixtures/grid/attach.jsonl:5-6 contains two two-row history messages. grid-terminal.js:1886-1918 slices/schedules draining;1973-1994 only gives no-backlog arrival one bounded slice;1997-2000 flush only paints.",
+            "f560058d:grid-model.js:971-1005 may yield after each row. terminal.js:3774-3778 explicitly says history may still be applying when the current screen is revealed.",
+            "The parent-to-f560058d diff adds the all-there-to-reveal inference beyond the former applies-as-they-arrive wording. A tiny fixture likely drains promptly, but no unconditional source guarantee exists. No timing observation or reproduction was made."
+          ],
+          "coverage_checked": [
+            "SPEC_impl.md The grid client:1867-1869 explicitly applies large history in slices; SPEC.md Terminal experience does not accept false synchronization explanations.",
+            "TODO Planned empty. BUGS, active TRIAGE_OUTCOMES and INDEX searches found no exact false-comment item. plans/queue/empty-scrollback-messages.md fixes zero-row numbering, not reveal/history synchronization; the tmux docs sweep is already landed and leaves this sentence present.",
+            "review_feedback_queue/replacement-history-absence-asserted-before-delivery.md describes a different replacement-test absence oracle, not this newly false documentation inference. Same underlying boundary is useful context but not exact coverage or an alias.",
+            "The supplied g181/c2 reference is outside this batch input; exact consolidation with its held-replay explanation cannot be established here. Parent can reconcile the underlying key. FILTER does not cover persistent inaccurate test-contract prose."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "The initial lead asked whether this fixture/callers needed history completeness; source establishes only a misleading all-frames-applied inference. Preserve that the test's actual screen/reveal checks remain useful, no history-loss or test-oracle behavior regression is asserted, and ordinary small-fixture timing is likely prompt.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Record the false test synchronization explanation as other. Qualify it to current-screen reveal with history potentially pending; do not demand an unnecessary history wait."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "held-replay-helper-misstates-history-drained-boundary",
+        "destination": "trailing-held-replay-helper-misstates-history-drained-boundary.md"
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete: all seven assigned patches read and checked against pinned contracts and callers.\n\nNo reportable findings or unresolved leads. Candidates `c1`–`c3` and their dismissal bases are recorded in `findings.jsonl`; `progress.md` is updated. No assigned scope remains unread. No tests or reproductions run."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised `c1`–`c3` with source checks covering script/reveal wiring, paste-mode ordering and attachment identity/readiness. Dispositions unchanged; no new findings.\n\nUnresolved lead IDs: none. No tests or reproductions run."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass complete.\n\n- Checked event interception, hover lifecycle, remaining small diffs, and catch-up fixture/drain/reveal contracts.\n- New verified: `l1` — revised test rationale overstates when history is applied.\n- New unverified: none. Open leads: none.\n- Recorded refuted candidate `c4` and clarified `c1`’s scope.\n\nSomething new was found: `l1`. Source-only; no runtime tests or reproductions."
+    }
+  ],
+  "progress": "Group: g179 — browser-terminal-regressions\nTurn type/count: initial review / 1. Discovery-pass count: 0.\nState: initial assigned pass complete; ready for the caller's later synthesis prompt.\n\nCoverage: read the brief fully, and the complete commits field of inventory.json without reading excluded coverage metadata. Delivered every assigned patch range through the evidence command: 01140:1–631, 01166:1–333, 01169:1–39, 01170:1–44, 01171:1–38, 01175:1–16, 01179:1–51 (1,152 lines). All seven patches are at f560058da19e02716e6f943883a9508b447aff4e. No unread assigned scope.\n\nContracts read at the pinned revision: SPEC.md Terminal experience and Attachments in full; SPEC_impl.md Terminal widget including The grid client in full, Grid streams in full, and Answers bind to what was drawn. Read priority/recording rules and injected root AGENTS.md through its End sentinel. Validation and test-evidence instructions read; no runtime validation selected for this source-only review.\n\nChecks: compared the revised static-page script gate, grid-first fit/socket construction, control/data path, malformed-grid ending, paste wiring and island publication with terminal.js at the pinned revision. Inspected the changed test helpers and their callers, including full font and Unicode specs, flood receiver/digest/socket assertions, file-download hover/save context, and multihost outage snapshot/recovery context. Re-read clipped production context separately. Removed compatibility tests match the protocol-77 contract. The removed paste latch was already a no-op on grid terminals. Positive grid/model/paint/cursor/digest assertions remain necessary after terminalKind removal.\n\nInterface assumptions: parent owns queue and cross-group coverage. Production migration changes are consulted only as interfaces for this group's test changes; no independent defects in retired implementations were sought. Grid-only helpers and registry fields are consistent with terminal.js:4660–4668. Paste framing is owned by the supervisor, not a client-side mode latch. Old loaded pages require reload under the explicit Grid streams contract.\n\nDurable records: c1, c2, c3 are source-refuted or contract-accepted candidates with proposed drops and could-be-highest:false. c1 and c2 were revised under the same IDs to sharpen references. New verified finding IDs: none. New unverified finding IDs: none. Open lead IDs: none.\n\nNo runtime tests, builds, reproductions, checkout edits, live-install actions or helper agents. Only this group's private artifacts were written.\nNext action: await the caller's later synthesis/discovery instructions; no later-turn pass was performed inside this initial turn.\n\nSynthesis turn 2 in progress. Revisiting helper identity/readiness, bracketed-paste ownership and remaining grid controls across the assigned patches. Discovery-pass count remains 0; no new IDs or open leads at turn entry.\n\nSynthesis turn 2 complete. Discovery-pass count: 0. No new verified or unverified findings; no unresolved lead IDs. No unread assigned scope.\n\nRevised c1 after comparing static-page script prerequisites with lib.rs:1914–1926 and terminal.js’s direct binary receive and marker reveal paths. Revised c2 after following createTabSession through FAKE_AGENT_INVOCATION to basic’s mode-enable-before-banner ordering, then checking server-mode encoding and marker collection. Revised c3 after checking shared readiness’s host-qualified session/tab URL identity, mounted grid, socket-open, replay and focus predicates, plus the other changed selector/snapshot callers. All three dispositions remain source-refuted/contract-accepted proposed drops; no new impact route was found.\n\nInterface assumptions now checked: a reused terminal DOM ID alone cannot satisfy shared readiness; grid mount needs the sanitizer and grid globals supplied by both live and static pages; server terminal modes own paste framing; static fake sockets need no removed stream notice for binary delivery or marker reveal. No readily checkable premise remains open for the logged candidates.\n\nNo runtime tests, builds or reproductions. No checkout edits. Next action: await caller instructions for a later discovery turn or finalization.\n\nDiscovery turn 3 started; discovery-pass count: 1. Read discovery-neighbours.json through its closing brace. Named pending questions: none. Interface context includes known old-page input reinterpretation, historical old-renderer test gaps, production-overlay test gaps, and held-replay/SGR documentation findings; none is claimed as a new discovery here. Revised c1 to limit its proposed-drop scope and preserve the supplied potentially-highest production compatibility concern. New search is confined to the assigned seven patches and their test-oracle/documentation contracts at recorded revisions.\n\nDiscovery turn 3 complete; discovery-pass count: 1. Assigned scope remains fully read; no unread patch ranges. No runtime tests, reproductions, builds or live-install actions.\n\nNew search checked the revised attachment event target against the actual grid paste listener and ancestor capture interceptor, plus the converse unsupported-payload witness; recorded refuted candidate c4 immediately. Checked file-hover leave/re-entry source, then re-inspected all five small font/files/flood/multihost/Unicode diffs for distinct oracle or documentation changes. Reviewed the assigned catch-up rationale separately from the supplied neighbouring held-replay finding. Read attach.jsonl, its hidden/revealed/first-row callers, bounded history receive/drain/flush paths, and the parent plus full base-to-tip attribution.\n\nNew verified ID: l1 (other, documentation): the newly added all-frames-ready inference overstates reveal’s applied-history boundary. l1 was first logged as a lead, then revised to a finding after fixture, per-row yield, flush and caller checks settled every accessible premise. Its actual screen/banners assertions remain useful; no product loss or executable test failure is claimed. Related supplied g181/c2 may be consolidated by the caller, but is not substituted for the local source checks. New unverified-after-investigation IDs: none. Remaining lead IDs: none.\n\nRevised known c1 only to fence its prior compatibility acceptance from the supplied potentially-highest valid-JSON old-page input route. No parent drop or lowering is assumed. Candidate c4’s dismissal is a proposal, not an accepted parent disposition.\n\nAnything new found: yes, l1’s changed test rationale; c4 is a refuted consideration, not a defect. Next action: return for a separate later pass as the charter requires after a substantive discovery; no additional discovery pass was performed inside this turn.\n"
+}

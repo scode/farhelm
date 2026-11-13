@@ -1,0 +1,717 @@
+{
+  "group": {
+    "id": "g001",
+    "domain": "product-contracts",
+    "purpose": "product-contracts: SPEC_impl.md, SPEC.md; phases @@ -2255,16 +2253,16 @@ answer; a client that has already loaded its preferences keeps its previous beha",
+    "interfaces": [
+      "g002",
+      "g003",
+      "g004",
+      "g005",
+      "g006",
+      "g007",
+      "g008",
+      "g009",
+      "g010",
+      "g011",
+      "g012",
+      "g013",
+      "g014",
+      "g015",
+      "g016",
+      "g017",
+      "g018",
+      "g022",
+      "g023",
+      "g024",
+      "g026",
+      "g027",
+      "g030",
+      "g031",
+      "g032",
+      "g035",
+      "g036",
+      "g039",
+      "g041",
+      "g042",
+      "g052",
+      "g065",
+      "g071",
+      "g079",
+      "g086",
+      "g087",
+      "g088",
+      "g090",
+      "g093",
+      "g095",
+      "g096",
+      "g097",
+      "g098",
+      "g099",
+      "g100",
+      "g101",
+      "g102",
+      "g103",
+      "g104",
+      "g110",
+      "g111",
+      "g112",
+      "g113",
+      "g114",
+      "g115",
+      "g117",
+      "g118",
+      "g119",
+      "g120",
+      "g121",
+      "g122",
+      "g124",
+      "g125",
+      "g126",
+      "g127",
+      "g128",
+      "g129",
+      "g130",
+      "g131",
+      "g132",
+      "g133",
+      "g134",
+      "g139",
+      "g140",
+      "g142",
+      "g144",
+      "g145",
+      "g150",
+      "g151",
+      "g153",
+      "g154",
+      "g155",
+      "g156",
+      "g159",
+      "g160",
+      "g161",
+      "g162",
+      "g163",
+      "g164",
+      "g165",
+      "g166",
+      "g167",
+      "g168",
+      "g169",
+      "g170",
+      "g171",
+      "g172",
+      "g183",
+      "g184"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00026-000.patch",
+        "ranges": [
+          [
+            1,
+            36
+          ]
+        ],
+        "original_path": "SPEC_impl.md",
+        "commit": "06d4b68f3a9e913f47cd426fedee5946a4eed77b",
+        "notes": "patch header; patch character offsets [0,3599)",
+        "lines": 36,
+        "bytes": 3599,
+        "start": 0,
+        "end": 3599,
+        "original": "[private-run]/prep/originals/00026.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00058-000.patch",
+        "ranges": [
+          [
+            1,
+            51
+          ]
+        ],
+        "original_path": "SPEC_impl.md",
+        "commit": "9ff03ce91f191ea59f3ce16cefbd0b76d7fe599d",
+        "notes": "patch header; patch character offsets [0,4908)",
+        "lines": 51,
+        "bytes": 4910,
+        "start": 0,
+        "end": 4908,
+        "original": "[private-run]/prep/originals/00058.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00082-001.patch",
+        "ranges": [
+          [
+            1,
+            444
+          ]
+        ],
+        "original_path": "SPEC.md",
+        "commit": "c8bc155cc36723c8c53870944d07ce8ec61ef9ed",
+        "notes": "@@ -2255,16 +2253,16 @@ answer; a client that has already loaded its preferences keeps its previous beha; patch character offsets [58344,101582)",
+        "lines": 444,
+        "bytes": 43282,
+        "start": 58344,
+        "end": 101582,
+        "original": "[private-run]/prep/originals/00082.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00511-000.patch",
+        "ranges": [
+          [
+            1,
+            25
+          ]
+        ],
+        "original_path": "SPEC.md",
+        "commit": "1d24c6af0b6fdbbec854623ff53f90281b8271ab",
+        "notes": "patch header; patch character offsets [0,2496)",
+        "lines": 25,
+        "bytes": 2496,
+        "start": 0,
+        "end": 2496,
+        "original": "[private-run]/prep/originals/00511.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00512-000.patch",
+        "ranges": [
+          [
+            1,
+            23
+          ]
+        ],
+        "original_path": "SPEC_impl.md",
+        "commit": "1d24c6af0b6fdbbec854623ff53f90281b8271ab",
+        "notes": "patch header; patch character offsets [0,2163)",
+        "lines": 23,
+        "bytes": 2163,
+        "start": 0,
+        "end": 2163,
+        "original": "[private-run]/prep/originals/00512.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00525-000.patch",
+        "ranges": [
+          [
+            1,
+            20
+          ]
+        ],
+        "original_path": "SPEC.md",
+        "commit": "ba7cc0264028eebb39647deb1d25b055e6886935",
+        "notes": "patch header; patch character offsets [0,1830)",
+        "lines": 20,
+        "bytes": 1832,
+        "start": 0,
+        "end": 1830,
+        "original": "[private-run]/prep/originals/00525.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00526-000.patch",
+        "ranges": [
+          [
+            1,
+            24
+          ]
+        ],
+        "original_path": "SPEC_impl.md",
+        "commit": "ba7cc0264028eebb39647deb1d25b055e6886935",
+        "notes": "patch header; patch character offsets [0,2157)",
+        "lines": 24,
+        "bytes": 2157,
+        "start": 0,
+        "end": 2157,
+        "original": "[private-run]/prep/originals/00526.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00616-000.patch",
+        "ranges": [
+          [
+            1,
+            16
+          ]
+        ],
+        "original_path": "SPEC.md",
+        "commit": "533169cf19571d34af3a8497eaceb8d2d7b7c852",
+        "notes": "patch header; patch character offsets [0,1344)",
+        "lines": 16,
+        "bytes": 1344,
+        "start": 0,
+        "end": 1344,
+        "original": "[private-run]/prep/originals/00616.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00899-000.patch",
+        "ranges": [
+          [
+            1,
+            34
+          ]
+        ],
+        "original_path": "SPEC.md",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,3029)",
+        "lines": 34,
+        "bytes": 3029,
+        "start": 0,
+        "end": 3029,
+        "original": "[private-run]/prep/originals/00899.patch"
+      }
+    ],
+    "lines": 673,
+    "bytes": 64812
+  },
+  "records": [
+    {
+      "key": "g001/f1",
+      "owner": "g001",
+      "id": "f1",
+      "domain": "product-contracts",
+      "purpose": "product-contracts: SPEC_impl.md, SPEC.md; phases @@ -2255,16 +2253,16 @@ answer; a client that has already loaded its preferences keeps its previous beha",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "f1",
+            "state": "open",
+            "summary": "Check delayed host-add opening against focus contract",
+            "location": "SPEC_impl.md:1175",
+            "detail": "Reviewed commit: 9ff03ce91f191ea59f3ce16cefbd0b76d7fe599d. TLDR: an explicitly requested host-add dialog can arrive after the user resumes typing, potentially interpreting later input as approval. Source basis: SPEC_impl.md:1175-1179 explicitly says queued opens proceed after the user moved on and without a fresh arm pause; SPEC.md:3217-3220 says a moved-on result opens no dialog. Suggested bucket: high for established focus disruption; could-be-highest only if shipped controls allow unintentional approval with security consequences, which has not been established. Confidence: unresolved lead; inspect admission and answer/focus controls at this revision, then determine whether this patch adds a contract defect or accurately records a pre-existing implementation gap. proposed_drop: false. possible_cover: SPEC_impl.md explicitly labels the discrepancy as implementation behind the product spec; this is not acceptance. No execution performed. Mandatory delivery currently blocked by malformed evidence manifest (ranges exceed snapshot line counts); no coverage certified."
+          }
+        },
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "f1",
+            "state": "open",
+            "summary": "Delayed host-add opening is accurately documented pre-existing behavior",
+            "location": "SPEC_impl.md:1175",
+            "detail": "Reviewed commit: 9ff03ce91f191ea59f3ce16cefbd0b76d7fe599d. TLDR: an explicitly requested host-add dialog can arrive after the user resumes typing, potentially interpreting later input as approval. Suggested bucket: high for focus disruption; could-be-highest: yes, because an unintended approval can initiate SSH host discovery, but a resulting security compromise is not established. Confidence: confirmed source analysis of the admission behavior; no execution. proposed_drop: this assigned documentation patch accurately records an existing implementation gap and preserves the governing product rule; it neither creates nor accepts that behavior. SPEC_impl.md:1172-1179 states, exactly, 'SPEC.md, “Keyboard focus” (confirmed 2026-11-10), now states the product rules in toolkit-neutral terms, and this code does not yet follow all of them' and 'Treat the spec as the target when changing any of these paths.' SPEC.md:3217-3220 requires a moved-on result to open no dialog. Source checks: approvals.rs:185-191 queues explicit openings unconditionally; :201-215 arms only on list/selection changes; hosts.rs:5914-5918 focuses the SSH input and :5939 gates submission only on that shared pause. Parent source approvals.rs:212-217 and :303-314 already queues explicit opens identically, and the patch removes require_active only for the deleted automatic path (explicit opens previously had automatic:false). Thus the changed contract does not direct a regression. possible_cover: none searched; implementation debt is explicitly acknowledged in the assigned spec text. Original possible consequence is retained for independent review; this candidate is set aside as a pre-existing implementation issue outside the assigned contract change, not as accepted product behavior. Lead f1 closed by this source comparison."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f1",
+            "state": "open",
+            "summary": "Queued host-add dialogs still take focus after the user moves on",
+            "location": "SPEC_impl.md:1175",
+            "detail": "Reviewed documentation commit: 9ff03ce91f191ea59f3ce16cefbd0b76d7fe599d. Later source checked through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: after explicitly opening an agent host-add card behind another dialog or add draft, the user can move on and resume typing, yet the queued Add host dialog opens later and takes input focus. Confirmed source consequence: focus disruption and redirected typing. Suggested bucket: high. Confidence: confirmed by source, not runtime observed. Original concern was that later input might also be interpreted as approval; could-be-highest remains an unestablished consequence, not a shown security bug. Pinned-tip approvals.rs:185-211 retains queued openings and arms solely on list/selection changes; hosts.rs:3204-3257 mounts the queued form once add draft/submission clears; modal_isolation.rs:80-104 waits for modal absence without any activity check; hosts.rs:6083-6089 sets initial focus to SSH input. The form does not approve on mere focus: submission is a separate event at :6101-6137 and probing/ops/arming checks can refuse. A full harmful route would need a valid destination and actual unintended submit after admission, then establish an unauthorized security or loss-of-work effect; none was shown or executed. No relevant in-range later repair: path history and tip show the same queue/admission policy. Attribution: this behavior predates the assigned patch (parent approvals.rs:212-217,303-314 already queues explicit opens with automatic:false); the assigned SPEC_impl.md change accurately documents it and explicitly retains SPEC.md as target, rather than accepting the deviation. Exact governing text at reviewed commit SPEC.md:3217-3220: Once the user has moved on, the result moves no focus, opens no dialog and switches no session. SPEC_impl.md:1172-1179 says this code does not yet follow all of them and Treat the spec as the target when changing any of these paths. Earlier latest wording was Delayed host-add opening is accurately documented pre-existing behavior, with proposed_drop on attribution grounds. Latest disposition preserves the implementation gap as a finding for the parent; proposed_drop remains attribution-only proposal: the documentation patch neither introduced nor accepted the gap. No accepted drop. possible_cover: only the explicitly documented gap, which is not specification acceptance; no forbidden sources searched. Original/latest wording and original potential approval consequence retained here; no lowering of an established highest route occurred."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f1",
+            "state": "open",
+            "summary": "Queued host-add dialogs still take focus after the user moves on",
+            "location": "SPEC_impl.md:1175",
+            "detail": "Reviewed documentation commit: 9ff03ce91f191ea59f3ce16cefbd0b76d7fe599d. Later source checked through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: after explicitly opening an agent host-add card behind another dialog or add draft, the user can move on and resume typing, yet the queued Add host dialog opens later and takes input focus. Confirmed source consequence: focus disruption and redirected typing. Suggested bucket: high. Confidence: confirmed by source, not runtime observed. Original concern was that later input might also be interpreted as approval; could-be-highest remains an unestablished consequence, not a shown security bug. Pinned-tip approvals.rs:185-211 retains queued openings and arms solely on list/selection changes; hosts.rs:3204-3257 mounts the queued form once add draft/submission clears; modal_isolation.rs:80-104 waits for modal absence without any activity check; hosts.rs:6083-6089 sets initial focus to SSH input. The form does not approve on mere focus: submission is a separate event at :6101-6137 and probing/ops/arming checks can refuse. A full harmful route would need a valid destination and actual unintended submit after admission, then establish an unauthorized security or loss-of-work effect; none was shown or executed. No relevant in-range later repair: path history and tip show the same queue/admission policy. Attribution: this behavior predates the assigned patch (parent approvals.rs:212-217,303-314 already queues explicit opens with automatic:false); the assigned SPEC_impl.md change accurately documents it and explicitly retains SPEC.md as target, rather than accepting the deviation. Exact governing text at reviewed commit SPEC.md:3217-3220: Once the user has moved on, the result moves no focus, opens no dialog and switches no session. SPEC_impl.md:1172-1179 says this code does not yet follow all of them and Treat the spec as the target when changing any of these paths. Earlier latest wording was Delayed host-add opening is accurately documented pre-existing behavior, with proposed_drop on attribution grounds. Latest disposition preserves the implementation gap as a finding for the parent; proposed_drop remains attribution-only proposal: the documentation patch neither introduced nor accepted the gap. No accepted drop. possible_cover: only the explicitly documented gap, which is not specification acceptance; no forbidden sources searched. Original/latest wording and original potential approval consequence retained here; no lowering of an established highest route occurred. Additional readily checkable premise resolved: pinned-tip modal_dialog.rs:918-931 selects InitialFocus::Remembered, :998-1005 installs it on mount, and :780-808 plus :835-837 performs its initial focus without LaunchActivity, a press-count check or a newer-focus veto. The generic modal shell therefore does not silently repair this queue path. Source-only confirmation; all earlier caveats and proposed-drop attribution are unchanged."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f1",
+            "state": "open",
+            "summary": "Queued host-add dialogs still take focus after the user moves on",
+            "location": "SPEC_impl.md:1175",
+            "detail": "Reviewed documentation commit: 9ff03ce91f191ea59f3ce16cefbd0b76d7fe599d. Later source checked through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: after explicitly opening an agent host-add card behind another dialog or add draft, the user can move on and resume typing, yet the queued Add host dialog opens later and takes input focus. Confirmed source consequence: focus disruption and redirected typing. Suggested bucket: high. Confidence: confirmed by source, not runtime observed. Original concern was that later input might also be interpreted as approval; could-be-highest remains an unestablished consequence, not a shown security bug. Pinned-tip approvals.rs:185-211 retains queued openings and arms solely on list/selection changes; hosts.rs:3204-3257 mounts the queued form once add draft/submission clears; modal_isolation.rs:80-104 waits for modal absence without any activity check; hosts.rs:6083-6089 sets initial focus to SSH input. The form does not approve on mere focus: submission is a separate event at :6101-6137 and probing/ops/arming checks can refuse. A full harmful route would need a valid destination and actual unintended submit after admission, then establish an unauthorized security or loss-of-work effect; none was shown or executed. No relevant in-range later repair: path history and tip show the same queue/admission policy. Attribution: this behavior predates the assigned patch (parent approvals.rs:212-217,303-314 already queues explicit opens with automatic:false); the assigned SPEC_impl.md change accurately documents it and explicitly retains SPEC.md as target, rather than accepting the deviation. Exact governing text at reviewed commit SPEC.md:3217-3220: Once the user has moved on, the result moves no focus, opens no dialog and switches no session. SPEC_impl.md:1172-1179 says this code does not yet follow all of them and Treat the spec as the target when changing any of these paths. Earlier latest wording was Delayed host-add opening is accurately documented pre-existing behavior, with proposed_drop on attribution grounds. Latest disposition preserves the implementation gap as a finding for the parent; proposed_drop remains attribution-only proposal: the documentation patch neither introduced nor accepted the gap. No accepted drop. possible_cover: only the explicitly documented gap, which is not specification acceptance; no forbidden sources searched. Original/latest wording and original potential approval consequence retained here; no lowering of an established highest route occurred. Additional readily checkable premise resolved: pinned-tip modal_dialog.rs:918-931 selects InitialFocus::Remembered, :998-1005 installs it on mount, and :780-808 plus :835-837 performs its initial focus without LaunchActivity, a press-count check or a newer-focus veto. The generic modal shell therefore does not silently repair this queue path. Source-only confirmation; all earlier caveats and proposed-drop attribution are unchanged. Turn-4 named range-attribution check: exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a already has SPEC.md Keyboard focus :3196-3327 and exact moved-on rule at :3217-3219, not a newly established in-range contract. Base approvals.rs:213-217 already drains explicit openings, :225-235 arms only on list/selection changes and :302-309 queues explicit openings with automatic:false. Git log for SPEC.md from base through reviewed 9ff03ce9 is empty. This now establishes that both governing rule and queued explicit-opening behavior predate the whole reviewed range, rather than only this patches immediate parent. Confirm base HostModal/form policy next to close the last direct caller premise. proposed_drop attribution basis is strengthened but remains proposed only; original focus disruption and potential approval harm stay preserved, with no parent acceptance or highest lowering."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f1",
+            "state": "open",
+            "summary": "Queued host-add dialogs still take focus after the user moves on",
+            "location": "SPEC_impl.md:1175",
+            "detail": "Reviewed documentation commit: 9ff03ce91f191ea59f3ce16cefbd0b76d7fe599d. Later source checked through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: after explicitly opening an agent host-add card behind another dialog or add draft, the user can move on and resume typing, yet the queued Add host dialog opens later and takes input focus. Confirmed source consequence: focus disruption and redirected typing. Suggested bucket: high. Confidence: confirmed by source, not runtime observed. Original concern was that later input might also be interpreted as approval; could-be-highest remains an unestablished consequence, not a shown security bug. Pinned-tip approvals.rs:185-211 retains queued openings and arms solely on list/selection changes; hosts.rs:3204-3257 mounts the queued form once add draft/submission clears; modal_isolation.rs:80-104 waits for modal absence without any activity check; hosts.rs:6083-6089 sets initial focus to SSH input. The form does not approve on mere focus: submission is a separate event at :6101-6137 and probing/ops/arming checks can refuse. A full harmful route would need a valid destination and actual unintended submit after admission, then establish an unauthorized security or loss-of-work effect; none was shown or executed. No relevant in-range later repair: path history and tip show the same queue/admission policy. Attribution: this behavior predates the assigned patch (parent approvals.rs:212-217,303-314 already queues explicit opens with automatic:false); the assigned SPEC_impl.md change accurately documents it and explicitly retains SPEC.md as target, rather than accepting the deviation. Exact governing text at reviewed commit SPEC.md:3217-3220: Once the user has moved on, the result moves no focus, opens no dialog and switches no session. SPEC_impl.md:1172-1179 says this code does not yet follow all of them and Treat the spec as the target when changing any of these paths. Earlier latest wording was Delayed host-add opening is accurately documented pre-existing behavior, with proposed_drop on attribution grounds. Latest disposition preserves the implementation gap as a finding for the parent; proposed_drop remains attribution-only proposal: the documentation patch neither introduced nor accepted the gap. No accepted drop. possible_cover: only the explicitly documented gap, which is not specification acceptance; no forbidden sources searched. Original/latest wording and original potential approval consequence retained here; no lowering of an established highest route occurred. Additional readily checkable premise resolved: pinned-tip modal_dialog.rs:918-931 selects InitialFocus::Remembered, :998-1005 installs it on mount, and :780-808 plus :835-837 performs its initial focus without LaunchActivity, a press-count check or a newer-focus veto. The generic modal shell therefore does not silently repair this queue path. Source-only confirmation; all earlier caveats and proposed-drop attribution are unchanged. Turn-4 named range-attribution check: exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a already has SPEC.md Keyboard focus :3196-3327 and exact moved-on rule at :3217-3219, not a newly established in-range contract. Base approvals.rs:213-217 already drains explicit openings, :225-235 arms only on list/selection changes and :302-309 queues explicit openings with automatic:false. Git log for SPEC.md from base through reviewed 9ff03ce9 is empty. This now establishes that both governing rule and queued explicit-opening behavior predate the whole reviewed range, rather than only this patches immediate parent. Confirm base HostModal/form policy next to close the last direct caller premise. proposed_drop attribution basis is strengthened but remains proposed only; original focus disruption and potential approval harm stay preserved, with no parent acceptance or highest lowering. Range-base caller check complete: base hosts.rs:3063-3077 mounts the queued form when adding/submission clear and passes require_active=opening.automatic; explicit opens have automatic:false. Base modal_isolation.rs:75-78 explicitly says explicit opens keep unconditional admission and :91-99 checks focus/visibility only when require_active. Base form :5920-5926 already selects the same remembered SSH-input focus. Hence the full focus disruption and its rule conflict existed before exclusive base; no in-range new rule or new caller premise was found for this record. Latest proposed_drop basis is out-of-range attribution of this implementation gap, not acceptance of harmful input or reduction of impact. Keep retained finding/proposed-drop status and original potential approval harm for independent parent judgment. No unresolved source lead remains."
+          }
+        }
+      ],
+      "latest": {
+        "line": 12,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "f1",
+          "state": "open",
+          "summary": "Queued host-add dialogs still take focus after the user moves on",
+          "location": "SPEC_impl.md:1175",
+          "detail": "Reviewed documentation commit: 9ff03ce91f191ea59f3ce16cefbd0b76d7fe599d. Later source checked through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: after explicitly opening an agent host-add card behind another dialog or add draft, the user can move on and resume typing, yet the queued Add host dialog opens later and takes input focus. Confirmed source consequence: focus disruption and redirected typing. Suggested bucket: high. Confidence: confirmed by source, not runtime observed. Original concern was that later input might also be interpreted as approval; could-be-highest remains an unestablished consequence, not a shown security bug. Pinned-tip approvals.rs:185-211 retains queued openings and arms solely on list/selection changes; hosts.rs:3204-3257 mounts the queued form once add draft/submission clears; modal_isolation.rs:80-104 waits for modal absence without any activity check; hosts.rs:6083-6089 sets initial focus to SSH input. The form does not approve on mere focus: submission is a separate event at :6101-6137 and probing/ops/arming checks can refuse. A full harmful route would need a valid destination and actual unintended submit after admission, then establish an unauthorized security or loss-of-work effect; none was shown or executed. No relevant in-range later repair: path history and tip show the same queue/admission policy. Attribution: this behavior predates the assigned patch (parent approvals.rs:212-217,303-314 already queues explicit opens with automatic:false); the assigned SPEC_impl.md change accurately documents it and explicitly retains SPEC.md as target, rather than accepting the deviation. Exact governing text at reviewed commit SPEC.md:3217-3220: Once the user has moved on, the result moves no focus, opens no dialog and switches no session. SPEC_impl.md:1172-1179 says this code does not yet follow all of them and Treat the spec as the target when changing any of these paths. Earlier latest wording was Delayed host-add opening is accurately documented pre-existing behavior, with proposed_drop on attribution grounds. Latest disposition preserves the implementation gap as a finding for the parent; proposed_drop remains attribution-only proposal: the documentation patch neither introduced nor accepted the gap. No accepted drop. possible_cover: only the explicitly documented gap, which is not specification acceptance; no forbidden sources searched. Original/latest wording and original potential approval consequence retained here; no lowering of an established highest route occurred. Additional readily checkable premise resolved: pinned-tip modal_dialog.rs:918-931 selects InitialFocus::Remembered, :998-1005 installs it on mount, and :780-808 plus :835-837 performs its initial focus without LaunchActivity, a press-count check or a newer-focus veto. The generic modal shell therefore does not silently repair this queue path. Source-only confirmation; all earlier caveats and proposed-drop attribution are unchanged. Turn-4 named range-attribution check: exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a already has SPEC.md Keyboard focus :3196-3327 and exact moved-on rule at :3217-3219, not a newly established in-range contract. Base approvals.rs:213-217 already drains explicit openings, :225-235 arms only on list/selection changes and :302-309 queues explicit openings with automatic:false. Git log for SPEC.md from base through reviewed 9ff03ce9 is empty. This now establishes that both governing rule and queued explicit-opening behavior predate the whole reviewed range, rather than only this patches immediate parent. Confirm base HostModal/form policy next to close the last direct caller premise. proposed_drop attribution basis is strengthened but remains proposed only; original focus disruption and potential approval harm stay preserved, with no parent acceptance or highest lowering. Range-base caller check complete: base hosts.rs:3063-3077 mounts the queued form when adding/submission clear and passes require_active=opening.automatic; explicit opens have automatic:false. Base modal_isolation.rs:75-78 explicitly says explicit opens keep unconditional admission and :91-99 checks focus/visibility only when require_active. Base form :5920-5926 already selects the same remembered SSH-input focus. Hence the full focus disruption and its rule conflict existed before exclusive base; no in-range new rule or new caller premise was found for this record. Latest proposed_drop basis is out-of-range attribution of this implementation gap, not acceptance of harmful input or reduction of impact. Keep retained finding/proposed-drop status and original potential approval harm for independent parent judgment. No unresolved source lead remains."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g001/findings.jsonl",
+        "id": "f1",
+        "line": 12,
+        "disposition": "under-investigation",
+        "group": "g001-f1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-001",
+          "key": "g001/f1",
+          "latest_line": 12,
+          "recommendation": "out-of-range",
+          "bucket": "high",
+          "underlying_key": "agent-host-add-explicit-queued-opening-ignores-moved-on",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The focus disruption is source-established, but the complete explicit-opening route and the product rule it violates both exist at the exclusive base. The assigned patch removes automatic opening and honestly documents the surviving explicit-opening gap; it does not introduce that gap. This is an attribution proposal, not acceptance of redirected typing.",
+          "checks": [
+            "At exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a, approvals.rs:213-217 promotes queued openings; :302-309 queues explicit opens with automatic:false. hosts.rs:3063-3077 waits for the ordinary draft/submission, then mounts HostModal with require_active:opening.automatic. modal_isolation.rs:75-99 explicitly preserves unconditional admission for explicit opens. hosts.rs:5920-5926 supplies remembered SSH-field focus. Thus the complete reported caller route predates the range.",
+            "Base SPEC.md:3196-3229 already contains the overriding focus rule, including :3217-3219 forbidding moved-on results from opening dialogs. Assigned 9ff03ce91f191ea59f3ce16cefbd0b76d7fe599d SPEC_impl.md:1172-1178 acknowledges the gap and says to treat SPEC.md as target.",
+            "At reviewed tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, approvals.rs:185-211, modal_isolation.rs:80-104 and hosts.rs:3204-3209 retain queueing and unconditional deferred mounting. hosts.rs:6083-6089 still requests SSH focus. :6101-6137 requires an actual submit and checks probing, operation and arm state before answering. No runtime observation or reproduction is claimed."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md Keyboard focus, especially :3218 onward, forbids this consequence; current SPEC_impl.md:1179-1185 acknowledges the implementation debt rather than accepting it.",
+            "TODO.md Planned is empty (:25-27). BUGS.md concerns only escaped SSH output holders and does not cover this trigger.",
+            "Searched plans/queue for the actual delayed host-add route. agent-host-add-card.md:57-70 explicitly keeps deferred explicit opening, but plans/REPORTS.md:20 records that plan as landed. It is not an unlanded repair; its decision also does not turn the SPEC_impl acknowledgment into specification acceptance.",
+            "Read INDEX.md in full and the matching queued-agent-dialog-inherits-elapsed-arm-timer.md and ordinary-setup-discards-deferred-agent-add.md. The former covers the separate missing fresh pause; the latter covers losing an opening rather than opening after moving on. Neither exactly covers the principal moved-on focus claim.",
+            "Read active TRIAGE_OUTCOMES.md:183-207 and :954-966. The elapsed-arm-timer discard is limited to that timer claim, with no harmful input sequence established. It does not decide redirected typing after moving on. No archive read.",
+            "FILTER.md has no complete match: deferred admission need not require subsecond human input, and the stronger possible approval consequence is outside harmless-display coverage."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No remaining premise for pre-range attribution. Highest would require a complete shipped sequence in which redirected typing actually submits a valid destination and causes security harm or loss of user-owned work; mere focus does not establish approval.",
+          "original_stronger_consequence": "The first record suspected that input typed after moving on could be interpreted as approval and initiate SSH discovery. Preserve that conditional security/work concern and the earlier withdrawn attribution candidate; no established highest consequence is declared refuted.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Propose excluding this principal implementation gap from this range because both the entire route and its governing rule already exist at the exclusive base. Independently check the out-of-range dismissal and the conditional approval consequence before any drop. The separate elapsed-arm-pause claim has existing queue/ledger coverage."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-001.json",
+          "key": "g001/f1",
+          "proposal": "claim-checks/claims-001/result.json",
+          "parent_proposal": "out-of-range",
+          "final_independent_gate": "required-before-drop",
+          "reason": "Parent read full flagged001. Source establishes moved-on delayed explicit Add-host focus disruption, but entire queuedexplicit/unconditionaldeferredmount/rememberedSSHfocus route and overridingSPECfocusrule both at exclusivebase. Assigned9ff removesautomaticopening andhonestlyacknowledgesdebt; no newfalseassurance. Propose boundedwhole-range attributionexclusion, preserving conditionalredirectedtyping→actualvalidsubmit/securityconsequence and separateelapsedarm/pendingopeningcoverage. No fullhighest harmroute shown, but cannot drop on parent alone. Finalfreshconsult mustcheck original/latest/withdrawn attributionbasis andconditionalapproval route, notconfusefocuswithcompletedconsent."
+        }
+      ],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "agent-host-add-explicit-queued-opening-ignores-moved-on",
+        "destination": "trailing-agent-host-add-explicit-queued-opening-ignores-moved-on.md"
+      }
+    },
+    {
+      "key": "g001/f2",
+      "owner": "g001",
+      "id": "f2",
+      "domain": "product-contracts",
+      "purpose": "product-contracts: SPEC_impl.md, SPEC.md; phases @@ -2255,16 +2253,16 @@ answer; a client that has already loaded its preferences keeps its previous beha",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "f2",
+            "state": "open",
+            "summary": "Check retired-container Delete's missing-Podman exception",
+            "location": "SPEC.md:4823",
+            "detail": "Reviewed commit: c8bc155cc36723c8c53870944d07ce8ec61ef9ed. TLDR: deleting an old container session may forget its row without actually confirming container removal when Podman is missing. Source basis: new Retired containerized sessions section says 'Delete retains the legacy container-removal path and confirms absence. Missing Podman counts as nothing left to remove.' The former contract required actual confirmed absence and retained sessions after unconfirmed cleanup. Suggested bucket: other or high for orphaned resource discoverability; could-be-highest unresolved if this can lose access to user work or leave a resource with credentials running. Confidence: unresolved; check replacement/removal contracts and legacy deletion source at this revision before judging. proposed_drop: false pending investigation; the explicit missing-Podman exception may accept precisely this behavior and would need independent checking if highest is plausible. possible_cover: exact quoted exception in assigned SPEC.md; no external coverage searched. No execution performed."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "f2",
+            "state": "open",
+            "summary": "Missing-Podman retirement policy has no shipped unsafe-deletion route here",
+            "location": "SPEC.md:4820",
+            "detail": "Reviewed commit: c8bc155cc36723c8c53870944d07ce8ec61ef9ed. TLDR of original concern: deleting an old container session might forget its handle while its container still exists when Podman is missing; lost access to work or lingering credential-bearing processes was a possible consequence, not established behavior. Suggested bucket: other for a future orphan-discoverability concern; could-be-highest: not established, with no shipped route to lost work or unauthorized access shown. Confidence: confirmed source refutation at the reviewed revision. Checks: container.rs:168-189 reconstructs the runtime with executable()?, which fails when Podman cannot resolve; service/teardown.rs:533-541 propagates that failure before upload cancellation, removal or process killing, and :569-575 requires confirmed removal. Thus this documentation-only commit does not ship the suspected forgetting behavior. The retirement target deliberately adds the narrow policy, exactly SPEC.md:4820-4821: 'Delete retains the legacy container-removal path and confirms absence. Missing Podman counts as nothing left to remove.' SPEC_impl.md:8652-8655 likewise says 'A host without Podman has nothing left to remove. Other unconfirmed cleanup keeps the session for retry.' proposed_drop: source-refuted as a present implementation defect; the future target explicitly permits the exception, so it is not an accidental contradiction requiring a documentation fix. possible_cover: only these exact assigned specification statements; no queue/coverage sources searched. No execution. Preserve the original suspected consequence for the parent's independent judgment if it treats the future policy as potentially highest. f2 lead closed after checking the actual removal contract and call path; subsequent implementation is outside this assigned patch."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "f2",
+            "state": "open",
+            "summary": "Reopened: missing-Podman retirement policy needs later-route analysis",
+            "location": "SPEC.md:4820",
+            "detail": "Reviewed policy commit: c8bc155cc36723c8c53870944d07ce8ec61ef9ed; trace through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. Original concern: deleting an old container session may forget its row without confirming removal when Podman is missing, potentially losing access to work or leaving credential-bearing processes running. Prior latest wording: Missing-Podman retirement policy has no shipped unsafe-deletion route here. That early-revision source refutation does not dismiss a newly specified policy that is itself in scope; reopened for later implementation and compatibility analysis. Suggested bucket unresolved; could-be-highest remains explicit for the original work/process/security consequences. Confidence unresolved lead. proposed_drop false pending source investigation; prior proposed_drop is insufficient. Exact policy basis: SPEC.md:4820-4821: Delete retains the legacy container-removal path and confirms absence. Missing Podman counts as nothing left to remove. SPEC_impl.md:8652-8655: A host without Podman has nothing left to remove. Other unconfirmed cleanup keeps the session for retry. possible_cover: those explicit exceptions only; no forbidden coverage searches. No execution."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "f2",
+            "state": "open",
+            "summary": "Missing-Podman Delete bypass exists at pinned tip; checking consequence",
+            "location": "crates/farhelm-supervisor/src/container.rs:176",
+            "detail": "Reviewed policy commit c8bc155cc36723c8c53870944d07ce8ec61ef9ed; implementation introduced by 04d85f0c98a9b635709d00b056719a0baa7fd3fc and inspected at 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: Delete can proceed without checking a retired container when Podman is not on the supervisor search path. Pinned-tip container.rs:170-190 resolves Podman to Option and skips both rm and container-exists verification on None, then clears the initialization fence. Its test :222-235 explicitly expects missing Podman to allow deletion. This supersedes the prior early-revision source refutation. Original possible consequence retained: losing the session handle to surviving work or processes, including credential-bearing processes. Need check teardown caller, resolver semantics, retained checkout/archive and cross-version guarantees to establish the actual consequence. Suggested bucket unresolved; could-be-highest yes pending those premises. Confidence confirmed bypass, unresolved impact. proposed_drop false pending analysis; exact policy exception remains SPEC.md at policy commit :4820-4821: Delete retains the legacy container-removal path and confirms absence. Missing Podman counts as nothing left to remove. possible_cover that exception only. No execution."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f2",
+            "state": "open",
+            "summary": "Retired-session Delete can forget a container without confirming removal",
+            "location": "SPEC.md:4820",
+            "detail": "Reviewed policy commit c8bc155cc36723c8c53870944d07ce8ec61ef9ed. Implemented in 04d85f0c98a9b635709d00b056719a0baa7fd3fc; checked through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: deleting a retired container session when the supervisor cannot find Podman can report success and remove the session record while the named container and its stored filesystem have not been removed or even checked. Reinstalling or restoring Podman may expose that leftover, now without its Farhelm row. Suggested bucket: other for established unconfirmed resource cleanup; confidence confirmed source route, no execution. Could-be-highest: original possible loss of access to work or lingering credential-bearing processes remains explicitly retained for independent judgment, but no security or work-loss route has been established. The users Delete already authorizes destruction of that container; failure to destroy its internal files alone does not demonstrate extra loss of work. The managed checkout remains on the host and takes ordinary archival/release handling, not the new environment Abandon disposition.\n\nSource: pinned-tip container.rs:170-190 resolves Podman and skips rm plus container-exists verification on None, then clears the initialization marker; scope.rs:1234-1284 shows None means no usable executable found in the supervisors PATH, not proof of an empty Podman storage. Teardown.rs:451-467 derives the legacy helper scope, :523-540 revokes creation, calls that removal, and still performs independent fail-closed process cleanup; :676-806 archives or releases managed checkout membership and :814-817 deletes the session row. Original creator at policy revision container.rs:327-377 creates a named detached container without --rm, with a host checkout bind. Consequently removing the Farhelm row does not itself remove container storage. No in-range repair: container.rs history shows the retirement implementation and later tmux cleanup, and the skip remains at tip.\n\nHighest-premise checks: sweep.rs:1448-1550 kills available named scopes and refuses recorded-scope or sweep failures; container deletion is not the only process cleanup. The retired helper scope is included, and its deletion may stop surviving container work. Thus a missing executable alone does not establish a running orphan or credential exposure. A route to highest would require evidence of a legacy container process surviving successful ordinary scope/process cleanup, or user work becoming inaccessible beyond the deletion the user authorized. Source inspected does not establish either; no reproduction was requested or performed. This record reports the confirmed cleanup omission, retaining those original possible consequences instead of calling them refuted.\n\nCompatibility: pinned-tip SPEC.md:5373-5378 says compatibility is decided per feature and is not blanket permission for destructive migrations or ordinary runtime data loss; :5429 onward distinguishes upgrade mechanics from stored-data survival. SPEC_impl.md:8328 onward binds values handed to running sessions across updates, while stored state follows its own migration/adoption rules. These general contracts do not erase the feature-specific retirement policy, but do not independently prove a highest consequence either.\n\nproposed_drop: explicit narrow specification acceptance ONLY, retained as a finding for independent checking, not dropped. Exact original policy text SPEC.md:4820-4821: Delete retains the legacy container-removal path and confirms absence. Missing Podman counts as nothing left to remove. Exact current text at pinned tip SPEC.md:4895-4897: Existing sessions support Delete only. Opening terminals or tabs, exec, Stop, Restart, Clone, Replace and Replace with are refused. Delete retains the legacy container-removal path and confirms absence. Missing Podman counts as nothing left to remove. SPEC_impl.md:8322-8324: Resolve Podman lazily. A host without Podman has nothing left to remove. Other unconfirmed cleanup keeps the session for retry. possible_cover: those exact explicit exceptions only; no forbidden coverage sources searched.\n\nOriginal wording: Check retired-container Deletes missing-Podman exception; concern: loss of the row without removal, possibly losing access to work or leaving credential-bearing processes running. Prior latest wording Missing-Podman retirement policy has no shipped unsafe-deletion route here and its source-refuted proposed drop were invalid as a complete judgment of this newly specified policy. Latest wording above preserves the original consequence and replaces that reason with the actual later source route and exact specification exception. No established highest consequence was lowered; independent check should judge the explicit exception and any potential-highest disposition. f2 lead is closed as this retained finding; no unresolved readily checkable premise remains for its confirmed cleanup route."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f2",
+            "state": "open",
+            "summary": "Retired-session Delete can forget a container without confirming removal",
+            "location": "SPEC.md:4820",
+            "detail": "Reviewed policy commit c8bc155cc36723c8c53870944d07ce8ec61ef9ed. Implemented in 04d85f0c98a9b635709d00b056719a0baa7fd3fc; checked through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: deleting a retired container session when the supervisor cannot find Podman can report success and remove the session record while the named container and its stored filesystem have not been removed or even checked. Reinstalling or restoring Podman may expose that leftover, now without its Farhelm row. Suggested bucket: other for established unconfirmed resource cleanup; confidence confirmed source route, no execution. Could-be-highest: original possible loss of access to work or lingering credential-bearing processes remains explicitly retained for independent judgment, but no security or work-loss route has been established. The users Delete already authorizes destruction of that container; failure to destroy its internal files alone does not demonstrate extra loss of work. The managed checkout remains on the host and takes ordinary archival/release handling, not the new environment Abandon disposition.\n\nSource: pinned-tip container.rs:170-190 resolves Podman and skips rm plus container-exists verification on None, then clears the initialization marker; scope.rs:1234-1284 shows None means no usable executable found in the supervisors PATH, not proof of an empty Podman storage. Teardown.rs:451-467 derives the legacy helper scope, :523-540 revokes creation, calls that removal, and still performs independent fail-closed process cleanup; :676-806 archives or releases managed checkout membership and :814-817 deletes the session row. Original creator at policy revision container.rs:327-377 creates a named detached container without --rm, with a host checkout bind. Consequently removing the Farhelm row does not itself remove container storage. No in-range repair: container.rs history shows the retirement implementation and later tmux cleanup, and the skip remains at tip.\n\nHighest-premise checks: sweep.rs:1448-1550 kills available named scopes and refuses recorded-scope or sweep failures; container deletion is not the only process cleanup. The retired helper scope is included, and its deletion may stop surviving container work. Thus a missing executable alone does not establish a running orphan or credential exposure. A route to highest would require evidence of a legacy container process surviving successful ordinary scope/process cleanup, or user work becoming inaccessible beyond the deletion the user authorized. Source inspected does not establish either; no reproduction was requested or performed. This record reports the confirmed cleanup omission, retaining those original possible consequences instead of calling them refuted.\n\nCompatibility: pinned-tip SPEC.md:5373-5378 says compatibility is decided per feature and is not blanket permission for destructive migrations or ordinary runtime data loss; :5434-5436 distinguishes upgrade mechanics from stored-data survival. SPEC_impl.md:8328 onward binds values handed to running sessions across updates, while stored state follows its own migration/adoption rules. These general contracts do not erase the feature-specific retirement policy, but do not independently prove a highest consequence either.\n\nproposed_drop: explicit narrow specification acceptance ONLY, retained as a finding for independent checking, not dropped. Exact original policy text SPEC.md:4820-4821: Delete retains the legacy container-removal path and confirms absence. Missing Podman counts as nothing left to remove. Exact current text at pinned tip SPEC.md:4895-4897: Existing sessions support Delete only. Opening terminals or tabs, exec, Stop, Restart, Clone, Replace and Replace with are refused. Delete retains the legacy container-removal path and confirms absence. Missing Podman counts as nothing left to remove. SPEC_impl.md:8322-8324: Resolve Podman lazily. A host without Podman has nothing left to remove. Other unconfirmed cleanup keeps the session for retry. possible_cover: those exact explicit exceptions only; no forbidden coverage sources searched.\n\nOriginal wording: Check retired-container Deletes missing-Podman exception; concern: loss of the row without removal, possibly losing access to work or leaving credential-bearing processes running. Prior latest wording Missing-Podman retirement policy has no shipped unsafe-deletion route here and its source-refuted proposed drop were invalid as a complete judgment of this newly specified policy. Latest wording above preserves the original consequence and replaces that reason with the actual later source route and exact specification exception. No established highest consequence was lowered; independent check should judge the explicit exception and any potential-highest disposition. f2 lead is closed as this retained finding; no unresolved readily checkable premise remains for its confirmed cleanup route. Citation correction after checking numbered context: SPEC.md:5434-5436 is the exact floor-versus-data passage. Additional compatibility premise: current core.rs:3479-3488 refuses retired launches through require_active_launch while retaining Delete, and :9558-9567 preserves a retired row on interrupted-create retry. Thus neither later retry nor ordinary opening constitutes resource rediscovery after successful Delete; the narrowly specified no-Podman branch remains the relevant record-loss route. No new claim of work loss or process survival is made."
+          }
+        },
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f2",
+            "state": "open",
+            "summary": "Unverified after investigation: lookup failure exceeds the literal missing-Podman exception",
+            "location": "SPEC.md:4820",
+            "detail": "Reviewed policy commit c8bc155cc36723c8c53870944d07ce8ec61ef9ed. Implemented in 04d85f0c98a9b635709d00b056719a0baa7fd3fc; checked through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: deleting a retired container session when the supervisor cannot find Podman can report success and remove the session record while the named container and its stored filesystem have not been removed or even checked. Reinstalling or restoring Podman may expose that leftover, now without its Farhelm row. Suggested bucket: other for established unconfirmed resource cleanup; confidence confirmed source route, no execution. Could-be-highest: original possible loss of access to work or lingering credential-bearing processes remains explicitly retained for independent judgment, but no security or work-loss route has been established. The users Delete already authorizes destruction of that container; failure to destroy its internal files alone does not demonstrate extra loss of work. The managed checkout remains on the host and takes ordinary archival/release handling, not the new environment Abandon disposition.\n\nSource: pinned-tip container.rs:170-190 resolves Podman and skips rm plus container-exists verification on None, then clears the initialization marker; scope.rs:1234-1284 shows None means no usable executable found in the supervisors PATH, not proof of an empty Podman storage. Teardown.rs:451-467 derives the legacy helper scope, :523-540 revokes creation, calls that removal, and still performs independent fail-closed process cleanup; :676-806 archives or releases managed checkout membership and :814-817 deletes the session row. Original creator at policy revision container.rs:327-377 creates a named detached container without --rm, with a host checkout bind. Consequently removing the Farhelm row does not itself remove container storage. No in-range repair: container.rs history shows the retirement implementation and later tmux cleanup, and the skip remains at tip.\n\nHighest-premise checks: sweep.rs:1448-1550 kills available named scopes and refuses recorded-scope or sweep failures; container deletion is not the only process cleanup. The retired helper scope is included, and its deletion may stop surviving container work. Thus a missing executable alone does not establish a running orphan or credential exposure. A route to highest would require evidence of a legacy container process surviving successful ordinary scope/process cleanup, or user work becoming inaccessible beyond the deletion the user authorized. Source inspected does not establish either; no reproduction was requested or performed. This record reports the confirmed cleanup omission, retaining those original possible consequences instead of calling them refuted.\n\nCompatibility: pinned-tip SPEC.md:5373-5378 says compatibility is decided per feature and is not blanket permission for destructive migrations or ordinary runtime data loss; :5434-5436 distinguishes upgrade mechanics from stored-data survival. SPEC_impl.md:8328 onward binds values handed to running sessions across updates, while stored state follows its own migration/adoption rules. These general contracts do not erase the feature-specific retirement policy, but do not independently prove a highest consequence either.\n\nproposed_drop: explicit narrow specification acceptance ONLY, retained as a finding for independent checking, not dropped. Exact original policy text SPEC.md:4820-4821: Delete retains the legacy container-removal path and confirms absence. Missing Podman counts as nothing left to remove. Exact current text at pinned tip SPEC.md:4895-4897: Existing sessions support Delete only. Opening terminals or tabs, exec, Stop, Restart, Clone, Replace and Replace with are refused. Delete retains the legacy container-removal path and confirms absence. Missing Podman counts as nothing left to remove. SPEC_impl.md:8322-8324: Resolve Podman lazily. A host without Podman has nothing left to remove. Other unconfirmed cleanup keeps the session for retry. possible_cover: those exact explicit exceptions only; no forbidden coverage sources searched.\n\nOriginal wording: Check retired-container Deletes missing-Podman exception; concern: loss of the row without removal, possibly losing access to work or leaving credential-bearing processes running. Prior latest wording Missing-Podman retirement policy has no shipped unsafe-deletion route here and its source-refuted proposed drop were invalid as a complete judgment of this newly specified policy. Latest wording above preserves the original consequence and replaces that reason with the actual later source route and exact specification exception. No established highest consequence was lowered; independent check should judge the explicit exception and any potential-highest disposition. f2 lead is closed as this retained finding; no unresolved readily checkable premise remains for its confirmed cleanup route. Citation correction after checking numbered context: SPEC.md:5434-5436 is the exact floor-versus-data passage. Additional compatibility premise: current core.rs:3479-3488 refuses retired launches through require_active_launch while retaining Delete, and :9558-9567 preserves a retired row on interrupted-create retry. Thus neither later retry nor ordinary opening constitutes resource rediscovery after successful Delete; the narrowly specified no-Podman branch remains the relevant record-loss route. No new claim of work loss or process survival is made. Turn-4 named g095/l1 synthesis: discovery-neighbours exact supplied record is the same lazy-cleanup/row-loss route; do not count as a new finding. The literal acceptance is a host without Podman, not every reason resolve_program returns None. Exact inspected source at tip scope.rs:1264-1284 skips any metadata error, omitted PATH entry, relative entry, nonregular/nonexecutable candidate and unsupported non-UTF8 path. Therefore proposed_drop is now PARTIAL: genuine engine absence and explicitly unsupported tool locations under cited policy, not automatic acceptance of all installed-engine lookup failures. The previous blanket specification-acceptance proposal is narrowed, with its original wording preserved above. No parent drop/lowering accepted. Source checks of actual earlier producer at 04d85f0c^ core.rs:17271-17303 establish container::executable runs in the supervisor before publishing; container.rs:104-107 resolves once before shell startup and :500-509 saves that runtime absolute path into the old ticket. Thus agent login-shell PATH does not supply an ordinary hidden-engine producer. units.rs:57-60,94-106,132-160 builds supported Linux supervisor PATH from executable directories and /usr/local/bin:/usr/bin:/bin. Base-to-retirement-parent container.rs diff is empty. Those checks narrow the trigger; no repository path was shown to make a formerly resolvable supported Podman disappear from the restarted supervisor PATH while leaving storage. Revoking the old ticket removes its saved absolute path but proves only future-creation exclusion, not existing storage removal. Confidence: confirmed lookup/removal source behavior; unverified after investigation as a REPORTABLE contract violation beyond the exact accepted absence case. Original row-loss, orphaned storage and possible highest process/work consequences are preserved. Exact missing premises: a supported deployment or non-deliberate metadata failure retaining legacy storage while hitting a lookup-None not intended by Missing Podman, and the authoritative meaning of that phrase for those failures. Source establishes no ordinary producer of the deployment transition and cannot settle unstated policy interpretation. Existing deployment/startup PATH and lookup-error evidence, or explicit clarification that all lookup failures are intended as engine absence, would settle it. No reproduction, local environment inspection or forbidden coverage search performed. Suggested bucket remains other for confirmed cleanup omission; potential highest impact is neither established nor discarded. No open uninvestigated lead remains; these are retained investigated caveats for parent judgment."
+          }
+        }
+      ],
+      "latest": {
+        "line": 13,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "f2",
+          "state": "open",
+          "summary": "Unverified after investigation: lookup failure exceeds the literal missing-Podman exception",
+          "location": "SPEC.md:4820",
+          "detail": "Reviewed policy commit c8bc155cc36723c8c53870944d07ce8ec61ef9ed. Implemented in 04d85f0c98a9b635709d00b056719a0baa7fd3fc; checked through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: deleting a retired container session when the supervisor cannot find Podman can report success and remove the session record while the named container and its stored filesystem have not been removed or even checked. Reinstalling or restoring Podman may expose that leftover, now without its Farhelm row. Suggested bucket: other for established unconfirmed resource cleanup; confidence confirmed source route, no execution. Could-be-highest: original possible loss of access to work or lingering credential-bearing processes remains explicitly retained for independent judgment, but no security or work-loss route has been established. The users Delete already authorizes destruction of that container; failure to destroy its internal files alone does not demonstrate extra loss of work. The managed checkout remains on the host and takes ordinary archival/release handling, not the new environment Abandon disposition.\n\nSource: pinned-tip container.rs:170-190 resolves Podman and skips rm plus container-exists verification on None, then clears the initialization marker; scope.rs:1234-1284 shows None means no usable executable found in the supervisors PATH, not proof of an empty Podman storage. Teardown.rs:451-467 derives the legacy helper scope, :523-540 revokes creation, calls that removal, and still performs independent fail-closed process cleanup; :676-806 archives or releases managed checkout membership and :814-817 deletes the session row. Original creator at policy revision container.rs:327-377 creates a named detached container without --rm, with a host checkout bind. Consequently removing the Farhelm row does not itself remove container storage. No in-range repair: container.rs history shows the retirement implementation and later tmux cleanup, and the skip remains at tip.\n\nHighest-premise checks: sweep.rs:1448-1550 kills available named scopes and refuses recorded-scope or sweep failures; container deletion is not the only process cleanup. The retired helper scope is included, and its deletion may stop surviving container work. Thus a missing executable alone does not establish a running orphan or credential exposure. A route to highest would require evidence of a legacy container process surviving successful ordinary scope/process cleanup, or user work becoming inaccessible beyond the deletion the user authorized. Source inspected does not establish either; no reproduction was requested or performed. This record reports the confirmed cleanup omission, retaining those original possible consequences instead of calling them refuted.\n\nCompatibility: pinned-tip SPEC.md:5373-5378 says compatibility is decided per feature and is not blanket permission for destructive migrations or ordinary runtime data loss; :5434-5436 distinguishes upgrade mechanics from stored-data survival. SPEC_impl.md:8328 onward binds values handed to running sessions across updates, while stored state follows its own migration/adoption rules. These general contracts do not erase the feature-specific retirement policy, but do not independently prove a highest consequence either.\n\nproposed_drop: explicit narrow specification acceptance ONLY, retained as a finding for independent checking, not dropped. Exact original policy text SPEC.md:4820-4821: Delete retains the legacy container-removal path and confirms absence. Missing Podman counts as nothing left to remove. Exact current text at pinned tip SPEC.md:4895-4897: Existing sessions support Delete only. Opening terminals or tabs, exec, Stop, Restart, Clone, Replace and Replace with are refused. Delete retains the legacy container-removal path and confirms absence. Missing Podman counts as nothing left to remove. SPEC_impl.md:8322-8324: Resolve Podman lazily. A host without Podman has nothing left to remove. Other unconfirmed cleanup keeps the session for retry. possible_cover: those exact explicit exceptions only; no forbidden coverage sources searched.\n\nOriginal wording: Check retired-container Deletes missing-Podman exception; concern: loss of the row without removal, possibly losing access to work or leaving credential-bearing processes running. Prior latest wording Missing-Podman retirement policy has no shipped unsafe-deletion route here and its source-refuted proposed drop were invalid as a complete judgment of this newly specified policy. Latest wording above preserves the original consequence and replaces that reason with the actual later source route and exact specification exception. No established highest consequence was lowered; independent check should judge the explicit exception and any potential-highest disposition. f2 lead is closed as this retained finding; no unresolved readily checkable premise remains for its confirmed cleanup route. Citation correction after checking numbered context: SPEC.md:5434-5436 is the exact floor-versus-data passage. Additional compatibility premise: current core.rs:3479-3488 refuses retired launches through require_active_launch while retaining Delete, and :9558-9567 preserves a retired row on interrupted-create retry. Thus neither later retry nor ordinary opening constitutes resource rediscovery after successful Delete; the narrowly specified no-Podman branch remains the relevant record-loss route. No new claim of work loss or process survival is made. Turn-4 named g095/l1 synthesis: discovery-neighbours exact supplied record is the same lazy-cleanup/row-loss route; do not count as a new finding. The literal acceptance is a host without Podman, not every reason resolve_program returns None. Exact inspected source at tip scope.rs:1264-1284 skips any metadata error, omitted PATH entry, relative entry, nonregular/nonexecutable candidate and unsupported non-UTF8 path. Therefore proposed_drop is now PARTIAL: genuine engine absence and explicitly unsupported tool locations under cited policy, not automatic acceptance of all installed-engine lookup failures. The previous blanket specification-acceptance proposal is narrowed, with its original wording preserved above. No parent drop/lowering accepted. Source checks of actual earlier producer at 04d85f0c^ core.rs:17271-17303 establish container::executable runs in the supervisor before publishing; container.rs:104-107 resolves once before shell startup and :500-509 saves that runtime absolute path into the old ticket. Thus agent login-shell PATH does not supply an ordinary hidden-engine producer. units.rs:57-60,94-106,132-160 builds supported Linux supervisor PATH from executable directories and /usr/local/bin:/usr/bin:/bin. Base-to-retirement-parent container.rs diff is empty. Those checks narrow the trigger; no repository path was shown to make a formerly resolvable supported Podman disappear from the restarted supervisor PATH while leaving storage. Revoking the old ticket removes its saved absolute path but proves only future-creation exclusion, not existing storage removal. Confidence: confirmed lookup/removal source behavior; unverified after investigation as a REPORTABLE contract violation beyond the exact accepted absence case. Original row-loss, orphaned storage and possible highest process/work consequences are preserved. Exact missing premises: a supported deployment or non-deliberate metadata failure retaining legacy storage while hitting a lookup-None not intended by Missing Podman, and the authoritative meaning of that phrase for those failures. Source establishes no ordinary producer of the deployment transition and cannot settle unstated policy interpretation. Existing deployment/startup PATH and lookup-error evidence, or explicit clarification that all lookup failures are intended as engine absence, would settle it. No reproduction, local environment inspection or forbidden coverage search performed. Suggested bucket remains other for confirmed cleanup omission; potential highest impact is neither established nor discarded. No open uninvestigated lead remains; these are retained investigated caveats for parent judgment."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g001/findings.jsonl",
+        "id": "f2",
+        "line": 13,
+        "disposition": "under-investigation",
+        "group": "g001-f2",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-001",
+          "key": "g001/f2",
+          "latest_line": 13,
+          "recommendation": "retain-unverified",
+          "bucket": "other",
+          "underlying_key": "retired-container-delete-treats-podman-lookup-none-as-absence",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The lookup-None removal bypass and eventual row deletion are established. Genuine missing-Podman cleanup is expressly accepted. The remaining reportable scope is an investigated uncertainty: whether supported installed-engine lookup failures also reach None while retaining storage, and whether the narrow acceptance intends to include them. Do not silently drop that remainder.",
+          "checks": [
+            "At tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db container.rs:170-190, remove resolves Podman and only runs rm and confirmed absence when resolution is Some. None still clears the initialization marker. :222-235 explicitly tests the uninstalled-Podman branch.",
+            "scope.rs:1234-1284 resolves the supervisor PATH, skipping relative entries, every metadata error, nonregular/nonexecutable candidates and unsupported non-UTF8 locations. None therefore proves no supported resolved executable, not an empty container store.",
+            "service/teardown.rs:523-540 revokes the creator, calls removal and independently performs fail-closed WholeSession process cleanup. :792-817 retains ordinary managed-checkout disposition and then removes the session row. A running orphan or credential exposure does not follow from missing Podman alone because process cleanup is independent.",
+            "The bypass was introduced in in-range 04d85f0c98a9b635709d00b056719a0baa7fd3fc, superseding the original early-revision source refutation. Source inspection only; no runtime test or orphan-process observation."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:4892-4900 and SPEC_impl.md:8317-8326 expressly accept a host without Podman as having nothing to remove. They do not explicitly classify every metadata/lookup error as engine absence.",
+            "Current SPEC.md:5373-5378 says compatibility is decided per feature, not blanket permission for destructive migrations or ordinary runtime data loss; :5434-5436 distinguishes update mechanics from stored-data survival. These passages do not prove the missing stronger consequence.",
+            "TODO.md Planned is empty; BUGS.md has no container-removal acceptance. Searched INDEX.md and active TRIAGE_OUTCOMES.md for missing Podman, retired containers and unconfirmed container cleanup; no exact existing item or decision found. No archive read.",
+            "Matching podman-environments.md:284-296 and :454 explicitly retain Delete with lazy resolution and the genuine missing-Podman exception. plans/REPORTS.md:21 records the plan landed; it is not an unlanded repair covering the residual lookup-failure ambiguity.",
+            "FILTER.md does not settle the residual: no established subsecond human window, and reporting successful deletion while retaining unchecked storage is not solely an imprecise diagnostic. Do not infer older-release-plus-another-rare-condition coverage without establishing the actual residual producer."
+          ],
+          "exact_cover_quotes": [
+            "SPEC.md:4896-4897: Delete retains the legacy container-removal path and confirms absence. Missing Podman counts as nothing left to remove.",
+            "SPEC_impl.md:8322-8324: Resolve Podman lazily. A host without Podman has nothing left to remove. Other unconfirmed cleanup keeps the session for retry."
+          ],
+          "missing_premise": "A supported deployment transition or non-deliberate metadata failure that leaves legacy storage while producing lookup-None outside the intended missing-Podman case; and the authoritative meaning of missing Podman for such failures. Highest additionally requires surviving credential-bearing processes despite successful ordinary process cleanup, or lost access to work beyond the destruction Delete already authorized. Earlier reviewer checks of the old creator and installed supervisor PATH found no ordinary hidden-engine producer; those limits remain.",
+          "original_stronger_consequence": "Losing the Farhelm row while the named container survives could lose access to user work or leave credential-bearing processes. The early source-refuted withdrawal was superseded by the later in-range implementation; the later blanket acceptance proposal was narrowed to genuine absence and explicitly unsupported locations. Preserve both changes and the unresolved stronger consequences.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Retain the investigated installed-engine/lookup ambiguity. The explicit exception is a proposed partial cover only for genuine absence and unsupported tool locations. Any acceptance-based drop or lowering of the original possible highest consequences needs the independent drop check."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-001.json",
+          "key": "g001/f2",
+          "proposal": "claim-checks/claims-001/result.json",
+          "parent_proposal": "retain-unverified-other-with-partial-cover",
+          "final_independent_gate": "required-for-partial-cover-and-priority",
+          "reason": "Parent read full flagged001 and complete actualownerf2. New04d lookupNone skipsrm/absencecheck anddeletesrow; actualcontractacceptsgenuinemissingPodman/unsupportedlocations. Broaderinstalled-but-unresolvableprogram/metadatafailureoutsideintendedexceptionremainUAI afteractualcreator-ticket/supervisorPATH/processsweepchecks. Noordinaryhiddenengineproducerfound; preservethislimit and noinventedstrongerrunningorphan because failclosedprocesscleanupindependent. Proposedpartialcovergenuineabsence only; retaininvestigatedscopeambiguity/conditionalstorageleftover with allmissingpremises. Originalsecurity/worklossroute needsprocesssurvivesuccessfulsweep or extraaccessloss beyondauthorizedDelete, notmerelyundeletedfiles. Finalfreshcheckjudgepartialacceptance andoutsidehighestclassification; ambiguousloweringretains highestperrule. No flagdrop/loweringacceptednow."
+        }
+      ],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retired-container-delete-treats-podman-lookup-none-as-absence",
+        "destination": "trailing-retired-container-delete-treats-podman-lookup-none-as-absence.md"
+      }
+    },
+    {
+      "key": "g001/f3",
+      "owner": "g001",
+      "id": "f3",
+      "domain": "product-contracts",
+      "purpose": "product-contracts: SPEC_impl.md, SPEC.md; phases @@ -2255,16 +2253,16 @@ answer; a client that has already loaded its preferences keeps its previous beha",
+      "history": [
+        {
+          "line": 14,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "f3",
+            "state": "open",
+            "summary": "Check whether busy Resume request time can exceed the declared wake budget",
+            "location": "SPEC_impl.md:7118",
+            "detail": "Reviewed commit: ba7cc0264028eebb39647deb1d25b055e6886935. TLDR: a launch could wait longer than the specified minute on a Resume ultimately refused as busy. Assigned SPEC_impl.md:7118-7120 says all waiting, busy refusals included, shares one 60-second budget excluding only accepted Resume. api.rs:5723-5734 awaits post_lifecycle outside WakeBudget.within, while :5681 uses a 150-second request timeout. Busy time is counted retrospectively but not interrupted by the wake deadline. Need check actual dispatch/save ordering and helm busy refusal to determine whether a supported slow-busy response can reach this gap, and whether the documented minute is a strict bound on pending HTTP rather than post-refusal retry allowance. Suggested bucket other for bounded timeout/wording correctness, potentially high only for material blocked launcher effect if source established; could-be-highest false on this lead. Confidence unresolved source lead, no execution. proposed_drop false. possible_cover none; supplied neighbour g026 concerns a distinct stale-suspension test oracle, not this timeout. No forbidden coverage sources searched."
+          }
+        },
+        {
+          "line": 15,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f3",
+            "state": "open",
+            "summary": "Wake contract omits the longer in-flight Resume wait",
+            "location": "SPEC_impl.md:7118",
+            "detail": "Reviewed commit: ba7cc0264028eebb39647deb1d25b055e6886935. TLDR: the new implementation contract describes a one-minute limit for waiting on a busy host, but a launch can remain waiting on a Resume request for up to its separate 150-second deadline even when the final result is a busy refusal. This is inaccurate timeout documentation; no observed hang, reproduction or work loss is claimed. Suggested bucket: other. Could-be-highest: false; the route only prolongs launch preparation and does not grant new execution or destructive authority. Confidence: confirmed source/contract mismatch for the in-flight request boundary; incidence unmeasured.\n\nAssigned text says All its waiting, busy refusals included, shares one 60-second budget that only the accepted Resume request does not spend, so a slow resume is never cut off. Product SPEC.md:334-338 similarly says a busy launch keeps asking within the same minute it allows for the connection. api.rs:5718-5720 starts WakeBudget after the initial hosts read. At :5723-5734 the Resume HTTP future is awaited directly, outside budget.within. post_lifecycle at :5677-5694 uses send_within(...150 seconds) at :5681. Only an Ok result is refunded (:5728-5730). Busy refusal time is correctly counted retrospectively, but the next budget check occurs only after this request returns, at :5736. Thus accounting does not bound the pending request to the minute. A request begun near the end of the retry allowance can remain in flight under its own 150-second deadline and later return a marked busy refusal; no accepted Resume is needed for that excess wait.\n\nUseful caller checks: send_within :2278-2284 passes the chosen 150 seconds into send_inner; :2488-2517 charges preceding-save wait and HTTP dispatch to that deadline, with no wake-budget override. The real helm makes HostBusy via environment/lifecycle.rs:28-34 nonwaiting try_host_provision_lock, and lib.rs:2783-2789 marks only that typed error. It does not make the client receive or decode the response immediately: queueing/slow helm or network can delay delivery, and SPEC.md Slow hosts expressly contemplates slow network/helm conditions. This is a source-permitted conditional request delay, not an asserted long provider operation in the busy branch. The accepted Resume exception rightly needs a longer request; the documentation should distinguish this unavoidable in-flight classification boundary from the bounded post-response polling/retry allowance, or an intentional implementation change must preserve slow accepted Resume behavior. Ordinary fetch_hosts reads and one-second sleeps are budget.within and do not have this omission.\n\nTip check: api.rs:5730-5768 retains the direct post_lifecycle await and budget checks in the same order; SPEC_impl.md:6731-6742 retains the same absolute-sounding claim. Scoped later diff contains no WakeBudget/post_lifecycle change, so no in-range repair found. This is distinct from supplied g026/f4, a stale-suspension browser test oracle; no duplicate new ID for that issue. proposed_drop: false. possible_cover: none; no prohibited coverage-source searches. All readily checkable source premises settled; the conditional delay is a timing premise, not missing shipped functionality. No tests, builds or reproductions. f3 lead closed to this documentation-boundary finding; does not challenge the accepted slow-host policy itself."
+          }
+        }
+      ],
+      "latest": {
+        "line": 15,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "f3",
+          "state": "open",
+          "summary": "Wake contract omits the longer in-flight Resume wait",
+          "location": "SPEC_impl.md:7118",
+          "detail": "Reviewed commit: ba7cc0264028eebb39647deb1d25b055e6886935. TLDR: the new implementation contract describes a one-minute limit for waiting on a busy host, but a launch can remain waiting on a Resume request for up to its separate 150-second deadline even when the final result is a busy refusal. This is inaccurate timeout documentation; no observed hang, reproduction or work loss is claimed. Suggested bucket: other. Could-be-highest: false; the route only prolongs launch preparation and does not grant new execution or destructive authority. Confidence: confirmed source/contract mismatch for the in-flight request boundary; incidence unmeasured.\n\nAssigned text says All its waiting, busy refusals included, shares one 60-second budget that only the accepted Resume request does not spend, so a slow resume is never cut off. Product SPEC.md:334-338 similarly says a busy launch keeps asking within the same minute it allows for the connection. api.rs:5718-5720 starts WakeBudget after the initial hosts read. At :5723-5734 the Resume HTTP future is awaited directly, outside budget.within. post_lifecycle at :5677-5694 uses send_within(...150 seconds) at :5681. Only an Ok result is refunded (:5728-5730). Busy refusal time is correctly counted retrospectively, but the next budget check occurs only after this request returns, at :5736. Thus accounting does not bound the pending request to the minute. A request begun near the end of the retry allowance can remain in flight under its own 150-second deadline and later return a marked busy refusal; no accepted Resume is needed for that excess wait.\n\nUseful caller checks: send_within :2278-2284 passes the chosen 150 seconds into send_inner; :2488-2517 charges preceding-save wait and HTTP dispatch to that deadline, with no wake-budget override. The real helm makes HostBusy via environment/lifecycle.rs:28-34 nonwaiting try_host_provision_lock, and lib.rs:2783-2789 marks only that typed error. It does not make the client receive or decode the response immediately: queueing/slow helm or network can delay delivery, and SPEC.md Slow hosts expressly contemplates slow network/helm conditions. This is a source-permitted conditional request delay, not an asserted long provider operation in the busy branch. The accepted Resume exception rightly needs a longer request; the documentation should distinguish this unavoidable in-flight classification boundary from the bounded post-response polling/retry allowance, or an intentional implementation change must preserve slow accepted Resume behavior. Ordinary fetch_hosts reads and one-second sleeps are budget.within and do not have this omission.\n\nTip check: api.rs:5730-5768 retains the direct post_lifecycle await and budget checks in the same order; SPEC_impl.md:6731-6742 retains the same absolute-sounding claim. Scoped later diff contains no WakeBudget/post_lifecycle change, so no in-range repair found. This is distinct from supplied g026/f4, a stale-suspension browser test oracle; no duplicate new ID for that issue. proposed_drop: false. possible_cover: none; no prohibited coverage-source searches. All readily checkable source premises settled; the conditional delay is a timing premise, not missing shipped functionality. No tests, builds or reproductions. f3 lead closed to this documentation-boundary finding; does not challenge the accepted slow-host policy itself."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g001/findings.jsonl",
+        "id": "f3",
+        "line": 15,
+        "disposition": "verified",
+        "group": "wake-budget-inflight-busy-resume",
+        "reason": "Parent primary source verification and fully read focused001 checks/current coverage: the shared minute is enforced only through WakeBudget.within, while the lifecycle POST uses a separate150s deadline and is awaited directly; busy time is charged only after its reply. A busy response delayed past remaining time therefore exceeds the stated all-waiting bound. Busy try-lock is immediate at server admission, but neither network nor helm delivery must be immediate. Retain the conditional bound/documentation mismatch, not an observed hang or material high-impact frequency claim. Current specifications do not clearly accept this pending-busy overrun; matching landed plans preserve slow accepted Resume but do not repair this boundary. No exact current cover or full filter match."
+      },
+      "accepted_parent_decision": {
+        "key": "g001/f3",
+        "line": 15,
+        "disposition": "verified",
+        "group": "wake-budget-inflight-busy-resume",
+        "bucket": "other",
+        "recording": "retain; reconcile g005/f2 if equivalent",
+        "needs_independent_drop_check": false,
+        "reason": "Parent primary source verification and fully read focused001 checks/current coverage: the shared minute is enforced only through WakeBudget.within, while the lifecycle POST uses a separate150s deadline and is awaited directly; busy time is charged only after its reply. A busy response delayed past remaining time therefore exceeds the stated all-waiting bound. Busy try-lock is immediate at server admission, but neither network nor helm delivery must be immediate. Retain the conditional bound/documentation mismatch, not an observed hang or material high-impact frequency claim. Current specifications do not clearly accept this pending-busy overrun; matching landed plans preserve slow accepted Resume but do not repair this boundary. No exact current cover or full filter match."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-001",
+          "key": "g001/f3",
+          "latest_line": 15,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "wake-budget-does-not-interrupt-inflight-busy-resume",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The absolute-sounding one-minute promise does not describe the in-flight classification boundary. Busy requests are charged retrospectively but can remain in flight under the separate 150-second request deadline. This establishes a conditional source/documentation mismatch, not an observed hang.",
+          "checks": [
+            "Assigned ba7cc0264028eebb39647deb1d25b055e6886935 SPEC_impl.md:7114-7125 says all waiting, busy refusals included, shares 60 seconds, excluding only accepted Resume.",
+            "At tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db api.rs:5691-5708 gives lifecycle POST 150 seconds. :5730-5748 awaits it directly and refunds elapsed time only for Ok. :5750-5768 bounds subsequent fetches/sleeps. :5792-5824 enforces WakeBudget only when within is used. A request begun before the minute expires can return busy after the minute.",
+            "environment/lifecycle.rs:28-34 produces busy by a nonwaiting try-lock; lib.rs:2793-2798 marks that typed refusal. This does not force immediate delivery over a slow network/helm. No long provider operation in the busy branch is asserted, and actual incidence remains unmeasured."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:334-343 promises retrying busy within the same minute as connection waiting. SPEC_impl.md:6731-6742 retains the absolute-sounding all-waiting statement. Neither expressly accepts the pending-busy request overrun.",
+            "TODO.md Planned is empty; BUGS.md's escaped-SSH-holder hang differs. Searched INDEX.md and active TRIAGE_OUTCOMES.md for busy Resume, wake budgets and timeout claims; no exact item or decision found. No archive read.",
+            "Read matching sandbox-suspend-overlap.md:59-94 and wake-launch-stuck.md:39-88. The former requires busy retry without cutting off accepted slow Resume; the latter explicitly leaves wake budgets alone and limits the later page-side connection wait. They do not fix or accept this boundary. plans/REPORTS.md records wake-launch-stuck landed; no unlanded exact repair found.",
+            "FILTER.md: no complete match established. A slow network/helm is not evidence of a rare subsecond human race, and the claim concerns the stated bound of blocking launch preparation, not merely an imprecise error string."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "A response delayed beyond the remaining minute is a conditional timing premise, not a missing shipped function. No measured frequency or runtime reproduction. Material high-priority UX impact beyond the documented-boundary mismatch has not been measured.",
+          "original_stronger_consequence": "A launch may wait longer than its specified minute while a Resume ultimately returns busy; no security, destructive authority or work-loss consequence was proposed.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Record the inaccurate timeout boundary at other priority. Clarify documentation or deliberately revise the implementation while preserving the accepted slow-Resume exception. No drop proposed."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "wake-budget-inflight-busy-resume",
+        "destination": "trailing-wake-budget-inflight-busy-resume.md"
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial source pass finished: no confirmed findings. Recorded candidates `f1` and `f2`; no open leads. Read the complete commits field and inspected all assigned patches at their pinned revisions.\n\nCoverage certification remains incomplete: invalid manifest ranges prevented every mandatory evidence read. No tests or reproductions ran.\n\n[Findings log]([private-run]/g001/findings.jsonl) · [Progress and blocker]([private-run]/g001/progress.md)"
+    },
+    {
+      "turn": 2,
+      "reply": "Coverage repair and initial review are complete: all nine mandatory sources, totaling 673 lines, were delivered successfully. No assigned material remains unread.\n\nNo findings added or revised. `f1` and `f2` remain candidates; no open leads. Progress updated. No tests or reproductions ran."
+    },
+    {
+      "turn": 3,
+      "reply": "- `f1` revised to a retained finding: focus disruption persists through tip; harmful approval remains unestablished. Documentation records the pre-existing gap without accepting it.\n- `f2` revised to a retained finding: later Delete implementation skips container checks when Podman is unresolved. Process cleanup and checkout safeguards remain. Exact specification exception and potential highest consequences are preserved for independent checking.\n\nNo drops applied. Unresolved lead IDs: none."
+    },
+    {
+      "turn": 4,
+      "reply": "Discovery pass 1 found one new issue: `f3`, a source-confirmed timeout documentation mismatch between the one-minute wake budget and the separately timed 150-second Resume request.\n\nChecked exclusive-base attribution, Podman producer/PATH assumptions, wake callers and deadlines, and remaining assigned contract changes. Revised `f1` and `f2`; no drops applied.\n\nNew verified IDs: `f3`. New unverified IDs: none; existing `f2` now carries investigated uncertainty. Open leads: none. No runtime work performed."
+    },
+    {
+      "turn": 5,
+      "reply": "Discovery pass 2 found nothing new.\n\nChecked container durability/transport contracts, same-host Suspend/Resume admission, Trash reader lifetimes, prompt-disabled and tmux-selector wording, and wake continuation authority.\n\nNew verified IDs: none. New unverified IDs: none. Revisions: none. Open leads: none. Progress updated; no runtime work performed."
+    }
+  ],
+  "progress": "g001: initialized, awaiting initial source review.\nGroup: g001 (product-contracts).\nLatest state, turn 5: discovery pass 2 complete. Nothing new found. New verified IDs: none. New unverified-after-investigation IDs: none. Revised IDs: none. Open leads: none. Existing findings and candidate/withdrawal history preserved; no drop/lowering accepted. No tests, builds, reproductions, live-install actions or prohibited coverage-source searches.\nLatest neighbour context has 2,031 lines/683,279 bytes. Read its full record index (owner/id/summary/location), first 70 raw lines and complete updated g087/g095 records relevant to this group's boundaries; reuse the previously read neighbour histories from context. Detailed new unrelated neighbour records were not expanded and are not claimed as fully read source. No named pending questions were supplied.\nPass-2 checks: pinned c8bc SPEC.md 3420..3475 (environment durability), 4388..4448 and 4470..4530 (transport/security distinctions), SPEC_impl.md 6408..6506 (provider/ownership/status/route/recipe contracts); compared their cross-references to already-read Container sessions and the exact latest neighbour subjects. Revisited 1d24 hosts.rs and sandbox_sessions.rs patch admission/disabled/answer checks for same-host launch-target exclusion, distinct from registry changes. Rechecked 06d4 list/trash.rs 678..807 for explicit demand, epoch eligibility, registry recovery and removal polling lifetimes, excluding known g022 wake and g017 golden topics from novelty. Checked assigned 1ed482 SPEC.md prompt-delivery/tmux-selector implications against its main.rs setup context and agent_requests.rs production prompts-off gate (347..352,454..462); dormant protocol text does not imply that prompt is enabled. Revisited 533169 continuation stamp methods 1134..1227 for opening/draft/connection authority and the separation of page-catch-up wait from checkout preview; new neighbour g087/l2 already owns its focus-return trigger and no duplicate was opened. These source checks exposed no new concrete contract/caller mismatch beyond durable known records.\nUnread assigned mandatory scope: none; original supported 673-line delivery remains unchanged. No fresh source-evidence credit claimed for neighbour context. Next action: return empty discovery result to parent.\nLatest state, turn 4: discovery pass 1 complete, following synthesis of the two named pending questions. Read discovery-neighbours.json through its end in bounded chunks; reread clipped g017/g095 detail regions. No mandatory source credit was claimed for these context reads. No assigned scope unread; no tests, reproductions or live-install work; no prohibited coverage searches.\nTurn-4 synthesis delta: f1 now has whole-range attribution evidence. Exclusive base already holds the identical moved-on focus rule and explicit queued-opening admission, shared arming and SSH-input focus. Both the gap and contract conflict are fully pre-base; prior attribution-only proposed drop strengthened, not accepted. Original focus and possible approval harm preserved. f2 reconciled supplied g095/l1: genuine engine absence acceptance is narrower than all lookup-None causes. Actual old producer resolves in supervisor PATH before shell startup and persists that absolute path; supported Linux unit PATH is constructed explicitly. No ordinary automatic PATH transition or installed-engine metadata failure was established. f2 retains confirmed code behavior but is now labelled unverified after investigation as a reportable contract violation beyond genuine absence; exact missing deployment/interpretation premises and settling evidence are in its latest event. No parent drop/lowering accepted.\nDiscovery result: something new found. New verified ID f3, an implementation-contract timeout mismatch at ba7cc0264028eebb39647deb1d25b055e6886935 SPEC_impl.md:7118. Busy Resume time is charged retrospectively to the 60-second WakeBudget, but an in-flight post_lifecycle is directly awaited under the separate 150-second request timeout. The implementation specification omits that longer in-flight classification boundary. f3 lead investigated and closed as finding, other, source-confirmed/no runtime occurrence claimed. New unverified-after-investigation IDs: none (f2 is an existing revised ID). Open leads: none.\nDiscovery useful checks beyond known findings: traced ba7 api.rs 5649..5810, send funnel 2270..2284 and 2390..2528, environment/lifecycle.rs 1..170, typed busy-response construction lib.rs 2770..2798 and relevant WakeWatch tests 8867..8935. Read complete Slow hosts/Waiting contracts and Tensorlake wake section; checked scoped later api history/diff and tip helper/spec retention. Revisited 1d24 OpGuard target/drop and 533169 form timeout/continuation 7430..7580 for distinct budget/authority interactions. Re-read 06d4 archive epoch producer hunks and consumer contract; supplied g022/f2 already owns the missing-wake interleaving, so no duplicate ID. Rechecked c8bc Container sessions 4734..4817 against already-read shared ownership/transport/recipe contracts and neighbour-known distinctions; no additional concrete new defect established. Rechecked assigned 1ed482 SPEC.md changes against active prompt-disabled and setup-only tmux contracts; no new route beyond neighbour-known retirement topics. Finished remaining assigned pass after recording f3.\nInterface assumptions: f1 is pre-range implementation debt accurately acknowledged by an in-range doc patch. f2 retains uncertainty specifically about policy width/deployed trigger, not the existence of code bypass. f3 concerns the newly added claim about busy wait bounds, distinct from g026 stale-suspension test and 533169 page-catch-up timeout. Parent owns independent proposed-drop/priority judgments. Next action: return delta; a further discovery pass must be separately requested because f3 is new.\nLatest state, turn 3: later-turn synthesis complete; discovery passes remain 0. Parent reports full 673-line delivery audited. No unread assigned scope, no open leads, no new IDs. No drops accepted or applied. f1/f2 are now retained findings rather than set-aside candidates. No runtime work or forbidden coverage searches.\nTurn-3 delta: f1 revised to finding, high for established focus disruption; still predates the assigned documentation patch, which documents contrary implementation rather than accepting it. Original possible harmful approval consequence preserved, without an established highest route. Tip queue, form admission, shared arm state and modal mount/focus implementation all checked; no in-range repair of this path found. Generic modal shell does not supply a hidden moved-on veto.\nTurn-3 delta: f2 reopened, then revised to finding after checking retirement implementation 04d85f0c98a9b635709d00b056719a0baa7fd3fc and pinned tip. Missing-Podman branch really skips removal/absence checks; successful ordinary teardown can then remove the row. Earlier early-commit refutation is explicitly superseded. Exact new policy exception preserved for independent checking. Established consequence is unconfirmed cleanup/leftover container storage (other); original potential highest consequences remain explicit but not established. Scope/process cleanup continues and can refuse, and host checkout handling still archives/releases, so neither survivor processes nor extra work loss follows just from missing Podman. Compatibility section distinguishes per-feature retirement from general update mechanics; it supplies no blanket acceptance of runtime loss.\nTurn-3 additional source checks at pinned tip: container.rs 1..260; scope.rs resolver 1234..1284; service/teardown.rs 285..867; service/sweep.rs 1252..1336,1390..1555; service/core.rs require_active_launch 3479..3488 and retained-create gate 9558..9567; approvals.rs 165..295; hosts.rs 3180..3260,6074..6178; modal_isolation.rs 64..118; modal_dialog.rs 1..248,780..850,914..941,990..1015; SPEC.md 1875..1905,4888..4908,5360..end; SPEC_impl.md relevant focus/retirement matches and 8328..8395. Historical container creation/removal contract source at policy revision container.rs 306..380,435..487,565..640. Commit path histories checked through tip to distinguish later repair from remaining behavior. Exact citations and missing highest premises are retained in findings.jsonl.\nInterface assumptions after synthesis: the documentation-only redesign establishes a policy under review even before its later implementation; the later source is evidence of that policy's actual route. Accurate implementation-gap documentation is not product acceptance. Confirmed local Delete still has ordinary process and checkout safeguards independent of container engine cleanup. Remaining highest-premise questions are impact caveats, not uninvestigated leads; no available source route establishes them. Next action: return deltas to parent; await separate discovery prompt.\nCurrent state: initial source-review pass complete, including coverage repair, turn 2; discovery passes remain 0. Corrected brief reread in full and existing findings log preserved. No synthesis/discovery pass performed. Complete commits field was read in turn 1; excluded inventory metadata and coverage sources remain unread by instruction.\nCoverage repair: all nine corrected manifest ranges successfully delivered through eleven separate evidence-read calls: 00026-000 1..36; 00058-000 1..51; 00082-001 1..140, 141..280, 281..444; 00511-000 1..25; 00512-000 1..23; 00525-000 1..20; 00526-000 1..24; 00616-000 1..16; 00899-000 1..34. Total 673 mandatory lines. Each packet ended normally, without clipping or errors. Parent performs transcript audit; this is a delivery statement, not a claim to have run that audit.\nInitial review result: no findings added or revised during repair; f1/f2 remain candidates supported by the source checks below. No open leads. No runtime tests, builds or reproductions performed. No repository files changed.\nUnread assigned scope: none. Next action: return to parent for the later synthesis turn.\n\nInterface assumptions: assigned SPEC.md/SPEC_impl.md patches define intended contracts for the implementation groups. The container redesign commit is documentation-only; an implementation gap at that revision is not by itself an introduced documentation defect. Focus policy remains authoritative even where SPEC_impl.md documents lagging implementation. Parent owns coverage matching and any independent drop check.\n\nRecords appended: f1 lead -> candidate (delayed explicit host-add opening predates the assigned patch); f2 lead -> candidate (missing-Podman removal is future policy, not the shipped route at that revision). Both preserve their original possible consequences and exact source basis. No confirmed findings, no unverified-after-investigation findings, no open leads. Candidate basis verified by source; no runtime behavior observed.\n\nTooling failure: required command `evidence read .../g001/manifest.json .../00026-000.patch 1 37` returned `PERSISTENT_REVIEW_TOOL_FAILED: Invalid source range. No coverage is certified by this invocation. See tooling.md; do not silently switch to bulk transcript inspection.` Read tooling.md afterward. The helper validates every manifest range before reading. wc reports 36 physical lines for required 1..37, 51 for 1..52, 444 for 1..445, and 25 for 1..26 in sampled snapshots. Manifest not changed. Asked caller for a corrected manifest or manual-inspection approval; no answer received in this turn. No manual audit claimed.\n\nSource reads at pinned revisions (context only, not certified evidence):\n- Full SPEC_impl.md patch at 06d4b68f3a9e913f47cd426fedee5946a4eed77b; surrounding 4480..4595 and implementation epoch/reader/call-site diffs in notices.rs, list/trash.rs and list/view.rs.\n- Full SPEC_impl.md patch at 9ff03ce91f191ea59f3ce16cefbd0b76d7fe599d; SPEC.md 3196..3327; SPEC_impl.md 1055..1205; changed approvals.rs/hosts.rs/modal_isolation.rs patch; approvals.rs 180..330, hosts.rs 5790..6135, parent approvals.rs 202..245 and 289..319.\n- Assigned SPEC.md diff hunks at c8bc155cc36723c8c53870944d07ce8ec61ef9ed from @@ -2255 through file end (git diff physical lines 566..1010), including the complete new Container sessions and Retired containerized sessions sections. Governing SPEC.md context 1..69, 1423..1522, 2237..2387, 4809..4834, 4829..4960; SPEC_impl.md 6408..6605 and 8628..8665. Removal contract source container.rs 148..198 and 398..432; service/teardown.rs 506..618. Retired creation implementation was not reviewed for unrelated defects.\n- Full assigned SPEC.md and SPEC_impl.md patches at 1d24c6af0b6fdbbec854623ff53f90281b8271ab and ba7cc0264028eebb39647deb1d25b055e6886935; former SPEC_impl.md 1137..1161; latter SPEC.md 270..365 and SPEC_impl.md 7089..7148.\n- Full assigned SPEC.md patch at 533169cf19571d34af3a8497eaceb8d2d7b7c852; SPEC.md 1328..1384 and create_form.rs patch through timer, wait predicate and integration (diff output through test-section start).\n- Full assigned SPEC.md patch at 1ed482dde220452e424973faf38a5e1318986333; governing SPEC.md context 3880..3937 and 5225..5305.\n\nHistorical turn-1 coverage status: assigned patch text had been read through Git context, but no mandatory packet could be delivered because the old manifest was invalid. Turn 2 repaired all those deliveries, as recorded above. Do not truncate findings.jsonl or treat its two candidates as confirmed findings.\n"
+}

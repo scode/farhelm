@@ -1,0 +1,264 @@
+[
+  {
+    "key": "g071/c1",
+    "latest_line": 1,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "installer-tmux-advice-companion-report-tests",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The companion tests change with the installer. The suspected obsolete expectation is absent.",
+    "checks": [
+      "17a3fe858c5511a24b7403af15dd41c93bf69fd7:scripts/test-install-sh.sh:1875-1910 expects unconditional fresh-install launch advice and retains the update assurance; 2015-2027 expects the same fresh report through a PTY.",
+      "17a3fe858c5511a24b7403af15dd41c93bf69fd7:scripts/install.sh:1242-1263 prints those reports without tmux advice. No installer/test diff from this revision through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. Source-only checks; no execution."
+    ],
+    "coverage_checked": {
+      "SPEC.md and SPEC_impl.md": "Current tmux prerequisites and provisioning sections accept removing tmux requirements; no separate stale-report-test acceptance is needed for this source refutation.",
+      "TODO.md Planned": "Empty at recording-time main.",
+      "plans/queue": "INDEX.md contains no unlanded plans. The tmux installation/tooling/docs plans are listed landed in plans/REPORTS.md:29-32.",
+      "BUGS.md": "Only the SSH transfer-output hang is recorded; unrelated.",
+      "queue and active ledger": "Searched installer, closing-message, prerequisite, tmux and assurance terms. installer-prerequisite-test-conflates-two-guards.md and its active outcome concern brick-test setup guards, not report assertions; read and excluded. No exact cover or extension."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Removing tmux advice might leave acceptance tests expecting obsolete output and failing. No security or user-work-loss consequence was alleged.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutation of this test expectation suspicion only; it does not dispose of g071/f2 or the older-target omission in g072/c1."
+  },
+  {
+    "key": "g071/f2",
+    "latest_line": 9,
+    "recommendation": "retain-verified",
+    "bucket": "highest",
+    "underlying_key": "old-terminal-migration-unconditional-session-survival-assurance",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Source establishes an ordinary supported update/reopen path from the survival assurance to intentional termination of still-running old terminals. Human reliance is hypothetical, not a runtime observation. The commit deliberately accepts this exact wording; that proposed drop needs independent judgment and must not be replaced by acceptance of termination alone.",
+    "checks": [
+      "78e9d68a95119db8452ee139efde13d38546f648:scripts/install.sh:1228-1232 classifies updates from install-result; 1285-1287 prints the unconditional assurance. 17a3fe858c5511a24b7403af15dd41c93bf69fd7 retains it at 1246-1248 and pins it in test-install-sh.sh:1886-1889.",
+      "78e9d68a95119db8452ee139efde13d38546f648:crates/farhelm-ui/src/desktop.rs:537-586,835-842 replaces a recorded supervisor running the preceding program; prerequisite checks may refuse first, and unrecorded answering supervisors can be reused.",
+      "Same revision: crates/farhelm-supervisor/src/service/core.rs:6112-6117,6142-6151 opens the database before invoking old-terminal shutdown for the state-directory owner; service/core/old_terminals.rs:176-232,247-251 identifies the same-user socket peer and attempts bounded termination. Missing/failed identity checks or termination can leave processes running.",
+      "The reviewed commit message explicitly accepts printing the general statement during this one migration. Its SPEC.md and SPEC_impl.md diff deliberately removes the migration caveats. No run or user reliance was observed."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Current Installation and updates:768 retains general session survival; Terminal experience:2998-3010 explicitly ends old terminals while preserving terminal-host sessions. Retirement acceptance alone does not settle misleading guidance.",
+      "SPEC_impl.md": "Current updater:7720-7727 retains general survival wording; Ending the old private tmux server:2780 onward explicitly describes retirement. The reviewed commit supplies the narrower wording decision.",
+      "TODO.md Planned": "Empty. The phase-3 Near term/Mid term cleanup text is not Planned and does not correct this assurance.",
+      "plans/queue": "No unlanded plan in INDEX.md. Landed tmux-end-old-terminals criterion 10 originally required removing the assurance, then the reviewed commit deliberately restored it; this historical plan is not future fix coverage.",
+      "BUGS.md": "Unrelated SSH transfer hang only.",
+      "queue and active ledger": "Searched tmux, old-terminal, survival, assurance, sessions keep running, installer and closing-message terms. No exact queued item or active decision covers this reassurance. Other survival items concern feedback sending or test liveness and are not aliases."
+    },
+    "exact_cover_quotes": [
+      "78e9d68a95119db8452ee139efde13d38546f648 commit rationale: 'Every other update keeps sessions running, so the general statement comes back without the caveat, accepting that the installer prints it during that one update too.'",
+      "Current SPEC.md:768: '(sessions keep running, as they do across any quit)'",
+      "Current SPEC.md:3000-3002: 'A supervisor that finds that tmux server when it starts ends it, and with it everything that still ran in an old terminal, without needing a tmux program.'"
+    ],
+    "missing_premise": "No missing source premise for the conditional guidance-to-process-loss route. Actual reliance and execution were not observed. Whether the explicit commit-level wording decision is sufficient acceptance to drop the guidance claim remains for the independent disposition.",
+    "original_stronger_consequence": "Users relying on 'Your sessions keep running' can leave work running in old terminals and reopen after updating; the new supervisor intentionally ends those processes. Earlier 'other for the diagnostic itself' wording did not dispose of this work-loss guidance consequence.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Retain the highest consequence pending the parent's independent check of the precise wording acceptance. No filter matches: this is ordinary migration/update guidance, not an additional rare interruption or harmless diagnostic. Parent-supplied g002/f1 and g004/f1 may share this root, but they are outside this batch and were not independently checked as aliases."
+  },
+  {
+    "key": "g071/c3",
+    "latest_line": 5,
+    "recommendation": "covered",
+    "bucket": "other",
+    "underlying_key": "supervisor-unit-path-drops-selected-tmux-directory",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The removed directory follows the explicit unit PATH contract. The claim concerns discovery of programs in new sessions, not deletion or termination of existing work.",
+    "checks": [
+      "17a3fe858c5511a24b7403af15dd41c93bf69fd7:crates/farhelm/src/setup.rs:651-659 passes only farhelm and state_dir; crates/farhelm-helm/src/units.rs:129-154 constructs PATH from the farhelm parent and BASE_PATH.",
+      "Current SPEC_impl.md:7996-8001 explicitly says no tmux directory is added and gives the exact base. This matches the reviewed contract quoted in history. Source-only; no launch observed."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Current remote Linux prerequisites:181-188 removes the bundled tmux; no contradictory service-PATH guarantee found.",
+      "SPEC_impl.md": "Exact coverage at 7996-8001, Provisioning.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "No unlanded plans; landed tmux-drop-from-install:144-146 explicitly anticipated loss of the selected tmux directory and login-shell PATH behavior.",
+      "BUGS.md": "No match.",
+      "queue and active ledger": "Searched tmux/PATH/program discovery and installer prerequisite terms; no exact open item or decision. No useful extension."
+    },
+    "exact_cover_quotes": [
+      "SPEC_impl.md:7996-7998: 'The supervisor unit, whether provisioning or `farhelm helm setup` renders it, names no tmux and puts no tmux directory on `PATH`: its `PATH` is the directory of the Farhelm program it runs, then `/usr/local/bin:/usr/bin:/bin`'"
+    ],
+    "missing_premise": null,
+    "original_stronger_consequence": "A Linuxbrew-only tmux or another program in the previously selected directory may no longer be found in newly launched sessions. History suggested high if unintended, with no work-loss or security route.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Exact specification acceptance, not a rarity filter. 'Other' here labels a covered candidate with no remaining defect; preserve the historical high-if-unintended assessment."
+  },
+  {
+    "key": "g071/c4",
+    "latest_line": 10,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "container-duplicate-refusal-empty-display-name",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Normal registration provides a nonempty reserved container name, which supplies the fallback display name. The refusal does not grant deletion authority.",
+    "checks": [
+      "04ffdbb35773cef36e73eb798c005ddbeb9a9de6:crates/farhelm-helm/src/provisioning/service.rs:1745-1766 obtains host_display_name from the matching registry row; aggregate.rs:119-139 uses the alias or strips podman: from its destination.",
+      "Same revision: store/podman.rs:149-156,249-267 validates a reserved name with a nonempty suffix and records podman:<name>; uninstall_refusal.rs:83-126 interpolates that name or an absent-twin fallback and returns a refusal.",
+      "Current SPEC_impl.md:5262-5271 requires trimming aliases and clearing empty ones. Hand-corrupted registry values are not an established normal-registration premise. Source-only, no execution."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Container ownership:4824 onward records the reserved name before creation; no empty-label allowance needed.",
+      "SPEC_impl.md": "Host alias normalization:5262-5271 and duplicate state:5330-5345 support the normal naming/refusal context.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "No unlanded plans in INDEX.md.",
+      "BUGS.md": "No match.",
+      "queue and active ledger": "Searched container duplicate, display name, empty alias and uninstall refusal terms. uninstall-refusal-missing-identity-wording-source-gap concerns installation identity wording, not container naming; no exact cover or extension."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "A shipped path recording an empty container destination or alias was not established; the inspected normal registration excludes it.",
+    "original_stronger_consequence": "Container duplicate advice might omit the container's usable name, preventing identification of the entry to delete. No wrong deletion or security consequence was claimed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutation within normal registration. No claim about arbitrary hand-corrupted database contents."
+  },
+  {
+    "key": "g072/c1",
+    "latest_line": 10,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "current-installer-omits-tmux-advice-for-supported-older-target",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The latest blanket handoff refutation is false. HANDOFF_FLOOR marks support for locked installation, not removal of tmux prerequisites. An older target at or above that floor reaches the current report while its desktop can still require tmux.",
+    "checks": [
+      "17a3fe858c5511a24b7403af15dd41c93bf69fd7:scripts/install.sh:91-101 sets HANDOFF_FLOOR=0.31.1-dev.0 for internal-install capability; 936-971 delegates only targets below it. 1246-1251 now prints fresh launch advice without tmux inspection.",
+      "Local v0.35.0 resolves to ee6957b5f0aa10bd4d36834f633b122cf2ec4695. At that explicit hash, scripts/install.sh still sets the same floor and warns at 1306 that tmux 3.7c is needed. crates/farhelm-ui/src/desktop.rs:1202-1214 invokes run_tmux_preflight_or_exit before spawning the supervisor. Thus this target is above the floor and remains tmux-dependent.",
+      "Current SPEC_impl.md:7317-7327 says FARHELM_VERSION selects the target and explains handoff strictly by locked-work capability. The new script can install the older target through its current path; no new installer/test change appears through the review endpoint.",
+      "No download, Mac installation or launch was executed. This is a conditional source conclusion for a supported older selection on a Mac without the prerequisite. Current-release launch advice remains correct."
+    ],
+    "coverage_checked": {
+      "SPEC.md and SPEC_impl.md": "Current no-tmux contract concerns this release. The older-target handoff contract explicitly covers only below-floor targets; it does not exempt omitted prerequisite advice for above-floor older targets.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "No unlanded plans. Landed tmux-drop-from-install criterion 4 removes current installer advice; it does not explicitly accept misleading advice when installing an older tmux-dependent target.",
+      "BUGS.md": "Unrelated SSH transfer hang only.",
+      "queue and active ledger": "No exact older-target/tmux reporting item found. Active outcomes at TRIAGE_OUTCOMES.md:792-825 discard older-generation installer defects prior to 0.31.1; this is the current installer selecting v0.35.0, so that boundary does not match. stopped-host-update-floor-unresolved concerns a remote supervisor update floor and is separate. installer-prerequisite-test-conflates-two-guards is a brick-test oracle defect, not this report."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "No runtime observation or endpoint download was made. Local released-tag source establishes a concrete above-floor tmux-dependent version; the report consequence is conditional on selecting such a release without tmux.",
+    "original_stronger_consequence": "Removing missing/old-tmux report cases can make an older tmux-dependent Mac release claim it can be launched without its prerequisite. Later history withdrew this on the mistaken assumption that every such target is below HANDOFF_FLOOR.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain the original missing-prerequisite guidance concern, narrowed to above-floor older targets. This is a diagnostic/convenience defect with no established security or work-loss route. The latest source-refutation claim must be corrected; handoff only refutes the below-floor subset."
+  },
+  {
+    "key": "g072/c2",
+    "latest_line": 2,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "single-prepared-payload-upload-install-pairing",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The shipped plan creates one target's payload and reuses the same staged snapshot for upload and install. The first-payload selection does not omit a second supported payload.",
+    "checks": [
+      "500548b9253b07a26fd03119679184b69544e31d:crates/farhelm-helm/src/provisioning/installation.rs:13-45 chooses and stages the first payload action; 69-91 both execution actions use the passed prepared value.",
+      "Same revision: plan.rs:797-810 makes at most one UploadPayload and one InstallPayload, both with reach.arch and matching paths; service.rs:2640-2665,2750-2771 prepares once and carries the same reference throughout execution. snapshot_preparer.rs:91-123 uses that plan and preparation path.",
+      "Current SPEC_impl.md:7737-7741,7973-7988 explicitly says one farhelm payload per host and one shared staged snapshot. Source-only; arbitrary manually fabricated future plans were not established as supported callers."
+    ],
+    "coverage_checked": {
+      "SPEC.md and SPEC_impl.md": "Current provisioning contract requires one payload and paired staging; implementation matches. No independent wrong-target route found within this named claim.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "No unlanded plans; landed tmux-drop-from-install criterion 2 requires the single-payload representation.",
+      "BUGS.md": "No exact match.",
+      "queue and active ledger": "Searched payload pairing, staged payload, wrong/missing payload and provisioning terms. Existing transfer-output hang is different. No exact item or useful extension."
+    },
+    "exact_cover_quotes": [
+      "SPEC_impl.md:7738: 'the one payload a host gets'",
+      "SPEC_impl.md:7986-7987: 'Both actions use the same staged payload snapshot, and local plans retain a single install action because they do not transfer over the network.'"
+    ],
+    "missing_premise": "A shipped builder creating multiple different payload targets in one plan was not established; the inspected builder excludes it.",
+    "original_stronger_consequence": "The first-action representation might upload the wrong target or leave later installs without their payload. No security or user-work-loss consequence was established.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutation for shipped plan construction and callers; no claim that malformed future plans are supported."
+  },
+  {
+    "key": "g072/l1",
+    "latest_line": 12,
+    "recommendation": "covered",
+    "bucket": "other",
+    "underlying_key": "snapshot-preparation-skips-inherited-private-tmux-removal",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The conditional retention route is possible, but the exact specification explicitly exempts snapshot preparation from removal. The initial assertion of a confirmed cleanup-contract violation was withdrawn; this is not a claim that inherited tmux is impossible.",
+    "checks": [
+      "500548b9253b07a26fd03119679184b69544e31d:crates/farhelm-helm/src/provisioning/snapshot_preparer.rs:87-99 rejects setup-managed installs and copied state; 109-119 deliberately skips RemoveBundledTmux. installation.rs:53-58 records the same expectation.",
+      "Same revision: tensorlake_backend.rs:188-198 checks only supervisor.db absence; tensorlake_add.rs:1415-1448,1473-1503 admits prepared facts and attaches without ordinary installation. A base with an inherited private tmux and no matching database/service is not excluded by these guards.",
+      "Same revision SPEC_impl.md:2854-2871 explicitly describes the skip. Current SPEC_impl.md:8003-8020 retains it. The inspected preparer/executor/copied-state/clone-admission files have no diff from the reviewed commit to 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. The exception existed at introduction; it was not a later repair.",
+      "No execution. Retention and unexpected program selection are conditional source consequences; no vulnerability or lost work follows merely from an old executable's presence."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Ordinary Linux setup/Update cleanup at 181-188 is general; custom bases are supported. This does not negate the specific preparation exception.",
+      "SPEC_impl.md": "Exact current coverage at 8018-8020 and reviewed coverage at 2869-2871.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "No unlanded plans in INDEX.md; historical prepared-snapshot and tmux plans supply context, not future fix coverage.",
+      "BUGS.md": "No match.",
+      "queue and active ledger": "Searched snapshot preparation, inherited/private tmux and removal. No exact open queue item or active outcome. Parent-supplied possible g045/l2 alias was not independently inspected because it is outside this batch."
+    },
+    "exact_cover_quotes": [
+      "SPEC_impl.md:8018-8020: 'Snapshot preparation skips the step, as it skips attachment and lingering: the sandbox image it installs into has no Farhelm installation (preparation refuses setup-managed installs and copied state), so it is not expected to carry an earlier tmux.'"
+    ],
+    "missing_premise": "No stronger promise that preparation removes inherited tmux was found. The clean-base rationale is an expectation, not an exhaustive guard.",
+    "original_stronger_consequence": "Prepared clones can retain and select an obsolete private tmux inherited from a custom base without supervisor state. Earlier events called this a confirmed setup-cleanup violation; that conclusion was retracted after finding the same-commit explicit exception. No security or work-loss route was claimed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Exact specification coverage of skipping removal. Preserve the conditional retained-binary consequence and withdrawal history; do not replace them with a false clean-base guarantee or claim an accepted parent drop."
+  },
+  {
+    "key": "g072/c3",
+    "latest_line": 11,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "release-inventory-tmux-removal-consumer-parity",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The runtime now asks only for farhelm archives, and the archive inventory, workflow and contract agree. Removing tmux membership does not itself weaken authentication.",
+    "checks": [
+      "cb762a313abbe6da03ae0bf041f07486c4ed4df9:crates/farhelm-helm/src/provisioning/assets.rs:43-108 contains four archives and target-specific farhelm selection; .github/workflows/sign-sums.yml:57-65 lists exactly those four payload names.",
+      "Same revision: provisioning/release_payloads.rs:804-853 selects the target archive, checks its manifest entry, downloads verified bytes, extracts its member and publishes the binary. No tmux lookup remains in this path.",
+      "Current SPEC_impl.md:8061-8076 specifies four archives plus install.sh, authenticates the signed manifest/version and verifies requested payload hashes. Off-repository signing/publication tooling was not inspected. Source-only, no download or signing run."
+    ],
+    "coverage_checked": {
+      "SPEC.md and SPEC_impl.md": "Release verification and current one-payload contract accept the new membership; exact list at SPEC_impl.md:8061-8065.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "No unlanded plans. Landed tmux-drop-from-install criteria 2 and 5 explicitly couple consumer and inventory removal; its off-repository tooling caveat remains a boundary, not a proven defect.",
+      "BUGS.md": "No match.",
+      "queue and active ledger": "Searched checksum inventory, release manifest, missing entry and tmux payload terms. No exact item or active decision."
+    },
+    "exact_cover_quotes": [
+      "SPEC_impl.md:8061-8065 specifies 'the four payload archives' and 'that release\u0027s `install.sh`', with earlier releases' tmux entries looked up by name."
+    ],
+    "missing_premise": "No runtime consumer requiring a removed tmux asset was established. External publication-tool compatibility is uninspected and is not asserted to be correct.",
+    "original_stronger_consequence": "Removing tmux checksum names might break signed-release downloads or omit a still-shipped payload. No established signature bypass or work-loss route was alleged.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Source refutation of the named membership regression. Conservative independent check flag because the dismissal concerns signed-release integrity; no claim that this consultation authorizes dropping security consequences."
+  },
+  {
+    "key": "g073/l1",
+    "latest_line": 5,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "migrated-farhelm-payload-fault-test-targets",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The examined migrated tests fault the shared manifest or the archive actually requested. Fresh caches and mechanism-specific assertions prevent the hypothesized warm-cache or wrong-file bypass on these paths. This is a test-oracle conclusion, not proof of all production cache behavior.",
+    "checks": [
+      "500548b9253b07a26fd03119679184b69544e31d:crates/farhelm-helm/src/provisioning/release_payloads.rs:2303-2333 faults SHA256SUMS, requires the first HTTP 500 and a successful second farhelm result with exactly two manifest requests. 2521-2544 intentionally tests the old signed fixture's absent tmux name through archive_member.",
+      "cb762a313abbe6da03ae0bf041f07486c4ed4df9:same file:2508-2545 uses a fresh cache, signed manifest omitting the actual Linux aarch64 archive, checks absent-name/cardinality premises, exact missing-entry error and no asset request. 2071-2159 uses actual distinct farhelm assets, fetch counts, arrival gates and architecture-specific expected bytes.",
+      "500548b9:same file:2181-2204,2715-2740,2901-2952,3608-3641,3705-3735,3842-3874 directly target requested archives/control files and check bytes, request counts or redaction. At cb762a31:2032-2062 a fresh source after control tampering requires recovered bytes and three new requests.",
+      "cb762a31:same file:805-853 only returns after extraction and binary publication; 1402-1416 requires a regular per-asset binary and matching bounded marker. Signed controls or a downloaded archive alone cannot satisfy this check. Cold tests do not assert every leftover name, a retry after every fault, or simultaneous repair. No test execution."
+    ],
+    "coverage_checked": {
+      "SPEC.md and SPEC_impl.md": "Current signed-payload verification, named-member selection and one-payload provisioning sections govern the test mechanisms. None explicitly accepts ineffective regression tests; the basis is source refutation.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "No unlanded plans in INDEX.md; historical tmux release fixture migration was already landed.",
+      "BUGS.md": "No matching test defect.",
+      "queue and active ledger": "Searched migrated faults, checksum retry, missing-entry, archive fault and warm-cache terms. Existing redirect-regression-omits-location-header concerns a different redirect test; no exact cover or extension for these named tests."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "No mismatched fault target or wrong warmed-cache bypass was established in the inspected migrated tests. The separately mentioned broader cache/authentication baseline question belongs to another record and is not decided here.",
+    "original_stronger_consequence": "Migrating tmux requests to farhelm might leave faults aimed at retired assets, causing failing or ineffective tests; later concerns included warm binaries hiding faults and failed publication looking usable. No product failure was established.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Source refutation limited to the named migrated-fault mechanisms. Conservative independent flag for the authentication and missing-manifest-entry test boundaries; no blanket security or cache-correctness clearance."
+  }
+]

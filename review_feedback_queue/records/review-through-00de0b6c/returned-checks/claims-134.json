@@ -1,0 +1,125 @@
+[
+  {
+    "key": "g077/f4",
+    "latest_line": 25,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "podman-place-typed-ssh-refusal-reasons-missing-final-ui-escaping",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The narrow claim is established by conditional source dataflow and the explicit authorship contract. A supported configured SSH alias can retain U+200B through a real mux-channel refusal plus failed fallback login, then appear unescaped in recipe-place status and the Container host option label. This is misleading diagnostic spelling, with no established remote-attacker, HTML, unauthorized execution, wrong-target, destructive-consent or user-work-loss route. The rare-diagnostic filter's consequence limb fits, but its rare-trigger limb is not established: unusual accepted configuration alone does not show a narrow timing window, a point interruption, or input shipped clients never send. Retain under the filter's express uncertainty rule.",
+    "checks": [
+      {
+        "reference": "g077/findings.jsonl:6,7,23,24,25",
+        "result": "Read the complete f4 history. Line 6 raised raw provider-output formatting and reserved stronger consequences only if a separate decision route existed. Line 7 source-refuted arbitrary remote-output propagation and called local-value final escaping future hardening. Lines 23-25 reopened that local-value dismissal under the explicit authorship contract and established a configured-alias typed-refusal route. Preserve line 7's narrow remote-output refutations; its broader no-current-defect conclusion is superseded, not silently accepted. No reproduction was claimed by the owner or performed here."
+      },
+      {
+        "reference": "350a4b33b6d4476f4a78e43cea124bc2b828f462:crates/farhelm-ui/src/peer.rs:4-18,39-56,159-180; same file unchanged through 24bc058066fd57848e788b465719b0e6da2f98f7",
+        "result": "The boundary explicitly includes every relayed value, local or distant, including transport errors and SSH destinations. Directly decoded protocol values and composed diagnostics still require presentation helpers. display_peer visibly escapes presentation-unsafe characters; Dioxus interpolation is markup-inert. The current proto text.rs:57-79 includes U+200B and directional formatting in the unsafe set. Local configuration origin therefore does not by itself exempt this diagnostic from final escaping."
+      },
+      {
+        "reference": "350a4b33b6d4476f4a78e43cea124bc2b828f462:crates/farhelm-ui/src/hosts.rs:6019-6029,6065-6069,6156-6177; crates/farhelm-helm/src/hosts.rs:1009-1050; store.rs:2240-2263,6867-6881",
+        "result": "The shipped Add-host form passes the destination draft unchanged to its probe and advertises SSH-config Host names; its separate alias-draft check concerns the optional Farhelm display alias. POST /api/hosts passes spec.ssh unchanged to add_ssh_host. The destination admission rejects reserved podman:, empty, leading-dash and NUL-containing spellings, not U+200B. The defect does not require editing the separate Farhelm display alias. Current hosts.rs:6101-6123,6162,6250-6270 preserves that client behavior; store admission is unchanged."
+      },
+      {
+        "reference": "350a4b33b6d4476f4a78e43cea124bc2b828f462:crates/farhelm-helm/src/access.rs:82-93,267-282,340-365; ssh.rs:277-297; primary OpenSSH V_9_9_P2 ssh.c:596-606,1108-1112,1155-1181; readconf.c:1697-1735",
+        "result": "Farhelm retains literal destination bytes, uses ordinary user SSH configuration and terminates option parsing. Checked the owner's primary compatibility references: OpenSSH's byte-oriented hostname validation permits the UTF-8 bytes of U+200B, Host patterns match the supplied alias, and HostName substitution precedes resolution. A matching alias stanza with a normal HostName supports a real endpoint without resolving the invisible-character alias as DNS. This is source compatibility evidence for that version, not a test of installed SSH or all implementations. Sources: https://raw.githubusercontent.com/openssh/openssh-portable/V_9_9_P2/ssh.c and https://raw.githubusercontent.com/openssh/openssh-portable/V_9_9_P2/readconf.c ."
+      },
+      {
+        "reference": "350a4b33b6d4476f4a78e43cea124bc2b828f462:crates/farhelm-helm/src/environment/podman_probe.rs:145-164,223-229,302-319,446-472,508-540; transport.rs:413-442; manager.rs:5307-5320; OpenSSH V_9_9_P2 mux.c:1273-1294; SPEC_impl.md at introduction:6462-6487/current:5983-6008",
+        "result": "Probe commands use the shared supervisor route and retain mux refusal logging. Exit 255 plus the client's session-open-refusal diagnostic constructs SessionLimitRefusal from the original destination. The helper truncates that destination to a bounded raw excerpt and expressly defers final escaping. run preserves this typed error while replacing ordinary command failures with fixed prerequisite text; probe stringifies it, refresh caches it, and view clones it. OpenSSH's real failed session-confirmation path emits the matched refusal; its fallback failure behavior is also expressly described by the implementation spec. Source: https://raw.githubusercontent.com/openssh/openssh-portable/V_9_9_P2/mux.c . This conditional path needs both channel refusal and failed fallback, not merely any probe failure."
+      },
+      {
+        "reference": "350a4b33b6d4476f4a78e43cea124bc2b828f462:crates/farhelm-helm/src/environment/podman.rs:952-974; hosts.rs:4294-4374; tensorlake/build.rs:550-674; crates/farhelm-ui/src/api/environments.rs:5-14,29-38; crates/farhelm-proto/src/environment.rs:118-140",
+        "result": "Provider places forward the cached probe reason unchanged. EnvironmentPlaceView takes that String directly; recipe_places uses it when the recipe's build/freshness view has no reason. A compatible saved recipe without competing failure/freshness exposes the recipe status path. Plain Option<String> reason fields derive ordinary deserialization; API reads deserialize directly without a presentation adapter. Current podman.rs:953-975 and hosts.rs:4335-4415 retain those projections; API/proto files are unchanged from introduction to current main."
+      },
+      {
+        "reference": "350a4b33b6d4476f4a78e43cea124bc2b828f462:crates/farhelm-ui/src/containers_settings.rs:189-246; environment_ui.rs:610-661; current 24bc058066fd57848e788b465719b0e6da2f98f7:containers_settings.rs:219-246/environment_ui.rs:897-924",
+        "result": "RecipePlaces escapes the host name but inserts row.reason directly into its status sentence. The host option label separately escapes place.name and directly appends place.reason; the adjacent selected-place help does escape that reason, which does not repair the option label. Launch-mode unavailable options are disabled; authoring can still show/select them using their correct numeric host ID. Source establishes diagnostic display mismatch, not an operation redirected by the displayed text."
+      },
+      {
+        "reference": "350a4b33b6d4476f4a78e43cea124bc2b828f462:crates/farhelm-helm/src/environment/podman/build.rs:279-286; tensorlake/shell.rs:189-212; environment/podman_probe.rs:516-540,667-693",
+        "result": "The original arbitrary-remote-output premise remains narrowly refuted: stored build errors pass through shell::shown, stripping the shared unsafe set; ordinary probe command errors become fixed text except SessionLimitRefusal; version failure text quotes a parsed semantic version. These facts do not sanitize the separately established configured-destination typed path. No HTML execution follows from ordinary Dioxus text interpolation."
+      },
+      {
+        "reference": "git log 6e423e30068b62c6cfa276c6d720ee35bb70387a..00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db for the two UI files; explicit introduction-to-tip and tip-to-24bc058066fd57848e788b465719b0e6da2f98f7 diffs",
+        "result": "Both sink files were added at 350a4b33, within the assigned range. containers_settings.rs and transport.rs are identical at introduction, reviewed tip and current main. podman_probe.rs changed only two environmental comments by the tip and is identical tip-to-current. Later environment_ui.rs patches add unrelated provider/lifecycle methods and tests; the raw option-reason expression survives, moved from :647 to :910. The tip-to-current diff of all four files is empty. Relevant upstream admission/routing/projection differences are unrelated; peer.rs, API/proto, ssh.rs, build failure cleaning and shell::shown are unchanged introduction-to-current. manager's raw excerpt helper survives at current :5547-5560. HEAD was the stated recording main with clean status; TODO and INDEX blob hashes matched that main."
+      }
+    ],
+    "coverage_checked": [
+      {
+        "source": "SPEC.md at recording main",
+        "result": "Searched for unsafe text, escaping, diagnostics, SSH aliases and capacity; read Errors and diagnostics, Local authority and trust between hosts, and Supported user environments. The host-text escaping rule supports the defect rather than accepting it. The copied-command configuration trust exception is limited to copying commands and expressly preserves the escaping rule. The broad deliberate-setup acceptance does not expressly accept unescaped relayed diagnostic values; supported alias routing is intended configuration, while the UI/transport contract separately promises final escaping. No exact acceptance found."
+      },
+      {
+        "source": "SPEC_impl.md at recording main",
+        "result": "Searched escaping, peer text, raw diagnostics, aliases and shared SSH limits. Read the relevant transport/diagnostic paragraphs and One route for transport and provisioning. They preserve raw operational identities and describe real full-master/fallback failures; they do not accept unescaped diagnostic rendering at these sinks. The overbroad universal retained-text sentence is a separately queued wording problem, not coverage for this UI defect."
+      },
+      {
+        "source": "TODO.md Planned",
+        "result": "Current Planned bucket is empty (:25-27). Searches across TODO found no exact fix. Desktop protocol fallback hardening elsewhere concerns script injection and filesystem access, not visible escaping in these labels."
+      },
+      {
+        "source": "plans/queue",
+        "result": "Searched all queued plans for the actual sink names, typed refusal, unsafe formatting, escaping, container-host reasons, SSH capacity and display_peer. No stated work fixes these two raw reason sinks. podman-environments.md:201-235,430-448 describes the already implemented shared-route capacity diagnosis and public reasons; it does not state this escaping repair. approval-cards-fit.md:8-35,120-149 preserves peer escaping inside approval cards, a different scope. Neither is exact coverage regardless of its landing state; no unlanded exact-fix plan was found."
+      },
+      {
+        "source": "BUGS.md",
+        "result": "Read in full. Its lone ssh-helper output-open hang acceptance has a different trigger and consequence. No coverage."
+      },
+      {
+        "source": "review_feedback_queue/INDEX.md and matching feedback files",
+        "result": "Searched the complete index for peer/raw/escaping/spoof/Unicode/host/recipe/container/capacity/reason terms, plus exact typed-error and sink patterns across queue Markdown; no exact item found. Read remote-version-display-retains-format-characters.md, peer-text-normalization-contract-overstates-retained-scope.md and removal-destination-collapses-distinguishing-spaces.md in full. They concern remote agent-version stdout, specification wording, and ordinary-space collapsing/removal/start guidance respectively. They share context or policy, not these producers, values and sinks. No exact alias or useful extension to those items established."
+      },
+      {
+        "source": "TRIAGE_OUTCOMES.md active ledger only",
+        "result": "Searched for actual names, typed refusal, unsafe formatting, escaping, SSH, container hosts, recipes and diagnostics. Read matching removal-destination and hidden-Unicode-copy outcomes, plus repeated SSH marker context. Those decide different display/clipboard or maintainer-script cases. The proposed unestablished-harm filter carried by removal-destination is not an enacted general omission rule in current FILTER.md and does not settle this source-established diagnostic path. No exact active outcome. Archive not read."
+      },
+      {
+        "source": "review_feedback_queue/FILTER.md, Rare, self-correcting glitches and imprecise diagnostics",
+        "result": "The entire established consequence is a misleading diagnostic; no stronger consequence is shown, so contract violation alone does not defeat this filter. However, the trigger does not establish its other required limb. Shipped UI accepts and sends the SSH alias; source supports that alias resolving through user config. Mux refusal with failed noninteractive fallback is a specified supported-capacity outcome and need not require a narrow timing window, crash or point interruption. Frequency was not observed. An unusual accepted input is not evidence that clients never send it. Full match is therefore unclear, and the explicit uncertainty rule requires retention. No other current filter has this trigger and scope."
+      }
+    ],
+    "exact_cover_quotes": [
+      {
+        "reference": "350a4b33 and current main:crates/farhelm-ui/src/peer.rs:4-13",
+        "quote": "The boundary this module draws is AUTHORSHIP, not distance: on one side the sentences this UI writes as literals, on the other every value it merely relays. Identities, build strings, transport errors, remediations and ssh destinations are all the second kind.",
+        "bearing": "Contract evidence, not accepted coverage; line wrapping and Rust comment prefixes omitted."
+      },
+      {
+        "reference": "350a4b33 and current main:crates/farhelm-ui/src/peer.rs:51-56",
+        "quote": "Directly decoded `farhelm-proto` types keep using the presentation helpers at their access sites; local drafts, operation snapshots and composed diagnostics can still be plain strings. Their adapters must preserve the same distinction between presentation and raw operational values.",
+        "bearing": "The plain-String protocol path has the same presentation duty; line wrapping and Rust comment prefixes omitted."
+      },
+      {
+        "reference": "350a4b33 and current main:crates/farhelm-helm/src/transport.rs:421-422",
+        "quote": "Name the place behind a failed nested login, preserving the bounded host spelling until the caller performs its ordinary final diagnostic escaping.",
+        "bearing": "Explicit final-escaping expectation; line wrapping and Rust comment prefixes omitted."
+      },
+      {
+        "reference": "SPEC.md:5278-5282 at 24bc058066fd57848e788b465719b0e6da2f98f7",
+        "quote": "for commands it offers for copying, Farhelm trusts the user's own configured host names, SSH destinations and helm state directory path (including the working directory a relative one resolves against) not to contain nonsensical characters that a shell or terminal interprets.",
+        "bearing": "Scope is copied commands, not raw diagnostic rendering; the paragraph also says the escaping rule still applies."
+      },
+      {
+        "reference": "review_feedback_queue/FILTER.md:30-34",
+        "quote": "The trigger is rare: a narrow timing window, a crash or interruption at a specific point, or an input the shipped clients never send.",
+        "bearing": "Required rare-trigger limb is not established for this shipped-client/configured-alias route."
+      },
+      {
+        "reference": "review_feedback_queue/FILTER.md:32-34",
+        "quote": "or an error message, log line or other diagnostic that is imprecise, misleading, missing detail, or lost.",
+        "bearing": "Established consequence does fit this limb; that alone does not satisfy both requirements."
+      },
+      {
+        "reference": "review_feedback_queue/FILTER.md:18-20",
+        "quote": "When it is unclear whether a finding matches, it does not match.",
+        "bearing": "Disposition when the full rare-trigger boundary is not demonstrated."
+      }
+    ],
+    "missing_premise": "No remaining source premise for the narrow conditional diagnostic defect. No runtime execution, frequency measurement, installed-SSH compatibility test or precise browser visual assessment was performed. Moving the consequence to highest would require an established route from these exact diagnostic surfaces to unauthorized execution, secret access, wrong-target or destructive authorization, or user data/process/work loss. The current routing/request values stay correct. Applying the rare-diagnostic filter would require evidence that its rare-trigger criterion covers this route; unusual accepted configuration alone is insufficient.",
+    "original_stronger_consequence": "Original f4 considered invisible/bidi formatting from provider errors misleading users, with a possible security or destructive consequence only if a separate consent/decision route were established. Such a route was never established. Line 7 refuted arbitrary remote provider-output propagation through these reasons and treated the locally configured typed-refusal destination as only future hardening. The latter conclusion was reopened and superseded by the broader authorship contract and supported SSH-alias path at lines 23-25. The former remote-output refutations remain valid for their exact producers. Dioxus text rendering supplies no HTML-execution route. Preserve all of these in the parent's final drop/lowering register; this consultation neither independently authorizes those exclusions nor accepts a parent drop.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Retain a new verified other item for final escaping of relayed typed-refusal reasons at the two exact sinks, preserving raw registry/request/SSH bytes. No exact current coverage or alias found. g059/l5 recipe-reference/account summaries and g086/l4 host-alias footer share a policy but are distinct sources/sinks/fixes; no deduplication proposed. Do not filter on inferred rarity, and do not claim a security/trust-boundary effect solely because an escaping helper is a defense elsewhere. Send the original remote/security hypotheses and the narrowly stated refutation/lowering bases to the separate fresh independent drop gate."
+  }
+]

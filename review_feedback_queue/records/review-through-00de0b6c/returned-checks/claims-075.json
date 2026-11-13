@@ -1,0 +1,66 @@
+[
+  {
+    "key": "g116/c1",
+    "latest_line": 4,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "tmux-retried-create-refusal-explanation-wording",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The assigned message change establishes no defect. This is limited to the changed explanatory clause; it does not certify the entire create-recovery or checkout-ownership flow. The earlier blanket rollback and settlement descriptions need the qualifications preserved below.",
+    "checks": [
+      "08399d092d20815ced6619c26df2391944ae2b4a diff, crates/farhelm-supervisor/src/service/core.rs:14661-14667: only the explanatory clause changes from creating only new terminals to starting every terminal in a terminal host. Conflict, old-terminal identity, refusal, and create-again instruction remain.",
+      "At that revision core.rs:10801-10816 refuses a taken-over tmux row before checkout allocation. core.rs:14641-14711 deletes a no-origin row, rolls back a still-Planned origin through abandon_fresh_pre_mkdir, and retains allocated/missing/unreadable provenance. These branches were not changed by the wording patch.",
+      "At that revision core.rs:9548-9740, occupied Planned targets and inspection errors yield RetainedCreateRefusal during validation, before the changed message. Therefore the helper's Planned rollback branch is not a description of every Planned retry. External path changes after validation are not refuted by Farhelm's operation serialization.",
+      "At that revision store.rs:3613-3654 atomically removes membership, Planned registry row and session and settles the intent; there is no filesystem deletion in this transaction. store.rs:4022-4074 retains session/registry evidence and settles within one transaction. core.rs:14719-14818 republishes prior evidence and reports an unrecorded outcome if persistence fails. Durable Failed settlement is conditional on successful commit.",
+      "At that revision core.rs:35940-36049, the existing regression checks the unchanged old terminal (tmux) substring, directory absence, removed session/plan and Failed intent. This was inspected, not executed.",
+      "Pinned git grep across crates and e2e found the new phrase only at core.rs:14664 and no old explanatory phrase at the reviewed revision. This provides no changed-string consumer route.",
+      "Read every supplied history event. No runtime test, build or reproduction ran; all conclusions are source-only. No broader conclusion about g107/l1 was made."
+    ],
+    "coverage_checked": [
+      "SPEC.md:2998-3013 describes ending old tmux terminals and subsequent host-backed starts; it does not establish a harmful consequence of this wording.",
+      "SPEC_impl.md:2178-2235, Creating agents in hosts, explicitly requires refusal of taken-over tmux creates before anything starts and settlement against the key; both reviewed and current text carry this contract. It supports the local explanation, not a blanket correctness verdict for retry ownership.",
+      "TODO.md:23-27: Planned is empty. No exact wording defect is scheduled there.",
+      "plans/queue searched for the actual retry, refusal and helper terms. tmux-drop-from-docs.md:48-103 schedules broad comment cleanup and a tmux audit; tmux-end-old-terminals.md:254-290 discusses host testing and migration. Neither states work fixing this claimed message consequence. No plan coverage relied upon, regardless of landing state.",
+      "BUGS.md read in full: its SSH transfer-output hang is unrelated.",
+      "review_feedback_queue/INDEX.md and queue Markdown searched for tmux refusal, retry/checkout, both helper names, the changed phrase and old terminal (tmux). No exact same-root item found. TRIAGE_OUTCOMES.md:569-580 concerns a retained-refusal UPDATE during concurrent Restart, not the changed string or its local branch; it is not exact coverage.",
+      "FILTER.md read in full. The rare-diagnostic filter could apply only to a demonstrated diagnostic-only flaw with its whole boundary met. This result instead refutes the named wording defect; it does not filter checkout ownership or user-work consequences. The archive was not read."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No source premise remains for the narrowly assigned wording claim. A different checkout ownership defect or user-work consequence would require its own established route and is not refuted here.",
+    "original_stronger_consequence": "A misleading recovery instruction or changed-string consumer could misdirect a refused create. Early events also described Planned rollback and settlement too broadly: rollback only describes attempts reaching this helper, and durable settlement requires successful persistence. Later events expressly preserve possible underlying checkout ownership defects and the separate parent-supplied g107/l1 lead.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Source refutation limited to a defect introduced by the message replacement. Preserve the earlier ownership/settlement caveats and do not treat this as a dismissal of g107/l1. Independent checking is warranted before any parent dismissal encompassing the earlier checkout-preservation assertions or possible user-work consequences. This consultation is not that independent check."
+  },
+  {
+    "key": "g116/l2",
+    "latest_line": 6,
+    "recommendation": "out-of-range",
+    "bucket": "other",
+    "underlying_key": "host-install-test-helper-real-binary-documentation-mismatch",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The helper documentation misdescribes the unit-test stand-in as a separate real Farhelm host, but the same claim and contradictory caller already exist at the exclusive range base. The reviewed rewording neither adds nor strengthens that claim. This is attribution refutation, not a conclusion that the documentation is correct.",
+    "checks": [
+      "08399d092d20815ced6619c26df2391944ae2b4a:crates/farhelm-supervisor/src/service/core.rs:15522-15538 says the chosen host is started from the real farhelm binary and never inside the test process. core/tests/host_terminals.rs:1606-1611 calls adopt_test_host(None), then passes test_host.socket() to this helper.",
+      "At that revision hosts/terminal/test_host.rs:1-23 expressly describes a listener inside the test process, a real sleep child, and the test runner as peer. Its adopt_test_host at 365-372 constructs that stand-in. The contradiction is source-established.",
+      "At that revision crates/farhelm/tests/e2e/host_terminals.rs:81-114 uses spawn_host with farhelm_bin and then the installation helper. The documentation accurately describes that caller, but not every caller.",
+      "Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:core.rs:18550-18570 already contains the real-binary/never-inside claim. Its core/tests/host_terminals.rs:1623-1627 already passes the stand-in socket, and hosts/terminal/test_host.rs:1-23 already declares the in-process listener/test-runner peer.",
+      "Range-wide git log -S 'never inside the test process' for core.rs returned no count-changing commit. The diff of 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 shows the existing paragraph moved into the merged installation helper. The assigned 08399d patch changes switch-point wording to lifecycle verbs and identifies the replaced create host; it retains the disputed executable claim.",
+      "All supplied history was read, including the unresolved lead and its later attribution resolution. No runtime defect is alleged and no tests/builds/reproductions ran."
+    ],
+    "coverage_checked": [
+      "Both specifications searched for the host-testing boundary. SPEC_impl.md:8164-8200 repeats the real-host testing explanation, including the built farhelm/never-inside assertion at 8190; this is not an explicit acceptance of inaccurate helper documentation. SPEC.md's terminal experience text does not settle this maintainer documentation mismatch.",
+      "TODO.md:23-27: Planned is empty. No exact scheduled fix found.",
+      "plans/queue searched for install_host_agent_for_test, adopt_test_host, real binary, never inside and stand-in wording. tmux-end-old-terminals.md:274-284 recognizes the in-process stand-in when discussing migration; tmux-drop-from-docs.md:67-103 schedules tmux-era wording cleanup. Neither states a correction of this real-binary claim, so neither is exact coverage.",
+      "BUGS.md read in full: only the unrelated SSH transfer-output hang is recorded.",
+      "INDEX.md and queue Markdown searched for the helper and exact executable-boundary wording, plus TestHost/stand-in/fixture terms. No same-root item found. input-test-comments-overstate-termination-coverage.md concerns different WebSocket test guarantees. The indexed stand-in cleanup/lifetime findings concern process cleanup and listener release, not this documentation claim. TRIAGE_OUTCOMES.md has no matching decision; the archive was not read.",
+      "FILTER.md read in full. No complete boundary matches a persistent code-documentation claim about test execution. In particular the imprecise-diagnostic filter does not cover this helper contract."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "None for the pre-existing mismatch or its attribution. No distinct new documentation or test-oracle consequence was established within the review range.",
+    "original_stronger_consequence": "A maintainer could infer a separate forked real-host execution boundary for a unit test that actually uses an in-process protocol stand-in. This remains a real documentation mismatch; production correctness and the genuine e2e caller do not refute it.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Outside 6e423e30068b62c6cfa276c6d720ee35bb70387a..00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db: the exact mismatch and caller are present at the exclusive base, and the in-range move/rewording introduces no distinct consequence. Its established impact is maintainer understanding, with no security or user-work-loss route alleged. No parent drop decision is inferred."
+  }
+]

@@ -1,0 +1,866 @@
+{
+  "group": {
+    "id": "g151",
+    "domain": "rust-terminal-host-regressions",
+    "purpose": "rust-terminal-host-regressions: crates/farhelm/tests/e2e/host_reclaim.rs, crates/farhelm/tests/e2e/terminal_tabs.rs, crates/farhelm/tests/e2e/host_creates.rs, crates/farhelm/tests/e2e/host_processes.rs, crates/farhelm/tests/e2e/tab_lifecycle_edges.rs, crates/farhelm/tests/e2e/host_connection.rs, crates/farhelm/tests/e2e/host_relaunches.rs, crates/farhelm/tests/e2e/host_restarts.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g001",
+      "g003",
+      "g005",
+      "g006",
+      "g007",
+      "g008",
+      "g009",
+      "g144",
+      "g145",
+      "g146",
+      "g152",
+      "g153",
+      "g154",
+      "g155",
+      "g156",
+      "g157",
+      "g158",
+      "g159",
+      "g160",
+      "g161",
+      "g162",
+      "g163",
+      "g164",
+      "g165",
+      "g166",
+      "g167",
+      "g168",
+      "g169",
+      "g170",
+      "g171",
+      "g172",
+      "g173"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00748-000.patch",
+        "ranges": [
+          [
+            1,
+            38
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/host_reclaim.rs",
+        "commit": "70bc66a9f285cc2a9984924f389834d118b7cfdc",
+        "notes": "patch header; patch character offsets [0,2338)",
+        "lines": 38,
+        "bytes": 2338,
+        "start": 0,
+        "end": 2338,
+        "original": "[private-run]/prep/originals/00748.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00750-000.patch",
+        "ranges": [
+          [
+            1,
+            189
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/terminal_tabs.rs",
+        "commit": "70bc66a9f285cc2a9984924f389834d118b7cfdc",
+        "notes": "patch header; patch character offsets [0,8237)",
+        "lines": 189,
+        "bytes": 8241,
+        "start": 0,
+        "end": 8237,
+        "original": "[private-run]/prep/originals/00750.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00787-000.patch",
+        "ranges": [
+          [
+            1,
+            231
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/host_creates.rs",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,10426)",
+        "lines": 231,
+        "bytes": 10426,
+        "start": 0,
+        "end": 10426,
+        "original": "[private-run]/prep/originals/00787.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00789-000.patch",
+        "ranges": [
+          [
+            1,
+            634
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/host_processes.rs",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,28925)",
+        "lines": 634,
+        "bytes": 28925,
+        "start": 0,
+        "end": 28925,
+        "original": "[private-run]/prep/originals/00789.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00799-000.patch",
+        "ranges": [
+          [
+            1,
+            267
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/tab_lifecycle_edges.rs",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,11464)",
+        "lines": 267,
+        "bytes": 11486,
+        "start": 0,
+        "end": 11464,
+        "original": "[private-run]/prep/originals/00799.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00973-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/host_connection.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,526)",
+        "lines": 13,
+        "bytes": 526,
+        "start": 0,
+        "end": 526,
+        "original": "[private-run]/prep/originals/00973.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00976-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/host_reclaim.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,545)",
+        "lines": 13,
+        "bytes": 545,
+        "start": 0,
+        "end": 545,
+        "original": "[private-run]/prep/originals/00976.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00977-000.patch",
+        "ranges": [
+          [
+            1,
+            14
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/host_relaunches.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,676)",
+        "lines": 14,
+        "bytes": 676,
+        "start": 0,
+        "end": 676,
+        "original": "[private-run]/prep/originals/00977.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00978-000.patch",
+        "ranges": [
+          [
+            1,
+            18
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/host_restarts.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,791)",
+        "lines": 18,
+        "bytes": 791,
+        "start": 0,
+        "end": 791,
+        "original": "[private-run]/prep/originals/00978.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00987-000.patch",
+        "ranges": [
+          [
+            1,
+            24
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/terminal_tabs.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,1256)",
+        "lines": 24,
+        "bytes": 1256,
+        "start": 0,
+        "end": 1256,
+        "original": "[private-run]/prep/originals/00987.patch"
+      }
+    ],
+    "lines": 1441,
+    "bytes": 65210
+  },
+  "records": [
+    {
+      "key": "g151/l1",
+      "owner": "g151",
+      "id": "l1",
+      "domain": "rust-terminal-host-regressions",
+      "purpose": "rust-terminal-host-regressions: crates/farhelm/tests/e2e/host_reclaim.rs, crates/farhelm/tests/e2e/terminal_tabs.rs, crates/farhelm/tests/e2e/host_creates.rs, crates/farhelm/tests/e2e/host_processes.rs, crates/farhelm/tests/e2e/tab_lifecycle_edges.rs, crates/farhelm/tests/e2e/host_connection.rs, crates/farhelm/tests/e2e/host_relaunches.rs, crates/farhelm/tests/e2e/host_restarts.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Check replacement coverage for deleted old-terminal process regressions",
+            "location": "crates/farhelm/tests/e2e/host_processes.rs:459",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: deletion may leave existing users' old terminals without regression coverage for adoption, notification resolution, and private tmux server shutdown. Source: assigned host_processes patch deletes the real-process migration and private-server lifecycle tests when removing --new-terminals. Contract: SPEC_impl.md at this revision still describes adoption of existing tmux terminals. Checks so far: read patch lines 1-500; replacement host_migrations coverage and remaining patch are not yet inspected. Missing premise: whether equivalent tests exercise these contracts through the replacement old-terminal fixture. Next check: remaining deletion and pinned host_migrations/harness callers. Suggested bucket: other (test coverage only). Confidence: uninvestigated lead, not a finding. Could-be-highest: no established security or loss-of-work route from this test deletion alone. proposed_drop: false pending source analysis. possible_cover: none; coverage sources not searched. No execution performed."
+          }
+        },
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Deleted real-process tmux regressions retain focused lower-layer coverage",
+            "location": "crates/farhelm/tests/e2e/host_processes.rs:459",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: the removed tests no longer check an old session through the shipped supervisor process, but the deletion alone does not establish a product failure or an untested core lifecycle contract. Original concern preserved: adoption, notification resolution, last-server shutdown, and refusal to delete or duplicate an unreachable old agent lose their combined real-process check. Checks/results: all assigned deletion hunks read; git tree confirms host_migrations.rs is also removed, not a replacement. Pinned tmux.rs:9448-9494 still tests a real server with missing tmux, non-absence and refused probe/kill/create; tmux.rs:9509-9540 tests adoption of a real earlier-build server with exit-empty off, querying its old sessions and actual server exit after the last kill. Pinned service/ticker.rs:7332-7399 seeds a real tmux terminal and tests one durable old-terminal notification, no duplicate, persistence while an old tab runs, and resolution after the tab exits. SPEC_impl.md:2294-2307 explicitly moves every new terminal and the e2e stacks to hosts while retaining driver tests: 'The tests of the tmux driver build their own tmux servers.' SPEC.md:3013-3038 retains existing-terminal behavior. Suggested bucket: other, coverage concern only. Confidence: confirmed source analysis, no execution. proposed_drop: focused remaining real-tmux tests cover the named mechanisms; absence of the broader process test is a narrower integration-coverage omission, without an identified erroneous assertion or demonstrated shipped behavioral defect. Could-be-highest: no; harm established here is confined to test coverage, and no loss-of-work route in shipped code is established. possible_cover: none; no queue or excluded metadata consulted. Caveat: these lower-layer tests do not prove that the shipped supervisor wires every path correctly; this record does not claim equivalent end-to-end coverage."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Old-terminal process wiring loses its regression oracle while compatibility still ships",
+            "location": "crates/farhelm/tests/e2e/host_processes.rs:459",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: tests no longer verify that the shipped supervisor process adopts an existing old-terminal session, serves it to a viewer, reports its migration state, and protects an old agent when tmux cannot be used, although this release still promises those behaviors. This is a confirmed test-only gap, not a claim of observed product failure. Original claim preserved: the deleted real-process tests jointly exercised adoption, notification resolution, private-server shutdown, and refusal to delete or duplicate an unreachable old agent. Source: assigned host_processes deletion removes an_old_session_after_the_switch_to_hosts_is_reported_as_one_to_move, the_private_tmux_server_ends_with_the_last_old_terminal and old_terminals_without_a_usable_tmux_are_reported_not_alive, with no process-level replacement established. At this commit SPEC.md:3013-3038 still promises old terminals remain as they are, old-terminal notification/band conditions, and last-old-terminal server retirement; SPEC_impl.md:2294-2296 says the supervisor still adopts and serves an earlier supervisor's server. Remaining tmux.rs:9448-9494 and 9509-9540 tests cover real driver adoption/refusal/server exit; ticker.rs:7332-7399 covers notification mechanics using an installed entry. Neither constructs the shipped supervisor on persisted old-session state and then checks reload, listing, terminal stream and lifecycle controls together. They therefore do not replace the deleted transition/wiring oracle. Suggested repair at this revision: seed a real earlier-build tmux session and matching stored row without restoring new-tmux production creation, then drive the bare supervisor process through the retained compatibility contracts. Suggested bucket: other (maintainer test coverage); confidence: confirmed source analysis. proposed_drop: false; the prior proposed drop is withdrawn because no observed product failure is not sufficient grounds to omit this concrete regression-oracle deletion. Could-be-highest: no established product security or loss-of-work defect; harm established is test-only. possible_cover: parent reports g152/l1 concerns the broader actual migration-suite deletion; likely overlapping coverage-gap topic, not independent evidence of a runtime bug. Parent also names g156's sink integration-coverage question; no sink conclusion is imported. Caveats: lower-layer tests preserve the named mechanisms but not process wiring; later source retirement at pinned tip remains to be checked separately. No execution performed."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Old-terminal process wiring gap is historical after later source retirement",
+            "location": "crates/farhelm/tests/e2e/host_processes.rs:459",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: deletion removes a concrete real-process regression oracle for old terminals while the reviewed intermediate revision still serves them. This remains a confirmed test-only finding, not an observed product failure. Original claim preserved: adoption and byte-stream serving, migration state and notification resolution, last-private-server shutdown, and unusable-tmux lifecycle protection lose their combined shipped-process check; retained tmux-driver and ticker tests cover mechanisms but not that process wiring. Governing references: SPEC.md at 647f0227:3013-3038 and SPEC_impl.md:2294-2296 retain old compatibility; removed tests are an_old_session_after_the_switch_to_hosts_is_reported_as_one_to_move, the_private_tmux_server_ends_with_the_last_old_terminal and old_terminals_without_a_usable_tmux_are_reported_not_alive in host_processes.rs. Repair at the reviewed revision: seed a real earlier-build server and corresponding persisted session, then start the bare supervisor and assert its listing/stream/lifecycle behavior, without restoring production creation of new tmux terminals. Later retirement checked separately: git history first adds service/core/old_terminals.rs in dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. At pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, SPEC.md:2998-3010 explicitly changes the contract: 'A supervisor that finds that tmux server when it starts ends it, and with it everything that still ran in an old terminal, without needing a tmux program.' SPEC.md:2804-2813 replaces the migration warning with an ended-terminal notice. Complete SPEC_impl.md section 'Ending the old private tmux server', lines 2780-2823, describes the replacement. Tip core.rs:6141-6184 calls end_private_server before reload; :6674-6678 gives every Tmux row no terminal; :6807-6821 converts live old rows to TerminalEnded. Thus the deleted steady-state adoption/serving/warning oracles have no remaining subject at tip. Suggested bucket: other (test-only gap at the intermediate revision); confidence: confirmed by source, no execution. proposed_drop: false for the historical finding; its former no-product-failure drop basis is withdrawn. Current-tip applicability is retired, so do not restore obsolete compatibility tests as a forward fix merely because this historical gap existed. possible_cover: parent identifies g152/l1 for the broader deleted migration suite; consolidate overlapping historical gaps if useful, retaining these exact lost process oracles. g156's sink coverage topic was not independently reviewed here. Could-be-highest: no; no shipped data-loss/security defect is established. Caveats: no claim that compatibility broke in execution, no claim of equivalent lower-layer coverage, and no judgment here of the replacement retirement implementation's correctness."
+          }
+        }
+      ],
+      "latest": {
+        "line": 8,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l1",
+          "state": "open",
+          "summary": "Old-terminal process wiring gap is historical after later source retirement",
+          "location": "crates/farhelm/tests/e2e/host_processes.rs:459",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: deletion removes a concrete real-process regression oracle for old terminals while the reviewed intermediate revision still serves them. This remains a confirmed test-only finding, not an observed product failure. Original claim preserved: adoption and byte-stream serving, migration state and notification resolution, last-private-server shutdown, and unusable-tmux lifecycle protection lose their combined shipped-process check; retained tmux-driver and ticker tests cover mechanisms but not that process wiring. Governing references: SPEC.md at 647f0227:3013-3038 and SPEC_impl.md:2294-2296 retain old compatibility; removed tests are an_old_session_after_the_switch_to_hosts_is_reported_as_one_to_move, the_private_tmux_server_ends_with_the_last_old_terminal and old_terminals_without_a_usable_tmux_are_reported_not_alive in host_processes.rs. Repair at the reviewed revision: seed a real earlier-build server and corresponding persisted session, then start the bare supervisor and assert its listing/stream/lifecycle behavior, without restoring production creation of new tmux terminals. Later retirement checked separately: git history first adds service/core/old_terminals.rs in dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. At pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, SPEC.md:2998-3010 explicitly changes the contract: 'A supervisor that finds that tmux server when it starts ends it, and with it everything that still ran in an old terminal, without needing a tmux program.' SPEC.md:2804-2813 replaces the migration warning with an ended-terminal notice. Complete SPEC_impl.md section 'Ending the old private tmux server', lines 2780-2823, describes the replacement. Tip core.rs:6141-6184 calls end_private_server before reload; :6674-6678 gives every Tmux row no terminal; :6807-6821 converts live old rows to TerminalEnded. Thus the deleted steady-state adoption/serving/warning oracles have no remaining subject at tip. Suggested bucket: other (test-only gap at the intermediate revision); confidence: confirmed by source, no execution. proposed_drop: false for the historical finding; its former no-product-failure drop basis is withdrawn. Current-tip applicability is retired, so do not restore obsolete compatibility tests as a forward fix merely because this historical gap existed. possible_cover: parent identifies g152/l1 for the broader deleted migration suite; consolidate overlapping historical gaps if useful, retaining these exact lost process oracles. g156's sink coverage topic was not independently reviewed here. Could-be-highest: no; no shipped data-loss/security defect is established. Caveats: no claim that compatibility broke in execution, no claim of equivalent lower-layer coverage, and no judgment here of the replacement retirement implementation's correctness."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g151/findings.jsonl",
+        "id": "l1",
+        "line": 8,
+        "disposition": "under-investigation",
+        "group": "g151-l1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-097",
+          "key": "g151/l1",
+          "latest_line": 8,
+          "recommendation": "needs-parent",
+          "bucket": "other",
+          "underlying_key": "647f022-old-terminal-process-compatibility-oracle-deletion",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The intermediate process-level coverage loss is established. Its subject was retired before the review tip, so there is no demonstrated current repair to make. Preserve the historical finding and ask the parent to decide whether that history warrants a queue item; do not restore obsolete compatibility tests.",
+          "checks": [
+            "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 deletes the named host_processes tests. Parent source :608-710 checks persisted old-session adoption, byte-stream attachment and notification resolution; :900-952 checks last-server exit; :970-1028 checks unusable-tmux listing and Delete refusal.",
+            "The unusable-tmux test's Restart refusal is explicitly an earlier no-conversation gate (:1011-1015), not a witness of the unusable-server Restart gate. Preserve this limit when describing the lost oracle.",
+            "At 647f022, tmux.rs:9448-9494 and :9509-9540 check driver refusal/adoption/server exit, and service/ticker.rs:7332-7399 checks notifications on an installed entry. These do not replace shipped-process wiring.",
+            "At 647f022, SPEC.md:3013-3038 and SPEC_impl.md:2294-2307 still retain compatibility. At 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, core.rs:6141-6149 ends old terminals before reload, :6674-6678 never resolves a Tmux row, and :6807-6821 converts live old rows to TerminalEnded. No runtime test or reproduction was run."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:2998-3010 and SPEC_impl.md:2780-2823 explicitly retire old-terminal serving; this resolves forward applicability, not the earlier test deletion.",
+            "TODO.md Planned bucket is empty. BUGS.md concerns stalled SSH provisioning, not these tests. Searches of active TRIAGE_OUTCOMES.md and queue INDEX/matching terms found no exact coverage.",
+            "plans/queue tmux removal plans describe retirement, but plans/REPORTS.md:29-32 records all four landed. They are not unlanded-plan coverage. FILTER.md has no complete boundary matching an ordinary test-oracle deletion."
+          ],
+          "exact_cover_quotes": [
+            "Current SPEC.md:3000-3002: A supervisor that finds that tmux server when it starts ends it, and with it everything that still ran in an old terminal, without needing a tmux program."
+          ],
+          "missing_premise": "None for the historical test-only consequence. Whether to record a fully retired intermediate gap is a parent recording decision.",
+          "original_stronger_consequence": "Lost combined real-process checks for adoption/serving, warning resolution, last-private-server shutdown, and protection against deleting or duplicating an unreachable old agent. No runtime breakage was established. The earlier lower-layer-coverage drop was withdrawn and remains withdrawn; lower-layer correctness is not equivalent process coverage.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Historical claim verified; current applicability retired by an explicit later contract and source change. This consultation does not authorize dropping the history. Related g152/l1 adds actual migration/history-transition oracles and can be consolidated as an extension, but is not an exact alias."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "647f022-old-terminal-process-compatibility-oracle-deletion",
+        "destination": "trailing-647f022-old-terminal-process-compatibility-oracle-deletion.md"
+      }
+    },
+    {
+      "key": "g151/c2",
+      "owner": "g151",
+      "id": "c2",
+      "domain": "rust-terminal-host-regressions",
+      "purpose": "rust-terminal-host-regressions: crates/farhelm/tests/e2e/host_reclaim.rs, crates/farhelm/tests/e2e/terminal_tabs.rs, crates/farhelm/tests/e2e/host_creates.rs, crates/farhelm/tests/e2e/host_processes.rs, crates/farhelm/tests/e2e/tab_lifecycle_edges.rs, crates/farhelm/tests/e2e/host_connection.rs, crates/farhelm/tests/e2e/host_relaunches.rs, crates/farhelm/tests/e2e/host_restarts.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Host size assertion observes processed resize records",
+            "location": "crates/farhelm/tests/e2e/terminal_tabs.rs:2159",
+            "detail": "Reviewed commit: 70bc66a9f285cc2a9984924f389834d118b7cfdc. TLDR: considered whether the ported resize regression could pass merely because it observed a requested size rather than a resize the terminal host applied; source refutes that concern. Source: terminal_tabs.rs:2100-2154 attaches both distinct host terminals at 81x25, waits for both premises, resizes each channel to a different size and checks the sibling remains unchanged. hosts/terminal.rs:2240-2253 states and implements size as emulator size, 'the size of the latest resize record processed, which a resize just asked for may not have reached yet'; on_event at 3240-3244 consumes HostEvent::Resized into on_resized. SPEC.md at 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:2968-2972 says the attached client owns terminal dimensions; the SPEC.md blob is unchanged from 70bc66a9f285cc2a9984924f389834d118b7cfdc. Suggested bucket: other, test validity concern only. Confidence: confirmed source analysis. proposed_drop: the observable is a processed record from the host, not the desired size, and the explicit non-default-size premises prevent creation defaults from satisfying the checks. Could-be-highest: no; no shipped security or loss-of-work defect established by this considered test-oracle concern. possible_cover: none. Caveat: the sibling checks are snapshots, as in the prior tmux test, not a proof against arbitrary future delayed resizes. No runtime execution."
+          }
+        }
+      ],
+      "latest": {
+        "line": 3,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Host size assertion observes processed resize records",
+          "location": "crates/farhelm/tests/e2e/terminal_tabs.rs:2159",
+          "detail": "Reviewed commit: 70bc66a9f285cc2a9984924f389834d118b7cfdc. TLDR: considered whether the ported resize regression could pass merely because it observed a requested size rather than a resize the terminal host applied; source refutes that concern. Source: terminal_tabs.rs:2100-2154 attaches both distinct host terminals at 81x25, waits for both premises, resizes each channel to a different size and checks the sibling remains unchanged. hosts/terminal.rs:2240-2253 states and implements size as emulator size, 'the size of the latest resize record processed, which a resize just asked for may not have reached yet'; on_event at 3240-3244 consumes HostEvent::Resized into on_resized. SPEC.md at 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:2968-2972 says the attached client owns terminal dimensions; the SPEC.md blob is unchanged from 70bc66a9f285cc2a9984924f389834d118b7cfdc. Suggested bucket: other, test validity concern only. Confidence: confirmed source analysis. proposed_drop: the observable is a processed record from the host, not the desired size, and the explicit non-default-size premises prevent creation defaults from satisfying the checks. Could-be-highest: no; no shipped security or loss-of-work defect established by this considered test-oracle concern. possible_cover: none. Caveat: the sibling checks are snapshots, as in the prior tmux test, not a proof against arbitrary future delayed resizes. No runtime execution."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g151/findings.jsonl",
+        "id": "c2",
+        "line": 3,
+        "disposition": "excluded",
+        "group": "70bc66a-resize-oracle-observes-applied-host-size",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-097 after inspecting it. The size observation is processed emulator state, rather than the requested size. The test establishes non-default initial geometry before exercising distinct resizes. Source refutation of the named oracle concern, with the snapshot limitation preserved. This does not refute g151/f5's separate inaccurate comment. Checked source/results: [\"70bc66a9f285cc2a9984924f389834d118b7cfdc terminal_tabs.rs:2100-2154 attaches both terminals at 81x25, waits for those premises, resizes tab to 111x33 and agent to 90x30, and samples the sibling after each wait.\",\"Same revision hosts/terminal.rs:2240-2253 reads emulator size; :3240-3244 dispatches HostEvent::Resized; :3754-3766 applies that record. Thus a desired-but-unprocessed size cannot satisfy host_size.\",\"The sibling assertions remain snapshots, not proof against an arbitrary later resize. No execution or actual false-pass schedule was claimed.\"] Current coverage/results: [\"SPEC.md terminal-dimension ownership and SPEC_impl.md Recovery and checkpoints support the processed-size model. Neither accepts a defective test oracle.\",\"Searched current specifications, TODO Planned, plans/queue, BUGS.md, queue INDEX/matching queue terms and active TRIAGE_OUTCOMES.md for resize/status/oracle claims; no exact item or decision found. Planned is empty; no filter is needed.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A resize regression could pass merely by seeing requested geometry rather than a host-applied resize. Source refutes that premise. No production security or work-loss claim existed.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g151/c2",
+        "line": 3,
+        "disposition": "excluded",
+        "group": "70bc66a-resize-oracle-observes-applied-host-size",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-097 after inspecting it. The size observation is processed emulator state, rather than the requested size. The test establishes non-default initial geometry before exercising distinct resizes. Source refutation of the named oracle concern, with the snapshot limitation preserved. This does not refute g151/f5's separate inaccurate comment. Checked source/results: [\"70bc66a9f285cc2a9984924f389834d118b7cfdc terminal_tabs.rs:2100-2154 attaches both terminals at 81x25, waits for those premises, resizes tab to 111x33 and agent to 90x30, and samples the sibling after each wait.\",\"Same revision hosts/terminal.rs:2240-2253 reads emulator size; :3240-3244 dispatches HostEvent::Resized; :3754-3766 applies that record. Thus a desired-but-unprocessed size cannot satisfy host_size.\",\"The sibling assertions remain snapshots, not proof against an arbitrary later resize. No execution or actual false-pass schedule was claimed.\"] Current coverage/results: [\"SPEC.md terminal-dimension ownership and SPEC_impl.md Recovery and checkpoints support the processed-size model. Neither accepts a defective test oracle.\",\"Searched current specifications, TODO Planned, plans/queue, BUGS.md, queue INDEX/matching queue terms and active TRIAGE_OUTCOMES.md for resize/status/oracle claims; no exact item or decision found. Planned is empty; no filter is needed.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A resize regression could pass merely by seeing requested geometry rather than a host-applied resize. Source refutes that premise. No production security or work-loss claim existed.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-097",
+          "key": "g151/c2",
+          "latest_line": 3,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "70bc66a-resize-oracle-observes-applied-host-size",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The size observation is processed emulator state, rather than the requested size. The test establishes non-default initial geometry before exercising distinct resizes.",
+          "checks": [
+            "70bc66a9f285cc2a9984924f389834d118b7cfdc terminal_tabs.rs:2100-2154 attaches both terminals at 81x25, waits for those premises, resizes tab to 111x33 and agent to 90x30, and samples the sibling after each wait.",
+            "Same revision hosts/terminal.rs:2240-2253 reads emulator size; :3240-3244 dispatches HostEvent::Resized; :3754-3766 applies that record. Thus a desired-but-unprocessed size cannot satisfy host_size.",
+            "The sibling assertions remain snapshots, not proof against an arbitrary later resize. No execution or actual false-pass schedule was claimed."
+          ],
+          "coverage_checked": [
+            "SPEC.md terminal-dimension ownership and SPEC_impl.md Recovery and checkpoints support the processed-size model. Neither accepts a defective test oracle.",
+            "Searched current specifications, TODO Planned, plans/queue, BUGS.md, queue INDEX/matching queue terms and active TRIAGE_OUTCOMES.md for resize/status/oracle claims; no exact item or decision found. Planned is empty; no filter is needed."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "A resize regression could pass merely by seeing requested geometry rather than a host-applied resize. Source refutes that premise. No production security or work-loss claim existed.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation of the named oracle concern, with the snapshot limitation preserved. This does not refute g151/f5's separate inaccurate comment."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "70bc66a-resize-oracle-observes-applied-host-size",
+        "destination": null
+      }
+    },
+    {
+      "key": "g151/c3",
+      "owner": "g151",
+      "id": "c3",
+      "domain": "rust-terminal-host-regressions",
+      "purpose": "rust-terminal-host-regressions: crates/farhelm/tests/e2e/host_reclaim.rs, crates/farhelm/tests/e2e/terminal_tabs.rs, crates/farhelm/tests/e2e/host_creates.rs, crates/farhelm/tests/e2e/host_processes.rs, crates/farhelm/tests/e2e/tab_lifecycle_edges.rs, crates/farhelm/tests/e2e/host_connection.rs, crates/farhelm/tests/e2e/host_relaunches.rs, crates/farhelm/tests/e2e/host_restarts.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Removed tab-window tests target a retired creation path",
+            "location": "crates/farhelm/tests/e2e/tab_lifecycle_edges.rs:113",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: considered whether removing the dead-tab and failed-marking regressions silently removes coverage for new terminal tabs leaving processes behind. Source: assigned patch removes a tmux-only dead-pane listing/attach/close test and a failure at BeforeMarking. SPEC_impl.md:2370-2411 says every new tab runs in a terminal host, failed opens end their host and sweep their processes, and processed exits are hidden and reaped. Pinned host_tabs.rs:475-519 retains a BeforePublishing failure test that checks the refusal's actual cause, zero tab-marked processes, unchanged host process/socket inventories, no listing and no launch record. host_tabs.rs:531-566 retains event-driven exit/reap with the ticker interval far away, checking listing, host process, socket and record disappearance. Suggested bucket: other. Confidence: confirmed source analysis. proposed_drop: the removed marking failure belongs to creating a tmux window, which the supervisor no longer does; the replacement host failure and exit mechanisms have direct real-host tests. Could-be-highest: no established shipped loss-of-work or security route; this is test coverage analysis. possible_cover: none. Caveat: the remaining host exit test does not pin the precise dead-but-unreaped attach refusal boundary of the removed tmux test, and old tabs remain supported at this intermediate commit. No production defect is inferred from that coverage difference. No execution performed."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c3",
+            "state": "open",
+            "summary": "Separate the removed exit-before-reap oracle from obsolete tmux marking",
+            "location": "crates/farhelm/tests/e2e/tab_lifecycle_edges.rs:113",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: the deleted test distinguishes an exited tab that still exists physically from one already reaped, requiring it absent from listings, unattachable as NotFound, and still manually closeable. The replacement host_tabs.rs:531-566 waits for both listing disappearance and actual host/socket/record removal; that does not distinguish the pre-reap refusal boundary. The prior proposed drop conflated this required boundary with the separately obsolete BeforeMarking failure path. Source checks now: terminals.rs:983-992 still implements the old dead-tab resolver condition at 647f0227; status.rs:537/545 still filters dead tabs. No equivalent pre-reap attach assertion was found in the pinned e2e host_tabs/terminal_tabs sources by the targeted dead/unreaped/NotFound search. Missing premise: whether a remaining lower-level test explicitly pins both the pre-reap lookup and attach contracts, and whether the same boundary remains for host tabs at tip. Next: read the retained host-tab unit tests and live-only resolver, then inspect pinned tip. Suggested bucket: other (test-only regression coverage). Confidence: source-supported lead pending the named checks. proposed_drop: false pending resolution; the original broad drop is withdrawn for the dead-but-unreaped portion. Could-be-highest: no established product security or loss-of-work defect. possible_cover: g152/l1 may encompass some broader migration test removal, but this tab-boundary oracle is distinct from l1's real-process transition check. Caveats: BeforeMarking creates a tmux window and remains obsolete after new tmux creation is removed; source retirement may eliminate the old-tab variant without eliminating the corresponding host-tab boundary. No execution performed."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c3",
+            "state": "open",
+            "summary": "Dead-but-unreaped tab attachment refusal loses its regression oracle",
+            "location": "crates/farhelm/tests/e2e/tab_lifecycle_edges.rs:113",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: the removed test uniquely checks that a tab whose shell exited is already hidden and cannot be attached as NotFound while its terminal still exists, and can nevertheless be closed. The retained exit/reap test can pass even if an exited-but-not-yet-reaped tab remains attachable, since it waits until the host is actually removed. This is a confirmed test-only oracle gap, not an observed product bug. Original concern preserved and narrowed: tab process cleanup still has direct host coverage; the missing part is the live-only interactive lookup versus dead-included close boundary. Assigned deletion removes a_tab_whose_shell_exited_vanishes_from_listings_and_still_closes, whose precondition explicitly establishes the dead pane still exists before refusal and close. At 647f0227, terminals.rs:899-912 applies the same dead-tab live-only gate to host tabs, and :983-993 documents and enforces it for old tabs. host_tabs.rs:531-566 instead waits for listing empty AND host process/socket/record gone; its result cannot distinguish refusal before destruction from refusal only after destruction. The lower-layer host_tabs.rs:1783-1833 tests dead-tab listing and reap selection but never calls the live-only attach resolver, so it does not replace that oracle. Targeted searches of pinned host_tabs, terminal_tabs, core/tests/host_terminals and terminal resolver sources found no equivalent pre-reap tab attach check; tip-wide searches over supervisor, Rust e2e and browser tests for dead/exited/unreaped attachment likewise found agent-terminal tests, not the missing tab boundary. Pinned-tip persistence checked: 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db terminals.rs:105-149 and :223-248 still distinguishes LiveOnly from DeadIncluded, returns NotFound for finished host tabs on interactive paths, and explicitly forbids attaching to their discarded scrollback. The old tmux-tab subject is retired later, but this host-tab boundary remains, so it is not wholly obsolete. Repair: port the deleted test to a real host tab on an in-process supervisor without automatic reap, wait for its processed exit independently of listing, establish its host/socket/record still exist, assert listing absence and exact attach refusal, then close it and verify the owned host is destroyed. Suggested bucket: other (test coverage only). Confidence: confirmed source analysis; no execution. proposed_drop: false for the missing pre-reap interactive oracle; the prior general drop is withdrawn. The separately deleted BeforeMarking failure is obsolete because no new tmux windows are created; its host replacement is host_tabs.rs:475-519's BeforePublishing cleanup test. Could-be-highest: no established shipped security or loss-of-work route. possible_cover: none known for this specific oracle; g152/l1 and g151/l1 concern the broader old-session transition coverage. Caveats: existing source implements the intended refusal; this finding reports loss of regression protection, not incorrect current runtime behavior. Search absence is not a proof against differently named future tests; the pinned tests inspected do not exercise this boundary."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c3",
+            "state": "open",
+            "summary": "Dead-but-unreaped tab refusal gap remains applicable to host tabs at tip",
+            "location": "crates/farhelm/tests/e2e/tab_lifecycle_edges.rs:113",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: deleting a_tab_whose_shell_exited_vanishes_from_listings_and_still_closes removes the regression oracle that an exited tab is hidden and unattachable as NotFound before its terminal has actually been reaped, while close can still destroy it. Confirmed test-only gap, not an observed product failure. The original concern about tab cleanup remains narrowed to this interactive-versus-close boundary: host_tabs.rs:475-519 still covers failed-open process cleanup, and :531-566 covers eventual exit-driven destruction, but its conjunctive host/socket/record disappearance wait cannot establish pre-reap attach refusal. At 647f0227 terminals.rs:899-912 applies the dead-tab gate to host tabs, :983-993 applies it to tmux tabs; handlers.rs:1780-1785 propagates that resolver's refusal before attachment. The retained host_tabs.rs:1783-1833 unit test checks pre-reap listing/reap selection only, never attach or the live-only resolver. Targeted searches over the pinned host-tab e2e/unit sources and tip supervisor/Rust e2e/browser tests found no corresponding pre-reap tab attach assertion; direct resolver call searches find only production wrappers/callers, no resolver test. Later source retirement does eliminate old tmux tabs, but tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db retains this contract for host tabs: complete SPEC_impl.md 'Tabs in hosts' bullet :2234-2269 says a shell-exited tab 'is hidden at once'; terminals.rs:105-149 and :223-248 keeps LiveOnly versus DeadIncluded and exact NotFound behavior. Tip handlers.rs:1667-1679 routes Attach through LiveOnly before takeover; core.rs:13985-14011 routes user Close and reap through DeadIncluded. These actual callers confirm the missing distinction survives retirement. Repair: port the deleted test to a real host tab on an in-process supervisor without automatic reap; independently wait for processed shell exit, assert the owned host/socket/record remain, check listing absence and exact attach refusal, then manually close and verify host destruction. Suggested bucket: other (maintainer test coverage). Confidence: confirmed source analysis. proposed_drop: false for this still-required oracle; prior broad drop withdrawn. Separately, BeforeMarking is obsolete new-tmux-window creation, adequately distinguished from the missing boundary and not proposed as a fix to restore. Could-be-highest: no established product security/data-loss route. possible_cover: none known for this specific oracle; parent-reported g152/l1 overlaps g151/l1's old-session migration coverage, not this surviving host-tab contract. Caveats: existing runtime source implements the intended behavior; no reproduction, test execution or observed failure is claimed. Search absence is scoped to named pinned sources and call searches, not a proof about all possible indirectly equivalent assertions."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "c3",
+          "state": "open",
+          "summary": "Dead-but-unreaped tab refusal gap remains applicable to host tabs at tip",
+          "location": "crates/farhelm/tests/e2e/tab_lifecycle_edges.rs:113",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: deleting a_tab_whose_shell_exited_vanishes_from_listings_and_still_closes removes the regression oracle that an exited tab is hidden and unattachable as NotFound before its terminal has actually been reaped, while close can still destroy it. Confirmed test-only gap, not an observed product failure. The original concern about tab cleanup remains narrowed to this interactive-versus-close boundary: host_tabs.rs:475-519 still covers failed-open process cleanup, and :531-566 covers eventual exit-driven destruction, but its conjunctive host/socket/record disappearance wait cannot establish pre-reap attach refusal. At 647f0227 terminals.rs:899-912 applies the dead-tab gate to host tabs, :983-993 applies it to tmux tabs; handlers.rs:1780-1785 propagates that resolver's refusal before attachment. The retained host_tabs.rs:1783-1833 unit test checks pre-reap listing/reap selection only, never attach or the live-only resolver. Targeted searches over the pinned host-tab e2e/unit sources and tip supervisor/Rust e2e/browser tests found no corresponding pre-reap tab attach assertion; direct resolver call searches find only production wrappers/callers, no resolver test. Later source retirement does eliminate old tmux tabs, but tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db retains this contract for host tabs: complete SPEC_impl.md 'Tabs in hosts' bullet :2234-2269 says a shell-exited tab 'is hidden at once'; terminals.rs:105-149 and :223-248 keeps LiveOnly versus DeadIncluded and exact NotFound behavior. Tip handlers.rs:1667-1679 routes Attach through LiveOnly before takeover; core.rs:13985-14011 routes user Close and reap through DeadIncluded. These actual callers confirm the missing distinction survives retirement. Repair: port the deleted test to a real host tab on an in-process supervisor without automatic reap; independently wait for processed shell exit, assert the owned host/socket/record remain, check listing absence and exact attach refusal, then manually close and verify host destruction. Suggested bucket: other (maintainer test coverage). Confidence: confirmed source analysis. proposed_drop: false for this still-required oracle; prior broad drop withdrawn. Separately, BeforeMarking is obsolete new-tmux-window creation, adequately distinguished from the missing boundary and not proposed as a fix to restore. Could-be-highest: no established product security/data-loss route. possible_cover: none known for this specific oracle; parent-reported g152/l1 overlaps g151/l1's old-session migration coverage, not this surviving host-tab contract. Caveats: existing runtime source implements the intended behavior; no reproduction, test execution or observed failure is claimed. Search absence is scoped to named pinned sources and call searches, not a proof about all possible indirectly equivalent assertions."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g151/findings.jsonl",
+        "id": "c3",
+        "line": 10,
+        "disposition": "verified",
+        "group": "647f022-pre-reap-tab-live-only-attach-oracle-not-ported",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-097 after inspecting it. The deletion removes a concrete pre-reap refusal/close oracle. Eventual destruction and dead-tab listing tests do not protect the interactive-versus-close boundary, which remains in host terminals. This is test coverage, not evidence of incorrect current attachment behavior. Retain the surviving pre-reap behavioral-oracle gap as other priority. Keep the obsolete BeforeMarking portion separate and do not restore it. Checked source/results: [\"647f022 parent tab_lifecycle_edges.rs:173-250 establishes shell exit, hidden listing, exact NotFound attachment refusal, and continued physical pane existence before manual close. The deleted fixture is tmux-backed.\",\"At 647f022, host_tabs.rs:475-519 checks failed-open cleanup; :531-566 waits for listing absence AND host/socket/record destruction. core/host_tabs.rs:1783-1833 checks listing and reap selection without calling the live-only resolver. Neither distinguishes pre-reap refusal.\",\"At 647f022, terminals.rs:906-912 and :983-993 implement separate host and tmux live-only gates. The deleted test directly exercised the tmux gate, not the host branch: the supported current claim is an unported behavioral oracle, not that the old test would detect a host-branch mutation.\",\"At tip 00de0b6, terminals.rs:105-149,223-248 still separates LiveOnly from DeadIncluded; handlers.rs:1674-1679 uses the former for Attach; core.rs:14003-14011 uses the latter for Close/reap. Targeted tip searches for dead/exited/unreaped attach assertions and resolve_terminal callers found no equivalent tab test. Search absence is bounded evidence, not a proof against every indirectly equivalent test.\"] Current coverage/results: [\"Current SPEC_impl.md Tabs in hosts (:2234-2269) says exited tabs are hidden at once and separately describes close/reap. This preserves the behavioral distinction; it does not accept missing regression protection. SPEC.md terminal-tab rules were searched alongside it.\",\"TODO Planned is empty. Searches of plans/queue, BUGS.md, active ledger and queue INDEX/matching queue terms found no exact pre-reap Attach/Close-oracle coverage. Zombie-agent and tab-reap-deadline items have different triggers and assertions.\",\"The landed tmux-end-old-terminals plan criterion 5 requires tests whose subject survives to run on terminal hosts; it is not an unlanded fix. FILTER.md does not cover ordinary missing test sensitivity.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The first candidate combined failed-open process cleanup and dead-tab handling. Failed-open cleanup remains directly tested, and BeforeMarking belongs to removed tmux-window creation. The initial broad drop was withdrawn for pre-reap refusal; preserve that withdrawal and the narrower surviving oracle gap. No actual leftover-process or privacy defect was established.\"; \"No missing premise for the narrow missing-oracle finding. Attribution must remain a lost tmux test whose backend-independent contract was not ported, rather than a formerly protected host-code branch.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g151/c3",
+        "line": 10,
+        "disposition": "verified",
+        "group": "647f022-pre-reap-tab-live-only-attach-oracle-not-ported",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-097 after inspecting it. The deletion removes a concrete pre-reap refusal/close oracle. Eventual destruction and dead-tab listing tests do not protect the interactive-versus-close boundary, which remains in host terminals. This is test coverage, not evidence of incorrect current attachment behavior. Retain the surviving pre-reap behavioral-oracle gap as other priority. Keep the obsolete BeforeMarking portion separate and do not restore it. Checked source/results: [\"647f022 parent tab_lifecycle_edges.rs:173-250 establishes shell exit, hidden listing, exact NotFound attachment refusal, and continued physical pane existence before manual close. The deleted fixture is tmux-backed.\",\"At 647f022, host_tabs.rs:475-519 checks failed-open cleanup; :531-566 waits for listing absence AND host/socket/record destruction. core/host_tabs.rs:1783-1833 checks listing and reap selection without calling the live-only resolver. Neither distinguishes pre-reap refusal.\",\"At 647f022, terminals.rs:906-912 and :983-993 implement separate host and tmux live-only gates. The deleted test directly exercised the tmux gate, not the host branch: the supported current claim is an unported behavioral oracle, not that the old test would detect a host-branch mutation.\",\"At tip 00de0b6, terminals.rs:105-149,223-248 still separates LiveOnly from DeadIncluded; handlers.rs:1674-1679 uses the former for Attach; core.rs:14003-14011 uses the latter for Close/reap. Targeted tip searches for dead/exited/unreaped attach assertions and resolve_terminal callers found no equivalent tab test. Search absence is bounded evidence, not a proof against every indirectly equivalent test.\"] Current coverage/results: [\"Current SPEC_impl.md Tabs in hosts (:2234-2269) says exited tabs are hidden at once and separately describes close/reap. This preserves the behavioral distinction; it does not accept missing regression protection. SPEC.md terminal-tab rules were searched alongside it.\",\"TODO Planned is empty. Searches of plans/queue, BUGS.md, active ledger and queue INDEX/matching queue terms found no exact pre-reap Attach/Close-oracle coverage. Zombie-agent and tab-reap-deadline items have different triggers and assertions.\",\"The landed tmux-end-old-terminals plan criterion 5 requires tests whose subject survives to run on terminal hosts; it is not an unlanded fix. FILTER.md does not cover ordinary missing test sensitivity.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The first candidate combined failed-open process cleanup and dead-tab handling. Failed-open cleanup remains directly tested, and BeforeMarking belongs to removed tmux-window creation. The initial broad drop was withdrawn for pre-reap refusal; preserve that withdrawal and the narrower surviving oracle gap. No actual leftover-process or privacy defect was established.\"; \"No missing premise for the narrow missing-oracle finding. Attribution must remain a lost tmux test whose backend-independent contract was not ported, rather than a formerly protected host-code branch.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-097",
+          "key": "g151/c3",
+          "latest_line": 10,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "647f022-pre-reap-tab-live-only-attach-oracle-not-ported",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The deletion removes a concrete pre-reap refusal/close oracle. Eventual destruction and dead-tab listing tests do not protect the interactive-versus-close boundary, which remains in host terminals. This is test coverage, not evidence of incorrect current attachment behavior.",
+          "checks": [
+            "647f022 parent tab_lifecycle_edges.rs:173-250 establishes shell exit, hidden listing, exact NotFound attachment refusal, and continued physical pane existence before manual close. The deleted fixture is tmux-backed.",
+            "At 647f022, host_tabs.rs:475-519 checks failed-open cleanup; :531-566 waits for listing absence AND host/socket/record destruction. core/host_tabs.rs:1783-1833 checks listing and reap selection without calling the live-only resolver. Neither distinguishes pre-reap refusal.",
+            "At 647f022, terminals.rs:906-912 and :983-993 implement separate host and tmux live-only gates. The deleted test directly exercised the tmux gate, not the host branch: the supported current claim is an unported behavioral oracle, not that the old test would detect a host-branch mutation.",
+            "At tip 00de0b6, terminals.rs:105-149,223-248 still separates LiveOnly from DeadIncluded; handlers.rs:1674-1679 uses the former for Attach; core.rs:14003-14011 uses the latter for Close/reap. Targeted tip searches for dead/exited/unreaped attach assertions and resolve_terminal callers found no equivalent tab test. Search absence is bounded evidence, not a proof against every indirectly equivalent test."
+          ],
+          "coverage_checked": [
+            "Current SPEC_impl.md Tabs in hosts (:2234-2269) says exited tabs are hidden at once and separately describes close/reap. This preserves the behavioral distinction; it does not accept missing regression protection. SPEC.md terminal-tab rules were searched alongside it.",
+            "TODO Planned is empty. Searches of plans/queue, BUGS.md, active ledger and queue INDEX/matching queue terms found no exact pre-reap Attach/Close-oracle coverage. Zombie-agent and tab-reap-deadline items have different triggers and assertions.",
+            "The landed tmux-end-old-terminals plan criterion 5 requires tests whose subject survives to run on terminal hosts; it is not an unlanded fix. FILTER.md does not cover ordinary missing test sensitivity."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No missing premise for the narrow missing-oracle finding. Attribution must remain a lost tmux test whose backend-independent contract was not ported, rather than a formerly protected host-code branch.",
+          "original_stronger_consequence": "The first candidate combined failed-open process cleanup and dead-tab handling. Failed-open cleanup remains directly tested, and BeforeMarking belongs to removed tmux-window creation. The initial broad drop was withdrawn for pre-reap refusal; preserve that withdrawal and the narrower surviving oracle gap. No actual leftover-process or privacy defect was established.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain the surviving pre-reap behavioral-oracle gap as other priority. Keep the obsolete BeforeMarking portion separate and do not restore it."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "647f022-pre-reap-tab-live-only-attach-oracle-not-ported",
+        "destination": "trailing-647f022-pre-reap-tab-live-only-attach-oracle-not-ported.md"
+      }
+    },
+    {
+      "key": "g151/c4",
+      "owner": "g151",
+      "id": "c4",
+      "domain": "rust-terminal-host-regressions",
+      "purpose": "rust-terminal-host-regressions: crates/farhelm/tests/e2e/host_reclaim.rs, crates/farhelm/tests/e2e/terminal_tabs.rs, crates/farhelm/tests/e2e/host_creates.rs, crates/farhelm/tests/e2e/host_processes.rs, crates/farhelm/tests/e2e/tab_lifecycle_edges.rs, crates/farhelm/tests/e2e/host_connection.rs, crates/farhelm/tests/e2e/host_relaunches.rs, crates/farhelm/tests/e2e/host_restarts.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Default timeout replacement does not shorten host budgets",
+            "location": "crates/farhelm/tests/e2e/host_restarts.rs:58",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether replacing the suite timeout helper makes terminal-host regressions use shorter host-lifecycle budgets and fail for unrelated timing reasons. Source checks: the parent revision's harness.rs:2482-2503 shows suite_timeouts only floors tmux_exchange, tmux_pane_list and sink_ready; all other fields already have production defaults. At the reviewed revision service/core.rs:375-436 and 451-467 removes those tmux fields and keeps the same host timeout defaults (delete_host_end and orphan_reclaim among them). Assigned host_reclaim.rs:692-696 still overrides orphan_reclaim to one second for its deliberate timeout test. remote_supervisor at host_connection.rs:180-190 starts host-only sessions; host_restarts.rs:50-79 preserves explicit caller timeout injection and verifies state-directory ownership. Suggested bucket: other, test behavior concern only. Confidence: confirmed source analysis. proposed_drop: no host timeout is shortened by these helper replacements; the only formerly floored fields no longer exist. Could-be-highest: no; no established shipped security or loss-of-work route. possible_cover: none. No execution performed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 5,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c4",
+          "state": "open",
+          "summary": "Default timeout replacement does not shorten host budgets",
+          "location": "crates/farhelm/tests/e2e/host_restarts.rs:58",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether replacing the suite timeout helper makes terminal-host regressions use shorter host-lifecycle budgets and fail for unrelated timing reasons. Source checks: the parent revision's harness.rs:2482-2503 shows suite_timeouts only floors tmux_exchange, tmux_pane_list and sink_ready; all other fields already have production defaults. At the reviewed revision service/core.rs:375-436 and 451-467 removes those tmux fields and keeps the same host timeout defaults (delete_host_end and orphan_reclaim among them). Assigned host_reclaim.rs:692-696 still overrides orphan_reclaim to one second for its deliberate timeout test. remote_supervisor at host_connection.rs:180-190 starts host-only sessions; host_restarts.rs:50-79 preserves explicit caller timeout injection and verifies state-directory ownership. Suggested bucket: other, test behavior concern only. Confidence: confirmed source analysis. proposed_drop: no host timeout is shortened by these helper replacements; the only formerly floored fields no longer exist. Could-be-highest: no; no established shipped security or loss-of-work route. possible_cover: none. No execution performed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g151/findings.jsonl",
+        "id": "c4",
+        "line": 5,
+        "disposition": "excluded",
+        "group": "1ed482-suite-timeout-replacement-preserves-host-budgets",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-097 after inspecting it. The removed helper only raised timeout fields removed with the tmux implementation. Replacing it with defaults does not reduce a surviving host deadline. Source-refuted candidate; g153/c1 is the exact same timeout-helper premise in another set of call sites. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333 parent harness.rs:2482-2503 starts from defaults and changes only tmux_exchange, tmux_pane_list and sink_ready.\",\"1ed482 core.rs diff removes those fields and their defaults; retained host fields are not changed by that removal. This directly refutes a shortened host-lifecycle budget caused by replacing suite_timeouts.\",\"No runtime run, timing observation or latent-flake claim was made.\"] Current coverage/results: [\"Searched both current specifications, TODO Planned, plans/queue, BUGS.md, active ledger and queue INDEX for suite_timeouts/host timeout replacement and related claims. No exact coverage found; Planned is empty. Relevant tmux-removal plans are recorded landed in REPORTS.md:29-32.\",\"FILTER.md need not be applied: the suspected change in effective timeout is source-refuted.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Replacing suite_timeouts could shorten host regression budgets and cause unrelated load-sensitive failures. No actual failure or product harm was alleged.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g151/c4",
+        "line": 5,
+        "disposition": "excluded",
+        "group": "1ed482-suite-timeout-replacement-preserves-host-budgets",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-097 after inspecting it. The removed helper only raised timeout fields removed with the tmux implementation. Replacing it with defaults does not reduce a surviving host deadline. Source-refuted candidate; g153/c1 is the exact same timeout-helper premise in another set of call sites. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333 parent harness.rs:2482-2503 starts from defaults and changes only tmux_exchange, tmux_pane_list and sink_ready.\",\"1ed482 core.rs diff removes those fields and their defaults; retained host fields are not changed by that removal. This directly refutes a shortened host-lifecycle budget caused by replacing suite_timeouts.\",\"No runtime run, timing observation or latent-flake claim was made.\"] Current coverage/results: [\"Searched both current specifications, TODO Planned, plans/queue, BUGS.md, active ledger and queue INDEX for suite_timeouts/host timeout replacement and related claims. No exact coverage found; Planned is empty. Relevant tmux-removal plans are recorded landed in REPORTS.md:29-32.\",\"FILTER.md need not be applied: the suspected change in effective timeout is source-refuted.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Replacing suite_timeouts could shorten host regression budgets and cause unrelated load-sensitive failures. No actual failure or product harm was alleged.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-097",
+          "key": "g151/c4",
+          "latest_line": 5,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "1ed482-suite-timeout-replacement-preserves-host-budgets",
+          "aliases": [
+            "g153/c1"
+          ],
+          "target_queue_file": null,
+          "why": "The removed helper only raised timeout fields removed with the tmux implementation. Replacing it with defaults does not reduce a surviving host deadline.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333 parent harness.rs:2482-2503 starts from defaults and changes only tmux_exchange, tmux_pane_list and sink_ready.",
+            "1ed482 core.rs diff removes those fields and their defaults; retained host fields are not changed by that removal. This directly refutes a shortened host-lifecycle budget caused by replacing suite_timeouts.",
+            "No runtime run, timing observation or latent-flake claim was made."
+          ],
+          "coverage_checked": [
+            "Searched both current specifications, TODO Planned, plans/queue, BUGS.md, active ledger and queue INDEX for suite_timeouts/host timeout replacement and related claims. No exact coverage found; Planned is empty. Relevant tmux-removal plans are recorded landed in REPORTS.md:29-32.",
+            "FILTER.md need not be applied: the suspected change in effective timeout is source-refuted."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Replacing suite_timeouts could shorten host regression budgets and cause unrelated load-sensitive failures. No actual failure or product harm was alleged.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source-refuted candidate; g153/c1 is the exact same timeout-helper premise in another set of call sites."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "1ed482-suite-timeout-replacement-preserves-host-budgets",
+        "destination": null
+      }
+    },
+    {
+      "key": "g151/f5",
+      "owner": "g151",
+      "id": "f5",
+      "domain": "rust-terminal-host-regressions",
+      "purpose": "rust-terminal-host-regressions: crates/farhelm/tests/e2e/host_reclaim.rs, crates/farhelm/tests/e2e/terminal_tabs.rs, crates/farhelm/tests/e2e/host_creates.rs, crates/farhelm/tests/e2e/host_processes.rs, crates/farhelm/tests/e2e/tab_lifecycle_edges.rs, crates/farhelm/tests/e2e/host_connection.rs, crates/farhelm/tests/e2e/host_relaunches.rs, crates/farhelm/tests/e2e/host_restarts.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "f5",
+            "state": "open",
+            "summary": "Resize wait rationale may contradict the runtime status contract",
+            "location": "crates/farhelm/tests/e2e/terminal_tabs.rs:2164",
+            "detail": "Reviewed commit: 70bc66a9f285cc2a9984924f389834d118b7cfdc. TLDR: the newly added resize-wait comment justifies a 100 ms polling fallback by saying terminal size is not a status field, while the pinned runtime publishes status.size on every processed resize. This could give future test maintainers the wrong synchronization model. Source checked: new terminal_tabs.rs:2164-2170 says it is rechecked every 100 ms 'since the size is the emulator’s and not a status field of its own'; hosts/terminal.rs:3754-3766 calls after_record on a processed resize, :3875-3886 calls publish, and :3890-3906 publishes size through status.send_modify. Missing premise: inspect the complete HostStatus definition and source history to confirm this is a real public status contract at the reviewed revision rather than an incidental/newer-looking field. Next: pinned HostStatus definition, subscription API and parent diff. Suggested bucket: other, documentation only. Confidence: source-supported lead pending those checks. proposed_drop: false pending investigation. Could-be-highest: no; no security or work-loss route. possible_cover: none in the supplied interface records. Caveat: no faulty resize or wait outcome is established; correctness of production code would not itself refute an inaccurate helper comment. No execution performed."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f5",
+            "state": "open",
+            "summary": "Resize wait comment gives a false synchronization rationale",
+            "location": "crates/farhelm/tests/e2e/terminal_tabs.rs:2167",
+            "detail": "Reviewed commit: 70bc66a9f285cc2a9984924f389834d118b7cfdc. TLDR: the new resize-wait helper tells future maintainers that it must periodically recheck terminal size because size is not in runtime status. In fact the public runtime status already carries that exact size and notifies subscribers when a resize is processed. This is a narrow documentation defect in the stated reason for the wait's shape; no wrong runtime outcome is alleged. Source: terminal_tabs.rs:2164-2170 says the wait is rechecked every 100 ms 'since the size is the emulator’s and not a status field of its own'. At that same commit hosts/terminal.rs:644-692 defines HostStatus, with public size: Size at :688-691 explicitly documented as the emulator's size and the same value as HostTerminal::size. HostTerminal::subscribe at :2116-2118 returns a watch receiver of that HostStatus. A processed resize at :3754-3766 calls after_record; :3875-3886 calls publish; :3890-3906 updates status.size through send_modify. Thus size changes do notify the very subscription this helper awaits; the comment describes a limitation the API does not have. Governing implementation contract: complete SPEC_impl.md 'Recovery and checkpoints' at 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:2200-2205 says 'The status carries the program’s modes and the terminal’s size as of each change'; this public contract is already implemented at the reviewed revision, and the HostStatus field documents it directly. Attribution: the assigned 70bc66a9 patch adds this helper and its rationale; git diff against its parent shows no HostStatus/runtime change, so this is not a later API change that invalidated an originally true comment. Later applicability: the pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db retains the same comment at terminal_tabs.rs:1300-1306 and the same public status.size contract at hosts/terminal.rs:688-691. Fix direction: correct the helper's rationale to acknowledge resize status notifications; any periodic fallback retained needs its actual reason, not the nonexistent absence of a size field. Suggested bucket: other (low-impact test documentation). Confidence: confirmed source/contract analysis; no execution. proposed_drop: false; correct runtime behavior does not refute inaccurate documentation of its synchronization contract. Could-be-highest: no established or suspected security/work-loss route. possible_cover: none in the supplied exact interface findings; forbidden coverage sources were not searched. Material caveat: polling is bounded and the implementation can still correctly observe a processed resize; this finding does not claim that polling itself is unsafe or that changing executable behavior is necessary. This resolves f5's HostStatus/history premise."
+          }
+        }
+      ],
+      "latest": {
+        "line": 12,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "f5",
+          "state": "open",
+          "summary": "Resize wait comment gives a false synchronization rationale",
+          "location": "crates/farhelm/tests/e2e/terminal_tabs.rs:2167",
+          "detail": "Reviewed commit: 70bc66a9f285cc2a9984924f389834d118b7cfdc. TLDR: the new resize-wait helper tells future maintainers that it must periodically recheck terminal size because size is not in runtime status. In fact the public runtime status already carries that exact size and notifies subscribers when a resize is processed. This is a narrow documentation defect in the stated reason for the wait's shape; no wrong runtime outcome is alleged. Source: terminal_tabs.rs:2164-2170 says the wait is rechecked every 100 ms 'since the size is the emulator’s and not a status field of its own'. At that same commit hosts/terminal.rs:644-692 defines HostStatus, with public size: Size at :688-691 explicitly documented as the emulator's size and the same value as HostTerminal::size. HostTerminal::subscribe at :2116-2118 returns a watch receiver of that HostStatus. A processed resize at :3754-3766 calls after_record; :3875-3886 calls publish; :3890-3906 updates status.size through send_modify. Thus size changes do notify the very subscription this helper awaits; the comment describes a limitation the API does not have. Governing implementation contract: complete SPEC_impl.md 'Recovery and checkpoints' at 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:2200-2205 says 'The status carries the program’s modes and the terminal’s size as of each change'; this public contract is already implemented at the reviewed revision, and the HostStatus field documents it directly. Attribution: the assigned 70bc66a9 patch adds this helper and its rationale; git diff against its parent shows no HostStatus/runtime change, so this is not a later API change that invalidated an originally true comment. Later applicability: the pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db retains the same comment at terminal_tabs.rs:1300-1306 and the same public status.size contract at hosts/terminal.rs:688-691. Fix direction: correct the helper's rationale to acknowledge resize status notifications; any periodic fallback retained needs its actual reason, not the nonexistent absence of a size field. Suggested bucket: other (low-impact test documentation). Confidence: confirmed source/contract analysis; no execution. proposed_drop: false; correct runtime behavior does not refute inaccurate documentation of its synchronization contract. Could-be-highest: no established or suspected security/work-loss route. possible_cover: none in the supplied exact interface findings; forbidden coverage sources were not searched. Material caveat: polling is bounded and the implementation can still correctly observe a processed resize; this finding does not claim that polling itself is unsafe or that changing executable behavior is necessary. This resolves f5's HostStatus/history premise."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g151/findings.jsonl",
+        "id": "f5",
+        "line": 12,
+        "disposition": "verified",
+        "group": "70bc66a-host-size-wait-comment-denies-public-status-size",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-097 after inspecting it. The helper's new rationale says size is not a status field, but the same revision exposes precisely that size in its public status and notifies subscribers after processed resizes. The comment remains at the review tip. Record a narrow test-documentation defect, other priority. Correct behavior of the size wait does not refute the comment defect. Checked source/results: [\"70bc66a9f285cc2a9984924f389834d118b7cfdc terminal_tabs.rs:2164-2170 adds the false rationale; git diff confirms this helper is new and no hosts/terminal.rs change in that commit explains it as later API drift.\",\"Same revision hosts/terminal.rs:688-691 defines public HostStatus.size as the emulator's size, :2116-2118 exposes its watch subscription, and :2240-2253 defines HostTerminal::size as applied emulator state.\",\"Same revision :3754-3766 on_resized calls after_record; :3875-3886 publishes; :3890-3906 writes status.size with send_modify. Resizes therefore notify the subscription already used by the helper.\",\"Tip 00de0b6 terminal_tabs.rs:1300-1306 retains the rationale. No wrong runtime result, unsafe polling, test failure or need to change executable behavior was established.\"] Current coverage/results: [\"At the reviewed revision SPEC_impl.md:2204-2205 says status carries terminal size as of each change; current Recovery and checkpoints (:2074-2075) preserves this. This contradicts the comment rather than accepting it. SPEC.md dimension ownership supplies no exception.\",\"Searched TODO Planned, plans/queue, BUGS.md, queue INDEX/matching terms and active TRIAGE_OUTCOMES.md for helper/status-size/resize-rationale claims. No exact coverage found; Planned is empty. The broad comment sweep in tmux-drop-from-docs is recorded landed, and its subject is tmux-specific rationale, not this status claim.\",\"No FILTER.md boundary matches: the inaccurate rationale is present in normal source reading, without a rare trigger, and is not a product diagnostic.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Future maintainers receive the wrong synchronization model. The lead's public-status/history premise is resolved; no stronger runtime or user-work consequence was claimed.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g151/f5",
+        "line": 12,
+        "disposition": "verified",
+        "group": "70bc66a-host-size-wait-comment-denies-public-status-size",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-097 after inspecting it. The helper's new rationale says size is not a status field, but the same revision exposes precisely that size in its public status and notifies subscribers after processed resizes. The comment remains at the review tip. Record a narrow test-documentation defect, other priority. Correct behavior of the size wait does not refute the comment defect. Checked source/results: [\"70bc66a9f285cc2a9984924f389834d118b7cfdc terminal_tabs.rs:2164-2170 adds the false rationale; git diff confirms this helper is new and no hosts/terminal.rs change in that commit explains it as later API drift.\",\"Same revision hosts/terminal.rs:688-691 defines public HostStatus.size as the emulator's size, :2116-2118 exposes its watch subscription, and :2240-2253 defines HostTerminal::size as applied emulator state.\",\"Same revision :3754-3766 on_resized calls after_record; :3875-3886 publishes; :3890-3906 writes status.size with send_modify. Resizes therefore notify the subscription already used by the helper.\",\"Tip 00de0b6 terminal_tabs.rs:1300-1306 retains the rationale. No wrong runtime result, unsafe polling, test failure or need to change executable behavior was established.\"] Current coverage/results: [\"At the reviewed revision SPEC_impl.md:2204-2205 says status carries terminal size as of each change; current Recovery and checkpoints (:2074-2075) preserves this. This contradicts the comment rather than accepting it. SPEC.md dimension ownership supplies no exception.\",\"Searched TODO Planned, plans/queue, BUGS.md, queue INDEX/matching terms and active TRIAGE_OUTCOMES.md for helper/status-size/resize-rationale claims. No exact coverage found; Planned is empty. The broad comment sweep in tmux-drop-from-docs is recorded landed, and its subject is tmux-specific rationale, not this status claim.\",\"No FILTER.md boundary matches: the inaccurate rationale is present in normal source reading, without a rare trigger, and is not a product diagnostic.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Future maintainers receive the wrong synchronization model. The lead's public-status/history premise is resolved; no stronger runtime or user-work consequence was claimed.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-097",
+          "key": "g151/f5",
+          "latest_line": 12,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "70bc66a-host-size-wait-comment-denies-public-status-size",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The helper's new rationale says size is not a status field, but the same revision exposes precisely that size in its public status and notifies subscribers after processed resizes. The comment remains at the review tip.",
+          "checks": [
+            "70bc66a9f285cc2a9984924f389834d118b7cfdc terminal_tabs.rs:2164-2170 adds the false rationale; git diff confirms this helper is new and no hosts/terminal.rs change in that commit explains it as later API drift.",
+            "Same revision hosts/terminal.rs:688-691 defines public HostStatus.size as the emulator's size, :2116-2118 exposes its watch subscription, and :2240-2253 defines HostTerminal::size as applied emulator state.",
+            "Same revision :3754-3766 on_resized calls after_record; :3875-3886 publishes; :3890-3906 writes status.size with send_modify. Resizes therefore notify the subscription already used by the helper.",
+            "Tip 00de0b6 terminal_tabs.rs:1300-1306 retains the rationale. No wrong runtime result, unsafe polling, test failure or need to change executable behavior was established."
+          ],
+          "coverage_checked": [
+            "At the reviewed revision SPEC_impl.md:2204-2205 says status carries terminal size as of each change; current Recovery and checkpoints (:2074-2075) preserves this. This contradicts the comment rather than accepting it. SPEC.md dimension ownership supplies no exception.",
+            "Searched TODO Planned, plans/queue, BUGS.md, queue INDEX/matching terms and active TRIAGE_OUTCOMES.md for helper/status-size/resize-rationale claims. No exact coverage found; Planned is empty. The broad comment sweep in tmux-drop-from-docs is recorded landed, and its subject is tmux-specific rationale, not this status claim.",
+            "No FILTER.md boundary matches: the inaccurate rationale is present in normal source reading, without a rare trigger, and is not a product diagnostic."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Future maintainers receive the wrong synchronization model. The lead's public-status/history premise is resolved; no stronger runtime or user-work consequence was claimed.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Record a narrow test-documentation defect, other priority. Correct behavior of the size wait does not refute the comment defect."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "70bc66a-host-size-wait-comment-denies-public-status-size",
+        "destination": "trailing-70bc66a-host-size-wait-comment-denies-public-status-size.md"
+      }
+    },
+    {
+      "key": "g151/c6",
+      "owner": "g151",
+      "id": "c6",
+      "domain": "rust-terminal-host-regressions",
+      "purpose": "rust-terminal-host-regressions: crates/farhelm/tests/e2e/host_reclaim.rs, crates/farhelm/tests/e2e/terminal_tabs.rs, crates/farhelm/tests/e2e/host_creates.rs, crates/farhelm/tests/e2e/host_processes.rs, crates/farhelm/tests/e2e/tab_lifecycle_edges.rs, crates/farhelm/tests/e2e/host_connection.rs, crates/farhelm/tests/e2e/host_relaunches.rs, crates/farhelm/tests/e2e/host_restarts.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c6",
+            "state": "open",
+            "summary": "Synthetic old-create fixture changes only an unlaunched durable row",
+            "location": "crates/farhelm/tests/e2e/host_creates.rs:1727",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: considered whether the new old-terminal retry fixture corrupts a live host launch or lets its replacement reconcile without owning the state directory. Source checks refute that fixture concern. host_creates.rs:1682-1694 installs the AfterRecord crash; :1717-1730 asserts a single Launching row with empty terminal address before changing it to Tmux. core.rs:11348-11355 places AfterRecord before checkout allocation and all launch side effects, so this fixture has no started host to relabel. store.rs:5067-5102 shows set_terminal_for_test updates only sessions.terminal_kind and terminal_address and requires exactly one existing row. create_idempotency.rs:207-238 drops the first client, waits for its connection references and state-directory claim to release, constructs the replacement, and asserts replacement.owns_state_dir. The test additionally checks its row remains Tmux after that reload before invoking the retry. Governing contract: SPEC_impl.md:2312-2319 says an interrupted older tmux create keeps its kind through takeover, is refused before anything starts when takeover claims it, and settles that refusal; :2336-2341 makes host launch records/start a later side effect. Suggested bucket: other (considered test-fixture validity concern). Confidence: confirmed source analysis. proposed_drop: no existing host is reclassified and replacement ownership is explicitly established, so the suspected invalid fixture premise is refuted. Could-be-highest: no; no security/work-loss route. possible_cover: none; this is a different premise from the known lost old-session transition oracles. Caveat: this validates the synthetic interrupted-no-launch shape, not all states an older supervisor could have left. No execution performed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 13,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c6",
+          "state": "open",
+          "summary": "Synthetic old-create fixture changes only an unlaunched durable row",
+          "location": "crates/farhelm/tests/e2e/host_creates.rs:1727",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: considered whether the new old-terminal retry fixture corrupts a live host launch or lets its replacement reconcile without owning the state directory. Source checks refute that fixture concern. host_creates.rs:1682-1694 installs the AfterRecord crash; :1717-1730 asserts a single Launching row with empty terminal address before changing it to Tmux. core.rs:11348-11355 places AfterRecord before checkout allocation and all launch side effects, so this fixture has no started host to relabel. store.rs:5067-5102 shows set_terminal_for_test updates only sessions.terminal_kind and terminal_address and requires exactly one existing row. create_idempotency.rs:207-238 drops the first client, waits for its connection references and state-directory claim to release, constructs the replacement, and asserts replacement.owns_state_dir. The test additionally checks its row remains Tmux after that reload before invoking the retry. Governing contract: SPEC_impl.md:2312-2319 says an interrupted older tmux create keeps its kind through takeover, is refused before anything starts when takeover claims it, and settles that refusal; :2336-2341 makes host launch records/start a later side effect. Suggested bucket: other (considered test-fixture validity concern). Confidence: confirmed source analysis. proposed_drop: no existing host is reclassified and replacement ownership is explicitly established, so the suspected invalid fixture premise is refuted. Could-be-highest: no; no security/work-loss route. possible_cover: none; this is a different premise from the known lost old-session transition oracles. Caveat: this validates the synthetic interrupted-no-launch shape, not all states an older supervisor could have left. No execution performed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g151/findings.jsonl",
+        "id": "c6",
+        "line": 13,
+        "disposition": "excluded",
+        "group": "647f022-unlaunched-old-create-row-fixture-validity",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-097 after inspecting it. The synthetic row is changed before any host starts, and replacement ownership is explicitly witnessed. The suspected invalid fixture premises are refuted. Source refutation of fixture validity concern, separate from the lost old-session migration oracles. Checked source/results: [\"647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 host_creates.rs:1682-1694 injects AfterRecord; :1717-1730 establishes one Launching row with an empty address before relabeling it Tmux.\",\"Same revision core.rs:11348-11355 places the crash before allocation and launch side effects; store.rs:5067-5102 updates only terminal_kind/address on exactly one existing row.\",\"create_idempotency.rs:207-238 drops the client and supervisor, waits for the directory claim, constructs the replacement and asserts owns_state_dir. The test additionally checks the old kind after reload. This validates the interrupted-no-launch shape, not every possible old-supervisor state. No execution performed.\"] Current coverage/results: [\"Reviewed SPEC_impl.md:2312-2319 expressly requires the interrupted old create to retain kind and refuse takeover before anything starts. Current old-terminal retirement does not invalidate what this fixture tested at that revision.\",\"Searched current specs, TODO Planned, plans/queue, BUGS.md, queue INDEX/matching terms and active ledger for synthetic old-create fixture/ownership claims. No exact coverage found. Planned is empty; no filter is used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The fixture might relabel a live host or let a non-owner replacement appear to reconcile correctly. Both premises are refuted. No production corruption, security or work-loss route was claimed.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g151/c6",
+        "line": 13,
+        "disposition": "excluded",
+        "group": "647f022-unlaunched-old-create-row-fixture-validity",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-097 after inspecting it. The synthetic row is changed before any host starts, and replacement ownership is explicitly witnessed. The suspected invalid fixture premises are refuted. Source refutation of fixture validity concern, separate from the lost old-session migration oracles. Checked source/results: [\"647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 host_creates.rs:1682-1694 injects AfterRecord; :1717-1730 establishes one Launching row with an empty address before relabeling it Tmux.\",\"Same revision core.rs:11348-11355 places the crash before allocation and launch side effects; store.rs:5067-5102 updates only terminal_kind/address on exactly one existing row.\",\"create_idempotency.rs:207-238 drops the client and supervisor, waits for the directory claim, constructs the replacement and asserts owns_state_dir. The test additionally checks the old kind after reload. This validates the interrupted-no-launch shape, not every possible old-supervisor state. No execution performed.\"] Current coverage/results: [\"Reviewed SPEC_impl.md:2312-2319 expressly requires the interrupted old create to retain kind and refuse takeover before anything starts. Current old-terminal retirement does not invalidate what this fixture tested at that revision.\",\"Searched current specs, TODO Planned, plans/queue, BUGS.md, queue INDEX/matching terms and active ledger for synthetic old-create fixture/ownership claims. No exact coverage found. Planned is empty; no filter is used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The fixture might relabel a live host or let a non-owner replacement appear to reconcile correctly. Both premises are refuted. No production corruption, security or work-loss route was claimed.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-097",
+          "key": "g151/c6",
+          "latest_line": 13,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "647f022-unlaunched-old-create-row-fixture-validity",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The synthetic row is changed before any host starts, and replacement ownership is explicitly witnessed. The suspected invalid fixture premises are refuted.",
+          "checks": [
+            "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 host_creates.rs:1682-1694 injects AfterRecord; :1717-1730 establishes one Launching row with an empty address before relabeling it Tmux.",
+            "Same revision core.rs:11348-11355 places the crash before allocation and launch side effects; store.rs:5067-5102 updates only terminal_kind/address on exactly one existing row.",
+            "create_idempotency.rs:207-238 drops the client and supervisor, waits for the directory claim, constructs the replacement and asserts owns_state_dir. The test additionally checks the old kind after reload. This validates the interrupted-no-launch shape, not every possible old-supervisor state. No execution performed."
+          ],
+          "coverage_checked": [
+            "Reviewed SPEC_impl.md:2312-2319 expressly requires the interrupted old create to retain kind and refuse takeover before anything starts. Current old-terminal retirement does not invalidate what this fixture tested at that revision.",
+            "Searched current specs, TODO Planned, plans/queue, BUGS.md, queue INDEX/matching terms and active ledger for synthetic old-create fixture/ownership claims. No exact coverage found. Planned is empty; no filter is used."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "The fixture might relabel a live host or let a non-owner replacement appear to reconcile correctly. Both premises are refuted. No production corruption, security or work-loss route was claimed.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation of fixture validity concern, separate from the lost old-session migration oracles."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "647f022-unlaunched-old-create-row-fixture-validity",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial g151 review complete: all 10 assigned patches, totaling 1,441 lines, reviewed at their recorded revisions.\n\nNo confirmed findings. Four candidates recorded (`l1`, `c2`, `c3`, `c4`); no unresolved leads. Coverage caveats are preserved in the [findings log]([private-run]/g151/findings.jsonl).\n\nProgress updated. No tests, reproductions, or checkout changes performed."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised original IDs:\n\n- `l1`: confirmed historical process-wiring coverage gap at `647f0227`; later source retirement removes its subject by pinned tip.\n- `c3`: confirmed missing pre-reap tab attachment-refusal oracle. This host-tab contract and its callers remain at tip; eventual reap tests do not cover it.\n\nPrior drop proposals for both IDs withdrawn. Findings log and progress updated. Source analysis only; no execution.\n\nUnresolved lead IDs: none."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 complete.\n\n- Checked fixture ownership, interrupted-create state, resize notifications, reclaim setup and restart stages.\n- New verified finding: `f5` — resize-wait documentation incorrectly says runtime status lacks terminal size.\n- New candidate: `c6` — synthetic fixture concern refuted by source.\n- New unverified IDs: none.\n- Open leads: none.\n\nNew issue found: yes, `f5` only. Log and progress updated. No execution performed."
+    },
+    {
+      "turn": 4,
+      "reply": "Discovery pass 2 complete.\n\nChecked fixture isolation and cleanup, shell-readiness markers, bare-process host assertions, and restart-stage convergence checks.\n\nNew verified IDs: none.  \nNew unverified IDs: none.  \nOpen leads: none.  \nAnything new found: **no**.\n\nProgress updated. No execution performed."
+    }
+  ],
+  "progress": "# g151 progress\n\nTurn 1: initial source review complete. Discovery passes: 0. Await the caller's later synthesis/discovery prompt; no later-turn pass was performed inside this turn.\n\nCoverage: all 10 assigned patch parts, all 1,441 lines, delivered with the evidence reader in separate packets of at most 200 lines. Read the complete inventory commits field only. No assigned patch material remains unread. Reviewed changes at 70bc66a9f285cc2a9984924f389834d118b7cfdc, 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 and 1ed482dde220452e424973faf38a5e1318986333, including deletions at their intermediate revisions.\n\nContracts and interfaces: read the pinned Terminal experience and Terminal host contracts, the startup reclaim contract at 70bc66a9, Testing at 647f0227 and 1ed482dd, and Answers bind to what was drawn. No GUI handlers are in this group. The resize oracle reads host-processed emulator size, not desired size. The interrupted-create fixture crashes before launch side effects and then changes the persisted row to the earlier tmux kind; the production retry settles a refusal rather than launching a different kind. The symlink fixture ends its own keeper's host before removing the owned socket directory; its store row keeps the nonempty-database premise. The timeout replacements remove only obsolete tmux floors. Old terminals remain supported at 647f0227; focused real-tmux driver and notification tests remain, while the broader real-process checks are deleted. Do not claim those lower-layer tests provide identical end-to-end coverage.\n\nDurable records this pass: l1 opened as a lead and revised to a candidate; c2, c3 and c4 recorded as candidates with source refutations or reasons for omission. Confirmed findings: none. New verified candidate IDs: l1, c2, c3, c4. New unverified IDs: none. Open lead IDs: none. All records preserve the reviewed full hash, TLDR, references, contract, bucket, confidence, proposed_drop, could-be-highest assessment, possible_cover and material caveats.\n\nEvidence limits: source analysis only. No runtime tests, reproductions, builds, live-install actions, checkout changes or helper agents. Excluded coverage metadata and queue contents were not read. An exploratory unassigned SPEC diff was clipped; conclusions use the complete bounded pinned contract reads and all mandatory patch packets instead. The first attempt to record l1's candidate revision used an unsupported state and was rejected; it was corrected to the supported open state and successfully appended. No record was truncated or deleted.\n\nNext action: return this initial-pass result to the caller. Later synthesis can independently assess the proposed drops, especially l1/c3's integration-coverage caveats.\n\nTurn 2: synthesis in progress. Discovery passes: 0. Revised l1 to a confirmed test-only finding; prior drop basis withdrawn. Next: pin later retirement and separate c3 obsolete marking mechanics from retained dead-tab boundaries.\n\nTurn 2 synthesis complete. Discovery passes: 0. Revised IDs: l1 and c3, both confirmed test-only findings in other; initial proposed drops for those IDs withdrawn.\nl1: old-session process transition/wiring oracle was still required at 647f0227, overlapping parent-reported g152/l1. Later dbfc6975 adds old-terminal retirement; pinned tip ends the private server before reload and never serves a tmux terminal, so that historical oracle has no current subject. Keep the historical finding; do not restore obsolete tests as a tip repair.\nc3: separately obsolete BeforeMarking remains distinguished from the deleted dead-but-unreaped attach/close oracle. Retained host listing/reap tests do not assert interactive refusal before host destruction. Tip still has LiveOnly versus DeadIncluded; actual Attach and Close callers route through the respective resolver. This test-only gap remains applicable to host tabs. Repair and exact source/contract references are in the revised c3 record.\nRead the complete pinned-tip Ending the old private tmux server section and Tabs in hosts bullet. No new mandatory patch scope; no unread assigned scope. No unverified findings, no unresolved lead IDs. c2 and c4 unchanged; no parent acceptance of any proposed drop is inferred.\nNo runtime tests, reproductions, builds, checkout writes, live-install actions or helper agents. All findings are source-supported. Next: return only this turn delta and await caller direction.\n\nTurn 3: discovery pass 1 in progress. Reading supplied interface findings before the new search. No named pending questions. Scope remains g151 assigned patches; no runtime execution.\n\nTurn 3 discovery pass 1 complete. Read all 467 lines of supplied discovery-neighbours.json in bounded 40-line chunks after the first oversized 1-160 read was clipped; the bounded rereads delivered that entire prefix and the rest without clipping. No named pending questions were supplied. Interface context introduced no new issue to duplicate; no parent drops or lowerings inferred.\nNew search stayed within g151: checked changed HostStack teardown ownership and state cleanup, synthetic interrupted-create row mutation and exclusive replacement handoff, resize wait subscription/record-publication semantics, symlink fixture keeper and launch-record helpers, explicit reclaim-budget override and the exhaustive retained restart-stage enum. These are source checks at the assigned revisions, with later source/history checks only to settle persistence and attribution.\nNew verified finding: f5, other/low-impact documentation. The newly added wait rationale denies a status size field even though the public HostStatus definition and every processed-resize publication already provide it. Confirmed at 70bc66a9 and persisting at tip; helper/runtime correctness is not used to dismiss this documentation defect. f5 was recorded immediately as a lead and revised after direct type/API/history checks.\nNew verified candidate: c6, synthetic fixture suspicion refuted by the AfterRecord pre-launch boundary, exact test-only row update and explicit state-directory handoff ownership check. No new verified production bug. New unverified-after-investigation IDs: none. Open lead IDs: none. New discovery: yes, f5 only; c6 is a recorded non-reporting decision.\nKnown IDs and their original consequences, proposed-drop bases, repair and acceptance references remain unchanged. No tests, reproductions, builds, checkout writes, helper agents, prohibited coverage searches or live-install actions. No unread assigned source scope. Next: return this pass delta; any additional discovery pass must be a later turn.\n\nTurn 4: discovery pass 2 in progress. Supplied neighbours snapshot changed to 202342 bytes; refreshing it in bounded chunks before source search. No pending named questions.\n\nTurn 4 discovery pass 2 complete. Refreshed the entire supplied interface snapshot: all 642 lines read in separate bounded 32-line chunks (last chunk 609-642); SHA-256 d83e85073341eb46baaa17b64308d053c56b6f6ad5519d87d21621d5aa556eef. A projected owner/ID/summary inventory was used only to orient that complete raw read, not as source credit. No pending named questions. No parent drops or lowerings inferred.\nNew source search remained in the assigned patch responsibilities: checked the symlink fixture full setup/teardown with tab_seams shell/home isolation and keeper creation; confirmed predecessor retirement before directory replacement and the test-owned other-directory socket premise. Checked resize fixture callers basic_session and wait_for_shell: agent readiness is an explicit fixture boundary and the shell round-trip expected XREADYX is absent from the echoed printf command. Checked HostStack bare-command host/stream assertions and the recording-tmux negative control and argument premise. Checked the retained interruption cases after enum cleanup: ReplacementStarted and BeforeOldHostEnded still fire distinct crash seams, assert generation/address shapes, retain both hosts across handoff, and assert convergence to the new socket plus old-host/record termination.\nResults: no additional concrete defect or unresolved lead emerged. Known issues were not restated, broadened or counted as discoveries; supplied adjacent runtime/documentation/test findings are novelty context only and do not create new g151 IDs. No new reporting/drop decision for a substantive candidate was made, so findings.jsonl needs no synthetic activity record.\nNew verified finding IDs: none. New verified candidate IDs: none. New unverified-after-investigation IDs: none. Remaining open lead IDs: none. Anything new found: no. Discovery count is now 2. No unread assigned patch scope. No tests, builds, reproductions, live-install actions, checkout changes, helper agents or prohibited coverage searches. Next action: return only this pass result.\n"
+}

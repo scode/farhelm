@@ -1,0 +1,145 @@
+[
+  {
+    "key": "g157/c2",
+    "latest_line": 11,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "retired-terminal-kind-assertions-with-surviving-grid-oracles",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The removed negotiation fields describe a retired distinction. Actual agent, browser-relay and tab grid decoding remain positively asserted at the reviewed revision. This refutes the named loss-of-grid-delivery-coverage concern, not every possible tab test gap.",
+    "checks": [
+      "At f560058da19e02716e6f943883a9508b447aff4e, crates/farhelm/tests/e2e/host_processes.rs:363-383 decodes Data as GridOutput before accepting screen text; :861-891 decodes binary WebSocket frames; :909-958 creates a real session through a real helm and requires READY and echo:through-the-helm after input.",
+      "At the same hash, host_tabs.rs:154-183 requires decoded Rows containing the target plus ReplayComplete; :290-330 opens an actual tab, obtains TAB-SAYS-42 and invokes that decoder for the tab selector. This resolves the earlier caveat that a bare attach and an agent oracle alone do not prove tab payloads.",
+      "At the same hash, SPEC_impl.md:3009-3027 explicitly retires terminal-kind negotiation with protocol 77. Source inspection only; no passing runtime result is inferred."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:2899 onward requires terminal hosts; SPEC_impl.md:2937-2955 explicitly states the grid-only protocol. These support removal of negotiation, not a general exemption from testing actual output.",
+      "TODO.md:25-26 has an empty Planned bucket. Focused searches of plans/queue found tmux-end-old-terminals acceptance criterion 3 requiring removal of the exact wire fields, and subsequent tmux plans; no separate missing-grid-oracle repair was identified.",
+      "BUGS.md contains only the detached SSH-output-holder issue, which is unrelated. Searches of active TRIAGE_OUTCOMES.md found no decision for this trigger/consequence.",
+      "Read INDEX.md in bounded chunks and searched queue Markdown for terminal-kind assertions/grid-oracle terms. No exact current queue item found; generic grid test issues have different triggers. No archive read.",
+      "FILTER.md has no complete boundary matching this ordinary test-coverage concern; no filter is used."
+    ],
+    "exact_cover_quotes": [
+      {"source": "SPEC_impl.md:2943-2945 (also f560058d:3015-3017)", "quote": "Protocol 77 removed the byte streams with the old terminals and xterm.js: every attachment's data channel carries a grid stream"}
+    ],
+    "missing_premise": null,
+    "original_stronger_consequence": "Deleting kind assertions, stream notices, byte-only refusals and reply-kind checks might remove meaningful terminal-delivery regression coverage. Earlier records correctly left the bare tab attach's payload unproved; the final record supplies a distinct direct tab decoder. No production or highest-priority consequence was claimed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutation of the precise missing-grid-decoding-oracle concern. Preserve the limited scope: successful attachment alone is insufficient, and this does not certify every grid behavior."
+  },
+  {
+    "key": "g157/c3",
+    "latest_line": 13,
+    "recommendation": "out-of-range",
+    "bucket": "other",
+    "underlying_key": "sink-churn-test-uses-host-default-and-accepts-zero-sinks",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The precise vacuous churn-fixture defect already exists at the exclusive base. Its deletion therefore did not remove an effective churn oracle, and its introduction is outside this review range. This does not refute the existence of the earlier test gap or certify all intermediate old-terminal behavior.",
+    "checks": [
+      "At exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a, terminal_tabs.rs:4210-4238 calls harness(), never requires sink presence, waits for absence and accepts registry length zero.",
+      "At that base, harness.rs:2284-2300 documents harness() as terminal-host-backed; :2288-2289 calls harness_with_timeouts and :2540-2541 supplies SupervisorSeams::default(). core.rs:1344-1363 defaults new_terminals to Host.",
+      "At 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513, handlers.rs:1870-1881 assigns no sink to a host target and creates one only for the tmux target.",
+      "git log -S for new_terminals: NewTerminals::Host before the exclusive base identifies f42178f9402ce22c60530360edc10d6721ef5b16. git merge-base --is-ancestor of that hash against the exclusive base exits 0.",
+      "The 647f0227 commit explicitly says private old servers are still served at that intermediate step. Later retirement is prospective and is not used to deny an intermediate test obligation. No runtime execution."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:2899 and SPEC_impl.md:2780-2822 describe terminal hosts plus startup retirement. Neither retroactively proves adequate pre-retirement testing.",
+      "Planned in TODO.md is empty. plans/queue/tmux-end-old-terminals.md:211-234 names sink-churn-without-sinks among queue items removed with their subjects; criterion 2 removes the sink machinery. This is historical coverage context, not an unlanded fix basis for the pre-range defect.",
+      "Current INDEX.md and focused queue-file searches contain no sink-churn item. The plan's sink-churn-without-sinks name is a probable historical same-root record, but that file is not currently queued; no archive was read and no exact alias is asserted without its text.",
+      "BUGS.md and active TRIAGE_OUTCOMES.md have no matching churn fixture trigger/consequence. The named neighbour g156/l1 is not supplied in this batch and is not assumed to be an alias.",
+      "FILTER.md does not apply to this ordinary test-oracle defect."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Deletion might leave live old-terminal registry boundedness/lifecycle without a regression oracle. The original blanket dismissal because no product bug was demonstrated was withdrawn, then the immediate-parent-only refutation was reopened to check whole-range provenance. Preserve all those corrections: production correctness does not refute a test gap; the exclusive-base fixture establishes that this particular gap predates the range. Pipe/roster helper deletion and new-host geometry/environment coverage are separate conclusions, with detailed environment and resize concerns owned elsewhere.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Out of range for the exact host-backed churn-fixture defect, established directly at the exclusive base. No newly lost effective churn oracle is established by deleting that test. Do not revive the superseded no-product-failure rationale."
+  },
+  {
+    "key": "g157/l4",
+    "latest_line": 16,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "converted-old-session-warning-retention-assertion-vacuous-all",
+    "aliases": [],
+    "target_queue_file": "review_feedback_queue/converted-warning-retention-oracle.md",
+    "why": "The test plants an old warning, then accepts an empty filtered warning set on both supervisor starts. It therefore cannot distinguish retention as resolved from deletion specifically for a converted session. This is a test sensitivity defect, not observed production notification loss.",
+    "checks": [
+      "At dbfc69751215dbf15e1d31d5bed73c3754c4ebc4, old_terminals.rs:305 plants the warning; :340-343 proves the session was converted to Interrupted; :344-357 requires one new ended notice but uses filter(OLD_WARNING).all(resolved), with no presence check. Calls at :359 and :365 repeat that vacuous assertion.",
+      "The same file's :466-476 positively checks retention only on the already-ended row that was not converted. A regression deleting warnings only for converted rows would evade both tests.",
+      "At the same hash, core.rs:7337-7382 commits conversions, collects converted Interrupted sessions and calls record_ended; core/old_terminals.rs:525-547 records ended notices then resolves old warnings. store.rs:5814-5830 currently uses UPDATE, so current production deletion is not alleged.",
+      "store.rs:11665-11792 checks generic notification deduplication, reopening, capping and delete cleanup; it does not drive this converted-row integration route. Targeted OLD_WARNING/OldTerminalEnded/record_ended searches in the immediate test and notification sources find no positive converted-row retained-warning assertion.",
+      "At inclusive tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, old_terminals.rs:348-369 retains the same assertion and both calls. No runtime execution or mutation experiment."
+    ],
+    "coverage_checked": [
+      "SPEC.md:2803-2828 requires startup resolution, visible resolved entries, persistence across starts and the ten-entry cap. This two-notice fixture cannot justify warning deletion by cap eviction. SPEC_impl.md:2780-2822 and :5682-5688 describe conversion and resolution; neither accepts discarding the warning or this missing test assertion.",
+      "TODO.md's Planned bucket is empty. Focused searches across plans/queue found tmux-end-old-terminals.md:95-100 requiring old-warning resolution and a separate persistent ended notice; this describes intended product behavior and does not fix the new test's presence assertion. Tooling/docs tmux plans leave the startup-shutdown tests in place and do not specify this oracle repair.",
+      "Current INDEX.md and queue-file searches found notification-cleanup-row-premise.md. Read it fully: it concerns schema reconstruction and the premise before DELETE, not retention across conversion/startup. It is neither exact coverage nor a same-root alias; extending it would mix distinct defects.",
+      "BUGS.md has no matching notification issue. Searches of active TRIAGE_OUTCOMES.md for notification, warning, old-terminal and conversion terms found no matching decision. No archive read.",
+      "FILTER.md has no full match: this is a deterministic maintainer-test assertion gap, not a rare runtime diagnostic-loss trigger."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No source premise is missing for the assertion gap. Runtime frequency and an actual production warning deletion are neither established nor required for this test-only claim. Absence search is limited to the named integration test and immediate notification/store tests.",
+    "original_stronger_consequence": "From its first lead onward, the concern was lost regression protection for retaining the converted session's prior warning as resolved. It never established shipped warning deletion, security harm or loss of user-owned work. Preserve the distinction from the already-ended-row assertion and from correct production UPDATE behavior.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Record the test-only defect at other priority. Require a positive exact warning presence/count assertion as well as resolved state on both starts. Preserve source-confirmed confidence and the absence of a runtime reproduction."
+  },
+  {
+    "key": "g158/c1",
+    "latest_line": 2,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "no-tmux-test-explanation-versus-startup-socket-cleanup",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The changed explanation describes supervisor session operations, which do not invoke a tmux program. Startup ends an old server through its socket and process identity; a user's own commands are outside this fixture's assertion.",
+    "checks": [
+      "At 08399d092d20815ced6619c26df2391944ae2b4a, host_processes.rs:459-476 states the bounded contract; :483-519 validates the recorder and its delivery through FARHELM_TMUX; :521-575 drives session/tab operations and orderly shutdown and requires an empty invocation log.",
+      "At the same hash, service/core/old_terminals.rs:176-280 connects using UnixStream::connect, verifies same-user peer identity, snapshots the subtree and calls terminate_process_within with names_tmux_server_socket. It never executes the configured tmux binary in this path.",
+      "Current SPEC_impl.md:7996-8002 explicitly states that the supervisor runs no tmux and ignores the FARHELM_TMUX retained in older installed units. No runtime pass is claimed."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md:2780-2822 and :7996-8002 explicitly support no-program startup cleanup and obsolete environment handling. SPEC.md:5164-5195 explicitly allows the user's own tmux as an ordinary program; that does not make it a supervisor operation exercised by this fixture.",
+      "TODO.md Planned is empty. Searched plans/queue for no-tmux, old-terminal and FARHELM_TMUX context; the tmux plans require program-free startup cleanup and removal of old environment plumbing, not a conflicting test contract.",
+      "Current INDEX.md and matching queue-file searches found no exact misleading-no-tmux-test explanation item. BUGS.md and active TRIAGE_OUTCOMES.md have no matching trigger/consequence. No archive read.",
+      "FILTER.md is not used; the named concern is source-refuted rather than a rare diagnostic exception."
+    ],
+    "exact_cover_quotes": [
+      {"source": "SPEC_impl.md:7996", "quote": "The supervisor runs no tmux."},
+      {"source": "SPEC_impl.md:2787-2788", "quote": "works whether or not any tmux program exists"}
+    ],
+    "missing_premise": null,
+    "original_stronger_consequence": "The broader wording might mislead maintainers by overlooking startup retirement or user-launched tmux. The second history record checks actual startup termination rather than relying on comments. Neither version alleges a runtime regression or security/work-loss route; the fixture does not prove arbitrary user commands avoid tmux.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutation of misleading regression documentation in the stated session-operation scope; preserve the explicit arbitrary-user-command caveat."
+  },
+  {
+    "key": "g158/c2",
+    "latest_line": 3,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "delete-daemon-oracle-distinguishes-terminal-hangup",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The fixture daemon escapes the controlling terminal and ignores HUP before publishing its process number. Requiring it to be gone after Delete distinguishes cleanup beyond ending the tab host. This is source reasoning about oracle sensitivity, not a successful test observation.",
+    "checks": [
+      "At 08399d092d20815ced6619c26df2391944ae2b4a, terminal_tabs.rs:310-343 writes a background subshell invoking setsid, redirects all terminal descriptors and executes trap \"\" HUP before publishing the daemon PID and execing sleep.",
+      "At the same hash, :1166-1173 explains the intended distinguishing oracle; :1195-1208 starts the daemon without scrubbing session markers, waits for its PID and arms cleanup. :1211-1217 deletes the session, requires both shell and daemon gone and requires no session-marked processes.",
+      "The helper's remaining kill-window wording is historical terminology; it does not change the actual HUP immunity. This check does not assert that all unchanged wording predates the entire range. No tests or reproductions run."
+    ],
+    "coverage_checked": [
+      "SPEC.md:5179-5195 describes teardown of ordinary descendants and cleanup limits; SPEC_impl.md:4794 onward describes sweeping beyond terminal hangup. Neither makes the claimed counterexample valid against this immune daemon fixture.",
+      "TODO.md Planned is empty. Focused plans/queue searches for daemonized descendants and the named cleanup fixture found no plan repairing this purported vacuity; user-tmux cleanup policy is a distinct scope.",
+      "Current INDEX.md includes child-hangup-masks-missing-stop-tree-sweep.md, concerning Stop and an unmarked descendant that lacks this escape premise. It is not an alias for this source-refuted Delete-daemon claim. No exact queue hit for the named fixture or daemonized-descendant claim.",
+      "BUGS.md's detached SSH output holder concerns provisioning and is unrelated. Active TRIAGE_OUTCOMES.md has no matching Delete-daemon-oracle decision. No archive read.",
+      "FILTER.md is not used; no established defect remains to filter."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "The migrated explanation might claim descendant-sweep coverage while the descendant dies only from terminal teardown. The actual detached, HUP-ignoring fixture refutes that exact vacuity concern. No shipped cleanup failure, security impact or loss of user work was established.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutation restricted to the terminal-hangup false-pass hypothesis. Other cleanup tests and their distinct premises are outside this disposition."
+  }
+]

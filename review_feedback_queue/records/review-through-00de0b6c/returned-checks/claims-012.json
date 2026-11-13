@@ -1,0 +1,236 @@
+[
+  {
+    "key": "g022/f1",
+    "latest_line": 2,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "podman-handle-tensorlake-refutable-pattern-build-lead",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The exact commit introducing the additional handle variant also changes both Tensorlake destructuring sites to returning let-else branches. The suspected intermediate compilation failure is source-refuted.",
+    "checks": [
+      "04ffdbb35773cef36e73eb798c005ddbeb9a9de6:crates/farhelm-helm/src/tensorlake/hosts.rs:126-130 and 150-154 reject a non-Tensorlake handle explicitly; neither pattern is an unguarded refutable let. The latest record's destroy line reference is slightly displaced: its let-else is at 151-153.",
+      "Read both history events, including the initial unresolved build-failure suspicion. This is a source check, not a compilation result."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md and SPEC_impl.md searched for provider/handle/destructuring concerns; no acceptance of this suspected build break found.",
+      "TODO.md Planned is empty. plans/queue/INDEX.md has no unlanded entries. BUGS.md describes an unrelated SSH transfer-helper hang.",
+      "Current queue INDEX and active TRIAGE_OUTCOMES searched for this handle/build route; no matching record found. FILTER.md supplies no relevant whole-consequence match."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Adding Podman might make Tensorlake bare let patterns refutable and prevent the intermediate revision from building. No security or user-work-loss consequence was asserted.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Narrow source refutation of the two alleged incompatible patterns; not a claim that the entire revision was built or is otherwise defect-free."
+  },
+  {
+    "key": "g022/f2",
+    "latest_line": 7,
+    "recommendation": "retain-verified",
+    "bucket": "high",
+    "underlying_key": "archive-trash-epoch-lacks-unconditional-fleet-wake",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "A supervisor can publish session removal and let the helm consume that hint before its later archive reply. The reply changes the Trash epoch, but changed-only cache forgetting need not publish a second fleet event. An idle filtered window can retain its earlier count. This is a source-supported interleaving, not a runtime observation.",
+    "checks": [
+      "06d4b68f3a9e913f47cd426fedee5946a4eed77b:crates/farhelm-supervisor/src/service/teardown.rs:1062-1065 removes the session and hints before unbounded cleanup at 1081-1187; service/handlers.rs:1371-1382 sends SessionDeleted only after mutation completion.",
+      "At that revision client.rs:3057-3106 releases request-map ownership before awaiting its own reply, and supervisor service/handlers.rs:599-619 spawns list work with separate admission. A list may therefore complete during post-removal cleanup.",
+      "00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:crates/farhelm-helm/src/sessions.rs:3725-3735 and 4575-4581 advance the archive epoch without an explicit fleet bump. manager.rs:2507-2535 bumps only when cache forgetting changed rows. The ordinary Delete tail at sessions.rs:3743-3766 reaches that manager method.",
+      "06d4b68f3a9e913f47cd426fedee5946a4eed77b:manager.rs:4602-4615,4662-4664 emits for changed cache or an unanswered hint, not every stable refresh. UI feed.rs:233-234 disables fallback while healthy; list/trash.rs:738-764 reacts to delivered epoch or explicit causes.",
+      "Files remain archived and retrievable. An unrelated fleet event, reconnect, load or dialog open repairs the count; complete unfiltered listings and the issuing window may have independent refresh triggers. No loss of archived files is established."
+    ],
+    "coverage_checked": [
+      "Current SPEC_impl.md:4039-4057 requires epoch advancement before the fleet wake and says ordinary events/fallback ticks do not themselves read Trash. Its other-helm reconnect exception is a different scope. SPEC.md Trash section supplies no acceptance of missed same-helm archive publication.",
+      "TODO.md Planned and plans/queue/INDEX.md are empty. The retained bell-trash-reads.md plan text describes this feature, but the plan is already landed and cannot cover a remaining defect as unlanded work.",
+      "BUGS.md has no archive/count item. INDEX and active TRIAGE_OUTCOMES searches found layout, migration, listing-test and read-admission issues, not the missing post-archive wake. Read trash-read-eligibility-can-remain-cached.md: it concerns an extra read during pending cleanup, not a missed epoch delivery.",
+      "FILTER.md rare/self-correcting display filter is a possible ambiguity. No guaranteed repair event bounds how long this healthy idle window stays stale, so the whole 'briefly wrong' boundary is not established. Retain under the rule that unclear coverage/filtering does not authorize omission."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "Runtime incidence and duration are unmeasured. Whether the maintainer regards an indefinitely idle stale count as 'briefly wrong' for FILTER.md remains a recording-policy ambiguity; it is not missing source support for the interleaving.",
+    "original_stronger_consequence": "Other open windows can keep an empty/outdated Trash count until another fleet change or explicit Trash open; filtered windows can miss newly archived work in the idle display. The history consistently disclaims file loss and retains high/material-UX priority.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain the conditional source finding and its high recommendation, with repair triggers and unmeasured incidence explicit. g017/c1's zero-valued wire fixture is a distinct test sensitivity concern, not an alias."
+  },
+  {
+    "key": "g023/f1",
+    "latest_line": 9,
+    "recommendation": "refuted",
+    "bucket": "highest",
+    "underlying_key": "sandbox-stop-refreshed-session-cross-identity-lead",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The refreshed session contributes only the same keyed identity to Stop. This refutes cross-session retargeting, not full rendered-consent safety. Keep the potential process-loss consequence in the independent drop register.",
+    "checks": [
+      "086d4ff96efb13bdb51accaa1ce0a0a6f7d5ca5b:crates/farhelm-ui/src/lib.rs:2267-2276 keys SessionView by session ID. list/view.rs:3082-3095 consumes source.id and separately supplied Stop guards, not refreshed status/tabs.",
+      "At the same revision sandbox_sessions.rs:255-288 saves guard values during start and later reads them during execute. Importantly, start itself is a refreshed use_callback, so those values need not belong to the original rendered activation; g023/f4 retains that separate route.",
+      "Read all five history events, including the corrected SessionView citation, narrowed identity-only refutation, and warning that g025/f3 direction selection and g026/f1 opening-token substitution are not refuted here."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:2051-2068 and SPEC_impl.md:1069-1095 require rendered consent; they do not accept wrong-session Stop. Source identity, rather than specification acceptance, is the proposed basis.",
+      "Planned TODO and unlanded-plan index are empty; BUGS.md has no relevant entry.",
+      "INDEX search and full sandbox-lifecycle-questions-lack-opening-guards.md read identify a distinct opening-token defect, with its stronger route still unverified. It does not cover or refute this identity allegation. Active ledger contains no exact cross-session identity decision. No whole FILTER.md match is proposed for potential process loss."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "A pending Stop and suspend might stop a different session or user-owned work the user had not agreed to stop. The identity route is source-refuted; same-session guard drift and other lifecycle claims survive separately.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Only dismiss the cross-session identity route after independent agreement. Do not use this result to dismiss g023/f4, g025/f3 or g026/f1 or to assert all guards were frozen by the rendered activation."
+  },
+  {
+    "key": "g023/f2",
+    "latest_line": 10,
+    "recommendation": "refuted",
+    "bucket": "high",
+    "underlying_key": "shared-lifecycle-perform-ordinary-error-strands-hold-lead",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Ordinary returned transition and attribution errors are captured before the common release decision. A hold publishes a non-connected state, making that decision release it. Successful Podman Suspend with no confirmed-state callback also releases. This refutes the scoped helper extraction concern.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/environment/lifecycle.rs:64-97 captures transition/record errors in result and releases before successful Resume retry. manager.rs:1604-1627 publishes state/hold together; 1651-1661 clears hold and nudges.",
+      "At that revision environment/podman.rs:643-719 validates canonical identity under the provisioning lock and uses perform with a callback returning None. tensorlake/lifecycle.rs:62-100 validates lock, binding and API key before perform; attribution recording at 101-125 remains inside the returned-error block.",
+      "Automatic starts are separately spawned at manager.rs:3862-3871. This result does not prove safety against panics or whole-runtime termination, and does not claim recovery of an already-dead actor's displayed state."
+    ],
+    "coverage_checked": [
+      "Current SPEC_impl.md:6704-6720 requires owned tasks and release on every failure; SPEC.md lifecycle rules do not accept a stranded hold. Those contracts support the check, rather than cover a defect.",
+      "TODO Planned and unlanded-plan index are empty. BUGS.md's SSH-transfer hang has different trigger/ownership.",
+      "Read retired-connection-leaves-suspend-progress-stuck.md and failed-setup-refresh-overwrites-held-lifecycle-status.md after INDEX hits. They concern a dead actor's residual display and sync_registry publication respectively, not this helper failing to release its hold. Active ledger has no exact matching disposition. No filter is needed for source refutation."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Helper extraction might leave a host permanently disconnected after Suspend or Resume. The original claimed impact was high availability harm, with no established security or loss-of-work route.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Narrow source refutation for ordinary returned-error/owned-task paths; do not globalize it to all lifecycle display or actor-retirement failures."
+  },
+  {
+    "key": "g023/f3",
+    "latest_line": 11,
+    "recommendation": "refuted",
+    "bucket": "highest",
+    "underlying_key": "never-created-registration-rollback-forgets-live-resource-lead",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The wrapper's sole production caller rolls back registration before the setup task can prepare or create a resource. A fresh Podman row has no canonical ID, preventing an automatic or explicit lifecycle start during this interval. Preserve the original potential user-work loss for an independent drop check.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/environment/mod.rs:181-189 documents and constructs never_created proof. git grep for handle.never_created at this revision returns only provisioning/tensorlake_add.rs:413.",
+      "At that revision provisioning/tensorlake_add.rs:391-417 registers then reconciles and rolls back on failure. The owned setup spawn is later at 452-486; ensure_prepared and provider.create are later still at 521-555.",
+      "At that revision environment/podman.rs:1242-1249 refuses status before inspect when canonical container ID is absent; 643-670 similarly refuses explicit lifecycle before I/O or hold. Thus registry actor startup does not establish an intervening create on the fresh row.",
+      "Tensorlake hosts.rs:56-68 expressly limits registration rollback to no recorded sandbox ID or outstanding create. No runtime resource creation or deletion was performed."
+    ],
+    "coverage_checked": [
+      "Current SPEC_impl.md:6271-6275 and 6695-6700 distinguishes cleanup proof from registration rollback before create. SPEC.md ownership/removal rules contain no acceptance of forgetting live user work.",
+      "TODO Planned and plans/queue/INDEX.md are empty; BUGS.md has no matching rollback-proof concern.",
+      "Queue INDEX/active ledger searches for never-created/rollback/resource-forgetting found no exact item. confirmation-rollback-omits-container-cleanup.md is a different rollback site/consequence; no alias asserted. FILTER.md does not supply a whole match for the original potential work-loss route."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "An unverified never-created cleanup proof might forget an environment that still contains a user's session or files. The caller ordering and absent-identity checks refute that route here; this is not an impact downgrade.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Independent consultation should judge the no-create premise and the narrow wrapper/caller scope. Do not infer that every cleanup proof or arbitrary concurrent provider operation was reviewed."
+  },
+  {
+    "key": "g023/f4",
+    "latest_line": 8,
+    "recommendation": "out-of-range",
+    "bucket": "highest",
+    "underlying_key": "sandbox-stop-start-callback-recaptures-ended-guard",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The remaining pre-handler guard race already exists at the exclusive base. The assigned patch captures guards before the activity await and improves that later interval, but it leaves the older refreshed-start route. Scope exclusion needs independent agreement because the supported consequence is stopping newly live processes beyond the earlier display's consent.",
+    "checks": [
+      "086d4ff96efb13bdb51accaa1ce0a0a6f7d5ca5b:crates/farhelm-ui/src/sandbox_sessions.rs:275-288 captures clicked_guards inside a refreshed start callback; button activation at 354-357 supplies only true. list/view.rs:3082-3095 forwards those booleans.",
+      "The revision pins dioxus-hooks 0.7.10 in Cargo.lock:1528-1531. Matching installed src/use_callback.rs:8-27 replaces the callback closure every render while preserving its handle.",
+      "086d4ff96efb13bdb51accaa1ce0a0a6f7d5ca5b:crates/farhelm-ui/src/hosts.rs:1844-1853 allows a current Idle row without activity confirmation. Supervisor service/handlers.rs:905-915 refuses newly live agents only when refuse_if_agent_running is true.",
+      "6e423e30068b62c6cfa276c6d720ee35bb70387a:crates/farhelm-ui/src/sandbox_sessions.rs:197-207 already reads refreshed session.status.has_ended() in execute; 220-247 already uses refreshed start(bool); 300-303 supplies only true. A refresh before activation handling followed by stable Idle therefore already weakens the guard before this range.",
+      "No runtime timing or native event incidence was measured. This conclusion is narrower than asserting every lifecycle event ordering is reachable."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:2051-2068 explicitly requires refusal when the click showed an ended agent; SPEC_impl.md:1069-1095 binds to the render. They forbid, rather than cover, this route.",
+      "TODO Planned and unlanded-plan index are empty. The landed sandbox-stop-click-guards.md plan addresses the activity-await interval; its text is not unlanded coverage of the residual pre-handler interval.",
+      "Read sandbox-lifecycle-questions-lack-opening-guards.md in full. Its opening-token defect and unresolved obsolete-question route are different from this no-question guard capture. Active ledger/BUGS searches provide no exact cover. No FILTER.md match can erase the process-loss consequence merely because timing is narrow."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "A delayed Stop and suspend activation can capture a newer permissive running-agent guard and stop newly started user-owned processes that the earlier ended-agent display did not authorize. Keep highest if retained; proposed exclusion is temporal, not severity-based.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "The identical pre-handler route is visible at the exclusive base. Independently confirm scope exclusion; do not call the defect source-refuted, fixed, specification-accepted, or duplicate of direction/opening-token claims."
+  },
+  {
+    "key": "g024/c1",
+    "latest_line": 8,
+    "recommendation": "refuted",
+    "bucket": "high",
+    "underlying_key": "automatic-environment-start-self-awaits-actor-parking-lead",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The automatic lifecycle operation runs in a separate task while the connection actor can observe its nudge and acknowledge the hold. Resetting the episode drops a join handle, not the operation. The considered self-deadlock/cancelled-wait path is source-refuted.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/manager.rs:3862-3889 spawns change_with_manager, then selects on nudge/timer or a borrowed JoinHandle; 3664-3670 acknowledges a hold on the outer-loop pass.",
+      "At that revision manager.rs:1604-1644 publishes hold/withdrawal before nudge and bounds its park wait. environment/lifecycle.rs:64-97 releases after ordinary success/errors before retrying Resume. Podman change at environment/podman.rs:649-670 owns provisioning admission and rereads binding before I/O.",
+      "This is not the same root as g023/f2: that record concerns missing release on returned errors; this one concerns an actor awaiting its own parking and the lifetime of its spawned start task. Neither refutes unrelated retirement/status defects."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md Container sessions and SPEC_impl.md Disposable environments require actor-owned starts and withdrawal before pause; no self-deadlock acceptance found.",
+      "TODO Planned and unlanded-plan index are empty. BUGS.md's transfer-helper hang does not match.",
+      "Queue INDEX and active ledger searches for automatic start, holds and deadlock found no exact route. Read related retired-connection-leaves-suspend-progress-stuck.md and failed-setup-refresh-overwrites-held-lifecycle-status.md: both are different display/publication defects. No filter-based dismissal proposed."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Automatically starting a stopped container might await its own actor's parking and strand access. Original suggested impact was high availability harm, without established security or work loss.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Refute only self-deadlock and cancellation caused by dropping the actor's wait/episode. Provider panic and whole-runtime termination remain outside this proof."
+  },
+  {
+    "key": "g024/c2",
+    "latest_line": 11,
+    "recommendation": "refuted",
+    "bucket": "high",
+    "underlying_key": "launcher-place-list-awaits-remote-probe-fanout-lead",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The awaited refresh performs a local row read and schedules owned background probe work. It does not await remote probe completion or retain the cache mutex around remote work. The fan-out blocking suspicion is source-refuted.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/hosts.rs:4294-4308 is the corrected endpoint: its refresh loop calls PodmanPlaces::refresh, then aggregates cached provider places.",
+      "At that revision environment/podman_probe.rs:435-475 awaits current_row locally, admits under a short mutex, then spawns the probe at 446. Its guard is installed before the task's first await; Refreshing::drop at 479-494 clears admission and notifies. Remote probe awaits occur outside the cache lock, and publication rechecks the route at 458-472.",
+      "Caller cancellation before local read completion creates no admitted remote job; after spawning, the task owns the probe. This proves neither refresh-on-every-reopening nor any UI scheduling behavior beyond the scoped endpoint."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md Container sessions requires background probes. SPEC_impl.md:6059-6063 explicitly says no synchronous probe fan-out gates opening the launcher; this is a contract satisfied by the scoped code, not permission for a blocking defect.",
+      "Planned TODO and unlanded-plan index are empty; BUGS.md has a different SSH-transfer hang.",
+      "Queue INDEX and active ledger searches for probe/fan-out/launcher blocking found no exact match. Read probe-timeout-discards-parsed-remote-path.md in full: it concerns discovery/update refusal after an SSH helper's open diagnostic pipe causes cleanup to discard a parsed path, not waiting for container-place probes. No filtering proposed."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Opening the launcher might block on multiple slow remote place probes. Suggested high if established; no security or user-work-loss route claimed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutation limited to synchronous remote-probe fan-out and the described cancellation/cache-lock concern. Keep the repeated-opening scheduling caveat."
+  },
+  {
+    "key": "g024/c3",
+    "latest_line": 13,
+    "recommendation": "needs-parent",
+    "bucket": "other",
+    "underlying_key": "agent-environment-history-lacks-gui-choice-provenance",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The original forged/obsolete-reply routes are narrowly source-refuted, but that does not refute the later supplied agent-provenance defect. The latest record corroborates g050/l1:8 rather than owning a separate discovery. Parent should attach the corroboration to that canonical finding while preserving the original authority-only proposed drop.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/sessions.rs:1064-1067 serde-skips environment_target. record_created_history at 2065-2107 checks entry UUID, incarnation, client, ownership and connected identity. store.rs:8863-8884 retains the returned guard during the transaction and compares durable identity.",
+      "At that revision supervisor db.rs:230-244 moves the complete closure onto spawn_blocking, taking the connection mutex before invoking it. Cancelling the async waiter after spawning does not release the closure-owned registry guard ahead of transaction completion.",
+      "190d844e58c96cf197aa838d0b0eea8062f48435:agent_requests.rs:4477-4484 constructs an agent request, 4493-4515 obtains approval, 4541-4548 invokes owned shared provisioning. provisioning/tensorlake_add.rs:357-361 always attaches the recipe/place target.",
+      "At that integration revision sessions.rs:1243-1252 retains Agent origin; 1893-1907 carries target independently; 2055-2060 omits explicit GUI selection for Agent; 2099-2109 and 2174-2235 pass target plus None selection through acceptance into storage. No origin discriminator reaches the history call.",
+      "Integration store.rs:9015-9017 calls environment_history::record. store/environment_history.rs:49-75 admits a target with NULL selection, 82-88 writes last_container_host, 93-99 evicts from the same bounded window; 113 filters NULL selections only when returning reusable setups.",
+      "Integration UI environment_ui.rs:491-507 computes default_container from last_container_host and 550-570 emits that place when entering New container. Thus successful agent creates can change a later GUI default and age/evict GUI recents, while agent selections themselves do not become visible reusable setups."
+    ],
+    "coverage_checked": [
+      "190d844e58c96cf197aa838d0b0eea8062f48435:SPEC.md:5158-5163 explicitly excludes anything an agent creates from GUI defaults/suggestions; current SPEC.md:5122-5128 retains the rule. Current SPEC_impl.md:6020-6023 requires captured request intent but does not authorize non-GUI intent to change GUI defaults.",
+      "TODO Planned and unlanded-plan index are empty. BUGS.md contains no history/default exception.",
+      "INDEX and active ledger history/default/provenance searches found history-reply-lacks-installation-provenance.md. Read the queue file and TRIAGE_OUTCOMES.md:1056-1068: that discard concerns an A-to-B-to-A GUI history response mislabeled by client target tags, not successful agent writes into the environment projection. It is not exact coverage.",
+      "FILTER.md subsecond convenience-history filter requires a person to win a short self-closing window; the agent-create provenance route needs no such race. The durable preference/history mutation also exceeds the rare brief-display filter."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No remaining source premise for the supplied convenience-data consequence. Parent must reconcile ownership with g050/l1:8; its full named record was not assigned to this batch and was not searched independently.",
+    "original_stronger_consequence": "Original c3 suspected arbitrary ordinary requests, descriptive supervisor replies or delayed replies could manufacture reusable placement or restore obsolete suggestions. Later history narrows that refutation to authority/connection freshness and separately confirms agent-created environment launches changing GUI container-host defaults and aging/evicting GUI recents. Neither route establishes security disclosure, automatic destructive execution or user-work loss.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Refute only forged-placement/obsolete-connection authority routes, with their original wording retained for the parent register because they concern an authority boundary. Retain the distinct GUI-provenance finding under g050/l1:8; this batch is corroboration, not authorization to drop or silently deduplicate it."
+  }
+]

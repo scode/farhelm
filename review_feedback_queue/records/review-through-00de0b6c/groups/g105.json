@@ -1,0 +1,761 @@
+{
+  "group": {
+    "id": "g105",
+    "domain": "supervisor-core-integration",
+    "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs, crates/farhelm-supervisor/src/lib.rs, crates/farhelm-supervisor/tests/fixtures/grid-keys.jsonl, crates/farhelm-supervisor/Cargo.toml, crates/farhelm-supervisor/src/agent_screen.rs, crates/farhelm-supervisor/src/files.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g002",
+      "g005",
+      "g006",
+      "g012",
+      "g097",
+      "g098",
+      "g099",
+      "g100",
+      "g101",
+      "g102",
+      "g103",
+      "g104",
+      "g106",
+      "g107",
+      "g108",
+      "g109",
+      "g110",
+      "g111",
+      "g112",
+      "g113",
+      "g114",
+      "g115",
+      "g116",
+      "g117",
+      "g118",
+      "g119",
+      "g120",
+      "g121",
+      "g122",
+      "g123",
+      "g124",
+      "g125",
+      "g126",
+      "g127",
+      "g128",
+      "g129",
+      "g130",
+      "g131",
+      "g132",
+      "g133",
+      "g134",
+      "g149",
+      "g150",
+      "g159",
+      "g160",
+      "g161",
+      "g162",
+      "g163",
+      "g164",
+      "g165",
+      "g166",
+      "g167",
+      "g168",
+      "g169",
+      "g170",
+      "g171",
+      "g172",
+      "g173"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00766-000.patch",
+        "ranges": [
+          [
+            1,
+            1143
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/core.rs",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,59787)",
+        "lines": 1143,
+        "bytes": 59831,
+        "start": 0,
+        "end": 59787,
+        "original": "[private-run]/prep/originals/00766.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01280-000.patch",
+        "ranges": [
+          [
+            1,
+            27
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/lib.rs",
+        "commit": "500548b9253b07a26fd03119679184b69544e31d",
+        "notes": "patch header; patch character offsets [0,1376)",
+        "lines": 27,
+        "bytes": 1376,
+        "start": 0,
+        "end": 1376,
+        "original": "[private-run]/prep/originals/01280.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01490-000.patch",
+        "ranges": [
+          [
+            1,
+            10
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/tests/fixtures/grid-keys.jsonl",
+        "commit": "61e632323dbc6b4a35ed27bf5b9833102ffd5a4e",
+        "notes": "patch header; patch character offsets [0,835)",
+        "lines": 10,
+        "bytes": 835,
+        "start": 0,
+        "end": 835,
+        "original": "[private-run]/prep/originals/01490.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01529-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/Cargo.toml",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,655)",
+        "lines": 13,
+        "bytes": 655,
+        "start": 0,
+        "end": 655,
+        "original": "[private-run]/prep/originals/01529.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01531-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/agent_screen.rs",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,880)",
+        "lines": 13,
+        "bytes": 880,
+        "start": 0,
+        "end": 880,
+        "original": "[private-run]/prep/originals/01531.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01532-000.patch",
+        "ranges": [
+          [
+            1,
+            14
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/files.rs",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,869)",
+        "lines": 14,
+        "bytes": 869,
+        "start": 0,
+        "end": 869,
+        "original": "[private-run]/prep/originals/01532.patch"
+      }
+    ],
+    "lines": 1220,
+    "bytes": 64446
+  },
+  "records": [
+    {
+      "key": "g105/c1",
+      "owner": "g105",
+      "id": "c1",
+      "domain": "supervisor-core-integration",
+      "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs, crates/farhelm-supervisor/src/lib.rs, crates/farhelm-supervisor/tests/fixtures/grid-keys.jsonl, crates/farhelm-supervisor/Cargo.toml, crates/farhelm-supervisor/src/agent_screen.rs, crates/farhelm-supervisor/src/files.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Interrupted tmux creates are refused after upgrade by design",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:11226",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513\n\nTLDR: A create interrupted under an older supervisor is refused rather than relaunched when its recorded terminal is tmux. This initially looks like lost retry functionality, but the implementation contract explicitly requires it.\n\nDetails: core.rs:11062-11079 preserves the recorded terminal kind, :11177-11222 performs the atomic takeover or returns an already-launched result, and :11226-11243 refuses only an acquired tmux retry before checkout allocation or spawn. The refusal helper at :15866-15929 settles the refusal and retains an already allocated managed checkout. SPEC_impl.md:2315-2319 states: \"A retried keyed create whose interrupted row is a tmux row (left by an older supervisor) keeps that kind through the store's takeover, so a row that turns out to have launched replays as itself; one the takeover claims is refused before anything starts and rolled back like a launch whose spec never landed, the refusal settled against its intent key: the evidence that allowed the retry was gathered for tmux, so starting it in a host instead would be a guess, and no tmux terminal is created any more.\"\n\nSuggested bucket: high if unintended, because this prevents recovery of an interrupted create. Confidence: confirmed specification acceptance, source analysis only. proposed_drop: explicit implementation specification acceptance quoted above. Could-be-highest: false; this candidate concerns the refusal itself, with allocated-checkout ownership preserved. possible_cover: none; coverage sources were not searched. Caveat: cleanup safety and concurrent takeover behavior remain independently in scope; acceptance of the refusal does not establish those guarantees."
+          }
+        }
+      ],
+      "latest": {
+        "line": 1,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Interrupted tmux creates are refused after upgrade by design",
+          "location": "crates/farhelm-supervisor/src/service/core.rs:11226",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513\n\nTLDR: A create interrupted under an older supervisor is refused rather than relaunched when its recorded terminal is tmux. This initially looks like lost retry functionality, but the implementation contract explicitly requires it.\n\nDetails: core.rs:11062-11079 preserves the recorded terminal kind, :11177-11222 performs the atomic takeover or returns an already-launched result, and :11226-11243 refuses only an acquired tmux retry before checkout allocation or spawn. The refusal helper at :15866-15929 settles the refusal and retains an already allocated managed checkout. SPEC_impl.md:2315-2319 states: \"A retried keyed create whose interrupted row is a tmux row (left by an older supervisor) keeps that kind through the store's takeover, so a row that turns out to have launched replays as itself; one the takeover claims is refused before anything starts and rolled back like a launch whose spec never landed, the refusal settled against its intent key: the evidence that allowed the retry was gathered for tmux, so starting it in a host instead would be a guess, and no tmux terminal is created any more.\"\n\nSuggested bucket: high if unintended, because this prevents recovery of an interrupted create. Confidence: confirmed specification acceptance, source analysis only. proposed_drop: explicit implementation specification acceptance quoted above. Could-be-highest: false; this candidate concerns the refusal itself, with allocated-checkout ownership preserved. possible_cover: none; coverage sources were not searched. Caveat: cleanup safety and concurrent takeover behavior remain independently in scope; acceptance of the refusal does not establish those guarantees."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g105/findings.jsonl",
+        "id": "c1",
+        "line": 1,
+        "disposition": "excluded",
+        "group": "legacy-tmux-interrupted-keyed-create-refusal",
+        "reason": "Parent explicitly accepted named covered proposal from claims-068 after inspecting it. The refusal is the behavior the implementation specification expressly requires. This disposition covers the refusal itself, not artifact cleanup, ownership settlement, or concurrent takeover safety. Explicit SPEC_impl acceptance of this precise refusal. Keep l1's cleanup question separate. Checked source/results: [\"647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:core.rs:11226-11243 refuses the acquired tmux retry before allocation/spawn. 15866-15929 deletes/settles ordinary rows, rolls back still-Planned ownership, or retains allocated/unreadable checkout ownership as a visible refusal.\",\"Current SPEC_impl.md:2178-2185 explicitly retains tmux kind through takeover, replays launched rows, and refuses an acquired retry because host launch would guess beyond the tmux evidence. This matches trigger, consequence, and scope. Source check only.\"] Current coverage/results: [\"Both specifications searched for retried keyed creates, interrupted tmux rows, and refusal. Current SPEC_impl.md:2178-2185 is exact coverage; SPEC.md contains no competing promise to retry this legacy launch in a host.\",\"TODO.md Planned is empty. BUGS.md unrelated. plans/queue tmux-end-old-terminals and tmux-drop-from-install describe this migration but have landed (REPORTS.md:29-30); no unlanded plan is needed as cover.\",\"INDEX.md, matching queue text, and active TRIAGE_OUTCOMES.md searched for this exact retry refusal. No separate matching queued finding or decision found. launch-input-database-duplication-rationale-overstated.md concerns a distinct retention explanation. Archive not read.\",\"FILTER.md supplies no necessary basis; explicit specification acceptance settles the bounded refusal claim.\"] Exact cited cover: [{\"source\":\"SPEC_impl.md:2180-2185\",\"quote\":\"A retried keyed create whose interrupted row is a tmux row (left by an older supervisor) keeps that kind through the store's takeover, so a row that turns out to have launched replays as itself; one the takeover claims is refused before anything starts and rolled back like a launch whose spec never landed, the refusal settled against its intent key: the evidence that allowed the retry was gathered for tmux, so starting it in a host instead would be a guess, and this supervisor creates no tmux terminal.\"}] Original stronger consequence and missing premise remain preserved: \"If unintended, refusing the interrupted create would prevent that create's retry recovery (high). Allocated checkout ownership is retained; this candidate alleges no lost work or security route.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g105/c1",
+        "line": 1,
+        "disposition": "excluded",
+        "group": "legacy-tmux-interrupted-keyed-create-refusal",
+        "bucket": "high",
+        "recording": "covered",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named covered proposal from claims-068 after inspecting it. The refusal is the behavior the implementation specification expressly requires. This disposition covers the refusal itself, not artifact cleanup, ownership settlement, or concurrent takeover safety. Explicit SPEC_impl acceptance of this precise refusal. Keep l1's cleanup question separate. Checked source/results: [\"647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:core.rs:11226-11243 refuses the acquired tmux retry before allocation/spawn. 15866-15929 deletes/settles ordinary rows, rolls back still-Planned ownership, or retains allocated/unreadable checkout ownership as a visible refusal.\",\"Current SPEC_impl.md:2178-2185 explicitly retains tmux kind through takeover, replays launched rows, and refuses an acquired retry because host launch would guess beyond the tmux evidence. This matches trigger, consequence, and scope. Source check only.\"] Current coverage/results: [\"Both specifications searched for retried keyed creates, interrupted tmux rows, and refusal. Current SPEC_impl.md:2178-2185 is exact coverage; SPEC.md contains no competing promise to retry this legacy launch in a host.\",\"TODO.md Planned is empty. BUGS.md unrelated. plans/queue tmux-end-old-terminals and tmux-drop-from-install describe this migration but have landed (REPORTS.md:29-30); no unlanded plan is needed as cover.\",\"INDEX.md, matching queue text, and active TRIAGE_OUTCOMES.md searched for this exact retry refusal. No separate matching queued finding or decision found. launch-input-database-duplication-rationale-overstated.md concerns a distinct retention explanation. Archive not read.\",\"FILTER.md supplies no necessary basis; explicit specification acceptance settles the bounded refusal claim.\"] Exact cited cover: [{\"source\":\"SPEC_impl.md:2180-2185\",\"quote\":\"A retried keyed create whose interrupted row is a tmux row (left by an older supervisor) keeps that kind through the store's takeover, so a row that turns out to have launched replays as itself; one the takeover claims is refused before anything starts and rolled back like a launch whose spec never landed, the refusal settled against its intent key: the evidence that allowed the retry was gathered for tmux, so starting it in a host instead would be a guess, and this supervisor creates no tmux terminal.\"}] Original stronger consequence and missing premise remain preserved: \"If unintended, refusing the interrupted create would prevent that create's retry recovery (high). Allocated checkout ownership is retained; this candidate alleges no lost work or security route.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-068",
+          "key": "g105/c1",
+          "latest_line": 1,
+          "recommendation": "covered",
+          "bucket": "high",
+          "underlying_key": "legacy-tmux-interrupted-keyed-create-refusal",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The refusal is the behavior the implementation specification expressly requires. This disposition covers the refusal itself, not artifact cleanup, ownership settlement, or concurrent takeover safety.",
+          "checks": [
+            "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:core.rs:11226-11243 refuses the acquired tmux retry before allocation/spawn. 15866-15929 deletes/settles ordinary rows, rolls back still-Planned ownership, or retains allocated/unreadable checkout ownership as a visible refusal.",
+            "Current SPEC_impl.md:2178-2185 explicitly retains tmux kind through takeover, replays launched rows, and refuses an acquired retry because host launch would guess beyond the tmux evidence. This matches trigger, consequence, and scope. Source check only."
+          ],
+          "coverage_checked": [
+            "Both specifications searched for retried keyed creates, interrupted tmux rows, and refusal. Current SPEC_impl.md:2178-2185 is exact coverage; SPEC.md contains no competing promise to retry this legacy launch in a host.",
+            "TODO.md Planned is empty. BUGS.md unrelated. plans/queue tmux-end-old-terminals and tmux-drop-from-install describe this migration but have landed (REPORTS.md:29-30); no unlanded plan is needed as cover.",
+            "INDEX.md, matching queue text, and active TRIAGE_OUTCOMES.md searched for this exact retry refusal. No separate matching queued finding or decision found. launch-input-database-duplication-rationale-overstated.md concerns a distinct retention explanation. Archive not read.",
+            "FILTER.md supplies no necessary basis; explicit specification acceptance settles the bounded refusal claim."
+          ],
+          "exact_cover_quotes": [
+            {
+              "source": "SPEC_impl.md:2180-2185",
+              "quote": "A retried keyed create whose interrupted row is a tmux row (left by an older supervisor) keeps that kind through the store's takeover, so a row that turns out to have launched replays as itself; one the takeover claims is refused before anything starts and rolled back like a launch whose spec never landed, the refusal settled against its intent key: the evidence that allowed the retry was gathered for tmux, so starting it in a host instead would be a guess, and this supervisor creates no tmux terminal."
+            }
+          ],
+          "missing_premise": null,
+          "original_stronger_consequence": "If unintended, refusing the interrupted create would prevent that create's retry recovery (high). Allocated checkout ownership is retained; this candidate alleges no lost work or security route.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Explicit SPEC_impl acceptance of this precise refusal. Keep l1's cleanup question separate."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "legacy-tmux-interrupted-keyed-create-refusal",
+        "destination": null
+      }
+    },
+    {
+      "key": "g105/l1",
+      "owner": "g105",
+      "id": "l1",
+      "domain": "supervisor-core-integration",
+      "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs, crates/farhelm-supervisor/src/lib.rs, crates/farhelm-supervisor/tests/fixtures/grid-keys.jsonl, crates/farhelm-supervisor/Cargo.toml, crates/farhelm-supervisor/src/agent_screen.rs, crates/farhelm-supervisor/src/files.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Check artifact cleanup before the new tmux-retry refusal",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:11226",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513\n\nTLDR: An interrupted create that is refused after upgrade must not leave its prior launch's private files behind without reporting cleanup failure. Whether the new early refusal does so is not settled yet.\n\nDetails: The new return at core.rs:11226-11243 calls refuse_retried_tmux_launch (:15866-15929), which removes or retains the row and settles its reservation without visibly clearing launch artifacts itself. The existing validation-refusal path at :10728-10751 explicitly clears generation-zero artifacts after deleting the untouched retry and reports a cleanup failure. Source checks still needed: inspect resolution/retry ordering before launch_reserved to determine whether it already clears all artifacts before this new early return, plus the artifact lifecycle contract. This is an investigation lead, not an established defect.\n\nSuggested bucket: other for leftover private files if established; could-be-highest: no established security or loss-of-work route, but credential-bearing input warrants checking the actual cleanup contract and access boundary. Confidence: uninvestigated lead. proposed_drop: false. possible_cover: none. No execution or reproductions performed."
+          }
+        },
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Tmux-retry refusal can retain private launch files until startup cleanup",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:11226",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513\n\nTLDR: Refusing a create interrupted under an older supervisor can leave its previous private launch files until the next supervisor start, or until deletion of a retained checkout session. The source supports the retention, but the leftover-files policy accepts it.\n\nDetails: The early return at core.rs:11226-11243 precedes generation-zero cleanup at :11708-11727. resolve_reservation (:10275-10384), reserved_launch_evidence (:10448-10534), and validate_retry (:9940 onward) establish absence and validate the stored request but do not remove artifacts. refuse_retried_tmux_launch (:15866-15929) settles the failure and removes the row, or preserves an allocated checkout's ownership. Therefore a prior spec can remain after this refusal. It was written 0600 (prepare_launch, :15695 onward), inside private state, and any embedded session credential loses its row. Startup calls sweep_launch_dir at core.rs:8445. launch_artifacts.rs:652-805 explicitly removes unknown-session specs and waypoints while retaining current-generation files; its docs call this tidiness rather than a credential boundary. A retained checkout's session remains the bounded ownership handle until Delete.\n\nSuggested bucket: other if reported; the established consequence is private-file retention, not exposed credentials or lost work. Confidence: confirmed source analysis; no behavior observed through execution. proposed_drop: SPEC_impl.md, Leftover files, :94-97 states: \"Confirmed 2026-09-28: files left behind are not a leak, and need no extra cleanup machinery, when they are bounded by a fixed amount, grow only with a rare and explicit user action (such as switching the release download source), or are removed by the next attempt at the same operation or by the next start of the process that owns them. As with retained supervisor metadata, the line is accumulation without bound over time during ordinary operation.\" This route is restricted to finite pre-upgrade interrupted tmux creates, and orphan specs are removed on startup. Could-be-highest: false after investigation; private 0600 files in the owning user's state establish no exposure route, and refusing an absent launch does not end user processes. possible_cover: none; no coverage sources searched. Original suspected consequence preserved: the new early refusal bypasses the ordinary immediate private-artifact cleanup; it is accepted retention rather than a failed source hypothesis. No unresolved premise remains for this lead."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Refused tmux retries can retain credential-bearing launch input with checkout ownership",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:11226",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. Synthesis also checked the refusal helper through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db.\n\nTLDR: A create interrupted under an older supervisor can be refused after upgrade while its credential-bearing launch input remains on disk. If its managed checkout must be kept, that input and its still-valid session credential can remain until the retained session is deleted; a supervisor restart does not guarantee removal in that case. This preserves the original credential-retention concern. The proposed drop rests on bounded-retention policy and the local security boundary, not on all credentials being revoked.\n\nDetails: The early return at core.rs:11226-11243 precedes clear_launch_artifacts_fail_closed at :11708-11727. Retry resolution and validation establish absence and validate the stored request without clearing the old launch spec. prepare_launch writes the spec before a terminal starts; its contents include the command (which can contain user credentials) and session_token, and it is created 0600 at :15659-15713 inside private supervisor state. refuse_retried_tmux_launch at :15866-15929 follows two different lifetimes. Without a fresh checkout it deletes the row and settles the refusal; a successfully removed row revokes that session token. With a still-Planned checkout it calls the atomic pre-mkdir rollback; caller validation first establishes the target path absent (parent-provided g107/l1 interface confirmation agrees). With an allocated checkout, a missing ownership result, or an ownership reread error, it retains all records rather than orphan the checkout, settles a visible Error refusal and republishes the Delete handle. If that retention transaction fails it preserves the prior row and pending reservation and reports unresolved durability. It does not claim cleanup succeeded.\n\nImportant correction to the prior event: the statement that an embedded session credential loses its row applies only to successful row removal. store.rs:4004-4059 changes the retained row's outcome and launch_hooked flag without clearing session_token. store.rs:4806-4831 authenticates by the row's token, with no outcome-state check; service/handlers.rs:3801-3848 rechecks that token before relaying the request. Thus a retained Error row's token remains valid. This is not itself a demonstrated disclosure: the retained spec is private, and its command-line credentials are already in the retained session's stored launch. Startup's sweep (core.rs:8445; launch_artifacts.rs:652-805) removes unknown-session specs and waypoints but preserves a surviving session's current generation. An allocated or conservatively retained checkout can therefore keep its spec across starts; Delete is the ownership-preserving cleanup route. The helper at pinned tip core.rs:14653-14717 has the same branch structure and still returns before launch and retry artifact cleanup; later wording changes do not repair or expand this lifetime (also confirmed by parent-provided g116 interface review).\n\nSuggested bucket: other for the established private-file retention. Confidence: confirmed source and contract analysis, with cross-group confirmations identified above; no runtime observation, build or reproduction. proposed_drop: SPEC_impl.md, Leftover files, :94-97 states exactly: \"Confirmed 2026-09-28: files left behind are not a leak, and need no extra cleanup machinery, when they are bounded by a fixed amount, grow only with a rare and explicit user action (such as switching the release download source), or are removed by the next attempt at the same operation or by the next start of the process that owns them. As with retained supervisor metadata, the line is accumulation without bound over time during ordinary operation.\" The boundedness basis is the finite set of interrupted tmux creates inherited from before this supervisor, which creates no new tmux launches; this is not indefinite accumulation during ordinary creates. The orphan-removal-on-start basis applies only to successfully removed rows. SPEC.md:4939-4944 states: \"The local security boundary is the Unix account on a particular host. Processes the user runs on the target host, including same-account processes that can reach Farhelm's private tmux server or its terminal hosts (the processes that keep its new terminals), are trusted by this threat model. Farhelm does not provide strong same-account isolation against deliberate interference with agents, that private session or those terminal hosts, and session credentials do not provide same-account containment.\"\n\nCould-be-highest: no established security or loss-of-work route after these checks; credential-bearing input and a valid retained token are explicit rather than dismissed, but no source route exposes them beyond private same-account state. A demonstrated unauthorized reader or transfer across the host boundary would require revisiting highest; rarity alone would not lower that consequence. possible_cover: none; no coverage sources searched. No parent drop is accepted: this remains a proposed disposition for the caller's independent check. Original consequence preserved and sharpened: immediate cleanup is bypassed, prior credential input can persist after refusal, and ownership-retained rows can keep an active session credential across restarts. Lead l1 has no readily checkable premise left unresolved."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Recheck retained Error-row reload cleanup before asserting persistence across starts",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:7072",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513\n\nTLDR: The refusal still skips immediate cleanup of credential-bearing launch input, and retained ownership still preserves a valid session credential. A newly inspected reload branch may remove that spec on the next supervisor start even while its session row remains.\n\nDetails: Synthesis read core.rs:7040-7100 after examining the launch-directory sweep alone. At :7072-7080, an already durable Error row calls cleanup_launch_artifacts before continuing, independently of the later sweep's rule that preserves current-generation files. launch_artifacts.rs:485-510 removes the settled spec, status and waypoint. This refutes treating the sweep's preservation rule alone as proof that retained Error-row specs persist across starts. The last l1 candidate event's stronger claim about that lifetime is not yet supported; inspect cleanup_launch_artifacts's preconditions and reservation behavior next. Original concern preserved: refusal returns before immediate private-artifact cleanup; a retained row keeps session_token and its authentication authority.\n\nSuggested bucket: other for established private retention. Could-be-highest: no established disclosure or user-work route; retained credential scope remains material. Confidence: source-identified counterevidence; investigation reopened for the exact startup lifetime. proposed_drop: pending resolution under the exact Leftover files acceptance already quoted in earlier l1 events, which remains unchanged at the pinned tip. No parent drop accepted. possible_cover: none. No runtime tests, builds or reproductions. Exact remaining premise: whether cleanup_launch_artifacts runs successfully for a retained refusal without a launch sentinel, or deliberately skips it."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Tmux-retry refusal defers cleanup of credential-bearing launch input",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:11226",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513; synthesis also checked through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db.\n\nTLDR: Refusing a create interrupted under an older supervisor bypasses immediate cleanup of its credential-bearing launch input. A retained checkout also retains a valid session credential. The private spec is eligible for existing Error-row cleanup, including on the next writable reload; it is not established to persist across successful supervisor starts. This remains a proposed drop under bounded-retention policy and the local security boundary, subject to the caller's independent decision.\n\nDetails: The early return at core.rs:11226-11243 precedes retry cleanup at :11708-11727. Retry resolution and validation do not clear the old spec. prepare_launch at :15659-15713 writes the spec before terminal start; it includes the command (possibly containing user credentials) and session_token, created 0600 inside private supervisor state. The refusal helper at :15866-15929 deletes and settles an ordinary session, atomically rolls back a still-Planned checkout, or keeps an allocated/unreadable ownership record as a visible Error with its registry rows and memberships. Planned rollback is preceded by absent-path validation (independently confirmed by parent-provided g107/l1). If ownership cannot be reread, the conservative branch retains the evidence. If settlement itself fails, the prior row and pending reservation remain visible and unresolved durability is reported; the helper never claims artifact cleanup succeeded. At the pinned tip the same helper remains at core.rs:14653-14717 with the same branch structure and prelaunch refusal; parent-provided g116 confirms the later wording-only revision.\n\nCredential distinction: successful row removal revokes its session token, but retained ownership does not. store.rs:4004-4059 changes outcome and launch_hooked without clearing session_token; :4806-4831 authenticates from that row's token without testing outcome. handlers.rs:3801-3848 rechecks that credential before relay. A retained Error session therefore keeps valid request authority even after its spec is cleaned, as part of keeping the session rather than a new credential exposure. The command-line credentials in the spec also already exist in its retained stored launch. No source route to an unauthorized reader of the 0600 spec or private state was established.\n\nLifetime correction from the preceding synthesis events: the directory sweep alone (launch_artifacts.rs:652-805) preserves a current-generation spec of a surviving row, but it is not the only startup cleanup. core.rs:7072-7080 calls cleanup_launch_artifacts for every already-Error row on writable reload, independently of a newly observed sentinel. launch_artifacts.rs:299-339 returns Ok(true) from its preservation gate when generation zero has no sentinel, then removes the settled spec, status and waypoint (:491-504). Thus a successfully retained Error refusal is eligible for cleanup on the next writable reload, including a supervisor restart. The same reload branch survives at tip core.rs:6726-6732. Cleanup read/unlink failures are logged and retryable. With a successfully deleted row, the next startup sweep removes the orphan spec and waypoint. With a failed retention transaction, the pending row's exact lifetime remains governed by subsequent retry/reconciliation or Delete, and the unresolved failure is surfaced; no new accumulation route is introduced. The earlier assertion that a retained Error-row spec ordinarily survives successful starts until Delete is retracted as refuted by this independent reload path. The original stronger concern remains: immediate cleanup of prior credential-bearing input is bypassed, and retaining ownership does preserve credential validity.\n\nSuggested bucket: other for the established private-file retention. Confidence: confirmed source and contract analysis; no behavior observed during execution, no builds or reproductions. proposed_drop: SPEC_impl.md, Leftover files, :94-97 states exactly: \"Confirmed 2026-09-28: files left behind are not a leak, and need no extra cleanup machinery, when they are bounded by a fixed amount, grow only with a rare and explicit user action (such as switching the release download source), or are removed by the next attempt at the same operation or by the next start of the process that owns them. As with retained supervisor metadata, the line is accumulation without bound over time during ordinary operation.\" This policy is unchanged at the pinned tip. The pre-upgrade tmux creates are a finite inherited set, since no new tmux launches are created; normal successful cleanup additionally removes orphan or retained-Error specs on startup. This uses boundedness, not rarity to lower an established security consequence. SPEC.md:4939-4944 states exactly: \"The local security boundary is the Unix account on a particular host. Processes the user runs on the target host, including same-account processes that can reach Farhelm's private tmux server or its terminal hosts (the processes that keep its new terminals), are trusted by this threat model. Farhelm does not provide strong same-account isolation against deliberate interference with agents, that private session or those terminal hosts, and session credentials do not provide same-account containment.\"\n\nCould-be-highest: no established security or loss-of-work route after investigation. Credential-bearing input and retained valid authority are explicit, but their presence in private same-account state does not establish disclosure; a demonstrated unauthorized reader or transfer across the host boundary would reopen highest regardless of rarity. possible_cover: none; coverage sources were not searched. No parent drop is accepted. Lead l1 is resolved back to candidate: the startup cleanup premise is now settled through source, and there are no unresolved readily checkable premises."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l1",
+          "state": "open",
+          "summary": "Tmux-retry refusal defers cleanup of credential-bearing launch input",
+          "location": "crates/farhelm-supervisor/src/service/core.rs:11226",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513; synthesis also checked through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db.\n\nTLDR: Refusing a create interrupted under an older supervisor bypasses immediate cleanup of its credential-bearing launch input. A retained checkout also retains a valid session credential. The private spec is eligible for existing Error-row cleanup, including on the next writable reload; it is not established to persist across successful supervisor starts. This remains a proposed drop under bounded-retention policy and the local security boundary, subject to the caller's independent decision.\n\nDetails: The early return at core.rs:11226-11243 precedes retry cleanup at :11708-11727. Retry resolution and validation do not clear the old spec. prepare_launch at :15659-15713 writes the spec before terminal start; it includes the command (possibly containing user credentials) and session_token, created 0600 inside private supervisor state. The refusal helper at :15866-15929 deletes and settles an ordinary session, atomically rolls back a still-Planned checkout, or keeps an allocated/unreadable ownership record as a visible Error with its registry rows and memberships. Planned rollback is preceded by absent-path validation (independently confirmed by parent-provided g107/l1). If ownership cannot be reread, the conservative branch retains the evidence. If settlement itself fails, the prior row and pending reservation remain visible and unresolved durability is reported; the helper never claims artifact cleanup succeeded. At the pinned tip the same helper remains at core.rs:14653-14717 with the same branch structure and prelaunch refusal; parent-provided g116 confirms the later wording-only revision.\n\nCredential distinction: successful row removal revokes its session token, but retained ownership does not. store.rs:4004-4059 changes outcome and launch_hooked without clearing session_token; :4806-4831 authenticates from that row's token without testing outcome. handlers.rs:3801-3848 rechecks that credential before relay. A retained Error session therefore keeps valid request authority even after its spec is cleaned, as part of keeping the session rather than a new credential exposure. The command-line credentials in the spec also already exist in its retained stored launch. No source route to an unauthorized reader of the 0600 spec or private state was established.\n\nLifetime correction from the preceding synthesis events: the directory sweep alone (launch_artifacts.rs:652-805) preserves a current-generation spec of a surviving row, but it is not the only startup cleanup. core.rs:7072-7080 calls cleanup_launch_artifacts for every already-Error row on writable reload, independently of a newly observed sentinel. launch_artifacts.rs:299-339 returns Ok(true) from its preservation gate when generation zero has no sentinel, then removes the settled spec, status and waypoint (:491-504). Thus a successfully retained Error refusal is eligible for cleanup on the next writable reload, including a supervisor restart. The same reload branch survives at tip core.rs:6726-6732. Cleanup read/unlink failures are logged and retryable. With a successfully deleted row, the next startup sweep removes the orphan spec and waypoint. With a failed retention transaction, the pending row's exact lifetime remains governed by subsequent retry/reconciliation or Delete, and the unresolved failure is surfaced; no new accumulation route is introduced. The earlier assertion that a retained Error-row spec ordinarily survives successful starts until Delete is retracted as refuted by this independent reload path. The original stronger concern remains: immediate cleanup of prior credential-bearing input is bypassed, and retaining ownership does preserve credential validity.\n\nSuggested bucket: other for the established private-file retention. Confidence: confirmed source and contract analysis; no behavior observed during execution, no builds or reproductions. proposed_drop: SPEC_impl.md, Leftover files, :94-97 states exactly: \"Confirmed 2026-09-28: files left behind are not a leak, and need no extra cleanup machinery, when they are bounded by a fixed amount, grow only with a rare and explicit user action (such as switching the release download source), or are removed by the next attempt at the same operation or by the next start of the process that owns them. As with retained supervisor metadata, the line is accumulation without bound over time during ordinary operation.\" This policy is unchanged at the pinned tip. The pre-upgrade tmux creates are a finite inherited set, since no new tmux launches are created; normal successful cleanup additionally removes orphan or retained-Error specs on startup. This uses boundedness, not rarity to lower an established security consequence. SPEC.md:4939-4944 states exactly: \"The local security boundary is the Unix account on a particular host. Processes the user runs on the target host, including same-account processes that can reach Farhelm's private tmux server or its terminal hosts (the processes that keep its new terminals), are trusted by this threat model. Farhelm does not provide strong same-account isolation against deliberate interference with agents, that private session or those terminal hosts, and session credentials do not provide same-account containment.\"\n\nCould-be-highest: no established security or loss-of-work route after investigation. Credential-bearing input and retained valid authority are explicit, but their presence in private same-account state does not establish disclosure; a demonstrated unauthorized reader or transfer across the host boundary would reopen highest regardless of rarity. possible_cover: none; coverage sources were not searched. No parent drop is accepted. Lead l1 is resolved back to candidate: the startup cleanup premise is now settled through source, and there are no unresolved readily checkable premises."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g105/findings.jsonl",
+        "id": "l1",
+        "line": 10,
+        "disposition": "under-investigation",
+        "group": "g105-l1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-068",
+          "key": "g105/l1",
+          "latest_line": 10,
+          "recommendation": "covered",
+          "bucket": "other",
+          "underlying_key": "legacy-tmux-retry-refusal-private-launch-artifact-retention",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Immediate cleanup is bypassed, and retained ownership keeps a valid session credential. The established consequence is bounded private-file retention accepted by the leftover-files policy and local security boundary. The stronger claim that retained Error-row specs ordinarily survive successful writable restarts until Delete was expressly withdrawn and is source-refuted. This remains a proposed coverage disposition requiring independent review.",
+          "checks": [
+            "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:core.rs:11226-11243 returns through refusal before retry cleanup at 11708-11727. 15866-15929 removes/settles ordinary rows or preserves checkout ownership and exposes the refusal. 15659-15713 puts argv and session_token in a 0600 spec.",
+            "Same revision store.rs:4004-4059 retains session_token while settling Error; 4806-4831 authenticates solely against the row's token, without an outcome test. Retaining the row therefore does not revoke its credential. No unauthorized reader or cross-host delivery was demonstrated.",
+            "Same revision core.rs:7072-7080 independently cleans already-Error rows on writable reload. launch_artifacts.rs:299-339 permits cleanup for generation zero without a sentinel, and 491-504 removes spec/status/waypoint. Thus the directory sweep's current-generation preservation is not proof that an Error refusal survives successful restarts.",
+            "Pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:core.rs:14653-14717 preserves refusal branch structure; 6726-6732 preserves Error-row cleanup. Failed settlement can leave a pending row, with visible unresolved durability; no new ordinary accumulation route was established. No execution ran."
+          ],
+          "coverage_checked": [
+            "Current SPEC_impl.md Leftover files:92-97 explicitly accepts fixed bounded leftovers or cleanup by the next owning-process start. Legacy tmux attempts are a finite inherited set because new supervisors create no tmux terminals. SPEC_impl.md:4975-4985 separately accepts private current-generation input until Delete, but its duplication rationale has a queued correction; this proposal does not rely on the false claim that every prompt is already in the database.",
+            "Current SPEC.md:4901-4910 states the Unix-account/host boundary and denies same-account containment by session credentials. No source route beyond that boundary was established. SPEC_impl's keyed-retry refusal contract is exact for the refusal, not a claim that cleanup succeeded.",
+            "TODO.md Planned empty; BUGS.md unrelated; plans/queue searched for refusal/artifacts/credential retention. Landed tmux removal plans are not unlanded coverage.",
+            "INDEX.md and matching queue launch-input-database-duplication-rationale-overstated.md read. Its distinct defect is the claim of complete database duplication, with raw create-time prompts as the counterexample, not this bounded cleanup lifetime. Active TRIAGE_OUTCOMES.md:1721-1737 likewise calls for truthful wording without changing retention behavior. No exact separate item to extend or duplicate; archive not read.",
+            "FILTER.md read; no filter needed. No rare-condition filter is used to lower a proven security consequence."
+          ],
+          "exact_cover_quotes": [
+            {
+              "source": "SPEC_impl.md:94-97",
+              "quote": "Confirmed 2026-09-28: files left behind are not a leak, and need no extra cleanup machinery, when they are bounded by a fixed amount, grow only with a rare and explicit user action (such as switching the release download source), or are removed by the next attempt at the same operation or by the next start of the process that owns them. As with retained supervisor metadata, the line is accumulation without bound over time during ordinary operation."
+            },
+            {
+              "source": "SPEC.md:4903-4907",
+              "quote": "The local security boundary is the Unix account on a particular host. Processes the user runs on the target host, including same-account processes that can reach Farhelm's terminal hosts (the processes that keep its terminals), are trusted by this threat model. Farhelm does not provide strong same-account isolation against deliberate interference with agents or those terminal hosts, and session credentials do not provide same-account containment."
+            }
+          ],
+          "missing_premise": "A security consequence would need an unauthorized reader or transfer beyond private same-account state. Failed-settlement lifetime is not proof of a new unbounded accumulation route; no such route was established.",
+          "original_stronger_consequence": "Immediate cleanup of credential-bearing launch input is skipped; retaining checkout ownership retains valid authority. Earlier history claimed its spec could survive ordinary successful starts until Delete, then retracted that assertion after checking Error-row reload cleanup. Preserve that correction and the valid-token distinction; do not replace them with a claim that all credentials were revoked.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Exact bounded-retention acceptance and local security boundary, plus source refutation only of the stronger ordinary-restart lifetime claim. Parent independent drop check must assess credential-retention coverage and consequence narrowing."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-068.json",
+          "key": "g105/l1",
+          "proposal": "claim-checks/claims-068/result.json",
+          "parent_proposal": "bounded-private-legacy-launch-input-retention-covered-with-valid-token-caveat",
+          "final_independent_gate": "required-before-original-security-drop-and-lifetime-lowering",
+          "reason": "Full068 read. Immediate refusal skips cleanup and retained ownership keeps an authenticating row token; do not claim revocation. Ordinary successful writable reload cleans Error-row artifacts, so earlier until-Delete-through-restarts assertion is source-refuted; failed settlement still exposes unresolved durability. Fixed inherited legacy set and private0600 files fit leftover-files policy, with no new ordinary unbounded producer. Local Unix-account boundary is proposed security coverage only absent unauthorized reader/transfer; not a broad no-secret-content claim. Existing prompt-duplication wording item/active decision explicitly preserve retention behavior and do not cover new disclosure. Gate must judge exact boundaries and retain original valid-authority consequence."
+        }
+      ],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "legacy-tmux-retry-refusal-private-launch-artifact-retention",
+        "destination": "trailing-legacy-tmux-retry-refusal-private-launch-artifact-retention.md"
+      }
+    },
+    {
+      "key": "g105/c2",
+      "owner": "g105",
+      "id": "c2",
+      "domain": "supervisor-core-integration",
+      "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs, crates/farhelm-supervisor/src/lib.rs, crates/farhelm-supervisor/tests/fixtures/grid-keys.jsonl, crates/farhelm-supervisor/Cargo.toml, crates/farhelm-supervisor/src/agent_screen.rs, crates/farhelm-supervisor/src/files.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Removing the tmux module does not bypass a surviving version guard",
+            "location": "crates/farhelm-supervisor/src/lib.rs:91",
+            "detail": "Reviewed commit: 500548b9253b07a26fd03119679184b69544e31d\n\nTLDR: Removing the supervisor library's tmux export does not leave Farhelm driving an unchecked tmux; that driver was already retired, and remote provisioning no longer uses the version parser.\n\nDetails: lib.rs removes pub mod tmux and its introductory description of the version-floor module. The deleted tmux.rs module's pre-change docs identify remote provisioning as its last consumer. A pinned-revision git grep across crates for farhelm_supervisor::tmux, crate::tmux, mod tmux and tmux-version constants found only the independent farhelm-teststate tmux test harness, not a remaining supervisor consumer. SPEC_impl.md:2786-2791 states: \"This release ends them at startup (below); every terminal runs in a terminal host (\"Terminal host\"). Nothing in an installation requires, looks for or installs a tmux: not the installer, the desktop app, `farhelm helm setup`, or provisioning of a Linux host or a Mac. The running supervisor runs no tmux at all, and its driver of the old terminals is gone: what remains is the startup step that ends them (below).\" The same section :2793-2830 specifies process-identity-based retirement, which requires no tmux executable or version parser.\n\nSuggested bucket: other for the considered integration/build risk; no defect established. Confidence: confirmed source refutation, no build or execution performed. proposed_drop: no surviving consumer or tmux-driving path relies on this removed export; the explicit contract also removes the dependency. Could-be-highest: false for this export removal; no route to security or user-work loss was established, and this candidate does not audit the separately assigned old-terminal retirement implementation. possible_cover: none. Scope caveat: the remote provisioning implementation and retirement logic are interfaces, not independently reviewed findings here."
+          }
+        }
+      ],
+      "latest": {
+        "line": 4,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Removing the tmux module does not bypass a surviving version guard",
+          "location": "crates/farhelm-supervisor/src/lib.rs:91",
+          "detail": "Reviewed commit: 500548b9253b07a26fd03119679184b69544e31d\n\nTLDR: Removing the supervisor library's tmux export does not leave Farhelm driving an unchecked tmux; that driver was already retired, and remote provisioning no longer uses the version parser.\n\nDetails: lib.rs removes pub mod tmux and its introductory description of the version-floor module. The deleted tmux.rs module's pre-change docs identify remote provisioning as its last consumer. A pinned-revision git grep across crates for farhelm_supervisor::tmux, crate::tmux, mod tmux and tmux-version constants found only the independent farhelm-teststate tmux test harness, not a remaining supervisor consumer. SPEC_impl.md:2786-2791 states: \"This release ends them at startup (below); every terminal runs in a terminal host (\"Terminal host\"). Nothing in an installation requires, looks for or installs a tmux: not the installer, the desktop app, `farhelm helm setup`, or provisioning of a Linux host or a Mac. The running supervisor runs no tmux at all, and its driver of the old terminals is gone: what remains is the startup step that ends them (below).\" The same section :2793-2830 specifies process-identity-based retirement, which requires no tmux executable or version parser.\n\nSuggested bucket: other for the considered integration/build risk; no defect established. Confidence: confirmed source refutation, no build or execution performed. proposed_drop: no surviving consumer or tmux-driving path relies on this removed export; the explicit contract also removes the dependency. Could-be-highest: false for this export removal; no route to security or user-work loss was established, and this candidate does not audit the separately assigned old-terminal retirement implementation. possible_cover: none. Scope caveat: the remote provisioning implementation and retirement logic are interfaces, not independently reviewed findings here."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g105/findings.jsonl",
+        "id": "c2",
+        "line": 4,
+        "disposition": "excluded",
+        "group": "removed-tmux-version-export-has-no-product-consumer",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-068 after inspecting it. Removing the exported version parser does not leave a surviving product driver without its guard. The driver was already gone, and this commit removes remote provisioning's final dependency. Source refutes a surviving consumer/driver dependency. Do not generalize this conclusion to independently assigned provisioning or old-terminal retirement behavior. Checked source/results: [\"500548b9253b07a26fd03119679184b69544e31d:lib.rs removes pub mod tmux. Its parent's tmux.rs:1-11 names remote provisioning as the last consumer and says startup retirement needs no tmux executable.\",\"Pinned-revision git grep across crates for farhelm_supervisor::tmux, crate::tmux, mod tmux, TMUX_FLOOR and TmuxVersion finds only the independent farhelm-teststate tmux module and test harness; no surviving product consumer.\",\"Current SPEC_impl.md Ending the old private tmux server:2783-2832 describes plain-socket/process-identity retirement, not running a tmux binary or parsing its version. No build or product execution was used as evidence.\"] Current coverage/results: [\"Both specs searched for tmux requirements/version guard/startup retirement. They prescribe terminal hosts and executable-free old-server termination; the alleged remaining dependency contradicts that source shape.\",\"TODO.md Planned empty, BUGS.md unrelated. plans/queue/tmux-drop-from-install.md criterion 7 removes the version-policy module with its last users; the plan is already landed per REPORTS.md:30, so it is context rather than unlanded-plan cover.\",\"INDEX.md, matching queue terms, and active TRIAGE_OUTCOMES.md searched for removed tmux export/version guard. No matching item or decision found. Archive not read. FILTER.md supplies no necessary basis.\"] Exact cited cover: [{\"source\":\"SPEC_impl.md:2785-2788\",\"quote\":\"Ending the old terminals (`service::core::old_terminals`) is the one tmux-related step the running supervisor keeps, and works whether or not any tmux program exists.\"}] Original stronger consequence and missing premise remain preserved: \"Considered an integration/build risk or an unchecked remaining tmux driver after deleting its export. No security or user-work-loss route was asserted; old-terminal retirement correctness is outside this bounded export check.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g105/c2",
+        "line": 4,
+        "disposition": "excluded",
+        "group": "removed-tmux-version-export-has-no-product-consumer",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-068 after inspecting it. Removing the exported version parser does not leave a surviving product driver without its guard. The driver was already gone, and this commit removes remote provisioning's final dependency. Source refutes a surviving consumer/driver dependency. Do not generalize this conclusion to independently assigned provisioning or old-terminal retirement behavior. Checked source/results: [\"500548b9253b07a26fd03119679184b69544e31d:lib.rs removes pub mod tmux. Its parent's tmux.rs:1-11 names remote provisioning as the last consumer and says startup retirement needs no tmux executable.\",\"Pinned-revision git grep across crates for farhelm_supervisor::tmux, crate::tmux, mod tmux, TMUX_FLOOR and TmuxVersion finds only the independent farhelm-teststate tmux module and test harness; no surviving product consumer.\",\"Current SPEC_impl.md Ending the old private tmux server:2783-2832 describes plain-socket/process-identity retirement, not running a tmux binary or parsing its version. No build or product execution was used as evidence.\"] Current coverage/results: [\"Both specs searched for tmux requirements/version guard/startup retirement. They prescribe terminal hosts and executable-free old-server termination; the alleged remaining dependency contradicts that source shape.\",\"TODO.md Planned empty, BUGS.md unrelated. plans/queue/tmux-drop-from-install.md criterion 7 removes the version-policy module with its last users; the plan is already landed per REPORTS.md:30, so it is context rather than unlanded-plan cover.\",\"INDEX.md, matching queue terms, and active TRIAGE_OUTCOMES.md searched for removed tmux export/version guard. No matching item or decision found. Archive not read. FILTER.md supplies no necessary basis.\"] Exact cited cover: [{\"source\":\"SPEC_impl.md:2785-2788\",\"quote\":\"Ending the old terminals (`service::core::old_terminals`) is the one tmux-related step the running supervisor keeps, and works whether or not any tmux program exists.\"}] Original stronger consequence and missing premise remain preserved: \"Considered an integration/build risk or an unchecked remaining tmux driver after deleting its export. No security or user-work-loss route was asserted; old-terminal retirement correctness is outside this bounded export check.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-068",
+          "key": "g105/c2",
+          "latest_line": 4,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "removed-tmux-version-export-has-no-product-consumer",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Removing the exported version parser does not leave a surviving product driver without its guard. The driver was already gone, and this commit removes remote provisioning's final dependency.",
+          "checks": [
+            "500548b9253b07a26fd03119679184b69544e31d:lib.rs removes pub mod tmux. Its parent's tmux.rs:1-11 names remote provisioning as the last consumer and says startup retirement needs no tmux executable.",
+            "Pinned-revision git grep across crates for farhelm_supervisor::tmux, crate::tmux, mod tmux, TMUX_FLOOR and TmuxVersion finds only the independent farhelm-teststate tmux module and test harness; no surviving product consumer.",
+            "Current SPEC_impl.md Ending the old private tmux server:2783-2832 describes plain-socket/process-identity retirement, not running a tmux binary or parsing its version. No build or product execution was used as evidence."
+          ],
+          "coverage_checked": [
+            "Both specs searched for tmux requirements/version guard/startup retirement. They prescribe terminal hosts and executable-free old-server termination; the alleged remaining dependency contradicts that source shape.",
+            "TODO.md Planned empty, BUGS.md unrelated. plans/queue/tmux-drop-from-install.md criterion 7 removes the version-policy module with its last users; the plan is already landed per REPORTS.md:30, so it is context rather than unlanded-plan cover.",
+            "INDEX.md, matching queue terms, and active TRIAGE_OUTCOMES.md searched for removed tmux export/version guard. No matching item or decision found. Archive not read. FILTER.md supplies no necessary basis."
+          ],
+          "exact_cover_quotes": [
+            {
+              "source": "SPEC_impl.md:2785-2788",
+              "quote": "Ending the old terminals (`service::core::old_terminals`) is the one tmux-related step the running supervisor keeps, and works whether or not any tmux program exists."
+            }
+          ],
+          "missing_premise": null,
+          "original_stronger_consequence": "Considered an integration/build risk or an unchecked remaining tmux driver after deleting its export. No security or user-work-loss route was asserted; old-terminal retirement correctness is outside this bounded export check.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutes a surviving consumer/driver dependency. Do not generalize this conclusion to independently assigned provisioning or old-terminal retirement behavior."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "removed-tmux-version-export-has-no-product-consumer",
+        "destination": null
+      }
+    },
+    {
+      "key": "g105/l2",
+      "owner": "g105",
+      "id": "l2",
+      "domain": "supervisor-core-integration",
+      "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs, crates/farhelm-supervisor/src/lib.rs, crates/farhelm-supervisor/tests/fixtures/grid-keys.jsonl, crates/farhelm-supervisor/Cargo.toml, crates/farhelm-supervisor/src/agent_screen.rs, crates/farhelm-supervisor/src/files.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l2",
+            "state": "open",
+            "summary": "Check the tab-settle documentation link after its import was removed",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:746",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513\n\nTLDR: The tab-start test seam's documentation may link to a timing constant that is no longer in scope. This could break that generated documentation link; no runtime effect is suspected.\n\nDetails: The assigned patch removes TAB_LAUNCH_SETTLE from the core.rs imports while its revised TabOpenSettleGate documentation still refers to [`TAB_LAUNCH_SETTLE`]. Need to check other imports, the constant's definition, and rustdoc visibility before deciding whether this is a real issue. Suggested bucket: other. Could-be-highest: false. Confidence: uninvestigated lead. proposed_drop: false. possible_cover: none. No builds or execution performed."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l2",
+            "state": "open",
+            "summary": "TabSettleGate retains an unresolved documentation link",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:748",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513\n\nTLDR: Developers reading the supervisor's test-seam documentation lose the link to the tab-start timing bound. This is a documentation defect with no established effect on running sessions.\n\nDetails: The patch removes TAB_LAUNCH_SETTLE from the super::terminals import at core.rs:78-82, but the revised public TabSettleGate docstring still links to [`TAB_LAUNCH_SETTLE`] at :748. A pinned-revision source search finds no other declaration or import of that name in core.rs. It is defined at service/terminals.rs:47, and host_tabs.rs:126 imports its own copy into that child module; that import does not put the name in core's lexical scope. TabSettleGate remains publicly re-exported from service/mod.rs:133-140. Thus the bare intra-doc link has no target in its defining scope. Qualify the reference as super::terminals::TAB_LAUNCH_SETTLE (or use ordinary code text if a public link to the private constant is not wanted).\n\nSuggested bucket: other; consequence is a broken developer-documentation reference. Confidence: confirmed source-level name-resolution analysis. Rustdoc was not executed, so no diagnostic or generated-page behavior is claimed as observed. proposed_drop: false. Could-be-highest: false; no security or user-work route. possible_cover: none. Material caveat: no claim that CI or ordinary builds fail; no rustdoc invocation or warnings-as-errors policy was found in the searched workspace manifest, workflow files and validation inventory. The prior target is crate-private, so public-doc link visibility can itself favor rendering this as code text. This revision closes lead l2; the original suspected consequence remains the unresolved timing-constant link."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l2",
+            "state": "open",
+            "summary": "TabSettleGate retains an unresolved documentation link through the pinned tip",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:748",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. Synthesis also checked through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db.\n\nTLDR: Developers reading the supervisor's test-seam documentation lose the link to the tab-start timing bound. The unresolved reference survives the remaining reviewed commits. No effect on running sessions is established.\n\nDetails: The original patch removes TAB_LAUNCH_SETTLE from the super::terminals import at core.rs:78-82, but the public TabSettleGate docstring still links to [`TAB_LAUNCH_SETTLE`] at :748. Source search finds no declaration or import of that name elsewhere in core.rs. The constant is defined at service/terminals.rs:47; host_tabs.rs:126 imports it only into that child module. TabSettleGate remains publicly re-exported by service/mod.rs:133-140. The name is therefore absent from the docstring's defining lexical scope. Qualify the reference as super::terminals::TAB_LAUNCH_SETTLE, or render it as ordinary code text to avoid linking a public docstring to a private constant.\n\nLater-change check: git log over the three related paths identifies dbfc69751215dbf15e1d31d5bed73c3754c4ebc4, 1ed482dde220452e424973faf38a5e1318986333, f560058da19e02716e6f943883a9508b447aff4e and 08399d092d20815ced6619c26df2391944ae2b4a. The last changes nearby historical wording and renames the gate's underlying alias, but leaves the bare link unchanged. A source search at the pinned tip finds the same lone TAB_LAUNCH_SETTLE reference at core.rs:662, followed by the public TabSettleGate alias at :671. No later qualification repair was found.\n\nSuggested bucket: other; consequence is a broken developer-documentation reference. Confidence: confirmed source-level name-resolution analysis, not observed generated-page behavior. Rustdoc was not executed; no warning, build failure or warnings-as-errors consequence is claimed. proposed_drop: false. Could-be-highest: false; no security or user-work route. possible_cover: none. Material caveat: the target is crate-private, so ordinary code text may be more suitable than a qualified public-doc link. The original suspected consequence is preserved. Lead l2 remains resolved to a finding."
+          }
+        }
+      ],
+      "latest": {
+        "line": 7,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l2",
+          "state": "open",
+          "summary": "TabSettleGate retains an unresolved documentation link through the pinned tip",
+          "location": "crates/farhelm-supervisor/src/service/core.rs:748",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. Synthesis also checked through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db.\n\nTLDR: Developers reading the supervisor's test-seam documentation lose the link to the tab-start timing bound. The unresolved reference survives the remaining reviewed commits. No effect on running sessions is established.\n\nDetails: The original patch removes TAB_LAUNCH_SETTLE from the super::terminals import at core.rs:78-82, but the public TabSettleGate docstring still links to [`TAB_LAUNCH_SETTLE`] at :748. Source search finds no declaration or import of that name elsewhere in core.rs. The constant is defined at service/terminals.rs:47; host_tabs.rs:126 imports it only into that child module. TabSettleGate remains publicly re-exported by service/mod.rs:133-140. The name is therefore absent from the docstring's defining lexical scope. Qualify the reference as super::terminals::TAB_LAUNCH_SETTLE, or render it as ordinary code text to avoid linking a public docstring to a private constant.\n\nLater-change check: git log over the three related paths identifies dbfc69751215dbf15e1d31d5bed73c3754c4ebc4, 1ed482dde220452e424973faf38a5e1318986333, f560058da19e02716e6f943883a9508b447aff4e and 08399d092d20815ced6619c26df2391944ae2b4a. The last changes nearby historical wording and renames the gate's underlying alias, but leaves the bare link unchanged. A source search at the pinned tip finds the same lone TAB_LAUNCH_SETTLE reference at core.rs:662, followed by the public TabSettleGate alias at :671. No later qualification repair was found.\n\nSuggested bucket: other; consequence is a broken developer-documentation reference. Confidence: confirmed source-level name-resolution analysis, not observed generated-page behavior. Rustdoc was not executed; no warning, build failure or warnings-as-errors consequence is claimed. proposed_drop: false. Could-be-highest: false; no security or user-work route. possible_cover: none. Material caveat: the target is crate-private, so ordinary code text may be more suitable than a qualified public-doc link. The original suspected consequence is preserved. Lead l2 remains resolved to a finding."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g105/findings.jsonl",
+        "id": "l2",
+        "line": 7,
+        "disposition": "verified",
+        "group": "tab-settle-gate-bare-link-out-of-scope",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-068 after inspecting it. The public test-seam documentation retains a bare intra-doc link after the timing constant's import was removed. The source-level unresolved name is established; generated-page behavior and build diagnostics were not observed. Retain source-confirmed unresolved documentation reference as other, without upgrading it to an observed tool failure. Checked source/results: [\"647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:core.rs:78-82 no longer imports TAB_LAUNCH_SETTLE; its sole remaining occurrence is the bare link at 748. TabSettleGate remains public at 757 and publicly re-exported by service/mod.rs:133-140.\",\"Same revision service/terminals.rs:47 defines the crate-private constant. A child module's own import cannot put it in core's lexical scope. Qualifying the path or using plain code text would address the unresolved reference, with private-target visibility considered separately.\",\"Pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:core.rs:662 retains the sole bare reference and 671 the public alias. No rustdoc, build, CI-failure or warnings-as-errors observation is claimed.\"] Current coverage/results: [\"SPEC.md and SPEC_impl.md searched for tab settle/test-seam/documentation references; no explicit acceptance of this unresolved link.\",\"TODO.md Planned empty; BUGS.md unrelated; plans/queue searched for exact gate/constant/link. tmux-drop-from-docs discusses comment and dangling-reference audits but already landed per REPORTS.md:32; no unlanded exact fix coverage.\",\"INDEX.md, queue text and active TRIAGE_OUTCOMES.md searched for TabSettleGate/TAB_LAUNCH_SETTLE/rustdoc link. No matching open item or decision. Archive not read.\",\"FILTER.md does not cover this persistent developer-documentation reference defect merely because its impact is small. No rare runtime trigger is required.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A broken link in generated developer documentation; earlier investigation did not assert a runtime failure. Keep the private-target and no-rustdoc-execution caveats.\"; \"The exact rustdoc warning or rendered link appearance remains unobserved. No runtime consequence or ordinary-build failure is established.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g105/l2",
+        "line": 7,
+        "disposition": "verified",
+        "group": "tab-settle-gate-bare-link-out-of-scope",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-068 after inspecting it. The public test-seam documentation retains a bare intra-doc link after the timing constant's import was removed. The source-level unresolved name is established; generated-page behavior and build diagnostics were not observed. Retain source-confirmed unresolved documentation reference as other, without upgrading it to an observed tool failure. Checked source/results: [\"647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:core.rs:78-82 no longer imports TAB_LAUNCH_SETTLE; its sole remaining occurrence is the bare link at 748. TabSettleGate remains public at 757 and publicly re-exported by service/mod.rs:133-140.\",\"Same revision service/terminals.rs:47 defines the crate-private constant. A child module's own import cannot put it in core's lexical scope. Qualifying the path or using plain code text would address the unresolved reference, with private-target visibility considered separately.\",\"Pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:core.rs:662 retains the sole bare reference and 671 the public alias. No rustdoc, build, CI-failure or warnings-as-errors observation is claimed.\"] Current coverage/results: [\"SPEC.md and SPEC_impl.md searched for tab settle/test-seam/documentation references; no explicit acceptance of this unresolved link.\",\"TODO.md Planned empty; BUGS.md unrelated; plans/queue searched for exact gate/constant/link. tmux-drop-from-docs discusses comment and dangling-reference audits but already landed per REPORTS.md:32; no unlanded exact fix coverage.\",\"INDEX.md, queue text and active TRIAGE_OUTCOMES.md searched for TabSettleGate/TAB_LAUNCH_SETTLE/rustdoc link. No matching open item or decision. Archive not read.\",\"FILTER.md does not cover this persistent developer-documentation reference defect merely because its impact is small. No rare runtime trigger is required.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A broken link in generated developer documentation; earlier investigation did not assert a runtime failure. Keep the private-target and no-rustdoc-execution caveats.\"; \"The exact rustdoc warning or rendered link appearance remains unobserved. No runtime consequence or ordinary-build failure is established.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-068",
+          "key": "g105/l2",
+          "latest_line": 7,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "tab-settle-gate-bare-link-out-of-scope",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The public test-seam documentation retains a bare intra-doc link after the timing constant's import was removed. The source-level unresolved name is established; generated-page behavior and build diagnostics were not observed.",
+          "checks": [
+            "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:core.rs:78-82 no longer imports TAB_LAUNCH_SETTLE; its sole remaining occurrence is the bare link at 748. TabSettleGate remains public at 757 and publicly re-exported by service/mod.rs:133-140.",
+            "Same revision service/terminals.rs:47 defines the crate-private constant. A child module's own import cannot put it in core's lexical scope. Qualifying the path or using plain code text would address the unresolved reference, with private-target visibility considered separately.",
+            "Pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:core.rs:662 retains the sole bare reference and 671 the public alias. No rustdoc, build, CI-failure or warnings-as-errors observation is claimed."
+          ],
+          "coverage_checked": [
+            "SPEC.md and SPEC_impl.md searched for tab settle/test-seam/documentation references; no explicit acceptance of this unresolved link.",
+            "TODO.md Planned empty; BUGS.md unrelated; plans/queue searched for exact gate/constant/link. tmux-drop-from-docs discusses comment and dangling-reference audits but already landed per REPORTS.md:32; no unlanded exact fix coverage.",
+            "INDEX.md, queue text and active TRIAGE_OUTCOMES.md searched for TabSettleGate/TAB_LAUNCH_SETTLE/rustdoc link. No matching open item or decision. Archive not read.",
+            "FILTER.md does not cover this persistent developer-documentation reference defect merely because its impact is small. No rare runtime trigger is required."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "The exact rustdoc warning or rendered link appearance remains unobserved. No runtime consequence or ordinary-build failure is established.",
+          "original_stronger_consequence": "A broken link in generated developer documentation; earlier investigation did not assert a runtime failure. Keep the private-target and no-rustdoc-execution caveats.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain source-confirmed unresolved documentation reference as other, without upgrading it to an observed tool failure."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "tab-settle-gate-bare-link-out-of-scope",
+        "destination": "trailing-tab-settle-gate-bare-link-out-of-scope.md"
+      }
+    },
+    {
+      "key": "g105/l3",
+      "owner": "g105",
+      "id": "l3",
+      "domain": "supervisor-core-integration",
+      "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs, crates/farhelm-supervisor/src/lib.rs, crates/farhelm-supervisor/tests/fixtures/grid-keys.jsonl, crates/farhelm-supervisor/Cargo.toml, crates/farhelm-supervisor/src/agent_screen.rs, crates/farhelm-supervisor/src/files.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l3",
+            "state": "open",
+            "summary": "Check whether definitive host failure really means no external changes",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:3404",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513\n\nTLDR: The rewritten failed-Restart documentation says a definitive failure changed nothing outside the supervisor. A replacement host can apparently have started its program before cleanup makes the failure definitive, so that statement may overpromise rollback of external side effects. This is a documentation lead, not an established production rollback defect.\n\nDetails: The assigned republished_terminal docstring at core.rs:3400-3413 now says \"A definitive failure changed nothing outside this process and puts the previous terminal back.\" The surrounding changed create code distinguishes a host that reported ready but cannot be used and ends it before returning confirmed absence. Need check the actual failed-Restart path, definition of definitive and original range attribution, then whether the later comment cleanup repairs the assertion. Suggested bucket: other if the comment promises a false external-state invariant. Could-be-highest: no established security or user-work route from this docstring; the external effects are the program's own, not a demonstrated unauthorized rollback. Confidence: concrete source lead, not executed. proposed_drop: false pending source checks. possible_cover: supplied interface records cover other stale comments and host rollback oracles, not this external-change statement. Exact missing premise: whether Restart can return definitive=true after a child has started, rather than only after a no-start failure. No runtime tests, builds or reproductions."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l3",
+            "state": "open",
+            "summary": "Definitive-Restart documentation overpromises absence of external effects",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:3404",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. Persistence checked through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db.\n\nTLDR: The rewritten failed-Restart documentation says a definitive failure changed nothing outside the supervisor. In fact it can mean a replacement program started and was later cleaned up. Restoring the previous terminal does not establish that the replacement made no external changes, so the explanation gives maintainers a false failure/rollback contract. No production failure or external change was observed during execution.\n\nDetails: republished_terminal's changed docstring at core.rs:3400-3413 says, \"A definitive failure changed nothing outside this process and puts the previous terminal back.\" Its caller at :13528 restores the prior terminal when the RelaunchFailure is definitive. host_restart.rs:481-489 obtains that failure from unwind_failed_host_relaunch. That helper at :1170-1219 ends a possibly-started host, removes its artifacts, reaps its process tree, and returns RelaunchFailure::definitive when cleanup is confirmed. The helper's own comment at :1197-1200 expressly says, \"The start's child may have run for a moment (a host that ended before it could be adopted).\" The concrete production route is host_launch.rs:576-623: StartingHost::finish can succeed, then HostTerminal::adopt can fail Gone or Unavailable; the failure returns to that unwind. hosts/spawn.rs:222-224 defines successful readiness as the socket bound and the child started. Thus this is not merely a no-start failure: the replacement's child can run before the definitive cleanup, and neither the sweep nor record restoration rolls back anything it wrote or did outside the terminal. The correct distinction is that no running replacement remains after confirmed cleanup, not that no external effect ever happened.\n\nContract: SPEC_impl.md at this revision, Terminal host / Restarting a host agent, :2450-2456 describes a failed replacement being ended and swept before definitive restoration. SPEC.md Lifecycle operations :1948-1950 likewise makes confirmed ending of the failed start the condition for returning to the old stopped terminal. Those rules do not promise transaction-like rollback of an already-started program's effects. Fix the comment to describe confirmed absence of a running replacement and restoration of the previous terminal, preserving the ambiguity rule for unconfirmed cleanup.\n\nAttribution: the parent core.rs:3506-3533 said a definitive failure changed nothing \"in tmux\" and then separately described host restoration. That tmux-specific sentence did not claim host launches or arbitrary external state were untouched. The assigned rewrite broadens it to \"nothing outside this process\" while making every launch a host. Therefore the false generalized invariant is introduced by this changed documentation, even though the failed-start execution/cleanup behavior already existed. Pinned tip core.rs:3239-3253 retains the same sentence verbatim, so later comment cleanup does not repair it. No earlier-range claim is needed to attribute this specific new wording.\n\nSuggested bucket: other (documentation correctness about a failure contract). Could-be-highest: false; no security or user-work-loss route is alleged from this docstring, and effects of an actually started replacement are not themselves a newly established production defect. Confidence: confirmed source/caller/contract analysis; no runtime tests, builds or reproductions. proposed_drop: false. possible_cover: none among supplied exact neighbour records; those cover distinct stale migration/tab-list comments and failure test oracles. Material caveat: this does not claim Restart should undo program side effects, nor challenge restoring the previous terminal after confirmed cleanup; the defect is teaching that cleanup proves external state was unchanged. Lead l3 is resolved to this finding, with no missing readily checkable source premise."
+          }
+        }
+      ],
+      "latest": {
+        "line": 12,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l3",
+          "state": "open",
+          "summary": "Definitive-Restart documentation overpromises absence of external effects",
+          "location": "crates/farhelm-supervisor/src/service/core.rs:3404",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. Persistence checked through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db.\n\nTLDR: The rewritten failed-Restart documentation says a definitive failure changed nothing outside the supervisor. In fact it can mean a replacement program started and was later cleaned up. Restoring the previous terminal does not establish that the replacement made no external changes, so the explanation gives maintainers a false failure/rollback contract. No production failure or external change was observed during execution.\n\nDetails: republished_terminal's changed docstring at core.rs:3400-3413 says, \"A definitive failure changed nothing outside this process and puts the previous terminal back.\" Its caller at :13528 restores the prior terminal when the RelaunchFailure is definitive. host_restart.rs:481-489 obtains that failure from unwind_failed_host_relaunch. That helper at :1170-1219 ends a possibly-started host, removes its artifacts, reaps its process tree, and returns RelaunchFailure::definitive when cleanup is confirmed. The helper's own comment at :1197-1200 expressly says, \"The start's child may have run for a moment (a host that ended before it could be adopted).\" The concrete production route is host_launch.rs:576-623: StartingHost::finish can succeed, then HostTerminal::adopt can fail Gone or Unavailable; the failure returns to that unwind. hosts/spawn.rs:222-224 defines successful readiness as the socket bound and the child started. Thus this is not merely a no-start failure: the replacement's child can run before the definitive cleanup, and neither the sweep nor record restoration rolls back anything it wrote or did outside the terminal. The correct distinction is that no running replacement remains after confirmed cleanup, not that no external effect ever happened.\n\nContract: SPEC_impl.md at this revision, Terminal host / Restarting a host agent, :2450-2456 describes a failed replacement being ended and swept before definitive restoration. SPEC.md Lifecycle operations :1948-1950 likewise makes confirmed ending of the failed start the condition for returning to the old stopped terminal. Those rules do not promise transaction-like rollback of an already-started program's effects. Fix the comment to describe confirmed absence of a running replacement and restoration of the previous terminal, preserving the ambiguity rule for unconfirmed cleanup.\n\nAttribution: the parent core.rs:3506-3533 said a definitive failure changed nothing \"in tmux\" and then separately described host restoration. That tmux-specific sentence did not claim host launches or arbitrary external state were untouched. The assigned rewrite broadens it to \"nothing outside this process\" while making every launch a host. Therefore the false generalized invariant is introduced by this changed documentation, even though the failed-start execution/cleanup behavior already existed. Pinned tip core.rs:3239-3253 retains the same sentence verbatim, so later comment cleanup does not repair it. No earlier-range claim is needed to attribute this specific new wording.\n\nSuggested bucket: other (documentation correctness about a failure contract). Could-be-highest: false; no security or user-work-loss route is alleged from this docstring, and effects of an actually started replacement are not themselves a newly established production defect. Confidence: confirmed source/caller/contract analysis; no runtime tests, builds or reproductions. proposed_drop: false. possible_cover: none among supplied exact neighbour records; those cover distinct stale migration/tab-list comments and failure test oracles. Material caveat: this does not claim Restart should undo program side effects, nor challenge restoring the previous terminal after confirmed cleanup; the defect is teaching that cleanup proves external state was unchanged. Lead l3 is resolved to this finding, with no missing readily checkable source premise."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g105/findings.jsonl",
+        "id": "l3",
+        "line": 12,
+        "disposition": "verified",
+        "group": "restart-definitive-comment-promises-no-external-effects",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-068 after inspecting it. The revised explanation teaches that definitive failure proves no external changes. A child can start before adoption fails and cleanup returns definitive, so that explanation is false. The product need not undo the child's effects; this is the comment's incorrect contract. Retain the newly broadened false comment as other; keep it distinct from the existing unwind-spec omission. Checked source/results: [\"647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:core.rs:3400-3413 says definitive failure changed nothing outside this process. Its immediate parent at 3506-3533 limited the prior statement to tmux and separately described host restoration; the assigned rewrite introduces this generalized external-state claim.\",\"Same revision host_launch.rs:576-623 can finish StartingHost successfully and then fail HostTerminal::adopt as Gone/Unavailable. hosts/spawn.rs:222-224 defines readiness as socket bound and child started. host_restart.rs:481-489 routes Host failure to unwind; 1170-1219 can end the host, remove artifacts, sweep, then return definitive. Its 1197-1200 comment explicitly allows a child that ran briefly.\",\"Restoring the prior terminal at core.rs:13528 neither reverses prior child writes nor proves their absence. Pinned tip core.rs:3239-3253 keeps the same false sentence. No actual external effect or runtime failure was observed.\"] Current coverage/results: [\"Current SPEC.md Lifecycle operations:1944-1950 and SPEC_impl.md Restarting a host agent:2307-2315 describe ending a failed replacement and restoring the old terminal. Neither promises transaction-like rollback of external effects.\",\"TODO.md Planned empty; BUGS.md unrelated; plans/queue searched for definitive/external effects/rollback comments. tmux-drop-from-docs has landed (REPORTS.md:32), and its generic audit is not an unlanded fix.\",\"INDEX.md and matching restart-unwind-omits-tree-sweep-failure.md read in full. That item concerns the specification's exhaustive ambiguous-cleanup condition and host-record reachability, not the new claim that a started replacement made no external changes. This is neither an exact alias nor full coverage. Active TRIAGE_OUTCOMES.md has no matching external-effects decision; archive not read.\",\"FILTER.md has no full match: a persistent false implementation explanation is not merely a rare runtime diagnostic/status glitch.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Initially suspected an overpromise that definitive Restart failure left all external state unchanged. Source establishes the false maintenance contract, not a requirement to undo program effects, a production rollback defect, or security/user-work loss caused by the comment.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g105/l3",
+        "line": 12,
+        "disposition": "verified",
+        "group": "restart-definitive-comment-promises-no-external-effects",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-068 after inspecting it. The revised explanation teaches that definitive failure proves no external changes. A child can start before adoption fails and cleanup returns definitive, so that explanation is false. The product need not undo the child's effects; this is the comment's incorrect contract. Retain the newly broadened false comment as other; keep it distinct from the existing unwind-spec omission. Checked source/results: [\"647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:core.rs:3400-3413 says definitive failure changed nothing outside this process. Its immediate parent at 3506-3533 limited the prior statement to tmux and separately described host restoration; the assigned rewrite introduces this generalized external-state claim.\",\"Same revision host_launch.rs:576-623 can finish StartingHost successfully and then fail HostTerminal::adopt as Gone/Unavailable. hosts/spawn.rs:222-224 defines readiness as socket bound and child started. host_restart.rs:481-489 routes Host failure to unwind; 1170-1219 can end the host, remove artifacts, sweep, then return definitive. Its 1197-1200 comment explicitly allows a child that ran briefly.\",\"Restoring the prior terminal at core.rs:13528 neither reverses prior child writes nor proves their absence. Pinned tip core.rs:3239-3253 keeps the same false sentence. No actual external effect or runtime failure was observed.\"] Current coverage/results: [\"Current SPEC.md Lifecycle operations:1944-1950 and SPEC_impl.md Restarting a host agent:2307-2315 describe ending a failed replacement and restoring the old terminal. Neither promises transaction-like rollback of external effects.\",\"TODO.md Planned empty; BUGS.md unrelated; plans/queue searched for definitive/external effects/rollback comments. tmux-drop-from-docs has landed (REPORTS.md:32), and its generic audit is not an unlanded fix.\",\"INDEX.md and matching restart-unwind-omits-tree-sweep-failure.md read in full. That item concerns the specification's exhaustive ambiguous-cleanup condition and host-record reachability, not the new claim that a started replacement made no external changes. This is neither an exact alias nor full coverage. Active TRIAGE_OUTCOMES.md has no matching external-effects decision; archive not read.\",\"FILTER.md has no full match: a persistent false implementation explanation is not merely a rare runtime diagnostic/status glitch.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Initially suspected an overpromise that definitive Restart failure left all external state unchanged. Source establishes the false maintenance contract, not a requirement to undo program effects, a production rollback defect, or security/user-work loss caused by the comment.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-068",
+          "key": "g105/l3",
+          "latest_line": 12,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "restart-definitive-comment-promises-no-external-effects",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The revised explanation teaches that definitive failure proves no external changes. A child can start before adoption fails and cleanup returns definitive, so that explanation is false. The product need not undo the child's effects; this is the comment's incorrect contract.",
+          "checks": [
+            "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:core.rs:3400-3413 says definitive failure changed nothing outside this process. Its immediate parent at 3506-3533 limited the prior statement to tmux and separately described host restoration; the assigned rewrite introduces this generalized external-state claim.",
+            "Same revision host_launch.rs:576-623 can finish StartingHost successfully and then fail HostTerminal::adopt as Gone/Unavailable. hosts/spawn.rs:222-224 defines readiness as socket bound and child started. host_restart.rs:481-489 routes Host failure to unwind; 1170-1219 can end the host, remove artifacts, sweep, then return definitive. Its 1197-1200 comment explicitly allows a child that ran briefly.",
+            "Restoring the prior terminal at core.rs:13528 neither reverses prior child writes nor proves their absence. Pinned tip core.rs:3239-3253 keeps the same false sentence. No actual external effect or runtime failure was observed."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md Lifecycle operations:1944-1950 and SPEC_impl.md Restarting a host agent:2307-2315 describe ending a failed replacement and restoring the old terminal. Neither promises transaction-like rollback of external effects.",
+            "TODO.md Planned empty; BUGS.md unrelated; plans/queue searched for definitive/external effects/rollback comments. tmux-drop-from-docs has landed (REPORTS.md:32), and its generic audit is not an unlanded fix.",
+            "INDEX.md and matching restart-unwind-omits-tree-sweep-failure.md read in full. That item concerns the specification's exhaustive ambiguous-cleanup condition and host-record reachability, not the new claim that a started replacement made no external changes. This is neither an exact alias nor full coverage. Active TRIAGE_OUTCOMES.md has no matching external-effects decision; archive not read.",
+            "FILTER.md has no full match: a persistent false implementation explanation is not merely a rare runtime diagnostic/status glitch."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Initially suspected an overpromise that definitive Restart failure left all external state unchanged. Source establishes the false maintenance contract, not a requirement to undo program effects, a production rollback defect, or security/user-work loss caused by the comment.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain the newly broadened false comment as other; keep it distinct from the existing unwind-spec omission."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "restart-definitive-comment-promises-no-external-effects",
+        "destination": "trailing-restart-definitive-comment-promises-no-external-effects.md"
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial pass complete: all six patches reviewed; no unread assigned material.\n\nRecorded one `other` finding: `l2`, an unresolved documentation link at `core.rs:748`. Three proposed drops are recorded; no leads remain unresolved.\n\n[Findings log]([private-run]/g105/findings.jsonl) and progress updated. Source analysis only; no tests or reproductions run."
+    },
+    {
+      "turn": 2,
+      "reply": "- Revised `l1`: retained ownership keeps the session credential valid, but existing Error-row cleanup removes its private launch spec on writable reload. Preserved the credential concern and exact bounded-retention policy as a proposed drop.\n- Revised `l2`: the unresolved documentation link survives through the pinned tip. No rustdoc execution or build failure claimed.\n\nNo new findings. Unresolved lead IDs: none."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass complete.\n\n- Checks: create cleanup/publication, host-program selection, removed-symbol references, file-writer callers, and smaller integration edits.\n- New verified: `l3` — documentation incorrectly equates definitive cleanup with no external effects.\n- New unverified-after-investigation: none.\n- Open leads: none.\n\nAnything new found: **yes, one documentation finding**, recorded in the log. No runtime execution."
+    },
+    {
+      "turn": 4,
+      "reply": "Discovery pass 2 complete. Checked retry takeover guards, narrowed host-launch ownership and failure handling, removed-symbol references, and smaller documentation callers.\n\n- New verified IDs: none.\n- New unverified IDs: none.\n- Open leads: none.\n- Anything new found: **no**.\n\nProgress updated. No runtime execution."
+    }
+  ],
+  "progress": "Group g105: supervisor-core-integration.\n\nInitial review turn 1 completed. Discovery-pass count: 0 (later synthesis/discovery protocol has not started).\n\nRead the full brief and complete inventory commits field only. All six assigned patches are fully delivered through the evidence reader: 1,220 lines, including core.rs 1-1143 and each five smaller patch's complete range. Unread assigned scope: none.\n\nContracts read at 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513: SPEC.md Creation, Lifecycle operations and Terminal experience in full; SPEC_impl.md Terminal host and Terminal substrate in full, plus Leftover files and the complete Answers bind to what was drawn subsection. At 500548b9253b07a26fd03119679184b69544e31d, read the complete Terminal substrate section. Contract snapshots and their separate manifests are private artifacts in this directory; the caller's assigned manifest is unchanged. Root instructions, queue priority rules and feedback-record format were read. The skillette and scode-voice instructions are loaded.\n\nInterfaces checked: retry evidence precedes launch takeover; a successful takeover preserves the recorded terminal kind; the new tmux refusal precedes checkout allocation and ordinary retry artifact cleanup; allocated checkout ownership is retained. Failed host starts retain an ambiguous row and settle only confirmed absence. Relaunch publication retains the prior terminal only on definitive failure and keeps host records for ambiguous starts. Removed tmux module has no surviving production import at its pinned revision; independent teststate tmux code is separate. Four metadata/comment edits change no executable behavior or fixture bytes.\n\nDurable records this pass: c1 (candidate: required refusal of never-launched tmux retries); l1 (lead revised to candidate: private-file retention accepted by leftover policy); c2 (candidate: removed version-floor export has no surviving consumer); l2 (lead revised to finding: unresolved TabSettleGate timing-constant documentation link, bucket other). New verified finding IDs: l2. New unverified finding IDs: none. Open lead IDs: none. State open on candidate records means retained for the caller's disposition, not unfinished investigation.\n\nEvidence is source and contract analysis only. No runtime tests, builds, reproductions or live-install actions were performed. No checkout file was created, modified or deleted. No coverage sources or excluded inventory metadata were read. No separate report file was written.\n\nNext action: return this initial-pass result to the caller and await the later synthesis-turn instructions. The initial pass is complete, not the multi-turn review protocol.\n\nSynthesis turn 2 completed. Discovery-pass count remains 0. This turn revisited interactions and readily checkable premises; it did not run a separate discovery pass. Unread assigned scope remains none.\n\nRevised l2: checked all later core/host-tabs/terminals changes through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. The bare TAB_LAUNCH_SETTLE link remains at tip core.rs:662 without a definition/import in that module. The finding remains other. No rustdoc warning, generated-page observation or build failure is claimed.\n\nRevised l1: distinguished ordinary rollback from allocated or unreadable ownership retention. Integrated the parent's g107/l1 absent-path validation confirmation and g116 prelaunch-refusal confirmation, and checked the actual pinned source. Keeping the Error row keeps session_token valid; successful row removal revokes it. Private spec contents include credential-bearing command input. This corrects the earlier broad revocation statement while preserving the original credential topic and exact bounded-retention acceptance for independent disposition.\n\nFurther source checks found a separate already-Error reload cleanup path at original core.rs:7072-7080 (tip :6726-6732), in addition to the directory sweep. Temporarily reopened l1 immediately as a lead, then resolved it after reading cleanup_launch_artifacts's absent-sentinel path and settled-file removals. Successful writable reload removes the retained Error row's spec even when its row and valid token remain. Therefore the intermediate synthesis claim that such specs ordinarily survive successful restarts until Delete is explicitly retracted in the latest l1 event. Existing cleanup failures remain logged/retryable; boundedness and private-account trust, not universal credential revocation, support the proposed drop. No parent drop was treated as accepted.\n\nNew verified finding IDs this turn: none. New unverified finding IDs: none. Revised IDs: l1, l2. Open lead IDs: none. Current l1 is candidate, not an unresolved lead; its exact lifetime and credential-scope premises are now checked. c1 and c2 require no revision from this synthesis. All events remain append-only under their original IDs.\n\nNo runtime tests, builds, reproductions, helper agents or live-install actions. No checkout changes. Next action: return only this turn's changes and unresolved lead IDs, then await the caller's next protocol turn.\n\nDiscovery turn 3 completed. Discovery-pass count: 1. Read the complete supplied discovery-neighbours.json in bounded chunks through its line-801 closing brace before the new search. Those records were used only for interface context and novelty, not source credit or coverage disposition. Named pending synthesis questions were empty. Unread assigned scope: none.\n\nNew search stayed within the six assigned patches and used adjacent source only to validate their contracts/callers. Checked create-confirmation failure cleanup and publication, release of the host_scan read guard before teardown and after publication, startup/default host-program selection, removed seam/type references, the remaining best-effort file writer, and agent-screen runtime/environment use. No remaining NewTerminals/ReplacementFault/ReplacementStage/SpawnTarget production references were found in the searched supervisor/main paths. files.rs's remaining best-effort writer call is the app-bundle Running record; agent_screen uses host_child_env and Fresh runtime adoption as its changed wording says. The fixture patch remains one comment-line replacement, with no key-table data change. These checks supplied no additional defect or unresolved premise.\n\nNew discovery: l3, initially recorded immediately as a lead, then revised under the same ID to a confirmed documentation finding. The changed republished_terminal explanation now says a definitive failure changed nothing outside this process (original core.rs:3404-3405). Source confirms a successful ready host can start its child, fail adoption, be ended/swept and return definitive=true; host_restart's own unwind comment expressly says the child may have run. The actual contract is confirmed absence of a running replacement, not rollback of the child's external effects. Compared the parent wording and pinned tip: the new broader claim is introduced by this patch and survives at tip :3242-3243. This is a distinct failure-contract documentation defect, not a runtime rollback bug, and not the neighbour stale migration/tab-list comments or known timing-constant link.\n\nNew verified IDs this pass: l3. New unverified-after-investigation IDs: none. Remaining open lead IDs: none. Anything new found: yes, one documentation finding, suggested bucket other. All known IDs/candidate histories remain intact; no parent drops or lowerings treated as accepted. No runtime tests, builds, reproductions, live-install actions, checkout writes or helper agents. Next action: return the discovery delta and await the caller's later turn; do not perform another discovery pass inside this turn.\n\nDiscovery turn 4 completed. Discovery-pass count: 2. Reused the prior complete neighbour context and refreshed the supplied 2026-11-13T17:19:29.702Z snapshot before source searching: read the current full record index and the full new/changed relevant interface records in bounded outputs. Re-read the one clipped g123/l1 detail separately in full. Nearby inherited-history excerpt, ownership, lifecycle prose and deleted-test findings are existing interface context, not new local discoveries. Named pending questions were empty. No parent drop or lowering was accepted. Unread assigned source scope: none.\n\nFresh assigned-group checks: traced the new tmux-retry refusal's input selection through restart_pending_launch. The store transaction rejects nonpending/replaced reservations and changed terminal kinds, generations, addresses and captured conversation evidence; Acquired always returns the committed snapshot before the new early refusal can use it. Resolved/Launched return through replay, so the new expect cannot be reached from those outcomes. Examined the removed Spawned/SpawnFailure/SpawnTarget seam names for remaining source/doc references in the assigned core context; none were found. Compared the host result's artifact, hook and spawning-guard contract with the narrowed create publication. HostSpawnFailure still distinguishes pre-spec failure from a spec-bearing failed/adoption start, and the existing confirmed-absence process sweep remains before row removal; no new classification/ownership mismatch found. Retained host launch records remain separate from settled spec cleanup.\n\nRechecked the smaller documentation/metadata changes against their actual callers: files.rs's best-effort tier still has only app_bundle's Running-record production writer, which uses the named overwrite helper in blocking work; its changed historical-parenthetical removal adds no false live writer claim. The narrowed core documentation references resolve to retained host types rather than the removed tmux spawn structs. No new test-oracle concern is introduced by the fixture's sole comment-line edit, which changes no fixture records. No new substantive lead or candidate disposition arose from these checks.\n\nResult: credible empty discovery pass. New verified finding IDs: none. New unverified-after-investigation IDs: none. New candidate IDs: none. Remaining open lead IDs: none. Anything new found: no. Existing findings and proposed-drop histories are unchanged; do not restate them as this turn's discoveries.\n\nSource and contract analysis only. No runtime tests, builds, reproductions, helper agents, checkout edits or live-install actions. No prohibited coverage sources read. Next action: return checks/results and the empty discovery delta, then await the caller's next protocol turn.\n"
+}

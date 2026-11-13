@@ -1,0 +1,317 @@
+[
+  {
+    "key": "g074/c1",
+    "latest_line": 1,
+    "recommendation": "covered",
+    "bucket": "high",
+    "underlying_key": "grid-only-upgrade-stale-browser-needs-reload",
+    "aliases": ["g075/c1", "g076/c1"],
+    "target_queue_file": null,
+    "why": "The old-page misdrawing and attachment refusal are explicitly accepted, with reload as the remedy. This does not cover current-page routing or ending old tmux processes.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e SPEC_impl.md:3009-3054 describes protocol 77, old-page misdrawing, malformed input ending the attachment, and helm-owned grid flow.",
+      "At that hash terminal.rs:762-798 forwards binary input via send_grid_input and ignores obsolete page controls; client.rs:4016-4069 unconditionally registers grid accounting and starts flow. terminal.js:3387-3428 constructs the grid before the socket, and :4152-4165 feeds binary output to it.",
+      "This hash is inside the supplied review range. No runtime observation was made."
+    ],
+    "coverage_checked": [
+      "Current SPEC_impl.md:2937-2955 explicitly accepts this exact previous-page trigger and reload consequence. SPEC.md terminal/upgrade searches supply no contradictory current-page promise.",
+      "TODO.md Planned:25-26 is empty. plans/queue searches found tmux-end-old-terminals.md:119-129 requiring the removal, not an unlanded repair of old pages. BUGS.md contains only the distinct provisioning SSH-helper hang.",
+      "INDEX.md, matching queue-text searches and active TRIAGE_OUTCOMES.md contain no same trigger/consequence/scope item. FILTER.md is unnecessary; no broad upgrade filter is claimed."
+    ],
+    "exact_cover_quotes": [
+      "SPEC_impl.md:2949-2950: A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.",
+      "SPEC_impl.md:2955: malformed input. Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy."
+    ],
+    "missing_premise": null,
+    "original_stronger_consequence": "Old pages can draw grid records as terminal text until reload; sibling records also preserve typing ending that viewer attachment. No agent/process termination or security consequence was established.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Exact specification acceptance, limited to pages loaded from the preceding helm. Product UX would be high if unaccepted; the original record suggested other, but rarity is not the basis."
+  },
+  {
+    "key": "g074/l1",
+    "latest_line": 3,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "systemctl-environment-literal-decoder-grammar-suspicion",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The checked systemctl quoting helpers produce whole raw or ANSI-C quoted values. The decoder handles those forms; the suspected concatenated-shell-word mismatch has no producer in the checked sources.",
+    "checks": [
+      "04ffdbb35773cef36e73eb798c005ddbeb9a9de6 units.rs:557-570 splits assignments, and :664-778 decodes whole quoted literals, standard C escapes and octal/hex bytes without evaluation.",
+      "Primary systemd v255 systemctl-set-environment.c:41-54 uses shell_maybe_quote on the value with SHELL_ESCAPE_POSIX. https://github.com/systemd/systemd/blob/v255/src/systemctl/systemctl-set-environment.c#L41-L54",
+      "Primary v255 escape.c:440-518 and v239 escape.c:432-474 construct one complete quoted value, with no concatenated words. The checked escapes match the decoder. https://github.com/systemd/systemd/blob/v255/src/basic/escape.c#L440-L518 and https://github.com/systemd/systemd/blob/v239/src/basic/escape.c#L432-L474",
+      "This refutes the named concatenation/escaping suspicion for checked helper versions, not every historical systemctl version. No runtime parse or host probe was run."
+    ],
+    "coverage_checked": [
+      "SPEC.md:4877-4880 and SPEC_impl.md:6082-6085 require deterministic host-manager proxy inheritance; neither accepts wrong parsing.",
+      "TODO.md Planned is empty. plans/queue/podman-environments.md:242-245 describes inheritance, without a separate decoder-repair acceptance. BUGS.md has no matching issue.",
+      "Searched INDEX.md, queue files and active TRIAGE_OUTCOMES.md for show-environment, decode_manager_value and proxy parsing; no exact matching queue/decision. No FILTER.md boundary is used."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A supported systemctl release emitting an unsupported literal would reopen this bounded refutation; none was shown. Exhaustive validation of historical releases is not claimed.",
+    "original_stronger_consequence": "A wrong fallback parse could refuse container probing or copy the wrong proxy value when busctl is unavailable. No shell evaluation, credential disclosure or user-work loss route was established.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutation of the actual investigated literal-grammar suspicion, preserving its version limit."
+  },
+  {
+    "key": "g074/l2",
+    "latest_line": 8,
+    "recommendation": "retain-unverified",
+    "bucket": "other",
+    "underlying_key": "retired-session-tcp-relay-cache-only-admission",
+    "aliases": [],
+    "target_queue_file": "review_feedback_queue/retired-session-tcp-cache-admission.md",
+    "why": "The cache-only retirement fence and existence-only supervisor TCP admission establish a conditional gap. The checked claimless supervisor cannot serve, but that bounded ordinary-route refutation does not settle the global Delete-only contract or remove the corrupt-cache case.",
+    "checks": [
+      "04d85f0c98a9b635709d00b056719a0baa7fd3fc sessions.rs:904-960 routes raw cache membership or identity-less live membership; :4525-4550 checks retirement only when cached_session returns a decoded payload.",
+      "At that hash store.rs:9719-9795 returns None for missing, malformed, mismatched or unaddressable display payload while has_cached_session queries raw membership independently.",
+      "tunnels.rs:303 and :361 use route_active_session for accepting sockets and opening tunnels. service/tcp_relays.rs:264-286 checks only row existence before connect_loopback; it does not inspect retired launch state.",
+      "manager.rs:4893-5040 publishes identity-bearing lists through the durable cache and clears rather than substitutes live fallback on failed writes. service/core.rs:8483-8506 requires ownership.begin_serving before binding. The checked claimless construction therefore supplies no serving route.",
+      "Pinned SPEC_impl.md:8642-8657 requires Delete-only retirement, but its TCP contract assigns existence and loopback checks without separately spelling out per-endpoint retirement. The inaccurate sessions.rs claim that the supervisor checks its stored launch remains relevant to this TCP path.",
+      "All conclusions are conditional/source-derived. No shipped cache-damage producer, observed incident, runtime reproduction or security crossing was established."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:4892-4899 and SPEC_impl.md:8312-8327 require Delete-only retirement; they do not accept this bypass. SPEC_impl.md:3039-3100 specifies full-authority loopback relay admission and consent, and :5323-5326 / :5510-5514 deliberately preserve routing under undecodable display payloads. That corruption behavior supplies context, not retirement-bypass acceptance.",
+      "TODO.md Planned is empty. plans/queue/podman-environments.md:284-295 reiterates Delete-only retirement; no searched unlanded plan specifically repairs the cache-only TCP boundary. BUGS.md does not cover it.",
+      "INDEX.md, matching queue-file searches and active TRIAGE_OUTCOMES.md have no same cache/retirement/TCP trigger and consequence. FILTER.md upgrade-plus-rare excludes security/trust-boundary consequences and cannot settle this unresolved concern."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A supported production caller/state exposing a retired supervisor row while its durable payload is unusable, or clarification that Delete-only refusal must also hold for the constructed full-authority API call. The checked None-identity constructor cannot serve. Actual outside-host security impact beyond already granted desktop tunnel authority also remains unestablished.",
+    "original_stronger_consequence": "A retired container session without a decodable durable cache could authorize a TCP tunnel on its former outside host, potentially exposing services across the retired-container boundary. History first proposed no shipped route, reopened the contract question, corrected the overly broad test-only identity-less explanation, then bounded the refutation to the checked claimless serving path. None of those revisions establishes global compliance or retracts the conditional API gap.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Retain the genuinely investigated missing-premise claim. Other reflects the established constructed/API consequence only; any dismissal or acceptance of the earlier security-consequence lowering requires the independent drop check."
+  },
+  {
+    "key": "g074/l3",
+    "latest_line": 10,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "clipboard-whole-write-versus-grid-part-bound-suspicion",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Eight MiB limits the whole clipboard write; one MiB limits each encoded part. Source implements splitting and reassembly, so the named transport-cap interaction is refuted.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e proto/grid.rs:226-236 and :413,459,463 distinguish encoded message, raw part and whole-write limits.",
+      "At that hash grid_output.rs:946-981 splits on UTF-8 character boundaries while accounting for escaped JSON size; service/grid_stream.rs:786-791 appends and sends the parts in order.",
+      "grid-model.js:1042-1065 checks per-part and cumulative bounds and publishes only on last. client.rs:837-849 admits frames individually, and clipboard.rs:61-80 applies the eight-MiB bound to the completed write.",
+      "The direct native-route test addresses that completed-text boundary. This is source evidence, not a claim that the tests were run."
+    ],
+    "coverage_checked": [
+      "SPEC.md:3053-3073 requires best-effort clipboard writes and excludes clipboard reads. SPEC_impl.md Grid streams specifies the encoded-frame cap; the protocol format clarifies multipart writes. Best effort alone is not used to excuse a cap defect.",
+      "TODO.md Planned is empty; tmux-end-old-terminals.md:119-124 calls for aligning the native cap, not accepting dropped parts. No matching BUGS.md or active TRIAGE_OUTCOMES.md decision.",
+      "INDEX.md and matching queue file clipboard-notice-drain-lacks-per-turn-work-bound.md concern a synchronous supervisor notice-drain work bound, a different trigger/root cause. No exact alias or useful extension for this refuted cap suspicion. FILTER.md is not used."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "An eight-MiB program clipboard write could have been lost at the one-MiB grid boundary before reaching the raised native cap. Clipboard content itself is excluded from user-owned-work loss by the priority rules; no other harm was established.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source-refuted bound mismatch; separate transport-part and completed-write limits are implemented."
+  },
+  {
+    "key": "g075/c1",
+    "latest_line": 7,
+    "recommendation": "covered",
+    "bucket": "high",
+    "underlying_key": "grid-only-upgrade-stale-browser-needs-reload",
+    "aliases": ["g074/c1", "g076/c1"],
+    "target_queue_file": null,
+    "why": "The old-browser consequence exactly matches an explicit accepted compatibility boundary. It must remain separate from peer protocol rejection and deliberate retirement of old tmux work.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e SPEC_impl.md:3009-3027 expressly accepts old pages misdrawing and input ending the viewer attachment.",
+      "At that hash proto/io.rs:585-658 returns success only for exact protocol equality; client.rs:4016-4069 installs grid accounting and starts flow for accepted attachment replies. This is distinct from the old-browser HTTP/WebSocket boundary.",
+      "client.rs:4111-4133 removes only the attachment on oversized input; terminal.rs:762-774 ends browser reading on refusal. No checked path sends terminal-host Shutdown. The latest record's independently retained terminal-host lifetime and separate old-tmux retirement caveats are preserved; this disposition does not lower those other claims.",
+      "No historical browser reproduction or runtime test was performed."
+    ],
+    "coverage_checked": [
+      "Current SPEC_impl.md:2943-2955 retains exactly the same old-page acceptance. SPEC.md terminal/upgrade rules do not turn it into an accepted current-page failure or authorize terminating terminal hosts.",
+      "TODO.md Planned is empty; plans/queue/tmux-end-old-terminals.md:119-129 requires removing stream negotiation and building grids unconditionally, not retaining compatibility. No matching BUGS.md or active TRIAGE_OUTCOMES.md item.",
+      "INDEX.md and matching queue searches found no exact queued finding. Aliases are limited to the supplied g074/c1 and g076/c1. The mentioned g053 records were not independently inspected or added as aliases. No FILTER.md basis is needed."
+    ],
+    "exact_cover_quotes": [
+      "SPEC_impl.md:2949-2950: A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.",
+      "SPEC_impl.md:2955: malformed input. Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy."
+    ],
+    "missing_premise": null,
+    "original_stronger_consequence": "An older page reconnecting automatically before the build-mismatch latch, or manually, draws grid messages as terminal text and typing ends its attachment until reload. The record explicitly excludes lowering the separate deliberate old-tmux process/history loss claim. Helm-supervisor incompatibility and the permanent terminal-host protocol are distinct boundaries.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Exact specification acceptance of the stale-browser effect only. This proposes no disposition of any old-tmux process/history-loss claim."
+  },
+  {
+    "key": "g075/c2",
+    "latest_line": 5,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "synthetic-terminal-queue-capacity-loses-production-bound-coverage-suspicion",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The smaller fixture deliberately exercises mpsc Full, while separate tests pin the production gauge limits. Unconditional production accounting remains present. These observations do not address the distinct stalled-input-writer timeout test.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e client.rs:4759-4796 documents TEST_EVENT_QUEUE=256 and uses a real QueueGauge with the synthetic queue.",
+      "At that hash :6409-6523 explicitly tests 4096 events, one-MiB frames, sixteen-MiB bytes, both pause/resume marks and flow release. :4016-4069 unconditionally installs production queue/gauge accounting before Attach and starts flow after Attached.",
+      ":2471-2519 applies gauge admission before nonblocking try_send and removes only the failed route, handing upstream release to its own task. Source inspection establishes coverage mechanisms, not executed test success or zero enqueue delay."
+    ],
+    "coverage_checked": [
+      "SPEC.md:3011-3029 requires isolated slow-viewer handling; SPEC_impl.md:2957-2982 specifies queue bounds and helm-owned flow. None accepts omitting production-bound coverage.",
+      "TODO.md Planned is empty. Searched plans/queue for overflow, gauge and writer coverage; removal criteria in tmux-end-old-terminals.md:119-129 do not settle a hypothetical test defect. No exact BUGS.md, INDEX.md/queue or active TRIAGE_OUTCOMES.md item.",
+      "FILTER.md does not supply a matching test-coverage boundary."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Keeping 256-slot synthetic queues while production moves to 4096 might mask missing production admission-bound coverage. No shipped failure or security/user-work route was shown. An independently owned Detach can still wait on the shared writer.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source-refuted concern about this coverage split. It provides no writer-capacity or elapsed-grace evidence for g076/l1."
+  },
+  {
+    "key": "g075/c3",
+    "latest_line": 8,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "resize-writer-fixtures-lose-ordering-or-blocked-write-oracle-suspicion",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Both named client tests distinguish the mechanisms they claim: FIFO order is checked at the peer, and the cancellation test receives a witness from inside the parked transport write.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e client.rs:4940-4978 awaits Detach, then enqueues Resize on the same writer and requires the first peer frame to be Detach.",
+      "At that hash :5009-5052 parks the writer, sends Resize, waits for entered.notified, then drops the client and requires peer EOF. ParkableWriter::poll_write at :4735-4744 emits that notification only in its parked branch before returning Pending.",
+      "This is a transport-entry witness, unlike g076/l1's manually polled input future. No runtime execution or claim of exhaustive cancellation schedules."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md:3101-3146 specifies complete-frame writes and the shared helm FIFO; SPEC.md terminal/responsiveness searches contain no acceptance of this hypothetical oracle gap.",
+      "TODO.md Planned is empty. No same ordering/parked-write test repair in searched unlanded plans, BUGS.md, INDEX.md/queue or active TRIAGE_OUTCOMES.md. FILTER.md is not a basis."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Replacing removed raw-input traffic with Resize might let writer-ordering or in-progress cancellation tests pass without their declared boundary. No shipped security or work-loss consequence was claimed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source-refuted test-oracle suspicion, limited to these two Resize replacements."
+  },
+  {
+    "key": "g075/c4",
+    "latest_line": 9,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "pre-attached-grid-limit-test-generic-connection-failure-suspicion",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The oversized fixture remains below the outer framing cap, and the same connection must subsequently deliver an exact-limit frame. Generic connection failure cannot satisfy those assertions.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e client.rs:6281-6406 sends GRID_MAX_MESSAGE+1 before Attached, requires the exact channel's upstream Detach, gates a second Attach on that witness, and requires an exact GRID_MAX_MESSAGE all-y event from the same client.",
+      "At that hash proto/lib.rs:484 sets the outer cap to eight MiB; :626-678 encodes/decodes kind+channel+body under it. Both one-MiB fixture lengths plus overhead are valid frames.",
+      "The later peer closure does not remove the explicit upstream Detach and second successful Attach requirements. This checks the source oracle, not a runtime pass or scheduling/performance guarantee."
+    ],
+    "coverage_checked": [
+      "SPEC.md:3011-3029 requires attachment isolation. SPEC_impl.md:2957-2982 specifies the grid cap, and :3101-3109 separates the outer eight-MiB framing cap. None accepts a false oracle.",
+      "TODO.md Planned is empty; searched plans, BUGS.md, INDEX.md/queue and active TRIAGE_OUTCOMES.md have no exact larger-fixture/outer-frame-failure item. The existing initial-oversized-grid-cannot-attach queue topic concerns attach dimensions and producer validity, not this test's generic failure alternative. No FILTER.md basis."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Increasing the pre-Attached fixture from sixty-four KiB to one MiB could have caused framing or connection failure to masquerade as per-attachment cap enforcement. The test sequence predates this patch; this disposition addresses its changed larger fixture only.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source-refuted competing mechanism; exact-channel Detach and same-connection exact-limit delivery distinguish cap enforcement."
+  },
+  {
+    "key": "g076/c1",
+    "latest_line": 8,
+    "recommendation": "covered",
+    "bucket": "high",
+    "underlying_key": "grid-only-upgrade-stale-browser-needs-reload",
+    "aliases": ["g074/c1", "g075/c1"],
+    "target_queue_file": null,
+    "why": "The specification explicitly accepts the previous-page consequence. Independently checked current-page code constructs and uses the grid without waiting for the removed stream notice.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e SPEC_impl.md:3021-3027 accepts old-page misdrawing and input ending the viewer attachment until reload.",
+      "At that hash terminal.js:3387-3428 constructs/fits the grid before WebSocket creation, :4152-4165 sends binary messages to receiveGrid, and :4495-4507 sends encoded binary grid input.",
+      "terminal.rs:762-774 forwards through send_grid_input and ends reading on refusal; client.rs:4111-4135 preserves one-frame delivery and the input cap. Current-page correctness is separate corroboration, not coverage for the old page.",
+      "Source-only routing check; no exhaustive browser-grid review or historical-page reproduction."
+    ],
+    "coverage_checked": [
+      "Current SPEC_impl.md:2949-2955 has the exact old-page acceptance. SPEC.md terminal/upgrade rules contain no broader current-page routing exception.",
+      "TODO.md Planned is empty; tmux-end-old-terminals.md:119-129 requires this removal and unconditional grid mount. No exact BUGS.md, INDEX.md/queue or active TRIAGE_OUTCOMES.md match. No FILTER.md basis is needed."
+    ],
+    "exact_cover_quotes": [
+      "SPEC_impl.md:2949-2950: A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.",
+      "SPEC_impl.md:2955: malformed input. Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy."
+    ],
+    "missing_premise": null,
+    "original_stronger_consequence": "A page loaded before the update may draw grid messages as terminal text and lose its viewer attachment on input until reload. The acceptance says nothing about current-page routing or terminating the agent.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Exact old-page specification acceptance only, with the supplied sibling aliases recorded."
+  },
+  {
+    "key": "g076/c2",
+    "latest_line": 9,
+    "recommendation": "refuted",
+    "bucket": "high",
+    "underlying_key": "removing-browser-pause-resume-disables-grid-flow-suspicion",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The removed page controls were not the surviving grid flow-control authority. Every attachment retains the helm-owned gauge and observer; ignoring old browser controls cannot override that gauge.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e client.rs:4016-4036 registers the grid queue and gauge before Attach; :4062-4069 starts flow after Attached, including prior data accounting.",
+      "At that hash :815-898 initializes counters, admits bounded events/bytes and steers pause/resume; :4138-4178 sends those changes through the shared writer. terminal.rs:776-798 ignores obsolete page controls.",
+      "Queue overflow and per-attachment release remain handled at client.rs:2436-2519. This narrowly refutes removal disabling flow control; it does not certify all accounting paths or prove g076/l1's input writer has no spare permits. No runtime observation."
+    ],
+    "coverage_checked": [
+      "SPEC.md:3011-3029 and SPEC_impl.md:2957-2982 require helm-owned queue control; the latter explicitly says the helm ignores page pause/resume and describes accepted in-flight-overflow/stall floors.",
+      "TODO.md Planned is empty. tmux-end-old-terminals.md:119-124 explicitly removes browser-driven flow control but is not acceptance of broken helm control. No same issue in BUGS.md, INDEX.md/queue or active TRIAGE_OUTCOMES.md. FILTER.md is not needed."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Ignoring browser pause/resume might let a slow viewer exhaust its output queue and stall/detach. No shipped agent termination, security impact or user-owned-work loss was established. Production output accounting and input writer cooperative scheduling are separate premises.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutation of the narrow removed-browser-branches claim. High describes the hypothesized UX consequence if it existed, not a demonstrated current failure."
+  },
+  {
+    "key": "g076/l1",
+    "latest_line": 7,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "detach-timeout-test-confuses-cooperative-yield-with-writer-capacity",
+    "aliases": [],
+    "target_queue_file": "review_feedback_queue/detach-timeout-test-lacks-writer-pressure.md",
+    "why": "The changed test treats any Pending from its manually polled input loop as full writer capacity and never asserts elapsed teardown grace. Pinned cooperative accounting supplies a concrete source route yielding with capacity remaining, so eventual Detach alone does not establish timeout coverage.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e terminal.rs:1116-1122 promises blocked-writer timeout survival; :1183-1204 polls input once, equates Pending with pressure, calls detach_bounded, then releases the peer without checking capacity or elapsed grace.",
+      "The commit diff replaces one send_input over eight MiB with a loop of send_grid_input. client.rs:4111-4134 acquires the terminal mutex and bounded sender for each message; :2989-2992 successfully awaits the Attach reply's oneshot first.",
+      "That hash Cargo.lock:6278-6281 pins Tokio 1.53.2. Its local primary sources task/coop/mod.rs:105-155 give a root poll 128 units; sync/batch_semaphore.rs:617-662 charges a successful Acquire, and sync/oneshot.rs:1317-1334 charges successful receive. mutex.rs:434-455 and mpsc/bounded.rs:1272-1307 use semaphore acquisition.",
+      "testtrace-macros/src/lib.rs:248-259 selects CurrentThread, and Tokio runtime/scheduler/current_thread/mod.rs:815-834 budgets the root future poll. The direct Future::poll inside poll_fn does not create another task or renew budget. At most 127 units remain after the reply, allowing at most 63 complete two-acquire sends before yielding, short of the 64-slot queue.",
+      "client.rs:2499-2519 independently spawns the Detach enqueue. Once the root yields it can enqueue with spare capacity, so the asserted eventual peer notification can occur without a caller timeout. This is a conditional source route, not a measured scheduler trace or mutation-test result.",
+      "The inherited test also lacked an elapsed-grace assertion, but the in-range loop rewrite adds the second acquisition per frame and destroys the source argument that the first Pending fills the queue. Suggested repair: establish an actually blocked independent enqueue, assert grace elapsed before releasing the peer, then observe surviving Detach."
+    ],
+    "coverage_checked": [
+      "SPEC.md terminal/responsiveness searches and SPEC_impl.md:2957-2982 / :3101-3146 specify bounded, isolated flow and the 64-frame writer. Neither accepts a regression test that omits its stated timeout boundary.",
+      "TODO.md Planned is empty. Searched all plans/queue for detach, timeout, writer, backpressure and cooperative budget; no unlanded plan repairs this test oracle. BUGS.md's SSH provisioning hang is unrelated.",
+      "Read INDEX.md and searched queue/active TRIAGE_OUTCOMES.md for ordinary_detach_wait, detach_bounded, stalled writer and cooperative budget: no exact existing item. Other timeout/writer-test items involve different fixtures and mechanisms. No FILTER.md boundary covers this test-evidence defect."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No missing premise for the absent capacity/grace witness. Exact dynamic frame count, elapsed time and timeout-removal mutation behavior remain unmeasured because no reproduction or tests were authorized.",
+    "original_stronger_consequence": "The timeout that prevents a stuck host connection holding a terminal socket open can be removed without this named test proving that regression. This is lost maintainer test sensitivity; no shipped teardown defect, security harm or user-owned-work loss is established. Earlier source revisions distinguished cooperative yielding from actual writer pressure; that distinction remains intact.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain source-confirmed test-evidence defect. Production gauge tests and the two correctly witnessed Resize writer tests do not cover this distinct input-writer timeout fixture."
+  },
+  {
+    "key": "g076/c3",
+    "latest_line": 6,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "removed-stream-trace-field-breaks-desktop-smoke-parser-suspicion",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The documented smoke parser reads retained trace fields and does not require the removed stream field.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e terminal.rs:106-135 retains the target, attached/ended messages, session field and terminal=agent spelling.",
+      "At that hash scripts/desktop-smoke.sh:289-323 uses a regex ending in terminal=agent followed by a word boundary and counts the same fixed prefix. Neither requires stream=bytes or stream=grid.",
+      "This checks the documented consumer only, not undocumented external parsers or an executed smoke pass."
+    ],
+    "coverage_checked": [
+      "SPEC.md terminal/diagnostic searches and SPEC_impl.md Grid streams/Multi­plexing searches contain no contrary stream-field requirement. This is source refutation, not specification acceptance of broken tooling.",
+      "TODO.md Planned is empty. Searched plans/queue, BUGS.md, INDEX.md/queue and active TRIAGE_OUTCOMES.md for attachment tracing, stream fields and desktop smoke parser changes; no exact defect coverage.",
+      "Read terminal-attachment-trace-retains-raw-session-id.md: that distinct existing item concerns diagnostic normalization, not stream-field removal. No alias or extension is warranted. FILTER.md is not used."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Removing the attachment trace's stream field might prevent the desktop smoke test identifying its open terminal. No product failure or user-owned-work/security route was claimed; undocumented log parsers were outside the check.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source-refuted breakage of the actual documented desktop smoke consumer."
+  }
+]

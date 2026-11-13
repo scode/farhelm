@@ -1,0 +1,939 @@
+{
+  "group": {
+    "id": "g149",
+    "domain": "supervisor-upgrade-state",
+    "purpose": "supervisor-upgrade-state: crates/farhelm-supervisor/src/checkout_trash.rs, crates/farhelm-supervisor/src/store.rs, crates/farhelm-supervisor/src/service/core/old_terminals.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g005",
+      "g006",
+      "g007",
+      "g012",
+      "g013",
+      "g014",
+      "g015",
+      "g016",
+      "g071",
+      "g072",
+      "g073",
+      "g097",
+      "g102",
+      "g103",
+      "g104",
+      "g105",
+      "g106",
+      "g107",
+      "g108",
+      "g109",
+      "g110",
+      "g111",
+      "g112",
+      "g113",
+      "g114",
+      "g115",
+      "g116",
+      "g128",
+      "g144",
+      "g150",
+      "g159",
+      "g160",
+      "g161",
+      "g162",
+      "g163",
+      "g164",
+      "g165",
+      "g166",
+      "g167",
+      "g168",
+      "g169",
+      "g170",
+      "g171",
+      "g172",
+      "g173"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00680-000.patch",
+        "ranges": [
+          [
+            1,
+            69
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/checkout_trash.rs",
+        "commit": "47f33bbdbd5ff4a6e437e97a800f9083be43096e",
+        "notes": "patch header; patch character offsets [0,3185)",
+        "lines": 69,
+        "bytes": 3185,
+        "start": 0,
+        "end": 3185,
+        "original": "[private-run]/prep/originals/00680.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00686-000.patch",
+        "ranges": [
+          [
+            1,
+            327
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/store.rs",
+        "commit": "47f33bbdbd5ff4a6e437e97a800f9083be43096e",
+        "notes": "patch header; patch character offsets [0,15649)",
+        "lines": 327,
+        "bytes": 15655,
+        "start": 0,
+        "end": 15649,
+        "original": "[private-run]/prep/originals/00686.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00776-000.patch",
+        "ranges": [
+          [
+            1,
+            39
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/store.rs",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,2484)",
+        "lines": 39,
+        "bytes": 2484,
+        "start": 0,
+        "end": 2484,
+        "original": "[private-run]/prep/originals/00776.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00868-000.patch",
+        "ranges": [
+          [
+            1,
+            615
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/core/old_terminals.rs",
+        "commit": "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4",
+        "notes": "patch header; patch character offsets [0,27763)",
+        "lines": 615,
+        "bytes": 27763,
+        "start": 0,
+        "end": 27763,
+        "original": "[private-run]/prep/originals/00868.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00873-000.patch",
+        "ranges": [
+          [
+            1,
+            78
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/store.rs",
+        "commit": "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4",
+        "notes": "patch header; patch character offsets [0,3812)",
+        "lines": 78,
+        "bytes": 3818,
+        "start": 0,
+        "end": 3812,
+        "original": "[private-run]/prep/originals/00873.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01474-000.patch",
+        "ranges": [
+          [
+            1,
+            15
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/core/old_terminals.rs",
+        "commit": "f96dd4363d97dc7e07dea5b8947c96be6bf912e8",
+        "notes": "patch header; patch character offsets [0,966)",
+        "lines": 15,
+        "bytes": 966,
+        "start": 0,
+        "end": 966,
+        "original": "[private-run]/prep/originals/01474.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01550-000.patch",
+        "ranges": [
+          [
+            1,
+            23
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/store.rs",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,1417)",
+        "lines": 23,
+        "bytes": 1417,
+        "start": 0,
+        "end": 1417,
+        "original": "[private-run]/prep/originals/01550.patch"
+      }
+    ],
+    "lines": 1166,
+    "bytes": 55288
+  },
+  "records": [
+    {
+      "key": "g149/l1",
+      "owner": "g149",
+      "id": "l1",
+      "domain": "supervisor-upgrade-state",
+      "purpose": "supervisor-upgrade-state: crates/farhelm-supervisor/src/checkout_trash.rs, crates/farhelm-supervisor/src/store.rs, crates/farhelm-supervisor/src/service/core/old_terminals.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Old-terminal startup budget excludes socket connect and file cleanup",
+            "location": "crates/farhelm-supervisor/src/service/core/old_terminals.rs:179",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR: startup might exceed the promised old-terminal cleanup budget, delaying a host's return after Update. Source basis: end_server awaits UnixStream::connect before either timeout_at, and remove_server_files also runs outside those timeouts. Contract: SPEC_impl.md, Terminal substrate: private tmux server, says the step's own work has one 15-second budget. Check pending: determine whether the shipped Unix socket connect can wait indefinitely or immediately errors under backlog pressure, and whether file cleanup offers a substantive blocking route. Suggested bucket: other pending route; could-be-highest: no established security or loss-of-work route. Confidence: uninvestigated lead. proposed_drop: false. possible_cover: none. Source analysis only; no runtime reproduction."
+          }
+        },
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Old-terminal startup budget excludes socket connect and file cleanup",
+            "location": "crates/farhelm-supervisor/src/service/core/old_terminals.rs:179",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR: the initial suspicion was that an unresponsive tmux server could make Update wait past the cleanup budget. Checks: Cargo.lock pins tokio 1.53.2 and mio 1.2.4. Their locally installed source shows UnixStream::connect_addr makes a nonblocking connect, propagates EAGAIN rather than retrying, then awaits writable readiness and checks SO_ERROR; it never waits for application accept or a tmux reply. hosts/process.rs:206-210 documents the supported backlog-full outcomes: EAGAIN on Linux, refusal on macOS. end_server handles either as an immediate logged error. Thus a wedged application does not establish the proposed hanging-connect route. remove_server_files (old_terminals.rs:426-450) is outside timeout_at and scans the state directory, so a stalled filesystem or unusually large directory could exceed the stated 15 seconds, but no particular shipped workload or new blocking route was established beyond ordinary asynchronous filesystem calls. Contract: SPEC_impl.md:3000-3003 says the step's own work has one 15-second budget. Suggested bucket: other if a material budget violation route is established. could-be-highest: no security or loss-of-work consequence established or suspected from this lead. Confidence: source-confirmed refutation of the application-unresponsive route; remaining filesystem timing is unverified. proposed_drop: no substantive defect established after checking pinned socket dependencies and cleanup source; not specification acceptance. possible_cover: none. No behavior was observed by execution, and no reproduction was written. Reopen if supported-kernel socket semantics show pending connect without readiness, or a normal shipped state-directory workload demonstrably exceeds the budget."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Old-terminal file cleanup runs outside its startup deadline",
+            "location": "crates/farhelm-supervisor/src/service/core/old_terminals.rs:423",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4; unchanged cleanup verified at pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: Farhelm's old-terminal cleanup does not enforce its promised startup budget for filesystem cleanup, so this phase can hold a host's return after Update beyond that budget. Details: end_server receives one deadline, but calls remove_server_files directly at lines 182, 244 and 250. That helper at 423-449 awaits read_dir, iterates until end with no entry/time limit, collects matching temporary names, then awaits every unlink; none is inside timeout_at. The elapsed time is recorded only after end_server returns and subtracted from the later sweep's budget, so that accounting cannot cap the cleanup that already ran. Exact contract, SPEC_impl.md:3000-3002: 'the step's own work, the server's end and the sweeps (not the reload's host discovery between them), has one 15-second budget (`OLD_TERMINALS_DEADLINE`), half the 30 seconds the helm allows a supervisor it restarted during Update to come back'. This enforcement gap is source-confirmed; no particular count, healthy-directory delay or measured timeout is claimed. Healthy normal writes are temporary and ordinarily cleaned: files.rs:147-166 says staging cleanup can be skipped by a hard crash, names use fresh UUIDs, and a backstop sweep handles debris; the root otherwise stores fixed metadata plus subdirectories for per-session state. Therefore ordinary session count must not be presented as an unbounded root-file workload. The helper itself imposes no cardinality bound on directory entries or retained crash/failed-cleanup debris, and no bound on asynchronous filesystem completion. No source-backed healthy numeric shape/time bound has been established. The claim is the missing enforcement of an explicit budget, not proof that a typical healthy directory exceeds it. Socket part of original lead is refuted: pinned Cargo.lock has tokio 1.53.2 and mio 1.2.4; tokio src/net/unix/stream.rs:116-128 calls mio connect, waits for writable readiness, then checks SO_ERROR without an application reply. mio src/sys/unix/uds/stream.rs:8-20 accepts only immediate success/EINPROGRESS and returns other errors (including EAGAIN); src/sys/unix/net.rs:15-35 uses SOCK_NONBLOCK on Linux and :58-89 sets O_NONBLOCK with fcntl on macOS. hosts/process.rs:206-210 and SPEC_impl.md:2970-2971 document full-backlog EAGAIN/Linux and refusal/macOS, both promptly logged by end_server. Thus a wedged tmux application alone does not show a hanging-connect route. Suggested bucket: other (deadline contract/enforcement), with high impact requiring an established supported situation causing material Update delay; could-be-highest: no established or suspected security/loss-of-work route from this issue. Confidence: confirmed source-level deadline gap; runtime occurrence and frequency unverified, no execution or reproduction. proposed_drop: false; replaces prior proposed drop because absence of a measured workload does not answer enforcement of the finite declared budget. possible_cover: none known. A remedy would put the entire cleanup await under the existing deadline and log/retain any uncompleted debris for a later start; physical completion of a filesystem syscall may still outlive cancellation, but startup need not wait for it."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Old-terminal file cleanup runs outside its startup deadline",
+            "location": "crates/farhelm-supervisor/src/service/core/old_terminals.rs:423",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4; unchanged cleanup verified at pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: Farhelm's old-terminal cleanup does not enforce its promised startup budget for filesystem cleanup, so this phase can hold a host's return after Update beyond that budget. Details: end_server receives one deadline, but calls remove_server_files directly at lines 182, 244 and 250. That helper at 423-449 awaits read_dir, iterates until end with no entry/time limit, collects matching temporary names, then awaits every unlink; none is inside timeout_at. The elapsed time is recorded only after end_server returns and subtracted from the later sweep's budget, so that accounting cannot cap the cleanup that already ran. Exact contract, SPEC_impl.md:3000-3002: 'the step's own work, the server's end and the sweeps (not the reload's host discovery between them), has one 15-second budget (`OLD_TERMINALS_DEADLINE`), half the 30 seconds the helm allows a supervisor it restarted during Update to come back'. This enforcement gap is source-confirmed; no particular count, healthy-directory delay or measured timeout is claimed. Healthy normal writes are temporary and ordinarily cleaned: files.rs:147-166 says staging cleanup can be skipped by a hard crash, names use fresh UUIDs, and a backstop sweep handles debris; the root otherwise stores fixed metadata plus subdirectories for per-session state. Therefore ordinary session count must not be presented as an unbounded root-file workload. The helper itself imposes no cardinality bound on directory entries or retained crash/failed-cleanup debris, and no bound on asynchronous filesystem completion. No source-backed healthy numeric shape/time bound has been established. The claim is the missing enforcement of an explicit budget, not proof that a typical healthy directory exceeds it. Socket part of original lead is refuted: pinned Cargo.lock has tokio 1.53.2 and mio 1.2.4; tokio src/net/unix/stream.rs:116-128 calls mio connect, waits for writable readiness, then checks SO_ERROR without an application reply. mio src/sys/unix/uds/stream.rs:8-20 accepts only immediate success/EINPROGRESS and returns other errors (including EAGAIN); src/sys/unix/net.rs:15-35 uses SOCK_NONBLOCK on Linux and :58-89 sets O_NONBLOCK with fcntl on macOS. hosts/process.rs:206-210 and SPEC_impl.md:2970-2971 document full-backlog EAGAIN/Linux and refusal/macOS, both promptly logged by end_server. Thus a wedged tmux application alone does not show a hanging-connect route. Suggested bucket: other (deadline contract/enforcement), with high impact requiring an established supported situation causing material Update delay; could-be-highest: no established or suspected security/loss-of-work route from this issue. Confidence: confirmed source-level deadline gap; runtime occurrence and frequency unverified, no execution or reproduction. proposed_drop: false; replaces prior proposed drop because absence of a measured workload does not answer enforcement of the finite declared budget. possible_cover: none known. A remedy would put the entire cleanup await under the existing deadline and log/retain any uncompleted debris for a later start; physical completion of a filesystem syscall may still outlive cancellation, but startup need not wait for it. Further synthesis checks: core.rs:4238-4286 explicitly identifies the root metadata/subdirectory shape and treats removal failures as retained debris; its backstop is called in serve at 8406-8407, after constructor old-terminal cleanup, so it does not pre-bound this helper. tmux.rs:3226-3265 stages config before a server start, not per live session. No normal-session-count scaling route was found. At pinned tip SPEC_impl.md:2821-2823 retains the same 15-second contract, and the complete old_terminals.rs diff since introduction changes only its documentation link; the helper/deadline gap has no later repair."
+          }
+        }
+      ],
+      "latest": {
+        "line": 11,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l1",
+          "state": "open",
+          "summary": "Old-terminal file cleanup runs outside its startup deadline",
+          "location": "crates/farhelm-supervisor/src/service/core/old_terminals.rs:423",
+          "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4; unchanged cleanup verified at pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: Farhelm's old-terminal cleanup does not enforce its promised startup budget for filesystem cleanup, so this phase can hold a host's return after Update beyond that budget. Details: end_server receives one deadline, but calls remove_server_files directly at lines 182, 244 and 250. That helper at 423-449 awaits read_dir, iterates until end with no entry/time limit, collects matching temporary names, then awaits every unlink; none is inside timeout_at. The elapsed time is recorded only after end_server returns and subtracted from the later sweep's budget, so that accounting cannot cap the cleanup that already ran. Exact contract, SPEC_impl.md:3000-3002: 'the step's own work, the server's end and the sweeps (not the reload's host discovery between them), has one 15-second budget (`OLD_TERMINALS_DEADLINE`), half the 30 seconds the helm allows a supervisor it restarted during Update to come back'. This enforcement gap is source-confirmed; no particular count, healthy-directory delay or measured timeout is claimed. Healthy normal writes are temporary and ordinarily cleaned: files.rs:147-166 says staging cleanup can be skipped by a hard crash, names use fresh UUIDs, and a backstop sweep handles debris; the root otherwise stores fixed metadata plus subdirectories for per-session state. Therefore ordinary session count must not be presented as an unbounded root-file workload. The helper itself imposes no cardinality bound on directory entries or retained crash/failed-cleanup debris, and no bound on asynchronous filesystem completion. No source-backed healthy numeric shape/time bound has been established. The claim is the missing enforcement of an explicit budget, not proof that a typical healthy directory exceeds it. Socket part of original lead is refuted: pinned Cargo.lock has tokio 1.53.2 and mio 1.2.4; tokio src/net/unix/stream.rs:116-128 calls mio connect, waits for writable readiness, then checks SO_ERROR without an application reply. mio src/sys/unix/uds/stream.rs:8-20 accepts only immediate success/EINPROGRESS and returns other errors (including EAGAIN); src/sys/unix/net.rs:15-35 uses SOCK_NONBLOCK on Linux and :58-89 sets O_NONBLOCK with fcntl on macOS. hosts/process.rs:206-210 and SPEC_impl.md:2970-2971 document full-backlog EAGAIN/Linux and refusal/macOS, both promptly logged by end_server. Thus a wedged tmux application alone does not show a hanging-connect route. Suggested bucket: other (deadline contract/enforcement), with high impact requiring an established supported situation causing material Update delay; could-be-highest: no established or suspected security/loss-of-work route from this issue. Confidence: confirmed source-level deadline gap; runtime occurrence and frequency unverified, no execution or reproduction. proposed_drop: false; replaces prior proposed drop because absence of a measured workload does not answer enforcement of the finite declared budget. possible_cover: none known. A remedy would put the entire cleanup await under the existing deadline and log/retain any uncompleted debris for a later start; physical completion of a filesystem syscall may still outlive cancellation, but startup need not wait for it. Further synthesis checks: core.rs:4238-4286 explicitly identifies the root metadata/subdirectory shape and treats removal failures as retained debris; its backstop is called in serve at 8406-8407, after constructor old-terminal cleanup, so it does not pre-bound this helper. tmux.rs:3226-3265 stages config before a server start, not per live session. No normal-session-count scaling route was found. At pinned tip SPEC_impl.md:2821-2823 retains the same 15-second contract, and the complete old_terminals.rs diff since introduction changes only its documentation link; the helper/deadline gap has no later repair."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g149/findings.jsonl",
+        "id": "l1",
+        "line": 11,
+        "disposition": "verified",
+        "group": "old-terminal-startup-filesystem-cleanup-outside-deadline",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-096 after inspecting it. The cleanup awaits are outside the declared startup deadline. Retain the narrow enforcement discrepancy; ordinary session count is not a demonstrated large-directory trigger, and no measured Update delay is established. Record only the missing enforcement of the explicit finite startup budget, preserving the healthy-filesystem acceptance and absent runtime premise. Do not assert a reproduced hang or count ordinary sessions as root-directory debris. Checked source/results: [\"00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:crates/farhelm-supervisor/src/service/core/old_terminals.rs:160-183,244-250,350-356,423-449: end_server directly awaits remove_server_files, whose directory enumeration and unlink loop have no deadline. spent is accounted only after it returns.\",\"git diff dbfc69751215dbf15e1d31d5bed73c3754c4ebc4..00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db for old_terminals.rs changes only a specification-heading link; the introduced implementation survives.\",\"Initial socket-hang suspicion was withdrawn after the reviewer checked pinned nonblocking Tokio/mio behavior. This consultation did not independently reread registry sources; the retained finding concerns filesystem cleanup only.\"] Current coverage/results: [{\"source\":\"SPEC.md and SPEC_impl.md\",\"result\":\"SPEC_impl.md:2781-2823 declares one 15-second budget. SPEC.md:4658-4675 explicitly accepts host-local filesystem errors/hangs, so that subset cannot establish an uncovered runtime bug. It does not expressly accept healthy directory enumeration exceeding the declared budget.\"},{\"source\":\"TODO.md:25-26\",\"result\":\"Planned bucket is empty. The phase-3 removal idea at 225-232 is in Mid term, not Planned, and does not cover these findings.\"},{\"source\":\"plans/queue\",\"result\":\"Searched named behavior and symbols. No matching unlanded corrective plan. Relevant tmux-end-old-terminals, tmux-drop-from-docs and environment-agent-operations plans are already landed per plans/REPORTS.md:28-32, despite retained queue files.\"},{\"source\":\"BUGS.md\",\"result\":\"Read fully; sole accepted ssh-output-pipe hang is unrelated.\"},{\"source\":\"review_feedback_queue/INDEX.md and matching files\",\"result\":\"Searched actual mechanisms, symbols and consequences. No exact existing item or useful same-root extension found. tab-reap-deadline-excludes-listing-request.md was read; its test polling helper is distinct from production startup cleanup.\"},{\"source\":\"TRIAGE_OUTCOMES.md\",\"result\":\"Searched actual mechanisms and consequences; no matching active decision. Archive not read.\"},{\"source\":\"review_feedback_queue/FILTER.md\",\"result\":\"Read fully. No whole-boundary filter match used.\"}] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Original suspicion: an unresponsive old tmux server could hang connect and delay Update; the socket route was source-refuted. Latest consequence is a structural filesystem-deadline gap with conditional host-return delay.\"; \"A supported healthy state-directory workload that materially exceeds the startup budget is unestablished. No typical delay, filesystem completion bound, or session-count scaling is claimed.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g149/l1",
+        "line": 11,
+        "disposition": "verified",
+        "group": "old-terminal-startup-filesystem-cleanup-outside-deadline",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-096 after inspecting it. The cleanup awaits are outside the declared startup deadline. Retain the narrow enforcement discrepancy; ordinary session count is not a demonstrated large-directory trigger, and no measured Update delay is established. Record only the missing enforcement of the explicit finite startup budget, preserving the healthy-filesystem acceptance and absent runtime premise. Do not assert a reproduced hang or count ordinary sessions as root-directory debris. Checked source/results: [\"00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:crates/farhelm-supervisor/src/service/core/old_terminals.rs:160-183,244-250,350-356,423-449: end_server directly awaits remove_server_files, whose directory enumeration and unlink loop have no deadline. spent is accounted only after it returns.\",\"git diff dbfc69751215dbf15e1d31d5bed73c3754c4ebc4..00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db for old_terminals.rs changes only a specification-heading link; the introduced implementation survives.\",\"Initial socket-hang suspicion was withdrawn after the reviewer checked pinned nonblocking Tokio/mio behavior. This consultation did not independently reread registry sources; the retained finding concerns filesystem cleanup only.\"] Current coverage/results: [{\"source\":\"SPEC.md and SPEC_impl.md\",\"result\":\"SPEC_impl.md:2781-2823 declares one 15-second budget. SPEC.md:4658-4675 explicitly accepts host-local filesystem errors/hangs, so that subset cannot establish an uncovered runtime bug. It does not expressly accept healthy directory enumeration exceeding the declared budget.\"},{\"source\":\"TODO.md:25-26\",\"result\":\"Planned bucket is empty. The phase-3 removal idea at 225-232 is in Mid term, not Planned, and does not cover these findings.\"},{\"source\":\"plans/queue\",\"result\":\"Searched named behavior and symbols. No matching unlanded corrective plan. Relevant tmux-end-old-terminals, tmux-drop-from-docs and environment-agent-operations plans are already landed per plans/REPORTS.md:28-32, despite retained queue files.\"},{\"source\":\"BUGS.md\",\"result\":\"Read fully; sole accepted ssh-output-pipe hang is unrelated.\"},{\"source\":\"review_feedback_queue/INDEX.md and matching files\",\"result\":\"Searched actual mechanisms, symbols and consequences. No exact existing item or useful same-root extension found. tab-reap-deadline-excludes-listing-request.md was read; its test polling helper is distinct from production startup cleanup.\"},{\"source\":\"TRIAGE_OUTCOMES.md\",\"result\":\"Searched actual mechanisms and consequences; no matching active decision. Archive not read.\"},{\"source\":\"review_feedback_queue/FILTER.md\",\"result\":\"Read fully. No whole-boundary filter match used.\"}] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Original suspicion: an unresponsive old tmux server could hang connect and delay Update; the socket route was source-refuted. Latest consequence is a structural filesystem-deadline gap with conditional host-return delay.\"; \"A supported healthy state-directory workload that materially exceeds the startup budget is unestablished. No typical delay, filesystem completion bound, or session-count scaling is claimed.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-096",
+          "key": "g149/l1",
+          "latest_line": 11,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "old-terminal-startup-filesystem-cleanup-outside-deadline",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The cleanup awaits are outside the declared startup deadline. Retain the narrow enforcement discrepancy; ordinary session count is not a demonstrated large-directory trigger, and no measured Update delay is established.",
+          "checks": [
+            "00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:crates/farhelm-supervisor/src/service/core/old_terminals.rs:160-183,244-250,350-356,423-449: end_server directly awaits remove_server_files, whose directory enumeration and unlink loop have no deadline. spent is accounted only after it returns.",
+            "git diff dbfc69751215dbf15e1d31d5bed73c3754c4ebc4..00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db for old_terminals.rs changes only a specification-heading link; the introduced implementation survives.",
+            "Initial socket-hang suspicion was withdrawn after the reviewer checked pinned nonblocking Tokio/mio behavior. This consultation did not independently reread registry sources; the retained finding concerns filesystem cleanup only."
+          ],
+          "coverage_checked": [
+            {
+              "source": "SPEC.md and SPEC_impl.md",
+              "result": "SPEC_impl.md:2781-2823 declares one 15-second budget. SPEC.md:4658-4675 explicitly accepts host-local filesystem errors/hangs, so that subset cannot establish an uncovered runtime bug. It does not expressly accept healthy directory enumeration exceeding the declared budget."
+            },
+            {
+              "source": "TODO.md:25-26",
+              "result": "Planned bucket is empty. The phase-3 removal idea at 225-232 is in Mid term, not Planned, and does not cover these findings."
+            },
+            {
+              "source": "plans/queue",
+              "result": "Searched named behavior and symbols. No matching unlanded corrective plan. Relevant tmux-end-old-terminals, tmux-drop-from-docs and environment-agent-operations plans are already landed per plans/REPORTS.md:28-32, despite retained queue files."
+            },
+            {
+              "source": "BUGS.md",
+              "result": "Read fully; sole accepted ssh-output-pipe hang is unrelated."
+            },
+            {
+              "source": "review_feedback_queue/INDEX.md and matching files",
+              "result": "Searched actual mechanisms, symbols and consequences. No exact existing item or useful same-root extension found. tab-reap-deadline-excludes-listing-request.md was read; its test polling helper is distinct from production startup cleanup."
+            },
+            {
+              "source": "TRIAGE_OUTCOMES.md",
+              "result": "Searched actual mechanisms and consequences; no matching active decision. Archive not read."
+            },
+            {
+              "source": "review_feedback_queue/FILTER.md",
+              "result": "Read fully. No whole-boundary filter match used."
+            }
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "A supported healthy state-directory workload that materially exceeds the startup budget is unestablished. No typical delay, filesystem completion bound, or session-count scaling is claimed.",
+          "original_stronger_consequence": "Original suspicion: an unresponsive old tmux server could hang connect and delay Update; the socket route was source-refuted. Latest consequence is a structural filesystem-deadline gap with conditional host-return delay.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Record only the missing enforcement of the explicit finite startup budget, preserving the healthy-filesystem acceptance and absent runtime premise. Do not assert a reproduced hang or count ordinary sessions as root-directory debris."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "old-terminal-startup-filesystem-cleanup-outside-deadline",
+        "destination": "trailing-old-terminal-startup-filesystem-cleanup-outside-deadline.md"
+      }
+    },
+    {
+      "key": "g149/c1",
+      "owner": "g149",
+      "id": "c1",
+      "domain": "supervisor-upgrade-state",
+      "purpose": "supervisor-upgrade-state: crates/farhelm-supervisor/src/checkout_trash.rs, crates/farhelm-supervisor/src/store.rs, crates/farhelm-supervisor/src/service/core/old_terminals.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Failed old-terminal termination still permits Restart",
+            "location": "crates/farhelm-supervisor/src/service/core/old_terminals.rs:251",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR: after a failure to end an old agent, Farhelm treats it as interrupted and Restart can start another beside it. Details: end_server logs termination failures and sweep times out without preventing conversion; module lines 61-76 describe this deliberately. Suggested bucket: high for duplicate active agents; could-be-highest: potentially, if concurrent agents overwrite user-owned work, but that route is not established here. Confidence: confirmed source behavior, no execution. proposed_drop: explicit specification acceptance, requiring independent check. Exact SPEC.md, Terminal experience, lines 3014-3016: 'A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running.' SPEC_impl.md lines 2999-3001 likewise explicitly accepts startup continuation and duplicate agents. This candidate preserves the original possible consequence; it is not lowered because it is rare. possible_cover: none."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c1",
+            "state": "open",
+            "summary": "Failed old-terminal termination still permits Restart",
+            "location": "crates/farhelm-supervisor/src/service/core/old_terminals.rs:251",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR: after a failure to end an old agent, Farhelm treats it as interrupted and Restart can start another beside it. Details: end_server logs termination failures and sweep times out without preventing conversion; module lines 61-76 describe this deliberately. Suggested bucket: high for duplicate active agents; could-be-highest: yes, if concurrent agents overwrite user-owned work; that additional loss route is not established here and must remain explicit. Confidence: confirmed source behavior, no execution. proposed_drop: explicit specification acceptance only; no parent drop has been accepted, and an independent check is required before any drop. Exact SPEC.md, Terminal experience, lines 3014-3016: 'A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running.' SPEC_impl.md:2999-3001 likewise accepts startup continuation and duplicate agents. possible_cover: parent reports g109/g112 overlap this issue; no coverage sources searched. The strongest original consequence remains duplicate active agents with possible loss of work; rarity is not a lowering basis. This acceptance does not settle a later Delete incorrectly reporting that a surviving old agent was ended; parent identifies that as distinct g128/l1. Synthesis revision changes kind to finding because a could-be-highest drop resting only on specification acceptance needs independent review."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c1",
+            "state": "open",
+            "summary": "Failed old-terminal termination still permits Restart",
+            "location": "crates/farhelm-supervisor/src/service/core/old_terminals.rs:251",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR: after a failure to end an old agent, Farhelm treats it as interrupted and Restart can start another beside it. Details: end_server logs termination failures and sweep times out without preventing conversion; module lines 61-76 describe this deliberately. Suggested bucket: high for duplicate active agents; could-be-highest: yes, if concurrent agents overwrite user-owned work; that additional loss route is not established here and must remain explicit. Confidence: confirmed source behavior, no execution. proposed_drop: explicit specification acceptance only; no parent drop has been accepted, and an independent check is required before any drop. Exact SPEC.md, Terminal experience, lines 3014-3016: 'A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running.' SPEC_impl.md:2999-3001 likewise accepts startup continuation and duplicate agents. possible_cover: parent reports g109/g112 overlap this issue; no coverage sources searched. The strongest original consequence remains duplicate active agents with possible loss of work; rarity is not a lowering basis. This acceptance does not settle a later Delete incorrectly reporting that a surviving old agent was ended; parent identifies that as distinct g128/l1. Synthesis revision changes kind to finding because a could-be-highest drop resting only on specification acceptance needs independent review. Later-revision check: pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db retains the acceptance in SPEC.md:3008-3010 and SPEC_impl.md:2819-2823. old_terminals.rs has only a documentation-link change after introduction; there is no later repair to this startup continuation policy. No evidence here establishes that a subsequent Delete may skip confirmation of surviving-process teardown; do not use this proposed drop to dispose of g128/l1."
+          }
+        },
+        {
+          "line": 15,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c1",
+            "state": "open",
+            "summary": "Failed old-terminal termination still permits Restart",
+            "location": "crates/farhelm-supervisor/src/service/core/old_terminals.rs:251",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR: after a failure to end an old agent, Farhelm treats it as interrupted and Restart can start another beside it. Details: end_server logs termination failures and sweep times out without preventing conversion; module lines 61-76 describe this deliberately. Suggested bucket: high for duplicate active agents; could-be-highest: yes, if concurrent agents overwrite user-owned work; that additional loss route is not established here and must remain explicit. Confidence: confirmed source behavior, no execution. proposed_drop: explicit specification acceptance only; no parent drop has been accepted, and an independent check is required before any drop. Exact SPEC.md, Terminal experience, lines 3014-3016: 'A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running.' SPEC_impl.md:2999-3001 likewise accepts startup continuation and duplicate agents. possible_cover: parent reports g109/g112 overlap this issue; no coverage sources searched. The strongest original consequence remains duplicate active agents with possible loss of work; rarity is not a lowering basis. This acceptance does not settle a later Delete incorrectly reporting that a surviving old agent was ended; parent identifies that as distinct g128/l1. Synthesis revision changes kind to finding because a could-be-highest drop resting only on specification acceptance needs independent review. Later-revision check: pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db retains the acceptance in SPEC.md:3008-3010 and SPEC_impl.md:2819-2823. old_terminals.rs has only a documentation-link change after introduction; there is no later repair to this startup continuation policy. No evidence here establishes that a subsequent Delete may skip confirmation of surviving-process teardown; do not use this proposed drop to dispose of g128/l1. Discovery-turn interface synthesis before new search: supplied g005/f1, g007/f1, g013/f1 and g109/c1 establish the limiting fresh Restart cleanup at original core.rs:12985-13010: recorded scope, AgentOnly and ScopeKillFailure::Refuse run before relaunch. Current agent and legacy session-only markers are selected. Therefore failed startup cleanup alone does not establish an ordinary duplicate-agent execution; the strongest original concurrent-agent/work-loss concern remains conditional on evading that fresh sweep, with no such ordinary agent route established. This is a confidence refinement, not an accepted lowering/drop. g128/l1 and g007/c4 establish separate subsequent Delete-consent routes, respectively a surviving marked old agent and a mixed host-agent/old-tab session. g111/l1 concerns private-spare traversal reaching a retained borrower after subtree movement. g144/c3 concerns the consumed test Harness directory dying before its outer server guard. g097/l4 concerns stale child PID-to-current-environment ownership reaching another live host tab through marker/scope selectors. None is excused by the duplicate-Restart acceptance and none is treated as new discovery in this group. Their exact supplied records were read; g097/l4 was read from its named log because its neighbour snapshot entry was empty. All no-runtime caveats remain."
+          }
+        }
+      ],
+      "latest": {
+        "line": 15,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "c1",
+          "state": "open",
+          "summary": "Failed old-terminal termination still permits Restart",
+          "location": "crates/farhelm-supervisor/src/service/core/old_terminals.rs:251",
+          "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR: after a failure to end an old agent, Farhelm treats it as interrupted and Restart can start another beside it. Details: end_server logs termination failures and sweep times out without preventing conversion; module lines 61-76 describe this deliberately. Suggested bucket: high for duplicate active agents; could-be-highest: yes, if concurrent agents overwrite user-owned work; that additional loss route is not established here and must remain explicit. Confidence: confirmed source behavior, no execution. proposed_drop: explicit specification acceptance only; no parent drop has been accepted, and an independent check is required before any drop. Exact SPEC.md, Terminal experience, lines 3014-3016: 'A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running.' SPEC_impl.md:2999-3001 likewise accepts startup continuation and duplicate agents. possible_cover: parent reports g109/g112 overlap this issue; no coverage sources searched. The strongest original consequence remains duplicate active agents with possible loss of work; rarity is not a lowering basis. This acceptance does not settle a later Delete incorrectly reporting that a surviving old agent was ended; parent identifies that as distinct g128/l1. Synthesis revision changes kind to finding because a could-be-highest drop resting only on specification acceptance needs independent review. Later-revision check: pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db retains the acceptance in SPEC.md:3008-3010 and SPEC_impl.md:2819-2823. old_terminals.rs has only a documentation-link change after introduction; there is no later repair to this startup continuation policy. No evidence here establishes that a subsequent Delete may skip confirmation of surviving-process teardown; do not use this proposed drop to dispose of g128/l1. Discovery-turn interface synthesis before new search: supplied g005/f1, g007/f1, g013/f1 and g109/c1 establish the limiting fresh Restart cleanup at original core.rs:12985-13010: recorded scope, AgentOnly and ScopeKillFailure::Refuse run before relaunch. Current agent and legacy session-only markers are selected. Therefore failed startup cleanup alone does not establish an ordinary duplicate-agent execution; the strongest original concurrent-agent/work-loss concern remains conditional on evading that fresh sweep, with no such ordinary agent route established. This is a confidence refinement, not an accepted lowering/drop. g128/l1 and g007/c4 establish separate subsequent Delete-consent routes, respectively a surviving marked old agent and a mixed host-agent/old-tab session. g111/l1 concerns private-spare traversal reaching a retained borrower after subtree movement. g144/c3 concerns the consumed test Harness directory dying before its outer server guard. g097/l4 concerns stale child PID-to-current-environment ownership reaching another live host tab through marker/scope selectors. None is excused by the duplicate-Restart acceptance and none is treated as new discovery in this group. Their exact supplied records were read; g097/l4 was read from its named log because its neighbour snapshot entry was empty. All no-runtime caveats remain."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g149/findings.jsonl",
+        "id": "c1",
+        "line": 15,
+        "disposition": "under-investigation",
+        "group": "g149-c1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-096",
+          "key": "g149/c1",
+          "latest_line": 15,
+          "recommendation": "covered",
+          "bucket": "high",
+          "underlying_key": "old-terminal-retirement-startup-continues-after-failed-kill",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Both specifications expressly accept startup continuing after failed old-terminal termination, including the possibility of Restart beside a surviving agent. Any drop or consequence lowering needs a separate independent check.",
+          "checks": [
+            "00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:crates/farhelm-supervisor/src/service/core/old_terminals.rs:251-284,300-356: termination/sweep failures log and do not veto conversion.",
+            "00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:crates/farhelm-supervisor/src/service/core.rs:12417-12442: Restart performs a fresh AgentOnly sweep using the recorded scope and ScopeKillFailure::Refuse before relaunch. Failed startup cleanup alone therefore does not establish an ordinary duplicate execution.",
+            "old_terminals.rs survives from dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 to reviewed tip except a documentation link."
+          ],
+          "coverage_checked": [
+            {
+              "source": "SPEC.md and SPEC_impl.md",
+              "result": "Exact startup-failure policy is accepted at SPEC.md:2998-3011 and SPEC_impl.md:2815-2823. This does not accept a later Delete acting beyond its confirmation, stale PID ownership, or wrong-target cleanup."
+            },
+            {
+              "source": "TODO.md:25-26",
+              "result": "Planned bucket is empty. The phase-3 removal idea at 225-232 is in Mid term, not Planned, and does not cover these findings."
+            },
+            {
+              "source": "plans/queue",
+              "result": "Searched named behavior and symbols. No matching unlanded corrective plan. Relevant tmux-end-old-terminals, tmux-drop-from-docs and environment-agent-operations plans are already landed per plans/REPORTS.md:28-32, despite retained queue files."
+            },
+            {
+              "source": "BUGS.md",
+              "result": "Read fully; sole accepted ssh-output-pipe hang is unrelated."
+            },
+            {
+              "source": "review_feedback_queue/INDEX.md and matching files",
+              "result": "Searched actual mechanisms, symbols and consequences. No exact existing item or useful same-root extension found. tab-reap-deadline-excludes-listing-request.md was read; its test polling helper is distinct from production startup cleanup."
+            },
+            {
+              "source": "TRIAGE_OUTCOMES.md",
+              "result": "Searched actual mechanisms and consequences; no matching active decision. Archive not read."
+            },
+            {
+              "source": "review_feedback_queue/FILTER.md",
+              "result": "Read fully. No whole-boundary filter match used."
+            }
+          ],
+          "exact_cover_quotes": [
+            {
+              "source": "SPEC.md:3008-3010",
+              "quote": "A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running."
+            },
+            {
+              "source": "SPEC_impl.md:2819-2821",
+              "quote": "A failure anywhere is logged and never fatal (the maintainer chose to start anyway and treat old sessions as ended, accepting that a Restart could then start a second agent beside one still running)"
+            }
+          ],
+          "missing_premise": "Ordinary duplicate execution still requires survivors to evade the fresh refusing Restart sweep; subsequent overwrite/loss of user work is not established.",
+          "original_stronger_consequence": "Duplicate active agents could overwrite user-owned work. Later synthesis found the fresh Restart sweep and made that route conditional; this is not an accepted lowering.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Propose coverage only for startup's documented continuation and residual agents. Send the original possible work-loss consequence and refinement through the independent drop/lowering check. Supplied histories mention g109/g112 overlap but exact keys/claims are unavailable here, so no external alias is asserted."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "old-terminal-retirement-startup-continues-after-failed-kill",
+        "destination": "trailing-old-terminal-retirement-startup-continues-after-failed-kill.md"
+      }
+    },
+    {
+      "key": "g149/l2",
+      "owner": "g149",
+      "id": "l2",
+      "domain": "supervisor-upgrade-state",
+      "purpose": "supervisor-upgrade-state: crates/farhelm-supervisor/src/checkout_trash.rs, crates/farhelm-supervisor/src/store.rs, crates/farhelm-supervisor/src/service/core/old_terminals.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l2",
+            "state": "open",
+            "summary": "Seal constraint test may pass on a duplicate metadata key",
+            "location": "crates/farhelm-supervisor/src/store.rs:7939",
+            "detail": "Reviewed commit: 47f33bbdbd5ff4a6e437e97a800f9083be43096e. TLDR: the migration test might fail to detect a missing seal-value constraint on upgraded installations. Source: migrated_and_fresh_schemas_agree inserts supervisor_meta id 0 with sealed 2 and accepts any error; an existing id 0 would make that pass without the CHECK. Check pending: establish whether plant_v1_database plus its migration creates metadata id 0, and whether another changed assertion independently proves the migrated seal CHECK. Suggested bucket: other (test coverage). could-be-highest: no established security or loss-of-work consequence; the production DDL visibly includes the correct CHECK. Confidence: uninvestigated lead. proposed_drop: false. possible_cover: none. Source-only review."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l2",
+            "state": "open",
+            "summary": "Migrated seal CHECK assertion accepts a duplicate-key failure",
+            "location": "crates/farhelm-supervisor/src/store.rs:7939",
+            "detail": "Reviewed commit: 47f33bbdbd5ff4a6e437e97a800f9083be43096e. TLDR: the new schema test can pass even if an upgraded installation loses the seal-value constraint it claims to verify. Details: migrated_and_fresh_schemas_agree plants an empty v1 database at store.rs:7888 and migrates it. The v10-to-v11 migration always inserts metadata id 0, even with zero sessions (store.rs:2114-2121). The new test at 7939 then INSERTs another id 0 with sealed 2 and accepts any error with expect_err. Without the migrated sealed CHECK, this still errors on the existing INTEGER PRIMARY KEY. columns_of cannot detect CHECKs, and meta_ddl.contains(\"CHECK\") at 7925-7929 also passes on the unrelated id CHECK. The fresh database branch does exercise its seal CHECK because its metadata table starts empty; it does not protect the separate ALTER TABLE migration. Contract: the test's own declaration at 7872-7883 promises migrated/fresh constraint parity, and the added comment at 7937-7940 specifically claims both paths. Suggested fix: seed or upsert a known valid id 0, then UPDATE sealed to 2 and assert the seal CHECK failure (or remove id 0 before the bad INSERT); also establish the valid-value premise. Suggested bucket: other, a targeted migration-test coverage defect. could-be-highest: no; production DDL visibly contains the correct CHECK, and no runtime security or data-loss defect is claimed. Confidence: confirmed by source and fixture/migration contract analysis, not by execution. proposed_drop: false. possible_cover: none. Caveat: this does not show that current production migration accepts an invalid seal; it shows that this regression assertion cannot detect its constraint being lost."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l2",
+            "state": "open",
+            "summary": "Migrated seal CHECK assertion accepts a duplicate-key failure",
+            "location": "crates/farhelm-supervisor/src/store.rs:7939",
+            "detail": "Reviewed commit: 47f33bbdbd5ff4a6e437e97a800f9083be43096e; synthesis checked persistence through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: the schema test can pass even if an upgraded installation loses the seal-value constraint it claims to verify. Details: migrated_and_fresh_schemas_agree plants an empty v1 database at original store.rs:7888. Migration 10-to-11 unconditionally INSERTs metadata id 0, including for zero sessions (original 2114-2121). At original 7939 the new assertion INSERTs id 0 with sealed 2 and accepts any error. If the migrated seal CHECK were omitted, the duplicate INTEGER PRIMARY KEY still rejects the row. columns_of cannot see CHECKs; meta_ddl.contains(\"CHECK\") also accepts the separate id CHECK. The fresh branch's empty metadata table exercises its CHECK, which does not prove the distinct ALTER TABLE migration's CHECK. At pinned tip the same fixtures, generic expect_err and bad INSERT remain at store.rs:7893-7896 and 7942-7945; no later repair was found. This is a competing-error test gap, not a claim that the actual bad INSERT's first reported error on today's correct schema must be PRIMARY KEY. SQLite may check the CHECK first today; removing that CHECK still leaves another failure satisfying the assertion. Suggested fix: establish id 0 with a valid seal, UPDATE sealed to 2, and assert the relevant CHECK constraint error; or remove id 0 before the bad INSERT and assert the valid-row premise. Suggested bucket: other, migration-test coverage. could-be-highest: no; current production DDL includes the correct CHECK and no runtime loss/security defect is claimed. Confidence: confirmed source/fixture analysis; no execution or mutation experiment. proposed_drop: false. possible_cover: none. The later store history was inspected for relevant repairs and the actual test was read at the pinned tip; an oversized general diff was clipped, so unrelated comment changes in that contextual diff are not claimed as newly reviewed."
+          }
+        },
+        {
+          "line": 14,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l2",
+            "state": "open",
+            "summary": "Migrated seal CHECK assertion accepts a duplicate-key failure",
+            "location": "crates/farhelm-supervisor/src/store.rs:7939",
+            "detail": "Reviewed commit: 47f33bbdbd5ff4a6e437e97a800f9083be43096e; synthesis checked persistence through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: the schema test can pass even if an upgraded installation loses the seal-value constraint it claims to verify. Details: migrated_and_fresh_schemas_agree plants an empty v1 database at original store.rs:7888. Migration 10-to-11 unconditionally INSERTs metadata id 0, including for zero sessions (original 2114-2121). At original 7939 the new assertion INSERTs id 0 with sealed 2 and accepts any error. If the migrated seal CHECK were omitted, the duplicate INTEGER PRIMARY KEY still rejects the row. columns_of cannot see CHECKs; meta_ddl.contains(\"CHECK\") also accepts the separate id CHECK. The fresh branch's empty metadata table exercises its CHECK, which does not prove the distinct ALTER TABLE migration's CHECK. At pinned tip the same fixtures, generic expect_err and bad INSERT remain at store.rs:7893-7896 and 7942-7945; no later repair was found. This is a competing-error test gap, not a claim that the actual bad INSERT's first reported error on today's correct schema must be PRIMARY KEY. SQLite may check the CHECK first today; removing that CHECK still leaves another failure satisfying the assertion. Suggested fix: establish id 0 with a valid seal, UPDATE sealed to 2, and assert the relevant CHECK constraint error; or remove id 0 before the bad INSERT and assert the valid-row premise. Suggested bucket: other, migration-test coverage. could-be-highest: no; current production DDL includes the correct CHECK and no runtime loss/security defect is claimed. Confidence: confirmed source/fixture analysis; no execution or mutation experiment. proposed_drop: false. possible_cover: none. The later store history was inspected for relevant repairs and the actual test was read at the pinned tip; an oversized general diff was clipped, so unrelated comment changes in that contextual diff are not claimed as newly reviewed. Final readily-checkable premise checks at pinned tip: migration still unconditionally inserts id 0 at store.rs:2133-2140. SessionStore::open at :3250-3264 performs apply_schema and reservation retention only; retention :6494-6514 changes create_reservations and does not create metadata in a fresh store. Searches found no DROP TABLE supervisor_meta or DELETE FROM supervisor_meta. The narrowed post-introduction diff has no hunk in this constraint test or metadata initialization path; only the unchanged relevant code is relied on, not the earlier clipped broad diff."
+          }
+        }
+      ],
+      "latest": {
+        "line": 14,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l2",
+          "state": "open",
+          "summary": "Migrated seal CHECK assertion accepts a duplicate-key failure",
+          "location": "crates/farhelm-supervisor/src/store.rs:7939",
+          "detail": "Reviewed commit: 47f33bbdbd5ff4a6e437e97a800f9083be43096e; synthesis checked persistence through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: the schema test can pass even if an upgraded installation loses the seal-value constraint it claims to verify. Details: migrated_and_fresh_schemas_agree plants an empty v1 database at original store.rs:7888. Migration 10-to-11 unconditionally INSERTs metadata id 0, including for zero sessions (original 2114-2121). At original 7939 the new assertion INSERTs id 0 with sealed 2 and accepts any error. If the migrated seal CHECK were omitted, the duplicate INTEGER PRIMARY KEY still rejects the row. columns_of cannot see CHECKs; meta_ddl.contains(\"CHECK\") also accepts the separate id CHECK. The fresh branch's empty metadata table exercises its CHECK, which does not prove the distinct ALTER TABLE migration's CHECK. At pinned tip the same fixtures, generic expect_err and bad INSERT remain at store.rs:7893-7896 and 7942-7945; no later repair was found. This is a competing-error test gap, not a claim that the actual bad INSERT's first reported error on today's correct schema must be PRIMARY KEY. SQLite may check the CHECK first today; removing that CHECK still leaves another failure satisfying the assertion. Suggested fix: establish id 0 with a valid seal, UPDATE sealed to 2, and assert the relevant CHECK constraint error; or remove id 0 before the bad INSERT and assert the valid-row premise. Suggested bucket: other, migration-test coverage. could-be-highest: no; current production DDL includes the correct CHECK and no runtime loss/security defect is claimed. Confidence: confirmed source/fixture analysis; no execution or mutation experiment. proposed_drop: false. possible_cover: none. The later store history was inspected for relevant repairs and the actual test was read at the pinned tip; an oversized general diff was clipped, so unrelated comment changes in that contextual diff are not claimed as newly reviewed. Final readily-checkable premise checks at pinned tip: migration still unconditionally inserts id 0 at store.rs:2133-2140. SessionStore::open at :3250-3264 performs apply_schema and reservation retention only; retention :6494-6514 changes create_reservations and does not create metadata in a fresh store. Searches found no DROP TABLE supervisor_meta or DELETE FROM supervisor_meta. The narrowed post-introduction diff has no hunk in this constraint test or metadata initialization path; only the unchanged relevant code is relied on, not the earlier clipped broad diff."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g149/findings.jsonl",
+        "id": "l2",
+        "line": 14,
+        "disposition": "verified",
+        "group": "migrated-seal-constraint-test-accepts-duplicate-metadata-key",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-096 after inspecting it. The migrated-schema assertion can remain green without the seal CHECK because its id=0 INSERT still violates the pre-existing primary key. This is a test oracle defect; current production constraints are correct. Retain as other. Exercise an UPDATE of a known valid metadata row, or remove the row before the invalid INSERT, and distinguish the relevant CHECK failure. Checked source/results: [\"47f33bbdbd5ff4a6e437e97a800f9083be43096e:crates/farhelm-supervisor/src/store.rs:7888,7937-7940 adds the invalid-seal INSERT to both migrated/fresh branches and accepts any error.\",\"00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:crates/farhelm-supervisor/src/store.rs:2133-2140 unconditionally initializes metadata id=0 even with no sessions; 7893-7896 plants and migrates the empty v1 fixture; 7942-7945 retains the generic expect_err.\",\"Tip store.rs:3250-3264 opens via schema application and reservation retention; 6494-6514 modifies reservations only. A fresh metadata table need not contain id=0. columns_of cannot inspect CHECKs and meta_ddl.contains(\\\"CHECK\\\") accepts the separate id CHECK.\",\"SQLite's first error on today's correct schema need not be PRIMARY KEY. The counterfactual missing seal CHECK still leaves a competing failure, which is sufficient to establish the test gap without execution.\"] Current coverage/results: [{\"source\":\"SPEC.md and SPEC_impl.md\",\"result\":\"Environment seal storage is required by SPEC_impl.md:6127-6135; neither specification accepts a test that cannot detect loss of its migrated CHECK. No matching coverage item was found.\"},{\"source\":\"TODO.md:25-26\",\"result\":\"Planned bucket is empty. The phase-3 removal idea at 225-232 is in Mid term, not Planned, and does not cover these findings.\"},{\"source\":\"plans/queue\",\"result\":\"Searched named behavior and symbols. No matching unlanded corrective plan. Relevant tmux-end-old-terminals, tmux-drop-from-docs and environment-agent-operations plans are already landed per plans/REPORTS.md:28-32, despite retained queue files.\"},{\"source\":\"BUGS.md\",\"result\":\"Read fully; sole accepted ssh-output-pipe hang is unrelated.\"},{\"source\":\"review_feedback_queue/INDEX.md and matching files\",\"result\":\"Searched actual mechanisms, symbols and consequences. No exact existing item or useful same-root extension found. tab-reap-deadline-excludes-listing-request.md was read; its test polling helper is distinct from production startup cleanup.\"},{\"source\":\"TRIAGE_OUTCOMES.md\",\"result\":\"Searched actual mechanisms and consequences; no matching active decision. Archive not read.\"},{\"source\":\"review_feedback_queue/FILTER.md\",\"result\":\"Read fully. No whole-boundary filter match used.\"}] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The new migration test may miss a missing seal-value constraint on upgraded installations. This remains the same narrow test consequence.\"; \"No production invalid-seal acceptance, corruption, security failure or user-work loss is claimed; no mutation experiment was run.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g149/l2",
+        "line": 14,
+        "disposition": "verified",
+        "group": "migrated-seal-constraint-test-accepts-duplicate-metadata-key",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-096 after inspecting it. The migrated-schema assertion can remain green without the seal CHECK because its id=0 INSERT still violates the pre-existing primary key. This is a test oracle defect; current production constraints are correct. Retain as other. Exercise an UPDATE of a known valid metadata row, or remove the row before the invalid INSERT, and distinguish the relevant CHECK failure. Checked source/results: [\"47f33bbdbd5ff4a6e437e97a800f9083be43096e:crates/farhelm-supervisor/src/store.rs:7888,7937-7940 adds the invalid-seal INSERT to both migrated/fresh branches and accepts any error.\",\"00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:crates/farhelm-supervisor/src/store.rs:2133-2140 unconditionally initializes metadata id=0 even with no sessions; 7893-7896 plants and migrates the empty v1 fixture; 7942-7945 retains the generic expect_err.\",\"Tip store.rs:3250-3264 opens via schema application and reservation retention; 6494-6514 modifies reservations only. A fresh metadata table need not contain id=0. columns_of cannot inspect CHECKs and meta_ddl.contains(\\\"CHECK\\\") accepts the separate id CHECK.\",\"SQLite's first error on today's correct schema need not be PRIMARY KEY. The counterfactual missing seal CHECK still leaves a competing failure, which is sufficient to establish the test gap without execution.\"] Current coverage/results: [{\"source\":\"SPEC.md and SPEC_impl.md\",\"result\":\"Environment seal storage is required by SPEC_impl.md:6127-6135; neither specification accepts a test that cannot detect loss of its migrated CHECK. No matching coverage item was found.\"},{\"source\":\"TODO.md:25-26\",\"result\":\"Planned bucket is empty. The phase-3 removal idea at 225-232 is in Mid term, not Planned, and does not cover these findings.\"},{\"source\":\"plans/queue\",\"result\":\"Searched named behavior and symbols. No matching unlanded corrective plan. Relevant tmux-end-old-terminals, tmux-drop-from-docs and environment-agent-operations plans are already landed per plans/REPORTS.md:28-32, despite retained queue files.\"},{\"source\":\"BUGS.md\",\"result\":\"Read fully; sole accepted ssh-output-pipe hang is unrelated.\"},{\"source\":\"review_feedback_queue/INDEX.md and matching files\",\"result\":\"Searched actual mechanisms, symbols and consequences. No exact existing item or useful same-root extension found. tab-reap-deadline-excludes-listing-request.md was read; its test polling helper is distinct from production startup cleanup.\"},{\"source\":\"TRIAGE_OUTCOMES.md\",\"result\":\"Searched actual mechanisms and consequences; no matching active decision. Archive not read.\"},{\"source\":\"review_feedback_queue/FILTER.md\",\"result\":\"Read fully. No whole-boundary filter match used.\"}] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The new migration test may miss a missing seal-value constraint on upgraded installations. This remains the same narrow test consequence.\"; \"No production invalid-seal acceptance, corruption, security failure or user-work loss is claimed; no mutation experiment was run.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-096",
+          "key": "g149/l2",
+          "latest_line": 14,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "migrated-seal-constraint-test-accepts-duplicate-metadata-key",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The migrated-schema assertion can remain green without the seal CHECK because its id=0 INSERT still violates the pre-existing primary key. This is a test oracle defect; current production constraints are correct.",
+          "checks": [
+            "47f33bbdbd5ff4a6e437e97a800f9083be43096e:crates/farhelm-supervisor/src/store.rs:7888,7937-7940 adds the invalid-seal INSERT to both migrated/fresh branches and accepts any error.",
+            "00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:crates/farhelm-supervisor/src/store.rs:2133-2140 unconditionally initializes metadata id=0 even with no sessions; 7893-7896 plants and migrates the empty v1 fixture; 7942-7945 retains the generic expect_err.",
+            "Tip store.rs:3250-3264 opens via schema application and reservation retention; 6494-6514 modifies reservations only. A fresh metadata table need not contain id=0. columns_of cannot inspect CHECKs and meta_ddl.contains(\"CHECK\") accepts the separate id CHECK.",
+            "SQLite's first error on today's correct schema need not be PRIMARY KEY. The counterfactual missing seal CHECK still leaves a competing failure, which is sufficient to establish the test gap without execution."
+          ],
+          "coverage_checked": [
+            {
+              "source": "SPEC.md and SPEC_impl.md",
+              "result": "Environment seal storage is required by SPEC_impl.md:6127-6135; neither specification accepts a test that cannot detect loss of its migrated CHECK. No matching coverage item was found."
+            },
+            {
+              "source": "TODO.md:25-26",
+              "result": "Planned bucket is empty. The phase-3 removal idea at 225-232 is in Mid term, not Planned, and does not cover these findings."
+            },
+            {
+              "source": "plans/queue",
+              "result": "Searched named behavior and symbols. No matching unlanded corrective plan. Relevant tmux-end-old-terminals, tmux-drop-from-docs and environment-agent-operations plans are already landed per plans/REPORTS.md:28-32, despite retained queue files."
+            },
+            {
+              "source": "BUGS.md",
+              "result": "Read fully; sole accepted ssh-output-pipe hang is unrelated."
+            },
+            {
+              "source": "review_feedback_queue/INDEX.md and matching files",
+              "result": "Searched actual mechanisms, symbols and consequences. No exact existing item or useful same-root extension found. tab-reap-deadline-excludes-listing-request.md was read; its test polling helper is distinct from production startup cleanup."
+            },
+            {
+              "source": "TRIAGE_OUTCOMES.md",
+              "result": "Searched actual mechanisms and consequences; no matching active decision. Archive not read."
+            },
+            {
+              "source": "review_feedback_queue/FILTER.md",
+              "result": "Read fully. No whole-boundary filter match used."
+            }
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No production invalid-seal acceptance, corruption, security failure or user-work loss is claimed; no mutation experiment was run.",
+          "original_stronger_consequence": "The new migration test may miss a missing seal-value constraint on upgraded installations. This remains the same narrow test consequence.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain as other. Exercise an UPDATE of a known valid metadata row, or remove the row before the invalid INSERT, and distinguish the relevant CHECK failure."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "migrated-seal-constraint-test-accepts-duplicate-metadata-key",
+        "destination": "trailing-migrated-seal-constraint-test-accepts-duplicate-metadata-key.md"
+      }
+    },
+    {
+      "key": "g149/c2",
+      "owner": "g149",
+      "id": "c2",
+      "domain": "supervisor-upgrade-state",
+      "purpose": "supervisor-upgrade-state: crates/farhelm-supervisor/src/checkout_trash.rs, crates/farhelm-supervisor/src/store.rs, crates/farhelm-supervisor/src/service/core/old_terminals.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Old tab daemons can survive when their tab id is undiscoverable",
+            "location": "crates/farhelm-supervisor/src/service/core/old_terminals.rs:321",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR: detached work from an old shell tab can remain running after the upgrade until its session is deleted. Details: sweep builds its session set only from converted live old-agent rows and tab-marked snapshot panes; old_tabs obtains other ids from those sessions' scope names, and preserves scopes with terminal-host tab records (launch.rs:890-906 establishes that those records survive until a host is confirmed ended). The set deliberately omits an already-ended old agent's session when its old server cannot be read, and unscoped old tabs then have no recoverable tab id. Suggested bucket: high if unwanted old processes materially persist; could-be-highest: potentially if such work later overwrites user files, but no such consequence route is established in this review. Confidence: confirmed source behavior, no execution. proposed_drop: exact specification acceptance, requiring independent check. SPEC_impl.md:2989-2994 says: 'A whole session is never swept, since its host terminals carry the same session marker; what cannot be attributed to an old tab is left for the session’s Delete, which sweeps the whole session. Once the server is gone, an old tab is found only through the scope units of a session whose agent this start converted, so a scoped tab of any other session (its agent already ended, or in a terminal host), an unscoped tab, and one whose shell’s environment macOS hides wait for that Delete.' SPEC.md:3011-3013 states the same product limitation. possible_cover: none. The original possible user-work consequence is preserved, not lowered because of rarity."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c2",
+            "state": "open",
+            "summary": "Old tab daemons can survive when their tab id is undiscoverable",
+            "location": "crates/farhelm-supervisor/src/service/core/old_terminals.rs:321",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR: detached work from an old shell tab can remain running after the upgrade until its session is deleted. Details: sweep builds its session set only from converted live old-agent rows and tab-marked snapshot panes; old_tabs obtains other ids from those sessions' scope names and preserves scopes with terminal-host tab records (launch.rs:890-906 establishes that those records survive until a host is confirmed ended). It deliberately omits an already-ended old agent's session when its old server cannot be read; unscoped tabs also have no recoverable tab id. Suggested bucket: high for materially persisting unwanted old processes; could-be-highest: yes, if surviving work later overwrites user files, but that additional loss route is not established here. Confidence: confirmed source behavior, no execution. proposed_drop: explicit specification acceptance only; no parent drop has been accepted, and an independent check is required before any drop. Exact SPEC_impl.md:2989-2994: 'A whole session is never swept, since its host terminals carry the same session marker; what cannot be attributed to an old tab is left for the session's Delete, which sweeps the whole session. Once the server is gone, an old tab is found only through the scope units of a session whose agent this start converted, so a scoped tab of any other session (its agent already ended, or in a terminal host), an unscoped tab, and one whose shell's environment macOS hides wait for that Delete.' SPEC.md:3011-3013 states the same limitation. possible_cover: none known. Strongest original consequence, persisting old work with possible later file loss, is preserved; rarity is not a lowering basis. This accepts startup discovery limitations only; it does not establish that a subsequent Delete may falsely report the surviving work gone. Synthesis revision changes kind to finding because a could-be-highest drop resting only on specification acceptance needs independent review."
+          }
+        },
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c2",
+            "state": "open",
+            "summary": "Old tab daemons can survive when their tab id is undiscoverable",
+            "location": "crates/farhelm-supervisor/src/service/core/old_terminals.rs:321",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR: detached work from an old shell tab can remain running after the upgrade until its session is deleted. Details: sweep builds its session set only from converted live old-agent rows and tab-marked snapshot panes; old_tabs obtains other ids from those sessions' scope names and preserves scopes with terminal-host tab records (launch.rs:890-906 establishes that those records survive until a host is confirmed ended). It deliberately omits an already-ended old agent's session when its old server cannot be read; unscoped tabs also have no recoverable tab id. Suggested bucket: high for materially persisting unwanted old processes; could-be-highest: yes, if surviving work later overwrites user files, but that additional loss route is not established here. Confidence: confirmed source behavior, no execution. proposed_drop: explicit specification acceptance only; no parent drop has been accepted, and an independent check is required before any drop. Exact SPEC_impl.md:2989-2994: 'A whole session is never swept, since its host terminals carry the same session marker; what cannot be attributed to an old tab is left for the session's Delete, which sweeps the whole session. Once the server is gone, an old tab is found only through the scope units of a session whose agent this start converted, so a scoped tab of any other session (its agent already ended, or in a terminal host), an unscoped tab, and one whose shell's environment macOS hides wait for that Delete.' SPEC.md:3011-3013 states the same limitation. possible_cover: none known. Strongest original consequence, persisting old work with possible later file loss, is preserved; rarity is not a lowering basis. This accepts startup discovery limitations only; it does not establish that a subsequent Delete may falsely report the surviving work gone. Synthesis revision changes kind to finding because a could-be-highest drop resting only on specification acceptance needs independent review. Later-revision check: pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db SPEC_impl.md:2810-2814 retains exactly the startup tab-discovery residual and leaves it for Delete. The complete diff of old_terminals.rs since its introduction changes only the documentation link. Original source :321-328 and :369-402 was rechecked: the session set and host-tab record exclusion match that narrow acceptance. No later repair or specification broadening to permit false success on a later Delete was found in this scope."
+          }
+        },
+        {
+          "line": 16,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c2",
+            "state": "open",
+            "summary": "Old tab daemons can survive when their tab id is undiscoverable",
+            "location": "crates/farhelm-supervisor/src/service/core/old_terminals.rs:321",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR: detached work from an old shell tab can remain running after the upgrade until its session is deleted. Details: sweep builds its session set only from converted live old-agent rows and tab-marked snapshot panes; old_tabs obtains other ids from those sessions' scope names and preserves scopes with terminal-host tab records (launch.rs:890-906 establishes that those records survive until a host is confirmed ended). It deliberately omits an already-ended old agent's session when its old server cannot be read; unscoped tabs also have no recoverable tab id. Suggested bucket: high for materially persisting unwanted old processes; could-be-highest: yes, if surviving work later overwrites user files, but that additional loss route is not established here. Confidence: confirmed source behavior, no execution. proposed_drop: explicit specification acceptance only; no parent drop has been accepted, and an independent check is required before any drop. Exact SPEC_impl.md:2989-2994: 'A whole session is never swept, since its host terminals carry the same session marker; what cannot be attributed to an old tab is left for the session's Delete, which sweeps the whole session. Once the server is gone, an old tab is found only through the scope units of a session whose agent this start converted, so a scoped tab of any other session (its agent already ended, or in a terminal host), an unscoped tab, and one whose shell's environment macOS hides wait for that Delete.' SPEC.md:3011-3013 states the same limitation. possible_cover: none known. Strongest original consequence, persisting old work with possible later file loss, is preserved; rarity is not a lowering basis. This accepts startup discovery limitations only; it does not establish that a subsequent Delete may falsely report the surviving work gone. Synthesis revision changes kind to finding because a could-be-highest drop resting only on specification acceptance needs independent review. Later-revision check: pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db SPEC_impl.md:2810-2814 retains exactly the startup tab-discovery residual and leaves it for Delete. The complete diff of old_terminals.rs since its introduction changes only the documentation link. Original source :321-328 and :369-402 was rechecked: the session set and host-tab record exclusion match that narrow acceptance. No later repair or specification broadening to permit false success on a later Delete was found in this scope. Discovery-turn interface synthesis: supplied g007/c4 completes a separate highest authority route for an ended host agent with an old live tab when startup gets EAGAIN/no pane inventory and no converted old-agent row: startup performs no tab sweep, current host-only listing/guard sees zero tabs, and later WholeSession cleanup can end undisclosed tab work. g128/l1 separately establishes that route for an old agent surviving the bounded sweep. They concern consent after startup, not only whether this residual was documented; the instruction leaving survivors for Delete does not itself settle a NothingAlive guard. Both remain owned by their original groups and are not new g149 discoveries. g097/l4 is also distinct: a stale snapshot PID read as a new tab owner enters old_tabs direct list, which does not run the host-record exclusion reserved for scope-derived candidates. Preserving live host records in that latter branch does not refute that highest wrong-target route or settle its proposed short-window PID-race acceptance. No parent drop/lowering is accepted. g111/l1 and g144/c3 are retained separately as moved-subtree work loss and test owner/drop-order cleanup respectively, not deduplicated into c2. These crosschecks preserve the original residual-process consequence and exact proposed-drop text above."
+          }
+        }
+      ],
+      "latest": {
+        "line": 16,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "c2",
+          "state": "open",
+          "summary": "Old tab daemons can survive when their tab id is undiscoverable",
+          "location": "crates/farhelm-supervisor/src/service/core/old_terminals.rs:321",
+          "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR: detached work from an old shell tab can remain running after the upgrade until its session is deleted. Details: sweep builds its session set only from converted live old-agent rows and tab-marked snapshot panes; old_tabs obtains other ids from those sessions' scope names and preserves scopes with terminal-host tab records (launch.rs:890-906 establishes that those records survive until a host is confirmed ended). It deliberately omits an already-ended old agent's session when its old server cannot be read; unscoped tabs also have no recoverable tab id. Suggested bucket: high for materially persisting unwanted old processes; could-be-highest: yes, if surviving work later overwrites user files, but that additional loss route is not established here. Confidence: confirmed source behavior, no execution. proposed_drop: explicit specification acceptance only; no parent drop has been accepted, and an independent check is required before any drop. Exact SPEC_impl.md:2989-2994: 'A whole session is never swept, since its host terminals carry the same session marker; what cannot be attributed to an old tab is left for the session's Delete, which sweeps the whole session. Once the server is gone, an old tab is found only through the scope units of a session whose agent this start converted, so a scoped tab of any other session (its agent already ended, or in a terminal host), an unscoped tab, and one whose shell's environment macOS hides wait for that Delete.' SPEC.md:3011-3013 states the same limitation. possible_cover: none known. Strongest original consequence, persisting old work with possible later file loss, is preserved; rarity is not a lowering basis. This accepts startup discovery limitations only; it does not establish that a subsequent Delete may falsely report the surviving work gone. Synthesis revision changes kind to finding because a could-be-highest drop resting only on specification acceptance needs independent review. Later-revision check: pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db SPEC_impl.md:2810-2814 retains exactly the startup tab-discovery residual and leaves it for Delete. The complete diff of old_terminals.rs since its introduction changes only the documentation link. Original source :321-328 and :369-402 was rechecked: the session set and host-tab record exclusion match that narrow acceptance. No later repair or specification broadening to permit false success on a later Delete was found in this scope. Discovery-turn interface synthesis: supplied g007/c4 completes a separate highest authority route for an ended host agent with an old live tab when startup gets EAGAIN/no pane inventory and no converted old-agent row: startup performs no tab sweep, current host-only listing/guard sees zero tabs, and later WholeSession cleanup can end undisclosed tab work. g128/l1 separately establishes that route for an old agent surviving the bounded sweep. They concern consent after startup, not only whether this residual was documented; the instruction leaving survivors for Delete does not itself settle a NothingAlive guard. Both remain owned by their original groups and are not new g149 discoveries. g097/l4 is also distinct: a stale snapshot PID read as a new tab owner enters old_tabs direct list, which does not run the host-record exclusion reserved for scope-derived candidates. Preserving live host records in that latter branch does not refute that highest wrong-target route or settle its proposed short-window PID-race acceptance. No parent drop/lowering is accepted. g111/l1 and g144/c3 are retained separately as moved-subtree work loss and test owner/drop-order cleanup respectively, not deduplicated into c2. These crosschecks preserve the original residual-process consequence and exact proposed-drop text above."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g149/findings.jsonl",
+        "id": "c2",
+        "line": 16,
+        "disposition": "under-investigation",
+        "group": "g149-c2",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-096",
+          "key": "g149/c2",
+          "latest_line": 16,
+          "recommendation": "covered",
+          "bucket": "high",
+          "underlying_key": "old-terminal-startup-cannot-discover-all-legacy-tab-identities",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The specifications explicitly leave unattributable old tab processes for session Delete. This covers startup discovery limitations only and requires an independent check before dropping the possible work-loss concern.",
+          "checks": [
+            "00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:crates/farhelm-supervisor/src/service/core/old_terminals.rs:321-328 builds sessions from converted agents and tab-marked snapshot panes; 369-402 discovers scope-derived tab IDs only for those sessions and excludes host-record tabs.",
+            "Tip old_terminals.rs:353-356 bounds the sweep and continues after timeout. No pane inventory plus an already-ended old agent supplies no additional session/tab ID through this startup path.",
+            "The full diff since dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 changes only the module's spec link; residual discovery policy persists."
+          ],
+          "coverage_checked": [
+            {
+              "source": "SPEC.md and SPEC_impl.md",
+              "result": "SPEC.md:3004-3008 and SPEC_impl.md:2805-2816 accept precisely these undiscoverable old-tab survivors pending Delete. No acceptance of later false Delete success or destruction beyond consent follows from that text."
+            },
+            {
+              "source": "TODO.md:25-26",
+              "result": "Planned bucket is empty. The phase-3 removal idea at 225-232 is in Mid term, not Planned, and does not cover these findings."
+            },
+            {
+              "source": "plans/queue",
+              "result": "Searched named behavior and symbols. No matching unlanded corrective plan. Relevant tmux-end-old-terminals, tmux-drop-from-docs and environment-agent-operations plans are already landed per plans/REPORTS.md:28-32, despite retained queue files."
+            },
+            {
+              "source": "BUGS.md",
+              "result": "Read fully; sole accepted ssh-output-pipe hang is unrelated."
+            },
+            {
+              "source": "review_feedback_queue/INDEX.md and matching files",
+              "result": "Searched actual mechanisms, symbols and consequences. No exact existing item or useful same-root extension found. tab-reap-deadline-excludes-listing-request.md was read; its test polling helper is distinct from production startup cleanup."
+            },
+            {
+              "source": "TRIAGE_OUTCOMES.md",
+              "result": "Searched actual mechanisms and consequences; no matching active decision. Archive not read."
+            },
+            {
+              "source": "review_feedback_queue/FILTER.md",
+              "result": "Read fully. No whole-boundary filter match used."
+            }
+          ],
+          "exact_cover_quotes": [
+            {
+              "source": "SPEC_impl.md:2810-2814",
+              "quote": "what cannot be attributed to an old tab is left for the session's Delete, which sweeps the whole session. Once the server is gone, an old tab is found only through the scope units of a session whose agent this start converted, so a scoped tab of any other session (its agent already ended, or in a terminal host), an unscoped tab, and one whose shell's environment macOS hides wait for that Delete."
+            },
+            {
+              "source": "SPEC.md:3005-3007",
+              "quote": "for a tab wherever its id can be found; what cannot be attributed to an old tab is left for the session's Delete, which stops everything of the session."
+            }
+          ],
+          "missing_premise": "A surviving process subsequently overwriting user files is not established. The established residual process can persist until Delete; the startup limitation is explicitly accepted.",
+          "original_stronger_consequence": "Unwanted old-tab work can persist after upgrade and could later overwrite user-owned files. Do not replace that conditional stronger concern with a rarity dismissal.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Propose exact startup-discovery coverage, subject to independent drop check. Do not deduplicate separate later Delete-consent or stale-PID wrong-target claims mentioned in this history; they have different defects and are outside this named batch."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "old-terminal-startup-cannot-discover-all-legacy-tab-identities",
+        "destination": "trailing-old-terminal-startup-cannot-discover-all-legacy-tab-identities.md"
+      }
+    },
+    {
+      "key": "g149/l3",
+      "owner": "g149",
+      "id": "l3",
+      "domain": "supervisor-upgrade-state",
+      "purpose": "supervisor-upgrade-state: crates/farhelm-supervisor/src/checkout_trash.rs, crates/farhelm-supervisor/src/store.rs, crates/farhelm-supervisor/src/service/core/old_terminals.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 17,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l3",
+            "state": "open",
+            "summary": "New sealed reservation spelling has no decoder arm",
+            "location": "crates/farhelm-supervisor/src/store.rs:1054",
+            "detail": "Reviewed commit: 47f33bbdbd5ff4a6e437e97a800f9083be43096e. TLDR: the added sealed error spelling cannot be decoded as a reservation error; need determine whether shipped creation can persist that spelling or whether it is deliberately unreachable. Source: error_kind_column maps K::Sealed to sealed at :1054, but the stated inverse at :1061-1074 has no sealed arm and rejects it. The writer comment :1052-1053 says the sealed refusal records nothing. Current missing premise is an actual caller that can route Sealed through failed-reservation persistence; checking that source next before deciding whether this is a reportable codec contract gap or an unreachable defensive encoding. Suggested bucket: other pending route; could-be-highest: no security/loss-of-work route established or suspected. Confidence: confirmed codec asymmetry, unresolved shipped reachability. proposed_drop: false pending caller check. possible_cover: none known from supplied interface records. Source only, no execution or reproduction."
+          }
+        },
+        {
+          "line": 18,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l3",
+            "state": "open",
+            "summary": "Sealed reservation spelling is asymmetric but not written by shipped refusals",
+            "location": "crates/farhelm-supervisor/src/store.rs:1054",
+            "detail": "Reviewed commit: 47f33bbdbd5ff4a6e437e97a800f9083be43096e; persistence checked at pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: considered whether a sealed supervisor can leave an unreadable create-retry reservation. Encoder :1054 emits sealed while decoder :1061-1074 rejects it; tip :1072/:1079-1092 remains asymmetric. Actual caller checks refute the proposed shipped user-facing failure: core.rs:9368-9379 returns an unkeyed sealed refusal before validation/launch; :9381-9403 resolves keyed replays then uses ? to return a sealed refusal before validation/persistence; :9404-9445 invokes record_refused_create only for subsequent validation failures. Other seal sites are recovery inspection, Restart after lifecycle, and tab-open after lifecycle (:15630-15635), which do not record create reservations. store.rs:991 serializes failed outcomes and :4078-4101 accepts a general ErrorKind, but no inspected shipped producer supplies Sealed to that writer. Exact SPEC_impl.md:6618-6620: 'a sealed refusal records nothing, so `create_unaccepted`, which needs a durable refusal record, stays false'. That matches the explicit encoder comment :1052-1053 that the spelling is defensive and never written today. Thus no malformed persisted Sealed row or lost retry behavior is established; an external/new caller handing Sealed directly to the generic store API would expose the asymmetry, but that is not a shipped route shown in this review. Suggested bucket: other if the standalone private inverse-contract inconsistency is retained; could-be-highest: no security or loss-of-work route established or suspected. Confidence: confirmed source asymmetry and source-refuted normal sealed-refusal persistence route; no execution. proposed_drop: no current shipped write/replay route; do not claim the missing decoder arm is present or that the codec is mathematically symmetric. Parent can retain the narrow internal consistency cleanup if desired, but no user-impact finding is asserted. possible_cover: none among supplied interface findings. No reproduction or test mutation performed. Lead resolved; no readily checkable source premise left open for the originally suspected normal-create failure."
+          }
+        }
+      ],
+      "latest": {
+        "line": 18,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l3",
+          "state": "open",
+          "summary": "Sealed reservation spelling is asymmetric but not written by shipped refusals",
+          "location": "crates/farhelm-supervisor/src/store.rs:1054",
+          "detail": "Reviewed commit: 47f33bbdbd5ff4a6e437e97a800f9083be43096e; persistence checked at pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: considered whether a sealed supervisor can leave an unreadable create-retry reservation. Encoder :1054 emits sealed while decoder :1061-1074 rejects it; tip :1072/:1079-1092 remains asymmetric. Actual caller checks refute the proposed shipped user-facing failure: core.rs:9368-9379 returns an unkeyed sealed refusal before validation/launch; :9381-9403 resolves keyed replays then uses ? to return a sealed refusal before validation/persistence; :9404-9445 invokes record_refused_create only for subsequent validation failures. Other seal sites are recovery inspection, Restart after lifecycle, and tab-open after lifecycle (:15630-15635), which do not record create reservations. store.rs:991 serializes failed outcomes and :4078-4101 accepts a general ErrorKind, but no inspected shipped producer supplies Sealed to that writer. Exact SPEC_impl.md:6618-6620: 'a sealed refusal records nothing, so `create_unaccepted`, which needs a durable refusal record, stays false'. That matches the explicit encoder comment :1052-1053 that the spelling is defensive and never written today. Thus no malformed persisted Sealed row or lost retry behavior is established; an external/new caller handing Sealed directly to the generic store API would expose the asymmetry, but that is not a shipped route shown in this review. Suggested bucket: other if the standalone private inverse-contract inconsistency is retained; could-be-highest: no security or loss-of-work route established or suspected. Confidence: confirmed source asymmetry and source-refuted normal sealed-refusal persistence route; no execution. proposed_drop: no current shipped write/replay route; do not claim the missing decoder arm is present or that the codec is mathematically symmetric. Parent can retain the narrow internal consistency cleanup if desired, but no user-impact finding is asserted. possible_cover: none among supplied interface findings. No reproduction or test mutation performed. Lead resolved; no readily checkable source premise left open for the originally suspected normal-create failure."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g149/findings.jsonl",
+        "id": "l3",
+        "line": 18,
+        "disposition": "excluded",
+        "group": "sealed-create-refusal-reservation-codec-asymmetry",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-096 after inspecting it. The encoder/decoder asymmetry is real, but the suspected shipped unreadable-reservation route is refuted: the seal gate returns before refused-create persistence. Retain that distinction in the parent's disposition. Propose refutation of the shipped create/replay failure only. Do not state the decoder has a sealed arm or that its inverse docstring is literally correct. The parent may retain a narrow internal consistency/documentation cleanup. Checked source/results: [\"00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:crates/farhelm-supervisor/src/store.rs:1069-1092 encodes Sealed as sealed, explicitly says it is never written today, and lacks the inverse decoder arm.\",\"Tip service/core.rs:8730-8765 calls refuse_when_sealed before validation/persistence for unkeyed and keyed launches; a keyed historical Answer can return before that gate. 8799-8803 records validation refusals only after the seal gate.\",\"47f33bbdbd5ff4a6e437e97a800f9083be43096e adds the defensive encoding, not a current persisted sealed-create failure.\"] Current coverage/results: [{\"source\":\"SPEC.md and SPEC_impl.md\",\"result\":\"SPEC_impl.md:6127-6135 explicitly says a sealed refusal records nothing and describes the same create gate. No matching queue, active outcome or unlanded corrective plan found.\"},{\"source\":\"TODO.md:25-26\",\"result\":\"Planned bucket is empty. The phase-3 removal idea at 225-232 is in Mid term, not Planned, and does not cover these findings.\"},{\"source\":\"plans/queue\",\"result\":\"Searched named behavior and symbols. No matching unlanded corrective plan. Relevant tmux-end-old-terminals, tmux-drop-from-docs and environment-agent-operations plans are already landed per plans/REPORTS.md:28-32, despite retained queue files.\"},{\"source\":\"BUGS.md\",\"result\":\"Read fully; sole accepted ssh-output-pipe hang is unrelated.\"},{\"source\":\"review_feedback_queue/INDEX.md and matching files\",\"result\":\"Searched actual mechanisms, symbols and consequences. No exact existing item or useful same-root extension found. tab-reap-deadline-excludes-listing-request.md was read; its test polling helper is distinct from production startup cleanup.\"},{\"source\":\"TRIAGE_OUTCOMES.md\",\"result\":\"Searched actual mechanisms and consequences; no matching active decision. Archive not read.\"},{\"source\":\"review_feedback_queue/FILTER.md\",\"result\":\"Read fully. No whole-boundary filter match used.\"}] Exact cited cover: [{\"source\":\"SPEC_impl.md:6127-6129\",\"quote\":\"a sealed refusal records nothing, so `create_unaccepted`, which needs a durable refusal record, stays false\"}] Original stronger consequence and missing premise remain preserved: \"A sealed supervisor might persist an unreadable create-retry reservation and lose retry behavior. Source checks withdraw that current shipped consequence, while preserving the private inverse-contract inconsistency.\"; \"A shipped caller writing Sealed through failed-reservation persistence was not found. A future/direct generic store caller could expose the asymmetry; that is not the original shipped route.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g149/l3",
+        "line": 18,
+        "disposition": "excluded",
+        "group": "sealed-create-refusal-reservation-codec-asymmetry",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-096 after inspecting it. The encoder/decoder asymmetry is real, but the suspected shipped unreadable-reservation route is refuted: the seal gate returns before refused-create persistence. Retain that distinction in the parent's disposition. Propose refutation of the shipped create/replay failure only. Do not state the decoder has a sealed arm or that its inverse docstring is literally correct. The parent may retain a narrow internal consistency/documentation cleanup. Checked source/results: [\"00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:crates/farhelm-supervisor/src/store.rs:1069-1092 encodes Sealed as sealed, explicitly says it is never written today, and lacks the inverse decoder arm.\",\"Tip service/core.rs:8730-8765 calls refuse_when_sealed before validation/persistence for unkeyed and keyed launches; a keyed historical Answer can return before that gate. 8799-8803 records validation refusals only after the seal gate.\",\"47f33bbdbd5ff4a6e437e97a800f9083be43096e adds the defensive encoding, not a current persisted sealed-create failure.\"] Current coverage/results: [{\"source\":\"SPEC.md and SPEC_impl.md\",\"result\":\"SPEC_impl.md:6127-6135 explicitly says a sealed refusal records nothing and describes the same create gate. No matching queue, active outcome or unlanded corrective plan found.\"},{\"source\":\"TODO.md:25-26\",\"result\":\"Planned bucket is empty. The phase-3 removal idea at 225-232 is in Mid term, not Planned, and does not cover these findings.\"},{\"source\":\"plans/queue\",\"result\":\"Searched named behavior and symbols. No matching unlanded corrective plan. Relevant tmux-end-old-terminals, tmux-drop-from-docs and environment-agent-operations plans are already landed per plans/REPORTS.md:28-32, despite retained queue files.\"},{\"source\":\"BUGS.md\",\"result\":\"Read fully; sole accepted ssh-output-pipe hang is unrelated.\"},{\"source\":\"review_feedback_queue/INDEX.md and matching files\",\"result\":\"Searched actual mechanisms, symbols and consequences. No exact existing item or useful same-root extension found. tab-reap-deadline-excludes-listing-request.md was read; its test polling helper is distinct from production startup cleanup.\"},{\"source\":\"TRIAGE_OUTCOMES.md\",\"result\":\"Searched actual mechanisms and consequences; no matching active decision. Archive not read.\"},{\"source\":\"review_feedback_queue/FILTER.md\",\"result\":\"Read fully. No whole-boundary filter match used.\"}] Exact cited cover: [{\"source\":\"SPEC_impl.md:6127-6129\",\"quote\":\"a sealed refusal records nothing, so `create_unaccepted`, which needs a durable refusal record, stays false\"}] Original stronger consequence and missing premise remain preserved: \"A sealed supervisor might persist an unreadable create-retry reservation and lose retry behavior. Source checks withdraw that current shipped consequence, while preserving the private inverse-contract inconsistency.\"; \"A shipped caller writing Sealed through failed-reservation persistence was not found. A future/direct generic store caller could expose the asymmetry; that is not the original shipped route.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-096",
+          "key": "g149/l3",
+          "latest_line": 18,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "sealed-create-refusal-reservation-codec-asymmetry",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The encoder/decoder asymmetry is real, but the suspected shipped unreadable-reservation route is refuted: the seal gate returns before refused-create persistence. Retain that distinction in the parent's disposition.",
+          "checks": [
+            "00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:crates/farhelm-supervisor/src/store.rs:1069-1092 encodes Sealed as sealed, explicitly says it is never written today, and lacks the inverse decoder arm.",
+            "Tip service/core.rs:8730-8765 calls refuse_when_sealed before validation/persistence for unkeyed and keyed launches; a keyed historical Answer can return before that gate. 8799-8803 records validation refusals only after the seal gate.",
+            "47f33bbdbd5ff4a6e437e97a800f9083be43096e adds the defensive encoding, not a current persisted sealed-create failure."
+          ],
+          "coverage_checked": [
+            {
+              "source": "SPEC.md and SPEC_impl.md",
+              "result": "SPEC_impl.md:6127-6135 explicitly says a sealed refusal records nothing and describes the same create gate. No matching queue, active outcome or unlanded corrective plan found."
+            },
+            {
+              "source": "TODO.md:25-26",
+              "result": "Planned bucket is empty. The phase-3 removal idea at 225-232 is in Mid term, not Planned, and does not cover these findings."
+            },
+            {
+              "source": "plans/queue",
+              "result": "Searched named behavior and symbols. No matching unlanded corrective plan. Relevant tmux-end-old-terminals, tmux-drop-from-docs and environment-agent-operations plans are already landed per plans/REPORTS.md:28-32, despite retained queue files."
+            },
+            {
+              "source": "BUGS.md",
+              "result": "Read fully; sole accepted ssh-output-pipe hang is unrelated."
+            },
+            {
+              "source": "review_feedback_queue/INDEX.md and matching files",
+              "result": "Searched actual mechanisms, symbols and consequences. No exact existing item or useful same-root extension found. tab-reap-deadline-excludes-listing-request.md was read; its test polling helper is distinct from production startup cleanup."
+            },
+            {
+              "source": "TRIAGE_OUTCOMES.md",
+              "result": "Searched actual mechanisms and consequences; no matching active decision. Archive not read."
+            },
+            {
+              "source": "review_feedback_queue/FILTER.md",
+              "result": "Read fully. No whole-boundary filter match used."
+            }
+          ],
+          "exact_cover_quotes": [
+            {
+              "source": "SPEC_impl.md:6127-6129",
+              "quote": "a sealed refusal records nothing, so `create_unaccepted`, which needs a durable refusal record, stays false"
+            }
+          ],
+          "missing_premise": "A shipped caller writing Sealed through failed-reservation persistence was not found. A future/direct generic store caller could expose the asymmetry; that is not the original shipped route.",
+          "original_stronger_consequence": "A sealed supervisor might persist an unreadable create-retry reservation and lose retry behavior. Source checks withdraw that current shipped consequence, while preserving the private inverse-contract inconsistency.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Propose refutation of the shipped create/replay failure only. Do not state the decoder has a sealed arm or that its inverse docstring is literally correct. The parent may retain a narrow internal consistency/documentation cleanup."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "sealed-create-refusal-reservation-codec-asymmetry",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial pass complete: all seven patches reviewed.\n\nRecorded one confirmed test-coverage finding (`l2`), three candidates, and no remaining open leads. No runtime tests or reproductions performed.\n\n[Findings log]([private-run]/g149/findings.jsonl) · [Progress]([private-run]/g149/progress.md)"
+    },
+    {
+      "turn": 2,
+      "reply": "- `l2`: confirmed no repair through the pinned tip; clarified the competing primary-key error.\n- `l1`: revised to an `other` finding for unenforced filesystem-cleanup deadline; retained socket refutation and workload limitations.\n- `c1`/`c2`: revised to findings with specification-based proposed drops requiring independent checks. Later Delete remains distinct.\n\nUnresolved lead IDs: none."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass complete. No new reportable issue found.\n\n- Checked seal persistence, checkout-removal guards, terminal conversion/notifications, and assigned comment changes.\n- Reconciled neighbour interactions under `c1`/`c2`.\n- New candidate `l3`: codec asymmetry; shipped refusal paths bypass persistence.\n- New verified/unverified findings: none.\n- Open leads: none.\n\nSource-only; no runtime execution."
+    }
+  ],
+  "progress": "g149: initialized, awaiting initial source review.\nGroup: g149 (supervisor-upgrade-state).\nState: initial source review, turn 1; discovery passes: 0.\nRead brief and complete inventory commits field. Findings log verified present.\nScope: seven assigned patches, 1166 lines; mandatory evidence reads pending.\nInterface assumptions: persisted state, checkout trash cleanup, terminal-host upgrade lifecycle; validate callers at each recorded revision.\nNext: read all assigned evidence packets and governing contracts, then investigate concrete leads. No runtime reproduction requested.\nNew verified/unverified IDs: none. Unread scope: all assigned patches.\n\nInitial pass complete (turn 1, type: initial review; discovery-pass count: 0).\nAll seven assigned patches read with evidence packets: 1166/1166 lines. No unread assigned scope.\nReviewed at recorded commits, including comment-only patches at 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513, f96dd4363d97dc7e07dea5b8947c96be6bf912e8 and 08399d092d20815ced6619c26df2391944ae2b4a.\nContracts read: environment Delete/seal; archived-checkout retirement and retry; upgrade compatibility; old-terminal ending at dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 and renamed section at f96dd4363d97dc7e07dea5b8947c96be6bf912e8; Terminal experience; GUI answers-bind rule. Applied the supplied test-authoring checklist to changed tests.\nInterface checks: handlers serialize seal behind directory admission and lifecycle, commit it before teardown, and set memory only after commit. Checkout discard is journaled in the session-delete transaction, then identity-checked recovery queues it. Metadata upserts for boot/identity/counter preserve sealed. Old-terminal sweeps use agent or individual-tab targets and retain terminal-host tabs through their launch records; failures/residual tab discovery match explicit specification acceptance.\nNew verified finding: l2 (other; migrated seal CHECK test can pass on duplicate primary key). New unverified findings: none.\nCandidates: c1 (failed old-terminal shutdown/duplicate agents; explicit specification acceptance, possible highest consequence remains unestablished); c2 (undiscoverable old-tab processes; explicit specification acceptance, possible highest consequence remains unestablished); l1 (hanging-connect route refuted through pinned tokio/mio source; filesystem timing alone did not establish substantive defect).\nOpen leads: none. Each substantive lead was recorded and revised under its original ID. Proposed drops remain in the log for the parent's independent check.\nChecks used: source, fixtures, callers and contracts only. No runtime tests, builds, reproductions or checkout changes. No coverage-source metadata read; inventory access used commits only.\nNext action: later synthesis turn if requested by caller; do not substitute a same-turn second pass.\n\nSynthesis started (turn 2; discovery-pass count remains 0).\nRevisiting l2 fixture/competing error and later repairs through pinned tip; l1 claimed finite budget versus healthy state-directory shape. Revised c1/c2 to findings with specification-based proposed drops requiring independent checks; neither drop is accepted. Parent-supplied overlaps and separate later-Delete risk retained in details.\n\nSynthesis complete (turn 2; discovery-pass count: 0).\nRevised IDs: l2 (no repair through pinned tip; confirmed migrated id 0, fresh metadata premise, competing-error distinction); l1 (now finding, other: filesystem cleanup outside explicit deadline, with exact pinned nonblocking socket evidence and healthy-root workload limitation); c1 and c2 (now findings, specification-only proposed drops remain unaccepted and require independent checks; strongest potential loss consequences preserved; later-Delete issue explicitly separate).\nRead source at original revisions and pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. The old_terminals.rs later diff changes only a documentation link. Later specs retain both startup acceptances and the finite deadline. Store test and metadata initialization remain unrepaired. Root-file writers/backstop show ordinary session count is not an unbounded root-directory workload; no measured or invented healthy workload was used for l1. Its source-level enforcement gap remains independent of runtime frequency.\nOpen/unresolved lead IDs: none. Unverified finding premises: l1 runtime delay/frequency and c1/c2 additional loss-of-work routes remain expressly unestablished; no readily checkable source premise left open. Independent acceptance/drop decisions remain for parent.\nNo new IDs, runtime executions, reproductions or checkout changes. No unread assigned scope. One oversized general contextual store diff was clipped; relevant paths were subsequently checked in bounded exact source ranges and a narrowed hunk inventory, without claiming the unrelated comment changes in the clipped diff as newly reviewed.\nNext: caller-directed discovery/synthesis, if any.\n\nTurn 3, discovery pass 1 started. Read discovery-neighbours.json through its end (639 lines) in bounded chunks. Named interface input: later Delete authority (g007/c4, g128/l1), migrated-claim opened-handle removal (g111/l1), old-server test guard/directory lifetime (g144/c3), and stale PID-to-environment attribution (g097/l4). Keep them distinct from accepted duplicate Restart and startup-discovery residuals; no parent drop/lowering accepted. Reading exact g097/l4 because the supplied neighbour snapshot has an empty records array for g097. Next: settle interface implications for owned IDs, then search only assigned production/store patches beyond known issues. No runtime actions.\n\nTurn 3 complete: separate discovery pass 1, beyond prior issues.\nInterface synthesis completed before new source search. c1/c2 revised under original IDs with supplied neighbour distinctions; no drops/lowerings accepted. g097/l4 exact latest log was read because discovery-neighbours.json listed no records there; its child-PID ownership route remains distinct from c2's missing old-tab discovery and l1's file-cleanup budget.\nDiscovery checks: re-read new seal store APIs and schema-35 DDL, checked every supervisor Sealed producer and failed-reservation writer/caller ordering, compared decoder through pinned tip, checked checkout journal/discard settlement and zero-member repoint predicates, rechecked old-terminal pane-owner parser/snapshot and notice-resolution paths, TerminalEnded terminal-state behavior, and the assigned comment-only store changes at recorded revisions. Checkout discard keeps its transaction/member guards and directory-admission recovery; these do not refute g111's distinct live-spare moved-subtree path. Notification resolution remains the specified startup behavior, separate from later Delete authority. No runtime test, build, reproduction, live-install action or checkout mutation.\nNew concrete lead l3 was immediately recorded, investigated, and revised to candidate: defensive Sealed encoding has no decode arm, but shipped sealed-create refusals return before persistence, so no current user-facing failed-replay route was established. Exact caller and contract evidence is in findings.jsonl. It remains a narrow internal codec asymmetry if parent elects to retain that cleanup, not a newly verified product defect.\nNew verified finding IDs: none. New unverified-after-investigation finding IDs: none. New candidate ID: l3 (source-settled, no open lead). Revised existing IDs: c1, c2 for interface reconciliation only. Remaining lead IDs: none.\nResult: no new reportable issue found in this discovery pass. Known neighbour issues were not reissued as new findings. Complete assigned mandatory coverage remains 1166/1166 lines; no unread assigned scope. Discovery-neighbours.json read through final closing braces. Next action: caller-directed further pass only.\n"
+}

@@ -1,0 +1,210 @@
+[
+  {
+    "key": "g109/c2",
+    "latest_line": 9,
+    "recommendation": "retain-verified",
+    "bucket": "highest",
+    "underlying_key": "old-terminal-snapshot-unvalidated-pane-owner",
+    "aliases": ["g097/l4 (same cause reported in supplied history; its separate record was not assigned)"],
+    "target_queue_file": null,
+    "why": "The conditional wrong-tab termination route is supported. Accurate markers and retained records protect ordinary attribution, but do not protect a tab UUID admitted directly from a recycled pane PID's environment. No execution or work loss was observed.",
+    "checks": [
+      "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:core/old_terminals.rs:456-476 snapshots PID/start pairs, then reads each direct child's current environment without comparing its identity again and stores the resulting owner separately from the stale roots.",
+      "Same revision old_terminals.rs:369-375 accepts direct snapshot Tab owners without the host-record check at :399-401; :329-342 constructs that owner's tab scope and marker sweep.",
+      "Same revision service/sweep.rs:1595-1646 drops changed root identities but explicitly continues marker/scope discovery. Server validation at old_terminals.rs:223-277 validates the server, not each pane owner.",
+      "Prior ordinary-path refutation remains valid only with accurately attributed pane owners. Deliberate marker scrubbing or unreadable record contents are unnecessary for the renewed route. Metadata errors remain a separate unestablished caveat."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:2998-3010 requires already-host-backed terminals to survive. SPEC_impl.md:2780-2823 describes the snapshot attribution, record exclusion and budget; it does not explicitly accept selecting an unrelated host tab.",
+      "SPEC_impl.md:4944-4957 accepts short PID reuse windows but excludes numbers carried through asynchronous work or stored for later. Whether that acceptance includes unvalidated owner extraction subsequently retained across reload is ambiguous; retain rather than infer coverage.",
+      "TODO.md Planned (:25-26) is empty. Searches of plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no exact trigger/consequence/scope. tmux-end-old-terminals and the documentation cleanup plans are already landed (plans/REPORTS.md:29-32), so are not unlanded coverage.",
+      "FILTER.md upgrade-plus-rare-condition rule is a possible but unclear cover: the reused PID may identify a host tab of another session or installation, beyond work within the affected legacy session. The specific verification-to-signal PID filter is a different handoff. No filter is applied."
+    ],
+    "exact_cover_quotes": [
+      "SPEC_impl.md:4944: Process-number reuse inside a short window is accepted, for now.",
+      "SPEC_impl.md:4951-4952: What is not accepted is carrying a bare number across unbounded waits or asynchronous work, or storing it for later.",
+      "FILTER.md, Upgrades from older releases combined with another rare condition: Unlike the filters above, this one also covers losing user-owned work within the affected sessions, such as resuming the wrong conversation."
+    ],
+    "missing_premise": "No missing source step for the conditional route. Actual PID reuse in this interval was not observed; the scope of the PID acceptance and upgrade filter needs the parent's independent disposition.",
+    "original_stronger_consequence": "Old-agent cleanup could kill a host-backed shell tab and lose its processes or user-owned work. The earlier general dismissal was narrowed and the owner-misattribution route renewed; do not reinstate the earlier dismissal silently.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Keep the conditional highest finding, reconcile the history-supplied alias, and independently check any proposed specification/filter dismissal or reliance on the earlier ordinary-path refutation."
+  },
+  {
+    "key": "g109/c3",
+    "latest_line": 4,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "reboot-before-old-terminal-notice-classification",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "A real reboot has already ended the agent; the notice is specifically for an agent this release ended while it was live. The source ordering matches that distinction.",
+    "checks": ["dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:core.rs:6869-6888 commits boot reconciliation and updates live rows to Interrupted before :7100-7114 builds the old-terminal converted set. :7374-7382 emits notices only for that set."],
+    "coverage_checked": ["SPEC.md:2998-3010 and SPEC_impl.md:2780-2823 distinguish live old agents this startup converts from agents already ended. Searches of both specifications, empty TODO Planned, plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no separate obligation to notify a true prior reboot. No filter needed."],
+    "exact_cover_quotes": ["SPEC.md:2808-2809: Each session whose agent was still launching, running or being stopped in an old terminal when a supervisor's start ended it gets one notice instead, at that start", "SPEC.md:2813: A session whose agent had already ended, or that lost only old tabs, gets none."],
+    "missing_premise": null,
+    "original_stronger_consequence": "Missing old-terminal notice for a session first loaded after reboot; no surviving process or user-work-loss route was alleged. Failed boot-ID reads are outside this claim.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source and notice scope refute a mandatory migration notice for an agent already ended by a true reboot."
+  },
+  {
+    "key": "g109/c4",
+    "latest_line": 13,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "old-terminal-reload-sentinel-and-create-evidence",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The named reconciliation branches preserve direct failure precedence, accepted-create evidence and outstanding host records. This does not refute the separate deleted-test oracle in l5.",
+    "checks": [
+      "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:core.rs:7060-7114 checks the sentinel before TerminalEnded. :7343-7353 and :7374-7378 clean artifacts after the corresponding committed outcomes. :7404-7415 keeps nonempty stored terminal addresses as launch evidence.",
+      "Same revision launch_artifacts.rs:299-333 settles generation-zero sentinel evidence before removal and retains artifacts on preservation failure; :491-502 removes status/spec/waypoint but explicitly retains the host record.",
+      "store.rs:386-392 declares address retention for TerminalEnded. At 1ed482dde220452e424973faf38a5e1318986333, host_handover.rs:994-1004 permits superseded-host retirement only for Host rows, so old-row conversion is not that authority."
+    ],
+    "coverage_checked": ["Current SPEC_impl.md:2780-2823 explicitly gives sentinel error precedence and requires recorded-address retention. Searches of both specifications, empty TODO Planned, plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no independent exact item; retired-terminal plans are landed, not future coverage. No filter needed."],
+    "exact_cover_quotes": ["SPEC_impl.md:2803-2804: Its `terminal_address` stays as stored, because the reservation settlement reads a recorded one as evidence that the launch happened."],
+    "missing_premise": "A launch with no recorded address, sentinel, report or remaining scope can still be unproven; the claim does not establish every reservation failure mode.",
+    "original_stronger_consequence": "Overwriting direct launch failure or removing accepted-create replay evidence; later checked concern that cleanup could discard an outstanding host handle was also refuted. No current work-loss route was established.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Refute only the named precedence/evidence/retained-host-handle hypotheses. Include the potentially work-affecting handle-loss dismissal in the independent register; preserve the remaining uncertainty and the distinct l5 test finding."
+  },
+  {
+    "key": "g109/l5",
+    "latest_line": 14,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "deleted-startup-error-artifact-readonly-oracle",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The deletion removes a useful startup-only authority oracle. Retained tests separately cover owning startup and read-only periodic reconciliation, leaving this combination untested. Production gating remains correct.",
+    "checks": [
+      "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4^:core.rs:22498-22644 creates an Error row/spec/sentinel, invokes reload with false at :22570-22578 and asserts preservation at :22607-22614, then invokes true and asserts cleanup without outcome change at :22616-22642.",
+      "Reviewed core.rs:7008-7022 retains the explicit read-only ownership condition. :37161-37251 tests startup only with true at :37221; :37254-37309 tests false/true through reconcile_for_test, a different entry path.",
+      "Pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:core.rs direct reload_sessions calls all pass true; :35352 remains the periodic read-only artifact test. This is source comparison, not mutation testing or an observed false pass."
+    ],
+    "coverage_checked": ["Both specifications and searches of empty TODO Planned, plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md supply no exact replacement or accepted omission. The old-terminal test migration plan has landed; it is not an unlanded fix. General state-directory ownership and periodic cleanup coverage do not replace the startup/Error-artifact oracle. FILTER.md has no test-coverage omission filter."],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Lost regression coverage for startup removing another owner's failed-launch artifacts. This is a test-quality defect; hypothetical future authority violations were never established as a current production consequence.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Record the narrow missing startup/Error/read-only combination, preserving the surviving broad ownership and periodic cleanup coverage."
+  },
+  {
+    "key": "g109/l6",
+    "latest_line": 16,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "cancelled-old-terminal-sweep-late-marker-signals",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Dropping the inline sweep prevents further marker enumeration results from causing signals. The blocking workers left running only read process metadata; they do not signal or restart the sweep.",
+    "checks": [
+      "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:old_terminals.rs:299-357 places the entire inline work future inside timeout_at. service/sweep.rs:1418-1426 awaits the inline kill_process_tree closure.",
+      "sweep.rs:805-807 worker only enumerates; :969-995 only polls identities; :1133-1213 signals synchronously between awaits. :774-779's destructor only sends identity-validated SIGCONT to previously recorded processes as the future drops.",
+      "scope.rs:1119-1128's independent worker reads cgroup.procs only. Targeted spawn_blocking/tokio::spawn search in sweep.rs, procs.rs and scope.rs finds only those production workers (the other scope spawn is test code). :1229-1232 uses generation-specific old-agent scope names."
+    ],
+    "coverage_checked": ["SPEC_impl.md:2780-2823 accepts unfinished old cleanup but does not need to waive the alleged continued marker-signal task. Searches of both specs, empty TODO Planned, plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no exact late-marker-sweep item. No filter is used; c2's owner misattribution is a different mechanism."],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "After timeout, an independently continuing retirement sweep could discover and kill the replacement agent by its reused session/agent markers, losing user-owned work. That route was withdrawn after the worker/cancellation check.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Source-refute this continued-marker-discovery/signalling hypothesis only. Already dispatched signals cannot be undone, and this does not dismiss other PID races or c2."
+  },
+  {
+    "key": "g110/f1",
+    "latest_line": 6,
+    "recommendation": "covered",
+    "bucket": "highest",
+    "underlying_key": "intentional-old-terminal-retirement-history-loss",
+    "aliases": ["g099/f1 (history-supplied possible alias)", "g053/f1 (history-supplied possible alias)"],
+    "target_queue_file": null,
+    "why": "Loss of old-terminal scrollback on Restart is an explicit product decision. Preserve the potential user-owned-output consequence and require independent agreement before omitting it.",
+    "checks": ["1ed482dde220452e424973faf38a5e1318986333:core.rs:4007-4016 retains a host-only seed; the old tmux seed machinery is removed. Host restart defaults to an empty seed when no old terminal remains (host_restart.rs:216-220)."],
+    "coverage_checked": ["Current SPEC.md:2998-3010 expressly says Restart/Clone/Replace of retired old terminals starts empty, including already-ended agents whose old final screen disappears. SPEC_impl.md:2780-2823 confirms intentional retirement. Searches of empty TODO Planned, plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no additional exact coverage; the retirement plan is landed. No filter required."],
+    "exact_cover_quotes": ["SPEC.md:3010: Restart, Clone and Replace start such a session in a new, empty terminal.", "SPEC.md:3003-3004: one whose agent had already ended keeps its outcome, but its terminal's last screen, which lived in the server, is gone"],
+    "missing_premise": null,
+    "original_stronger_consequence": "Restart loses retained old tmux output, potentially user-owned work. Acceptance concerns intentional retirement/history loss only, not generic survival guidance or an omitted warning.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Propose specification coverage limited to intentional old-terminal/history retirement; parent must independently check it and reconcile the history-supplied aliases rather than assuming their drops."
+  },
+  {
+    "key": "g110/c1",
+    "latest_line": 2,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "removed-fresh-state-dir-claim-flag",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The flag removal preserves cross-process exclusivity and all startup authority gates. Same-process claim sharing is deliberate and unchanged.",
+    "checks": ["1ed482dde220452e424973faf38a5e1318986333:core.rs:1343-1374 canonicalizes the path, reuses a process-local Arc and uses exclusive try_lock for a new claim; another process yields None. :6116-6117 gates store migration, :6134-6138 gates identity writes, :6147-6151 gates old-server ending and :6168-6184 passes ownership into reconciliation. :1276-1291 explains intentional in-process sharing and separate serving exclusion."],
+    "coverage_checked": ["Both specifications were searched for state-directory claims/read-only authority; SPEC_impl.md:2787 requires ownership for old-server cleanup. Empty TODO Planned, plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md have no exact flag-removal defect or accepted violation. Source refutation needs no filter or waiver."],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Startup might migrate another process's database or terminate its healthy terminals after the fresh/reused flag is removed, potentially losing processes/work or breaking its incumbent. The specific source route is refuted.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Drop only the alleged authority regression caused by this signature simplification, subject to independent agreement; do not claim the whole ownership subsystem is defect-free."
+  },
+  {
+    "key": "g110/c2",
+    "latest_line": 12,
+    "recommendation": "out-of-range",
+    "bucket": "other",
+    "underlying_key": "restart-history-promoted-into-launch-excerpt",
+    "aliases": ["g100/c1 (history-supplied same cause)", "g013/f2 (history-supplied same cause)"],
+    "target_queue_file": null,
+    "why": "The conditional resize contamination mechanism is real in source, so the broad blank-screen refutation was withdrawn correctly. However, the host excerpt arm already had the same behavior and rationale at the exclusive range base; removing the tmux-only fence does not introduce it.",
+    "checks": [
+      "1ed482dde220452e424973faf38a5e1318986333:vendor/alacritty_terminal/src/grid/resize.rs:25-28,46-71 promotes history into the visible area on height growth. core/host_restart.rs:216-255 passes the old history seed and :294-305,363-388 publishes without a shim-consumed fence. handlers.rs:2071-2083 forwards owned resizes; hosts/terminal.rs:3872-3884 resizes the emulator.",
+      "launch_artifacts.rs:63-76 only gates on Owned/dead and reads screen_tail; :97-102 discards blank lines before choosing the last nonblank rows. Final exit proves output order, not that promoted history originated in this launch.",
+      "6e423e30068b62c6cfa276c6d720ee35bb70387a:launch_artifacts.rs:52-95 already has the same host rationale and final-screen read without the launch fence; :98-106 uses that fence only after the host arm returns. Base host_restart.rs:445,512,575,687 already spawns, confirms, publishes and reads inherited host history. The complete base-to-tip grid/resize.rs diff is empty. Range log/diff shows no introduction of these host-seeding or height-promotion mechanisms."
+    ],
+    "coverage_checked": ["SPEC.md:2890-2894 forbids excerpts without safe attribution; SPEC_impl.md:2658-2667 makes the contradicted blank-screen rationale, which is not explicit acceptance of contamination. Empty TODO Planned, plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md have no exact item. Landed tmux cleanup plans supply no unlanded coverage. FILTER.md rare-diagnostic coverage is ambiguous because the excerpt is stored durably; no filter applied."],
+    "exact_cover_quotes": [],
+    "missing_premise": "Parent may hold a separate in-range introduction under the history-supplied aliases; that evidence was not assigned. This result establishes only that the named fence deletion did not introduce the host route and the relevant source existed at the range base.",
+    "original_stronger_consequence": "An earlier run's output can be attached to a new launch's durable failure detail after inherited history is promoted by a resize. No security or user-work-loss consequence was claimed. The earlier universal provenance dismissal is withdrawn; only the narrow deletion-attribution refutation survives.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Treat this named deletion attribution as out of range, and reconcile the conditional mechanism with the supplied same-cause identities. Do not use the withdrawn blank-screen rationale as a general source refutation."
+  },
+  {
+    "key": "g110/c3",
+    "latest_line": 4,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "old-tmux-config-temp-cleanup-owner",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The narrower running-version sweep has a replacement owner for old tmux staging files. Failures intentionally keep the files so a later startup can still reach the old server.",
+    "checks": ["1ed482dde220452e424973faf38a5e1318986333:core.rs:4068-4102 narrows that helper and names the new owner; :6147-6151 invokes old-server ending under ownership. dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:old_terminals.rs:179-189,240-251 invokes cleanup on absence or confirmed ending; :423-447 lists and removes config staging files as well as socket/config."],
+    "coverage_checked": ["Current SPEC_impl.md:2786-2792 explicitly specifies both replacement cleanup and the failure residual. Searches of both specs, empty TODO Planned, plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no separate exact finding. The retirement plan has landed; no filter needed."],
+    "exact_cover_quotes": ["SPEC_impl.md:2790-2791: Any other failure is logged and the files are left, so a later start can still reach the server"],
+    "missing_premise": null,
+    "original_stronger_consequence": "Old tmux configuration staging files might lose their cleanup owner and remain indefinitely. No credential or user-work-loss route was established; this is not proof that every individual cleanup attempt succeeds.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutes loss of the cleanup owner; the remaining connection/end-failure residue is explicitly accepted."
+  },
+  {
+    "key": "g110/l1",
+    "latest_line": 10,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "host-scan-lock-map-forbids-required-host-io",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The changed lock-order sentence forbids terminal calls under a fence whose stated purpose and implementation require host startup and adoption under that fence. This is a documentation contract defect; no current runtime failure is asserted.",
+    "checks": [
+      "1ed482dde220452e424973faf38a5e1318986333:core.rs:4560-4583 describes host startup/adoption under host_scan, then prohibits acquiring a terminal call while it is held. :4794-4817 explains why scans must not race unpublished starts.",
+      "host_launch.rs:536-609 starts/finishes/adopts a host under the shared guard and :639-645 returns that guard still live. host_handover.rs:722-732 takes the exclusive guard through scan/adoption, including :786-790's adopt_found.",
+      "git log -S over the pinned range identifies 1ed482dd as introduction of the terminal-call wording. Pinned tip core.rs:4580-4582 retains it. Surrounding lock map defines no narrower terminal-call term that exempts these operations."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md:2226-2232 requires the host_scan fence through publication and around scans; this supports correcting the comment, not accepting its contradiction. SPEC.md supplies no contrary lock restriction.",
+      "TODO Planned is empty. Searches of plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no exact cover. tmux-drop-from-docs has already landed (plans/REPORTS.md:32) and left this sentence intact.",
+      "Read review_feedback_queue/host-lock-table-contradicts-startup-span.md in full. It concerns the adjacent host_adoption no-connection sentence, not host_scan. Correcting one clause would leave the other false: distinct underlying defect, possible useful combined extension rather than exact duplicate. No rare-trigger diagnostic filter applies to an always-inaccurate contract."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "A maintainer following the false prohibition could release the scan fence prematurely. No actual early release, work loss or current runtime locking failure was established; the confirmed consequence is incorrect safety documentation.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Record the false host_scan contract. Parent may extend the adjacent lock-table item with this additional distinct clause, explicitly preserving both lock identities and causes; it is not exact coverage."
+  }
+]

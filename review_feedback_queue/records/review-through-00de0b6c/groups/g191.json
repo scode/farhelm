@@ -1,0 +1,767 @@
+{
+  "group": {
+    "id": "g191",
+    "domain": "retired-xterm-vendor",
+    "purpose": "retired-xterm-vendor: crates/farhelm-ui/assets/vendor/xterm.js; phases webpack module 2079: Property 2079 | webpack module 9078: Property 9078 | webpack module 2486: Property 2486 | webpack module 8811: Property 8811",
+    "interfaces": [
+      "g009",
+      "g010",
+      "g011",
+      "g061",
+      "g062",
+      "g063",
+      "g079",
+      "g080",
+      "g081",
+      "g082",
+      "g083",
+      "g084",
+      "g135",
+      "g136",
+      "g186",
+      "g187",
+      "g188",
+      "g189",
+      "g190",
+      "g192",
+      "g193",
+      "g194",
+      "g195",
+      "g196",
+      "g197"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/01085-008.patch",
+        "ranges": [
+          [
+            1,
+            1
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/assets/vendor/xterm.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "webpack module 2079: Property 2079; patch character offsets [114893,129679)",
+        "lines": 1,
+        "bytes": 14786,
+        "start": 114893,
+        "end": 129679,
+        "original": "[private-run]/prep/originals/01085.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01085-009.patch",
+        "ranges": [
+          [
+            1,
+            1
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/assets/vendor/xterm.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "webpack module 9078: Property 9078; patch character offsets [129679,148619)",
+        "lines": 1,
+        "bytes": 18940,
+        "start": 129679,
+        "end": 148619,
+        "original": "[private-run]/prep/originals/01085.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01085-010.patch",
+        "ranges": [
+          [
+            1,
+            1
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/assets/vendor/xterm.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "webpack module 2486: Property 2486; patch character offsets [148619,168286)",
+        "lines": 1,
+        "bytes": 19667,
+        "start": 148619,
+        "end": 168286,
+        "original": "[private-run]/prep/originals/01085.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01085-017.patch",
+        "ranges": [
+          [
+            1,
+            1
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/assets/vendor/xterm.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "webpack module 8811: Property 8811; patch character offsets [280376,289298)",
+        "lines": 1,
+        "bytes": 8922,
+        "start": 280376,
+        "end": 289298,
+        "original": "[private-run]/prep/originals/01085.patch"
+      }
+    ],
+    "lines": 4,
+    "bytes": 62315
+  },
+  "records": [
+    {
+      "key": "g191/c1",
+      "owner": "g191",
+      "id": "c1",
+      "domain": "retired-xterm-vendor",
+      "purpose": "retired-xterm-vendor: crates/farhelm-ui/assets/vendor/xterm.js; phases webpack module 2079: Property 2079 | webpack module 9078: Property 9078 | webpack module 2486: Property 2486 | webpack module 8811: Property 8811",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removing the bundle does not leave a live xterm constructor or asset dependency",
+            "location": "crates/farhelm-ui/assets/vendor/xterm.js:2",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether removing selection, theme, parsing and hyperlink services makes terminal panes fail to mount because the page still invokes the retired renderer. Source refutation: crates/farhelm-ui/src/lib.rs:1479-1496,1914-1926 registers the five grid assets and terminal.js without xterm; terminal.js:4294-4354 constructs farhelmGridTerminal with the theme, selection-copy, program-clipboard and link callbacks. A pinned git grep for window.Terminal, new Terminal(, XTERM_JS, XTERM_CSS, addon-fit.js and vendor/xterm.js across product UI files returned no executable references. SelectionService/ThemeService/OscLinkService hits were comments or license descriptions only. SPEC_impl.md:1506-1514 states: Every terminal runs in a terminal host and the browser draws a grid stream with its own grid client. Suggested bucket: high if this renderer failure existed. Confidence: confirmed source refutation, no execution. proposed_drop: source refutation; bundle removal leaves no live constructor or asset dependency in the checked UI sources. possible_cover: none; coverage sources were not searched. Could-be-highest: false for this candidate's unavailable terminal display/input consequence; no established loss-of-work or security route. Caveat: this record settles only stale dependencies, not semantic parity of the replacement; those checks continue."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removing the bundle does not leave a live xterm constructor or asset dependency",
+            "location": "crates/farhelm-ui/assets/vendor/xterm.js:2",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether removing selection, theme, parsing and hyperlink services makes terminal panes fail to mount because the page still invokes the retired renderer. Source refutation: crates/farhelm-ui/src/lib.rs:1479-1496,1914-1926 registers the five grid assets and terminal.js without xterm; terminal.js:4294-4354 constructs farhelmGridTerminal with the theme, selection-copy, program-clipboard and link callbacks. A pinned git grep for window.Terminal, new Terminal(, XTERM_JS, XTERM_CSS, addon-fit.js and vendor/xterm.js across product UI files returned no executable references. SelectionService/ThemeService/OscLinkService hits were comments or license descriptions only. SPEC_impl.md:1506-1514 assigns all terminals to terminal hosts and the browser to its grid client. Synthesis checked the old-peer assumption: farhelm-proto/src/lib.rs:255 changes protocol 76 in the parent to 77 here; io.rs:595-659 accepts Hello only when the protocol equals this binary's version and otherwise returns VersionSkew. farhelm-helm/src/manager.rs:4503-4542 returns AttemptOutcome::Skew on that handshake failure, rather than establishing a client to a legacy byte-stream supervisor. The parent terminal.js:3580-3605 already bypassed xterm globals for host terminals. Supervisor core.rs:6138-6190 ends the private server before reload, and :6370-6390 describes old rows reloading with no terminal. Suggested bucket: high if this renderer failure existed. Confidence: confirmed source refutation, no execution. proposed_drop: source refutation; bundle removal leaves no live constructor or asset dependency in the checked UI sources, and the checked old-peer path refuses protocol mismatch. possible_cover: none; coverage sources were not searched. Could-be-highest: false for this candidate's unavailable terminal display/input consequence; no established loss-of-work or security route. Caveat: this record settles stale dependencies and the named old-peer premise, not every transport or renderer behavior."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removing the bundle does not leave a live xterm constructor or asset dependency",
+            "location": "crates/farhelm-ui/assets/vendor/xterm.js:2",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether removing selection, theme, parsing and hyperlink services makes terminal panes fail to mount because the updated page still invokes the retired renderer. Source refutation: crates/farhelm-ui/src/lib.rs:1479-1496,1914-1926 registers the five grid assets and terminal.js without xterm; terminal.js:4294-4354 constructs farhelmGridTerminal with the theme, selection-copy, program-clipboard and link callbacks. A pinned git grep for window.Terminal, new Terminal(, XTERM_JS, XTERM_CSS, addon-fit.js and vendor/xterm.js across product UI files returned no executable references. SelectionService/ThemeService/OscLinkService hits were comments or license descriptions only. SPEC_impl.md:1506-1514 assigns all terminals to terminal hosts and the browser to its grid client. Synthesis checked the old-supervisor premise: farhelm-proto/src/lib.rs:255 changes protocol 76 in the parent to 77 here; io.rs:595-659 accepts Hello only when the protocol equals this binary's version and otherwise returns VersionSkew. farhelm-helm/src/manager.rs:4503-4542 returns AttemptOutcome::Skew on that handshake failure, rather than establishing a client to a legacy byte-stream supervisor. The parent terminal.js:3580-3605 already bypassed xterm globals for host terminals. Supervisor core.rs:6138-6190 ends the private server before reload, and :6370-6390 describes old rows reloading with no terminal. Suggested bucket: high if this renderer failure existed. Confidence: confirmed source refutation, no execution. proposed_drop: source refutation limited to updated-page stale dependencies and the old-supervisor handshake. possible_cover: caller-supplied g196/l1 identifies a DISTINCT old-page input reinterpretation route, echoed by g082/c2 and g083/c5; no prohibited coverage sources searched. Discovery interface synthesis: the supervisor handshake does not authenticate browser-build compatibility and does not refute that supplied route. Its potential highest/security or loss-of-work consequence and pending proposed specification drop remain intact; this candidate proposes no drop or lowering of g196/l1. Could-be-highest: false only for this candidate's updated-page unavailable display/input consequence, with no established loss-of-work/security route in that narrow dependency hypothesis. The supplied old-page JSON-to-command route could be highest and is not included in this refutation. Other supplied interface findings concern a distinct rewritten failed-mount test oracle, primary-selection notice suppression, or single-write documentation; successful replacement ownership does not refute them. Caveat: c1 settles neither every transport/renderer behavior nor older browser pages left open across an update. No parent drop or lowering is claimed accepted."
+          }
+        }
+      ],
+      "latest": {
+        "line": 9,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Removing the bundle does not leave a live xterm constructor or asset dependency",
+          "location": "crates/farhelm-ui/assets/vendor/xterm.js:2",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether removing selection, theme, parsing and hyperlink services makes terminal panes fail to mount because the updated page still invokes the retired renderer. Source refutation: crates/farhelm-ui/src/lib.rs:1479-1496,1914-1926 registers the five grid assets and terminal.js without xterm; terminal.js:4294-4354 constructs farhelmGridTerminal with the theme, selection-copy, program-clipboard and link callbacks. A pinned git grep for window.Terminal, new Terminal(, XTERM_JS, XTERM_CSS, addon-fit.js and vendor/xterm.js across product UI files returned no executable references. SelectionService/ThemeService/OscLinkService hits were comments or license descriptions only. SPEC_impl.md:1506-1514 assigns all terminals to terminal hosts and the browser to its grid client. Synthesis checked the old-supervisor premise: farhelm-proto/src/lib.rs:255 changes protocol 76 in the parent to 77 here; io.rs:595-659 accepts Hello only when the protocol equals this binary's version and otherwise returns VersionSkew. farhelm-helm/src/manager.rs:4503-4542 returns AttemptOutcome::Skew on that handshake failure, rather than establishing a client to a legacy byte-stream supervisor. The parent terminal.js:3580-3605 already bypassed xterm globals for host terminals. Supervisor core.rs:6138-6190 ends the private server before reload, and :6370-6390 describes old rows reloading with no terminal. Suggested bucket: high if this renderer failure existed. Confidence: confirmed source refutation, no execution. proposed_drop: source refutation limited to updated-page stale dependencies and the old-supervisor handshake. possible_cover: caller-supplied g196/l1 identifies a DISTINCT old-page input reinterpretation route, echoed by g082/c2 and g083/c5; no prohibited coverage sources searched. Discovery interface synthesis: the supervisor handshake does not authenticate browser-build compatibility and does not refute that supplied route. Its potential highest/security or loss-of-work consequence and pending proposed specification drop remain intact; this candidate proposes no drop or lowering of g196/l1. Could-be-highest: false only for this candidate's updated-page unavailable display/input consequence, with no established loss-of-work/security route in that narrow dependency hypothesis. The supplied old-page JSON-to-command route could be highest and is not included in this refutation. Other supplied interface findings concern a distinct rewritten failed-mount test oracle, primary-selection notice suppression, or single-write documentation; successful replacement ownership does not refute them. Caveat: c1 settles neither every transport/renderer behavior nor older browser pages left open across an update. No parent drop or lowering is claimed accepted."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g191/findings.jsonl",
+        "id": "c1",
+        "line": 9,
+        "disposition": "under-investigation",
+        "group": "g191-c1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-120",
+          "key": "g191/c1",
+          "latest_line": 9,
+          "recommendation": "refuted",
+          "bucket": "high",
+          "underlying_key": "retired-xterm-current-page-mount-dependency",
+          "aliases": [
+            "g192/c1"
+          ],
+          "target_queue_file": null,
+          "why": "The updated page registers and constructs the grid without the removed xterm global. This refutes the named dependency failure, not old-page compatibility or semantic parity.",
+          "checks": [
+            "At f560058da19e02716e6f943883a9508b447aff4e, UI lib.rs:1479-1496,1914-1926 registers grid assets and terminal.js; terminal.js:3191-3228 waits for grid helpers/fonts and :4294-4354 constructs farhelmGridTerminal.",
+            "Pinned git grep across UI src/assets for window.Terminal, new Terminal(, XTERM_JS, XTERM_CSS, addon-fit.js and vendor/xterm.js returned no references.",
+            "At that revision, proto lib.rs:255 is protocol 77; io.rs:595-659 refuses a different protocol; helm manager.rs:4503-4542 returns AttemptOutcome::Skew. This handshake concerns supervisor peers, not browser-build compatibility. Source only."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md Terminal experience:2855-3170 requires fidelity and terminal hosts; SPEC_impl.md Terminal widget:1693-1755 and grid client:1836-1886 describe grid ownership. No accepted fresh-page mount failure.",
+            "TODO.md Planned:25-26 is empty. BUGS.md contains only the unrelated SSH-helper transfer hang.",
+            "Searched plans/queue for xterm, grid, old-page and replacement terms; read matching tmux-end-old-terminals acceptance criteria and tmux-drop-from-docs scope. Removal/cleanup requirements do not cover a fresh-page mount failure or fix the distinct legacy input route.",
+            "Read INDEX.md in full and searched matching queue/active TRIAGE_OUTCOMES.md text. No exact mount-dependency item. Old-page authentication/shortcut items concern different triggers and consequences. No filter needed for a source refutation."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No stale executable xterm dependency was found. This does not establish compatibility for a pre-update page.",
+          "original_stronger_consequence": "Initially considered an unusable terminal after removal. Latest history expressly preserves the distinct potentially highest old-page JSON-to-command route attributed to g196/l1, g082/c2 and g083/c5; it must not be dropped with this candidate.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Refute only updated-page stale constructor/asset dependency and old-supervisor protocol acceptance. Keep all legacy-page input claims outside this disposition; independent judgment is needed before using this narrowing to dismiss any security or work-loss consequence."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retired-xterm-current-page-mount-dependency",
+        "destination": null
+      }
+    },
+    {
+      "key": "g191/c2",
+      "owner": "g191",
+      "id": "c2",
+      "domain": "retired-xterm-vendor",
+      "purpose": "retired-xterm-vendor: crates/farhelm-ui/assets/vendor/xterm.js; phases webpack module 2079: Property 2079 | webpack module 9078: Property 9078 | webpack module 2486: Property 2486 | webpack module 8811: Property 8811",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Selection and copying survive removal of SelectionService",
+            "location": "crates/farhelm-ui/assets/vendor/xterm.js:2 (module 2079)",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether terminal users lose local selection or select-to-copy when the old selection service is removed. Source refutation: grid-terminal.js:1044-1072 retains selection, platform line endings, block copying and select-all; :1106-1165 implements character/word/line/block selections and Shift extension; :1665-1685 copies completed local selections through onCopy; :1761-1809 preserves forced selection versus program mouse reporting. grid-buffer.js:133-157,249-293,447-461 provides wrapped text, word/line selection and column text independently of the removed module. terminal.js:4332-4334 wires onCopy to the page clipboard queue. SPEC.md:3060-3081 requires completed local selections to copy and distinguishes program-owned drags. Suggested bucket: high if selection/copy disappeared. Confidence: confirmed source refutation, no execution. proposed_drop: selection ownership and copy callbacks are implemented in the grid and do not call SelectionService. possible_cover: none; coverage sources were not searched. Could-be-highest: false for this candidate's selection/copy availability consequence; no security or loss-of-work route established. Caveat: this checks the deletion's effect and principal selection contracts, not an independent exhaustive audit of the already-existing grid selection implementation."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Selection and copying survive removal of SelectionService",
+            "location": "crates/farhelm-ui/assets/vendor/xterm.js:2 (module 2079)",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether terminal users lose local selection or select-to-copy when the old selection service is removed. Source refutation: grid-terminal.js:1044-1072 retains selection, platform line endings, block copying and select-all; :1106-1165 implements character/word/line/block selections and Shift extension; :1665-1685 copies completed local selections through onCopy; :1761-1809 preserves forced selection versus program mouse reporting. grid-buffer.js:133-157,249-293,447-461 provides wrapped text, word/line selection and column text independently of the removed module. terminal.js:4332-4334 wires onCopy to the page clipboard queue. SPEC.md:3060-3081 requires completed local selections to copy and distinguishes program-owned drags. Synthesis compared the complete grid-buffer.js patch and the grid-terminal.js patch, including local selection, copy completion and press/release handlers: these executable selection paths are retained unchanged; their changes in this commit are comments. The grid-terminal executable changes remove inherited sizing for the retired renderer-swap path, not selection ownership. Suggested bucket: high if selection/copy disappeared. Confidence: confirmed source refutation, no execution. proposed_drop: selection ownership and copy callbacks are implemented in the grid and do not call SelectionService; the relevant retained selection paths were checked against this commit's patch. possible_cover: none; coverage sources were not searched. Could-be-highest: false for this candidate's selection/copy availability consequence; no security or loss-of-work route established. Caveat: this checks the deletion's effect and principal selection contracts, not an independent exhaustive audit of the already-existing grid selection implementation."
+          }
+        }
+      ],
+      "latest": {
+        "line": 8,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Selection and copying survive removal of SelectionService",
+          "location": "crates/farhelm-ui/assets/vendor/xterm.js:2 (module 2079)",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether terminal users lose local selection or select-to-copy when the old selection service is removed. Source refutation: grid-terminal.js:1044-1072 retains selection, platform line endings, block copying and select-all; :1106-1165 implements character/word/line/block selections and Shift extension; :1665-1685 copies completed local selections through onCopy; :1761-1809 preserves forced selection versus program mouse reporting. grid-buffer.js:133-157,249-293,447-461 provides wrapped text, word/line selection and column text independently of the removed module. terminal.js:4332-4334 wires onCopy to the page clipboard queue. SPEC.md:3060-3081 requires completed local selections to copy and distinguishes program-owned drags. Synthesis compared the complete grid-buffer.js patch and the grid-terminal.js patch, including local selection, copy completion and press/release handlers: these executable selection paths are retained unchanged; their changes in this commit are comments. The grid-terminal executable changes remove inherited sizing for the retired renderer-swap path, not selection ownership. Suggested bucket: high if selection/copy disappeared. Confidence: confirmed source refutation, no execution. proposed_drop: selection ownership and copy callbacks are implemented in the grid and do not call SelectionService; the relevant retained selection paths were checked against this commit's patch. possible_cover: none; coverage sources were not searched. Could-be-highest: false for this candidate's selection/copy availability consequence; no security or loss-of-work route established. Caveat: this checks the deletion's effect and principal selection contracts, not an independent exhaustive audit of the already-existing grid selection implementation."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g191/findings.jsonl",
+        "id": "c2",
+        "line": 8,
+        "disposition": "excluded",
+        "group": "retired-selection-service-current-grid-dependency",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-120 after inspecting it. Local selection and completed-selection copying are implemented and called independently of the deleted SelectionService. Source-refuted deletion dependency only. Preserve separate selection defects and primary-selection notice claims. Checked source/results: [\"At f560058da19e02716e6f943883a9508b447aff4e, grid-terminal.js:1044-1072 implements selection state/text/select-all; :1106-1165 implements character, word, line and block extension.\",\"grid-terminal.js:1665-1685 calls onCopy for completed admitted selections; :1761-1809 chooses local versus program-owned gestures. terminal.js:4332-4334 supplies enqueueClipboardWrite as onCopy. Source only; no runtime clipboard result claimed.\"] Current coverage/results: [\"Current SPEC.md:3060-3081 requires completed local selections to copy; SPEC_impl.md:1728-1755 and :1836-1886 assign clipboard/selection ownership. These are requirements, not acceptance of lost selection.\",\"TODO Planned is empty; BUGS.md has only an unrelated SSH-transfer hang. Matching plans/queue removal and docs-cleanup sections preserve selection ports and behavior; they provide no separate cause-removing work for the hypothesis.\",\"INDEX.md read fully; selection-related queue entries describe anchor invalidation, wheel selection and individual text-copy differences, not complete loss caused by deleting SelectionService. Active TRIAGE_OUTCOMES.md search found no exact trigger/consequence. FILTER.md does not need to be applied.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Hypothetical loss of selection/select-to-copy availability, suggested high; no security or user-work-loss route was established in any supplied revision.\"; \"No call from the surviving selection/copy path to the removed service was found; this is not an exhaustive audit of grid selection correctness.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g191/c2",
+        "line": 8,
+        "disposition": "excluded",
+        "group": "retired-selection-service-current-grid-dependency",
+        "bucket": "high",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-120 after inspecting it. Local selection and completed-selection copying are implemented and called independently of the deleted SelectionService. Source-refuted deletion dependency only. Preserve separate selection defects and primary-selection notice claims. Checked source/results: [\"At f560058da19e02716e6f943883a9508b447aff4e, grid-terminal.js:1044-1072 implements selection state/text/select-all; :1106-1165 implements character, word, line and block extension.\",\"grid-terminal.js:1665-1685 calls onCopy for completed admitted selections; :1761-1809 chooses local versus program-owned gestures. terminal.js:4332-4334 supplies enqueueClipboardWrite as onCopy. Source only; no runtime clipboard result claimed.\"] Current coverage/results: [\"Current SPEC.md:3060-3081 requires completed local selections to copy; SPEC_impl.md:1728-1755 and :1836-1886 assign clipboard/selection ownership. These are requirements, not acceptance of lost selection.\",\"TODO Planned is empty; BUGS.md has only an unrelated SSH-transfer hang. Matching plans/queue removal and docs-cleanup sections preserve selection ports and behavior; they provide no separate cause-removing work for the hypothesis.\",\"INDEX.md read fully; selection-related queue entries describe anchor invalidation, wheel selection and individual text-copy differences, not complete loss caused by deleting SelectionService. Active TRIAGE_OUTCOMES.md search found no exact trigger/consequence. FILTER.md does not need to be applied.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Hypothetical loss of selection/select-to-copy availability, suggested high; no security or user-work-loss route was established in any supplied revision.\"; \"No call from the surviving selection/copy path to the removed service was found; this is not an exhaustive audit of grid selection correctness.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-120",
+          "key": "g191/c2",
+          "latest_line": 8,
+          "recommendation": "refuted",
+          "bucket": "high",
+          "underlying_key": "retired-selection-service-current-grid-dependency",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Local selection and completed-selection copying are implemented and called independently of the deleted SelectionService.",
+          "checks": [
+            "At f560058da19e02716e6f943883a9508b447aff4e, grid-terminal.js:1044-1072 implements selection state/text/select-all; :1106-1165 implements character, word, line and block extension.",
+            "grid-terminal.js:1665-1685 calls onCopy for completed admitted selections; :1761-1809 chooses local versus program-owned gestures. terminal.js:4332-4334 supplies enqueueClipboardWrite as onCopy. Source only; no runtime clipboard result claimed."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:3060-3081 requires completed local selections to copy; SPEC_impl.md:1728-1755 and :1836-1886 assign clipboard/selection ownership. These are requirements, not acceptance of lost selection.",
+            "TODO Planned is empty; BUGS.md has only an unrelated SSH-transfer hang. Matching plans/queue removal and docs-cleanup sections preserve selection ports and behavior; they provide no separate cause-removing work for the hypothesis.",
+            "INDEX.md read fully; selection-related queue entries describe anchor invalidation, wheel selection and individual text-copy differences, not complete loss caused by deleting SelectionService. Active TRIAGE_OUTCOMES.md search found no exact trigger/consequence. FILTER.md does not need to be applied."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No call from the surviving selection/copy path to the removed service was found; this is not an exhaustive audit of grid selection correctness.",
+          "original_stronger_consequence": "Hypothetical loss of selection/select-to-copy availability, suggested high; no security or user-work-loss route was established in any supplied revision.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source-refuted deletion dependency only. Preserve separate selection defects and primary-selection notice claims."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retired-selection-service-current-grid-dependency",
+        "destination": null
+      }
+    },
+    {
+      "key": "g191/c3",
+      "owner": "g191",
+      "id": "c3",
+      "domain": "retired-xterm-vendor",
+      "purpose": "retired-xterm-vendor: crates/farhelm-ui/assets/vendor/xterm.js; phases webpack module 2079: Property 2079 | webpack module 9078: Property 9078 | webpack module 2486: Property 2486 | webpack module 8811: Property 8811",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Removing the browser parser and theme service does not remove terminal interpretation",
+            "location": "crates/farhelm-ui/assets/vendor/xterm.js:2 (modules 9078 and 2486)",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether removing xterm's parser and color/theme services leaves escape sequences or color queries uninterpreted. Source refutation: crates/farhelm-terminal-emulator/src/emulator.rs:108-162 builds a Term and Processor, feeds output into QueryHandler with parser.advance, and routes effects. queries.rs:24-42 documents the host query table, including device attributes, status, dynamic palette colors and clipboard policy; :312,357-358,367 forwards title, color and hyperlink operations to the terminal. Browser terminal.js:3387-3393 and :4313-4334 creates only the grid surface with the bundled theme. grid-style.js:100-121 builds the theme palette independently of xterm; :133-196 resolves dynamic default colors and styled runs; grid-terminal.js:831 updates defaults from grid state. SPEC_impl.md:1506-1514 and :2673-2698 explicitly assigns interpretation and query answers to the supervisor emulator, while the browser draws grids. Suggested bucket: high if programs lost interpretation/query support. Confidence: confirmed source refutation, no execution. proposed_drop: the removed parser/theme module is not on the remaining output path; required interpretation resides in the host emulator and colors in grid styles. possible_cover: none; coverage sources were not searched. Could-be-highest: false for this candidate's terminal rendering/query availability consequence; no established data-loss or security route. Caveat: not a claim that every historical xterm escape is implemented; the specification separately lists query differences. No independent defects in the retired parser were sought."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Removing the browser parser and theme service does not remove terminal interpretation",
+            "location": "crates/farhelm-ui/assets/vendor/xterm.js:2 (modules 9078 and 2486)",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether removing xterm's parser and color/theme services leaves escape sequences or color queries uninterpreted. Source refutation: crates/farhelm-terminal-emulator/src/emulator.rs:108-162 builds a Term and Processor, feeds output into QueryHandler with parser.advance, and routes effects. queries.rs:24-42 documents the host query table, including device attributes, status, dynamic palette colors and clipboard policy; :312,357-358,367 forwards title, color and hyperlink operations to the terminal. Its delegate macro at :293-302 was checked in synthesis and calls Term's Handler methods directly. Browser terminal.js:3387-3393 and :4313-4334 creates only the grid surface with the bundled theme. grid-style.js:100-121 builds the theme palette independently of xterm; :133-196 resolves dynamic default colors and styled runs; grid-terminal.js:831 updates defaults from grid state. Synthesis checked the missing cross-layer premise: supervisor grid_output.rs:276-288 resolves program-redefined palette entries to direct colors, and :461-477 sends redefined foreground/background in TerminalState, so palette state is not stranded in the deleted ThemeService. The commit's grid-style.js and grid-input.js patches change documentation only; grid-buffer.js likewise changes comments, not the retained selection/link functions. SPEC_impl.md:1506-1514 and :2673-2698 explicitly assigns interpretation and query answers to the supervisor emulator, while the browser draws grids. Suggested bucket: high if programs lost interpretation/query support. Confidence: confirmed source refutation, no execution. proposed_drop: the removed parser/theme module is not on the remaining output path; required interpretation resides in the host emulator and colors in grid styles. possible_cover: none; coverage sources were not searched. Could-be-highest: false for this candidate's terminal rendering/query availability consequence; no established data-loss or security route. Caveat: not a claim that every historical xterm escape is implemented; the specification separately lists query differences. No independent defects in the retired parser were sought."
+          }
+        }
+      ],
+      "latest": {
+        "line": 5,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Removing the browser parser and theme service does not remove terminal interpretation",
+          "location": "crates/farhelm-ui/assets/vendor/xterm.js:2 (modules 9078 and 2486)",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether removing xterm's parser and color/theme services leaves escape sequences or color queries uninterpreted. Source refutation: crates/farhelm-terminal-emulator/src/emulator.rs:108-162 builds a Term and Processor, feeds output into QueryHandler with parser.advance, and routes effects. queries.rs:24-42 documents the host query table, including device attributes, status, dynamic palette colors and clipboard policy; :312,357-358,367 forwards title, color and hyperlink operations to the terminal. Its delegate macro at :293-302 was checked in synthesis and calls Term's Handler methods directly. Browser terminal.js:3387-3393 and :4313-4334 creates only the grid surface with the bundled theme. grid-style.js:100-121 builds the theme palette independently of xterm; :133-196 resolves dynamic default colors and styled runs; grid-terminal.js:831 updates defaults from grid state. Synthesis checked the missing cross-layer premise: supervisor grid_output.rs:276-288 resolves program-redefined palette entries to direct colors, and :461-477 sends redefined foreground/background in TerminalState, so palette state is not stranded in the deleted ThemeService. The commit's grid-style.js and grid-input.js patches change documentation only; grid-buffer.js likewise changes comments, not the retained selection/link functions. SPEC_impl.md:1506-1514 and :2673-2698 explicitly assigns interpretation and query answers to the supervisor emulator, while the browser draws grids. Suggested bucket: high if programs lost interpretation/query support. Confidence: confirmed source refutation, no execution. proposed_drop: the removed parser/theme module is not on the remaining output path; required interpretation resides in the host emulator and colors in grid styles. possible_cover: none; coverage sources were not searched. Could-be-highest: false for this candidate's terminal rendering/query availability consequence; no established data-loss or security route. Caveat: not a claim that every historical xterm escape is implemented; the specification separately lists query differences. No independent defects in the retired parser were sought."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g191/findings.jsonl",
+        "id": "c3",
+        "line": 5,
+        "disposition": "excluded",
+        "group": "retired-browser-parser-current-emulator-dependency",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-120 after inspecting it. Removing the browser parser does not remove the active output interpreter or palette/default-color path. This does not claim preservation of every removed theme capability. Refute removal-as-loss-of-active-interpreter. Keep cursor-color and any separately named semantic gaps outside that refutation. Checked source/results: [\"At f560058da19e02716e6f943883a9508b447aff4e, emulator.rs:117-159 constructs Term/Processor and feeds QueryHandler; queries.rs:293-367 delegates cursor, scroll, color, title and hyperlink operations; :476-486 answers dynamic colors from stored values/theme.\",\"grid_output.rs:276-288 resolves redefined palette colors; :461-477 sends foreground/background overrides. grid-style.js:100-121 builds the palette and :133 onward resolves styled colors; grid-terminal.js:831 applies defaults.\",\"The cursor-color omission is independently confirmed in g191/l1 and the existing queue item; successful ownership does not refute it. Source only.\"] Current coverage/results: [\"Current SPEC.md Terminal experience requires full color/cursor fidelity. SPEC_impl.md:1693-1720,1836-1886,2670-2704 assigns interpretation to the supervisor and names unanswered-query exceptions; none is a blanket theme-parity waiver.\",\"TODO Planned empty; BUGS unrelated. Plans/queue removal/docs-cleanup criteria preserve terminal behavior and do not independently repair a missing capability.\",\"INDEX.md read fully; program-selected-cursor-color-never-reaches-viewer.md read fully and covers the distinct cursor-color omission, not total parser/theme loss. Active TRIAGE_OUTCOMES search found no exact parser-dependency decision. No FILTER applied.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Hypothetical lost terminal interpretation/query availability, suggested high. Supplied history establishes no security or user-work-loss consequence for this narrow hypothesis.\"; \"No dependence of the active output path on the deleted parser/theme service. No exhaustive escape-sequence or theme parity claim is justified.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g191/c3",
+        "line": 5,
+        "disposition": "excluded",
+        "group": "retired-browser-parser-current-emulator-dependency",
+        "bucket": "high",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-120 after inspecting it. Removing the browser parser does not remove the active output interpreter or palette/default-color path. This does not claim preservation of every removed theme capability. Refute removal-as-loss-of-active-interpreter. Keep cursor-color and any separately named semantic gaps outside that refutation. Checked source/results: [\"At f560058da19e02716e6f943883a9508b447aff4e, emulator.rs:117-159 constructs Term/Processor and feeds QueryHandler; queries.rs:293-367 delegates cursor, scroll, color, title and hyperlink operations; :476-486 answers dynamic colors from stored values/theme.\",\"grid_output.rs:276-288 resolves redefined palette colors; :461-477 sends foreground/background overrides. grid-style.js:100-121 builds the palette and :133 onward resolves styled colors; grid-terminal.js:831 applies defaults.\",\"The cursor-color omission is independently confirmed in g191/l1 and the existing queue item; successful ownership does not refute it. Source only.\"] Current coverage/results: [\"Current SPEC.md Terminal experience requires full color/cursor fidelity. SPEC_impl.md:1693-1720,1836-1886,2670-2704 assigns interpretation to the supervisor and names unanswered-query exceptions; none is a blanket theme-parity waiver.\",\"TODO Planned empty; BUGS unrelated. Plans/queue removal/docs-cleanup criteria preserve terminal behavior and do not independently repair a missing capability.\",\"INDEX.md read fully; program-selected-cursor-color-never-reaches-viewer.md read fully and covers the distinct cursor-color omission, not total parser/theme loss. Active TRIAGE_OUTCOMES search found no exact parser-dependency decision. No FILTER applied.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Hypothetical lost terminal interpretation/query availability, suggested high. Supplied history establishes no security or user-work-loss consequence for this narrow hypothesis.\"; \"No dependence of the active output path on the deleted parser/theme service. No exhaustive escape-sequence or theme parity claim is justified.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-120",
+          "key": "g191/c3",
+          "latest_line": 5,
+          "recommendation": "refuted",
+          "bucket": "high",
+          "underlying_key": "retired-browser-parser-current-emulator-dependency",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Removing the browser parser does not remove the active output interpreter or palette/default-color path. This does not claim preservation of every removed theme capability.",
+          "checks": [
+            "At f560058da19e02716e6f943883a9508b447aff4e, emulator.rs:117-159 constructs Term/Processor and feeds QueryHandler; queries.rs:293-367 delegates cursor, scroll, color, title and hyperlink operations; :476-486 answers dynamic colors from stored values/theme.",
+            "grid_output.rs:276-288 resolves redefined palette colors; :461-477 sends foreground/background overrides. grid-style.js:100-121 builds the palette and :133 onward resolves styled colors; grid-terminal.js:831 applies defaults.",
+            "The cursor-color omission is independently confirmed in g191/l1 and the existing queue item; successful ownership does not refute it. Source only."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md Terminal experience requires full color/cursor fidelity. SPEC_impl.md:1693-1720,1836-1886,2670-2704 assigns interpretation to the supervisor and names unanswered-query exceptions; none is a blanket theme-parity waiver.",
+            "TODO Planned empty; BUGS unrelated. Plans/queue removal/docs-cleanup criteria preserve terminal behavior and do not independently repair a missing capability.",
+            "INDEX.md read fully; program-selected-cursor-color-never-reaches-viewer.md read fully and covers the distinct cursor-color omission, not total parser/theme loss. Active TRIAGE_OUTCOMES search found no exact parser-dependency decision. No FILTER applied."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No dependence of the active output path on the deleted parser/theme service. No exhaustive escape-sequence or theme parity claim is justified.",
+          "original_stronger_consequence": "Hypothetical lost terminal interpretation/query availability, suggested high. Supplied history establishes no security or user-work-loss consequence for this narrow hypothesis.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Refute removal-as-loss-of-active-interpreter. Keep cursor-color and any separately named semantic gaps outside that refutation."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retired-browser-parser-current-emulator-dependency",
+        "destination": null
+      }
+    },
+    {
+      "key": "g191/c4",
+      "owner": "g191",
+      "id": "c4",
+      "domain": "retired-xterm-vendor",
+      "purpose": "retired-xterm-vendor: crates/farhelm-ui/assets/vendor/xterm.js; phases webpack module 2079: Property 2079 | webpack module 9078: Property 9078 | webpack module 2486: Property 2486 | webpack module 8811: Property 8811",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "OSC 8 link recognition does not depend on the removed link service",
+            "location": "crates/farhelm-ui/assets/vendor/xterm.js:2 (module 8811)",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether removing OscLinkService leaves program hyperlinks unavailable. Source refutation: crates/farhelm-terminal-emulator/src/queries.rs:367 delegates set_hyperlink to the emulator terminal. Browser grid-buffer.js:285-295 reads links from styled runs; :308-345 resolves generated continuation identities; :379-405 builds OSC links with explicit id/target identity and evidence. terminal.js:1029-1060 maps those OSC links to web or file handlers and keeps unrecognized schemes inert; :1108-1116 installs the grid provider, combining OSC links, printed URLs and file paths. Activation still passes through isLinkClick/hasSelection checks, and web targets through webDisclosureAdmits at :1013-1017. SPEC_impl.md:1785-1806 assigns link reading to the grid link-lines interface; :1817-1833 describes generated-id joining. Suggested bucket: high if program hyperlinks disappeared. Confidence: confirmed source refutation, no execution. proposed_drop: link metadata and activation are supplied by the grid/emulator path independently of OscLinkService. possible_cover: none; coverage sources were not searched. Could-be-highest: false for this candidate's lost-link availability consequence; no route to wrong-target opening or bypassed disclosure was established. Caveat: this is a deletion-impact check, not a new whole-system security audit of link handling."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "OSC 8 link recognition does not depend on the removed link service",
+            "location": "crates/farhelm-ui/assets/vendor/xterm.js:2 (module 8811)",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether removing OscLinkService leaves program hyperlinks unavailable. Source refutation: crates/farhelm-terminal-emulator/src/queries.rs:367 delegates set_hyperlink to the emulator terminal. Browser grid-buffer.js:285-295 reads links from styled runs; :308-345 resolves generated continuation identities; :379-405 builds OSC links with explicit id/target identity and evidence. terminal.js:1029-1060 maps those OSC links to web or file handlers and keeps unrecognized schemes inert; :1108-1116 installs the grid provider, combining OSC links, printed URLs and file paths. Activation still passes through isLinkClick/hasSelection checks, and web targets through webDisclosureAdmits at :1013-1017. Synthesis checked the cross-layer metadata handoff: supervisor grid_output.rs:143-165 copies each cell hyperlink's id and URI into the outgoing CellRun representation. queries.rs:293-302 confirms that the delegate macro actually calls the terminal's Handler methods. The reviewed grid-buffer.js patch leaves executable identity resolution and link extraction unchanged. SPEC_impl.md:1785-1806 assigns link reading to the grid link-lines interface; :1817-1833 describes generated-id joining. Suggested bucket: high if program hyperlinks disappeared. Confidence: confirmed source refutation, no execution. proposed_drop: link metadata and activation are supplied by the grid/emulator path independently of OscLinkService. possible_cover: none; coverage sources were not searched. Could-be-highest: false for this candidate's lost-link availability consequence; no route to wrong-target opening or bypassed disclosure was established. Caveat: this is a deletion-impact check, not a new whole-system security audit of link handling."
+          }
+        }
+      ],
+      "latest": {
+        "line": 6,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c4",
+          "state": "open",
+          "summary": "OSC 8 link recognition does not depend on the removed link service",
+          "location": "crates/farhelm-ui/assets/vendor/xterm.js:2 (module 8811)",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether removing OscLinkService leaves program hyperlinks unavailable. Source refutation: crates/farhelm-terminal-emulator/src/queries.rs:367 delegates set_hyperlink to the emulator terminal. Browser grid-buffer.js:285-295 reads links from styled runs; :308-345 resolves generated continuation identities; :379-405 builds OSC links with explicit id/target identity and evidence. terminal.js:1029-1060 maps those OSC links to web or file handlers and keeps unrecognized schemes inert; :1108-1116 installs the grid provider, combining OSC links, printed URLs and file paths. Activation still passes through isLinkClick/hasSelection checks, and web targets through webDisclosureAdmits at :1013-1017. Synthesis checked the cross-layer metadata handoff: supervisor grid_output.rs:143-165 copies each cell hyperlink's id and URI into the outgoing CellRun representation. queries.rs:293-302 confirms that the delegate macro actually calls the terminal's Handler methods. The reviewed grid-buffer.js patch leaves executable identity resolution and link extraction unchanged. SPEC_impl.md:1785-1806 assigns link reading to the grid link-lines interface; :1817-1833 describes generated-id joining. Suggested bucket: high if program hyperlinks disappeared. Confidence: confirmed source refutation, no execution. proposed_drop: link metadata and activation are supplied by the grid/emulator path independently of OscLinkService. possible_cover: none; coverage sources were not searched. Could-be-highest: false for this candidate's lost-link availability consequence; no route to wrong-target opening or bypassed disclosure was established. Caveat: this is a deletion-impact check, not a new whole-system security audit of link handling."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g191/findings.jsonl",
+        "id": "c4",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "retired-osc-link-service-current-grid-dependency",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-120 after inspecting it. OSC 8 metadata travels from the emulator to grid links and their activation callbacks without the removed link service. Refute lost OSC-link availability caused by removal only; do not treat this as security approval of other link behavior. Checked source/results: [\"At f560058da19e02716e6f943883a9508b447aff4e, queries.rs:293-302,367 delegates hyperlinks; grid_output.rs:143-165 copies hyperlink id/URI into CellRun.\",\"grid-buffer.js:285-345 resolves hyperlink identities and :379-405 builds OSC links; terminal.js:1029-1060 supplies web/file/inert-scheme callbacks and :1108-1116 installs the provider.\",\"terminal.js:995-1017 checks admitted click/selection and disclosure for web activation. This confirms a retained path, not a whole-system link security audit. No execution.\"] Current coverage/results: [\"Current SPEC.md:3082-3170 requires link behavior and target disclosure; SPEC_impl grid-client/terminal-widget sections assign the grid link interface. No accepted disappearance of OSC links.\",\"TODO Planned empty; BUGS unrelated; matching removal/docs-cleanup plans preserve link behavior rather than accept or repair complete link-service dependency failure.\",\"INDEX.md read fully; hyperlink identity, hover and copied-text entries concern distinct mechanisms. Active TRIAGE_OUTCOMES search found no exact deletion/availability decision. No FILTER applied.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Hypothetical unavailable program hyperlinks, suggested high; history expressly disclaims an established wrong-target or disclosure-bypass route.\"; \"No missing live link metadata or callback handoff was found. No wrong-target/disclosure-bypass consequence was established by this candidate.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g191/c4",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "retired-osc-link-service-current-grid-dependency",
+        "bucket": "high",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-120 after inspecting it. OSC 8 metadata travels from the emulator to grid links and their activation callbacks without the removed link service. Refute lost OSC-link availability caused by removal only; do not treat this as security approval of other link behavior. Checked source/results: [\"At f560058da19e02716e6f943883a9508b447aff4e, queries.rs:293-302,367 delegates hyperlinks; grid_output.rs:143-165 copies hyperlink id/URI into CellRun.\",\"grid-buffer.js:285-345 resolves hyperlink identities and :379-405 builds OSC links; terminal.js:1029-1060 supplies web/file/inert-scheme callbacks and :1108-1116 installs the provider.\",\"terminal.js:995-1017 checks admitted click/selection and disclosure for web activation. This confirms a retained path, not a whole-system link security audit. No execution.\"] Current coverage/results: [\"Current SPEC.md:3082-3170 requires link behavior and target disclosure; SPEC_impl grid-client/terminal-widget sections assign the grid link interface. No accepted disappearance of OSC links.\",\"TODO Planned empty; BUGS unrelated; matching removal/docs-cleanup plans preserve link behavior rather than accept or repair complete link-service dependency failure.\",\"INDEX.md read fully; hyperlink identity, hover and copied-text entries concern distinct mechanisms. Active TRIAGE_OUTCOMES search found no exact deletion/availability decision. No FILTER applied.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Hypothetical unavailable program hyperlinks, suggested high; history expressly disclaims an established wrong-target or disclosure-bypass route.\"; \"No missing live link metadata or callback handoff was found. No wrong-target/disclosure-bypass consequence was established by this candidate.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-120",
+          "key": "g191/c4",
+          "latest_line": 6,
+          "recommendation": "refuted",
+          "bucket": "high",
+          "underlying_key": "retired-osc-link-service-current-grid-dependency",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "OSC 8 metadata travels from the emulator to grid links and their activation callbacks without the removed link service.",
+          "checks": [
+            "At f560058da19e02716e6f943883a9508b447aff4e, queries.rs:293-302,367 delegates hyperlinks; grid_output.rs:143-165 copies hyperlink id/URI into CellRun.",
+            "grid-buffer.js:285-345 resolves hyperlink identities and :379-405 builds OSC links; terminal.js:1029-1060 supplies web/file/inert-scheme callbacks and :1108-1116 installs the provider.",
+            "terminal.js:995-1017 checks admitted click/selection and disclosure for web activation. This confirms a retained path, not a whole-system link security audit. No execution."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:3082-3170 requires link behavior and target disclosure; SPEC_impl grid-client/terminal-widget sections assign the grid link interface. No accepted disappearance of OSC links.",
+            "TODO Planned empty; BUGS unrelated; matching removal/docs-cleanup plans preserve link behavior rather than accept or repair complete link-service dependency failure.",
+            "INDEX.md read fully; hyperlink identity, hover and copied-text entries concern distinct mechanisms. Active TRIAGE_OUTCOMES search found no exact deletion/availability decision. No FILTER applied."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No missing live link metadata or callback handoff was found. No wrong-target/disclosure-bypass consequence was established by this candidate.",
+          "original_stronger_consequence": "Hypothetical unavailable program hyperlinks, suggested high; history expressly disclaims an established wrong-target or disclosure-bypass route.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Refute lost OSC-link availability caused by removal only; do not treat this as security approval of other link behavior."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retired-osc-link-service-current-grid-dependency",
+        "destination": null
+      }
+    },
+    {
+      "key": "g191/c5",
+      "owner": "g191",
+      "id": "c5",
+      "domain": "retired-xterm-vendor",
+      "purpose": "retired-xterm-vendor: crates/farhelm-ui/assets/vendor/xterm.js; phases webpack module 2079: Property 2079 | webpack module 9078: Property 9078 | webpack module 2486: Property 2486 | webpack module 8811: Property 8811",
+      "history": [
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c5",
+            "state": "open",
+            "summary": "Attribution for retained selection ports survives bundle removal",
+            "location": "crates/farhelm-ui/assets/vendor/xterm.js:2 (module 2079)",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. Discovery pass 1. TLDR: considered whether deleting the vendored bundle and its separate license file also removes the attribution for selection behavior retained as Farhelm ports. Source refutation: crates/farhelm-ui/assets/grid-ported-code-LICENSES.txt was read in full and explicitly lists the grid-terminal.js selection coordinates, drag scrolling and block selection ports and grid-buffer.js selection-text/word-selection ports from SelectionService. Its @xterm/xterm — MIT section retains the xterm authors, SourceLair and Christopher Jeffrey copyright statements and complete permission/disclaimer text. THIRD_PARTY_NOTICES.md:19-45 identifies these retained ports and points to the shipped standalone notice. The asset declaration at crates/farhelm-ui/src/lib.rs:1484-1495 embeds that standalone file independently of the removed bundle. Suggested bucket: other if required attribution had disappeared; no missing attribution was found in the checked source. Confidence: confirmed source refutation; no build/distribution contents were executed or observed. proposed_drop: source refutation, because the retained port notice is separate and still declared as a distributed asset. possible_cover: none; prohibited coverage sources were not searched. Could-be-highest: false; this candidate concerns attribution retention, with no established security or loss-of-work route. Caveat: a source/asset-declaration check, not a legal opinion or a built-package audit. No parent drop is claimed accepted."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c5",
+          "state": "open",
+          "summary": "Attribution for retained selection ports survives bundle removal",
+          "location": "crates/farhelm-ui/assets/vendor/xterm.js:2 (module 2079)",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. Discovery pass 1. TLDR: considered whether deleting the vendored bundle and its separate license file also removes the attribution for selection behavior retained as Farhelm ports. Source refutation: crates/farhelm-ui/assets/grid-ported-code-LICENSES.txt was read in full and explicitly lists the grid-terminal.js selection coordinates, drag scrolling and block selection ports and grid-buffer.js selection-text/word-selection ports from SelectionService. Its @xterm/xterm — MIT section retains the xterm authors, SourceLair and Christopher Jeffrey copyright statements and complete permission/disclaimer text. THIRD_PARTY_NOTICES.md:19-45 identifies these retained ports and points to the shipped standalone notice. The asset declaration at crates/farhelm-ui/src/lib.rs:1484-1495 embeds that standalone file independently of the removed bundle. Suggested bucket: other if required attribution had disappeared; no missing attribution was found in the checked source. Confidence: confirmed source refutation; no build/distribution contents were executed or observed. proposed_drop: source refutation, because the retained port notice is separate and still declared as a distributed asset. possible_cover: none; prohibited coverage sources were not searched. Could-be-highest: false; this candidate concerns attribution retention, with no established security or loss-of-work route. Caveat: a source/asset-declaration check, not a legal opinion or a built-package audit. No parent drop is claimed accepted."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g191/findings.jsonl",
+        "id": "c5",
+        "line": 10,
+        "disposition": "excluded",
+        "group": "retained-grid-port-notices-after-xterm-removal",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-120 after inspecting it. The retained ports have their own complete license notices, still declared as a shipped asset independently of the removed bundle. Refute source/asset-declaration omission only. Do not convert the result into a package audit. Checked source/results: [\"At f560058da19e02716e6f943883a9508b447aff4e, grid-ported-code-LICENSES.txt was read in full: it lists selection ports and retains xterm, add-on and VS Code MIT notices.\",\"THIRD_PARTY_NOTICES.md:19-45 identifies the retained ports and separate notice. UI lib.rs:1484-1495 declares GRID_PORTED_CODE_LICENSES with #[used]. This is source/asset-declaration evidence, not an observed built-package audit or legal opinion.\"] Current coverage/results: [\"Current SPEC_impl.md:1693-1700 states that ported-code attribution stays beside the code and in THIRD_PARTY_NOTICES.md; SPEC.md has no separate accepted attribution-loss rule.\",\"TODO Planned empty; BUGS unrelated. plans/queue/tmux-end-old-terminals.md:125-129 and tmux-drop-from-docs.md:37-42,68-74 require retaining the independent notices; those requirements match the observed source, not a defect waiver.\",\"INDEX.md read fully; matching attribution searches found no exact retained-port notice-loss item. Active TRIAGE_OUTCOMES had no matching decision. No FILTER applied.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Possible required-attribution loss, suggested other; no security or loss-of-work route in supplied history.\"; \"No source-level loss of attribution. Built distribution contents were not inspected.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g191/c5",
+        "line": 10,
+        "disposition": "excluded",
+        "group": "retained-grid-port-notices-after-xterm-removal",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-120 after inspecting it. The retained ports have their own complete license notices, still declared as a shipped asset independently of the removed bundle. Refute source/asset-declaration omission only. Do not convert the result into a package audit. Checked source/results: [\"At f560058da19e02716e6f943883a9508b447aff4e, grid-ported-code-LICENSES.txt was read in full: it lists selection ports and retains xterm, add-on and VS Code MIT notices.\",\"THIRD_PARTY_NOTICES.md:19-45 identifies the retained ports and separate notice. UI lib.rs:1484-1495 declares GRID_PORTED_CODE_LICENSES with #[used]. This is source/asset-declaration evidence, not an observed built-package audit or legal opinion.\"] Current coverage/results: [\"Current SPEC_impl.md:1693-1700 states that ported-code attribution stays beside the code and in THIRD_PARTY_NOTICES.md; SPEC.md has no separate accepted attribution-loss rule.\",\"TODO Planned empty; BUGS unrelated. plans/queue/tmux-end-old-terminals.md:125-129 and tmux-drop-from-docs.md:37-42,68-74 require retaining the independent notices; those requirements match the observed source, not a defect waiver.\",\"INDEX.md read fully; matching attribution searches found no exact retained-port notice-loss item. Active TRIAGE_OUTCOMES had no matching decision. No FILTER applied.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Possible required-attribution loss, suggested other; no security or loss-of-work route in supplied history.\"; \"No source-level loss of attribution. Built distribution contents were not inspected.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-120",
+          "key": "g191/c5",
+          "latest_line": 10,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "retained-grid-port-notices-after-xterm-removal",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The retained ports have their own complete license notices, still declared as a shipped asset independently of the removed bundle.",
+          "checks": [
+            "At f560058da19e02716e6f943883a9508b447aff4e, grid-ported-code-LICENSES.txt was read in full: it lists selection ports and retains xterm, add-on and VS Code MIT notices.",
+            "THIRD_PARTY_NOTICES.md:19-45 identifies the retained ports and separate notice. UI lib.rs:1484-1495 declares GRID_PORTED_CODE_LICENSES with #[used]. This is source/asset-declaration evidence, not an observed built-package audit or legal opinion."
+          ],
+          "coverage_checked": [
+            "Current SPEC_impl.md:1693-1700 states that ported-code attribution stays beside the code and in THIRD_PARTY_NOTICES.md; SPEC.md has no separate accepted attribution-loss rule.",
+            "TODO Planned empty; BUGS unrelated. plans/queue/tmux-end-old-terminals.md:125-129 and tmux-drop-from-docs.md:37-42,68-74 require retaining the independent notices; those requirements match the observed source, not a defect waiver.",
+            "INDEX.md read fully; matching attribution searches found no exact retained-port notice-loss item. Active TRIAGE_OUTCOMES had no matching decision. No FILTER applied."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No source-level loss of attribution. Built distribution contents were not inspected.",
+          "original_stronger_consequence": "Possible required-attribution loss, suggested other; no security or loss-of-work route in supplied history.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Refute source/asset-declaration omission only. Do not convert the result into a package audit."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retained-grid-port-notices-after-xterm-removal",
+        "destination": null
+      }
+    },
+    {
+      "key": "g191/l1",
+      "owner": "g191",
+      "id": "l1",
+      "domain": "retired-xterm-vendor",
+      "purpose": "retired-xterm-vendor: crates/farhelm-ui/assets/vendor/xterm.js; phases webpack module 2079: Property 2079 | webpack module 9078: Property 9078 | webpack module 2486: Property 2486 | webpack module 8811: Property 8811",
+      "history": [
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Check whether program cursor colors survive removal of ThemeService",
+            "location": "crates/farhelm-ui/assets/vendor/xterm.js:2 (module 9078)",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. Discovery pass 1. TLDR: the removed ThemeService held a mutable cursor color, while the replacement may render the cursor only with the bundled theme even after a program changes it with OSC 12. Source basis already read: grid_output.rs:461-477 emits default_fg/default_bg but no cursor color; grid-terminal.js calls styles.cursor() for cursor painting; the removed module 9078 has cursor/restore-color support. Missing premise to check now: whether another grid message or browser path carries and applies the emulator's cursor-color override. Also check original integration actually forwarded OSC 12 and compare the entire review range before attributing a replacement gap. Suggested bucket: other for cursor-color correctness unless a larger established consequence emerges. Confidence: substantive source lead pending readily available checks; no runtime observation. proposed_drop: false pending investigation. possible_cover: none in supplied neighbour records; prohibited sources not searched. Could-be-highest: false for the named cursor-color display consequence; no loss-of-work/security route established. Material caveat: may predate the range on the grid path; its relationship to removal must be kept explicit."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Grid cursor-color omission confirmed; settle removal attribution",
+            "location": "crates/farhelm-ui/assets/vendor/xterm.js:2 (module 9078)",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. Discovery pass 1. TLDR: the grid replacement paints the bundled cursor color, ignoring a program's OSC 12 color change that the removed ThemeService could retain. Useful checks: grid-style.js:225-233 returns theme.cursor without emulator state; grid-terminal.js:792-819 applies that color to every cursor shape. grid_output.rs:329-362 serializes cursor position/visibility/shape/blink but no color, and :461-477 sends only default foreground/background colors. farhelm-proto/src/grid.rs:1040-1048,1128-1153 has no cursor-color field in Cursor or TerminalState. The parent xterm InputHandler registers OSC 12, setOrReportCursorColor sends a color event, and the browser core forwards that event to ThemeService.modifyColors; those minified source snippets were read directly. Historical check: baseline 6e423e30068b62c6cfa276c6d720ee35bb70387a already has the same fixed-theme cursor function (grid-style.js:220-250) and the same foreground/background-only terminal_state (grid_output.rs:460-476). git log over the entire pinned range shows only f560058d and 61e63232 touching those two files; check their patches and the complete Grid streams contract next to settle attribution and any explicit omission. Suggested bucket: other for cursor-color correctness. Confidence: source omission confirmed; scope/contract conclusion pending the named readily available checks, no runtime observation. proposed_drop: false pending that decision. possible_cover: none in supplied neighbour records; prohibited sources not searched. Could-be-highest: false for the original named cursor-color display consequence; no loss-of-work/security route established. Material caveat preserved: this is a baseline grid behavior, not evidence that f560058d newly broke cursor-color handling for existing grid terminals. The earlier c3 parser/theme ownership refutation is not proof that every ThemeService capability is preserved."
+          }
+        },
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Grid replacement ignores program-requested cursor colors",
+            "location": "crates/farhelm-ui/assets/grid-style.js:230",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e; assigned deletion is crates/farhelm-ui/assets/vendor/xterm.js:2, module 9078 (ThemeService). TLDR: a terminal program can change its cursor color, but Farhelm continues drawing the bundled cursor color. A program querying the cursor color can receive its requested color even though the viewer draws another. This is a replacement-contract gap exposed by reviewing removal of the service that maintained cursor colors. Details: vendor/vte/src/ansi.rs:1491-1507 dispatches dynamic OSC colors through NamedColor::Cursor to set_color or a query. The emulator forwards set_color/reset_color (farhelm-terminal-emulator/src/queries.rs:357-358) and answers dynamic queries from term.colors before theme fallback (:476-486). However, supervisor grid_output.rs:329-362 builds Cursor from position, visibility, shape and blink only; :461-477 sends foreground/background overrides but no cursor-color override. Proto grid.rs:1040-1048,1128-1153 likewise provides no cursor-color field. On the page grid-style.js:225-233 always returns theme.cursor, and grid-terminal.js:792-819 uses that color for blocks, bars, underlines and unfocused outlines. Thus no cursor-color update reaches the painter. The removed ThemeService contains mutable cursor state and restore handling; parent xterm.js InputHandler registers OSC 12, setOrReportCursorColor raises the color event, and browser core routes it through ThemeService.modifyColors, as confirmed by direct minified-source reads. Contract: SPEC.md:2860-2861 says 'Full fidelity: colors, cursor movement, alternate screens, resize. If it works over plain SSH it must work here.' SPEC_impl.md:2689-2693 says color queries answer from the theme or colors the program set; the program's set value can consequently disagree with the viewer. The complete Grid streams section (:3009-3110) contains no cursor-color exception; grid_output.rs:42-48 names accepted blink differences, not this color omission. Fix direction: carry the effective cursor color (including reset semantics) in the grid state/frame, and have paintCursor use it instead of only the bundled theme. Suggested bucket: other, cursor-color/display correctness. Confidence: confirmed by source and contract analysis; no runtime behavior observed or reproduced. proposed_drop: false. possible_cover: none in caller-supplied neighbour records; prohibited coverage sources were not searched. Could-be-highest: false for the established cursor-color display/query discrepancy; no security or loss-of-work route established. Important attribution caveat: this omission already exists at range baseline 6e423e30068b62c6cfa276c6d720ee35bb70387a in grid-style.js:220-250 and grid_output.rs:460-476. Complete baseline-to-tip diffs for both files change comments only; git log lists only f560058d and 61e63232 touching them. This is NOT a new cursor-color regression for existing grid terminals introduced by f560058d. It is reported only as a checked replacement-contract gap of the removed ThemeService, under the charter's deletion/replacement review rule; the caller must retain that scope and attribution. No independent defect in retired implementation was sought. Earlier c3 establishes parser/theme ownership, not preservation of every removed ThemeService capability."
+          }
+        },
+        {
+          "line": 14,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Grid replacement ignores program-requested cursor colors",
+            "location": "crates/farhelm-ui/assets/grid-style.js:230",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e; assigned deletion is crates/farhelm-ui/assets/vendor/xterm.js:2, module 9078 (ThemeService). Discovery pass 1. TLDR: a terminal program can change its cursor color, but Farhelm continues drawing the bundled cursor color. A program querying the cursor color can receive its requested color even though the viewer draws another. This is a replacement-contract gap exposed by reviewing removal of the service that maintained cursor colors. Details: vendor/vte/src/ansi.rs:1486-1511 explicitly handles OSC 10/11/12 through NamedColor::Cursor, dispatching set_color or a query. The emulator forwards set_color/reset_color (farhelm-terminal-emulator/src/queries.rs:357-358); vendor/alacritty_terminal/src/term/mod.rs:2145-2154 confirms set_color stores the cursor override in self.colors even though cursor-color changes do not mark all cells damaged. queries.rs:476-486 answers dynamic queries from those stored colors before theme fallback. However, supervisor grid_output.rs:329-362 builds Cursor from position, visibility, shape and blink only; :461-477 sends foreground/background overrides but no cursor-color override. Proto grid.rs:1040-1048,1128-1153 likewise has no cursor-color field. On the page grid-style.js:225-233 always returns theme.cursor, and grid-terminal.js:792-819 uses that color for blocks, bars, underlines and unfocused outlines. Thus no cursor-color update reaches the painter. The removed ThemeService contains mutable cursor state and restore handling; parent xterm.js InputHandler registers OSC 12, setOrReportCursorColor raises the color event, and browser core routes it through ThemeService.modifyColors, confirmed by direct minified-source reads. Contract: SPEC.md:2860-2861 says 'Full fidelity: colors, cursor movement, alternate screens, resize. If it works over plain SSH it must work here.' SPEC_impl.md:2689-2693 says color queries answer from the theme or colors the program set; the set value can consequently disagree with the viewer. The complete Grid streams section (:3009-3110) contains no cursor-color exception; grid_output.rs:42-48 names accepted blink differences, not this omission. Fix direction: carry effective cursor color with reset semantics in the grid state/frame and have paintCursor use it. Suggested bucket: other, cursor-color/display correctness. Confidence: confirmed by source and contract analysis; no runtime behavior observed or reproduced. proposed_drop: false. possible_cover: none in supplied neighbour records; prohibited coverage sources were not searched. Could-be-highest: false for the established cursor-color display/query discrepancy; no security or loss-of-work route established. Attribution caveat retained: this omission already exists at range baseline 6e423e30068b62c6cfa276c6d720ee35bb70387a in grid-style.js:220-250 and grid_output.rs:460-476. Complete baseline-to-tip diffs for both files change comments only; git log lists only f560058d and 61e63232 touching them. This is NOT a new cursor-color regression for existing grid terminals introduced by f560058d. It is reported only as a checked replacement-contract gap of the removed ThemeService, under the charter's deletion/replacement review rule; the caller must retain that scope and attribution. No independent retired-code defect was sought. Earlier c3 establishes parser/theme ownership, not preservation of every removed ThemeService capability. No parent drop or lowering is claimed accepted."
+          }
+        }
+      ],
+      "latest": {
+        "line": 14,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l1",
+          "state": "open",
+          "summary": "Grid replacement ignores program-requested cursor colors",
+          "location": "crates/farhelm-ui/assets/grid-style.js:230",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e; assigned deletion is crates/farhelm-ui/assets/vendor/xterm.js:2, module 9078 (ThemeService). Discovery pass 1. TLDR: a terminal program can change its cursor color, but Farhelm continues drawing the bundled cursor color. A program querying the cursor color can receive its requested color even though the viewer draws another. This is a replacement-contract gap exposed by reviewing removal of the service that maintained cursor colors. Details: vendor/vte/src/ansi.rs:1486-1511 explicitly handles OSC 10/11/12 through NamedColor::Cursor, dispatching set_color or a query. The emulator forwards set_color/reset_color (farhelm-terminal-emulator/src/queries.rs:357-358); vendor/alacritty_terminal/src/term/mod.rs:2145-2154 confirms set_color stores the cursor override in self.colors even though cursor-color changes do not mark all cells damaged. queries.rs:476-486 answers dynamic queries from those stored colors before theme fallback. However, supervisor grid_output.rs:329-362 builds Cursor from position, visibility, shape and blink only; :461-477 sends foreground/background overrides but no cursor-color override. Proto grid.rs:1040-1048,1128-1153 likewise has no cursor-color field. On the page grid-style.js:225-233 always returns theme.cursor, and grid-terminal.js:792-819 uses that color for blocks, bars, underlines and unfocused outlines. Thus no cursor-color update reaches the painter. The removed ThemeService contains mutable cursor state and restore handling; parent xterm.js InputHandler registers OSC 12, setOrReportCursorColor raises the color event, and browser core routes it through ThemeService.modifyColors, confirmed by direct minified-source reads. Contract: SPEC.md:2860-2861 says 'Full fidelity: colors, cursor movement, alternate screens, resize. If it works over plain SSH it must work here.' SPEC_impl.md:2689-2693 says color queries answer from the theme or colors the program set; the set value can consequently disagree with the viewer. The complete Grid streams section (:3009-3110) contains no cursor-color exception; grid_output.rs:42-48 names accepted blink differences, not this omission. Fix direction: carry effective cursor color with reset semantics in the grid state/frame and have paintCursor use it. Suggested bucket: other, cursor-color/display correctness. Confidence: confirmed by source and contract analysis; no runtime behavior observed or reproduced. proposed_drop: false. possible_cover: none in supplied neighbour records; prohibited coverage sources were not searched. Could-be-highest: false for the established cursor-color display/query discrepancy; no security or loss-of-work route established. Attribution caveat retained: this omission already exists at range baseline 6e423e30068b62c6cfa276c6d720ee35bb70387a in grid-style.js:220-250 and grid_output.rs:460-476. Complete baseline-to-tip diffs for both files change comments only; git log lists only f560058d and 61e63232 touching them. This is NOT a new cursor-color regression for existing grid terminals introduced by f560058d. It is reported only as a checked replacement-contract gap of the removed ThemeService, under the charter's deletion/replacement review rule; the caller must retain that scope and attribution. No independent retired-code defect was sought. Earlier c3 establishes parser/theme ownership, not preservation of every removed ThemeService capability. No parent drop or lowering is claimed accepted."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g191/findings.jsonl",
+        "id": "l1",
+        "line": 14,
+        "disposition": "rejected",
+        "group": "grid-osc12-cursor-color-not-transmitted",
+        "reason": "Parent explicitly accepted named covered proposal from claims-120 after inspecting it. The omission is source-established, but the exact trigger, consequence and scope are already recorded in the queue. The existing item already says it affects both live updates and reconnects. Exact existing-queue coverage, not source refutation or an accepted product exception. Optional provenance extension may add f560058d's retained replacement-gap confirmation and baseline attribution; it adds no new user-visible consequence. Checked source/results: [\"At f560058da19e02716e6f943883a9508b447aff4e, vte ansi.rs:1486-1511 accepts OSC 12; term/mod.rs:2145-2154 stores the cursor color; queries.rs:357-358 delegates it and :476-486 answers queries from stored colors.\",\"grid_output.rs:329-362 and :461-477 omit cursor color; proto grid.rs:1040-1048,1128-1153 has no field. grid-style.js:225-233 returns theme.cursor and grid-terminal.js:792-819 paints it.\",\"Baseline grid-style.js:220-240 already has the same fixed-theme mapping. Complete baseline-to-tip diffs for grid-style.js and grid_output.rs change comments only. It is not a new f560058d regression for existing grid terminals; retain the supplied deletion/replacement-contract attribution caveat. No runtime reproduction.\"] Current coverage/results: [\"Current SPEC.md:2860 requires fidelity; SPEC_impl.md:2670-2704 describes program-set color query answers and its complete Grid streams section has no cursor-color exception.\",\"TODO Planned empty; BUGS unrelated. Matching plans/queue sections remove obsolete code/docs and retain cursor defaults but do not specify transmission of OSC 12 overrides.\",\"INDEX.md:1315-1317 points to program-selected-cursor-color-never-reaches-viewer.md, read fully. Its existing g173/f4 evidence covers the same accepted OSC12 -> omitted field -> theme-only painter chain, with live/reconnect scope. Active TRIAGE_OUTCOMES search found no further exact decision. FILTER rare/self-correcting does not cover an ordinary program color change remaining wrong after reconnect.\"] Exact cited cover: [\"review_feedback_queue/program-selected-cursor-color-never-reaches-viewer.md, TLDR: A program that changes its text cursor color continues to show the theme's fixed cursor color, even though Farhelm's emulator accepts the new color.\",\"Same file, Details: No transmitted value can represent the accepted OSC12 change, on live update or reconnect.\"] Original stronger consequence and missing premise remain preserved: \"Cursor-color display/query disagreement, other throughout. Earlier parser/theme ownership refutation never established preservation of every ThemeService capability.\"; \"None for the conditional source omission. No runtime occurrence/frequency was measured. The current review does not establish a newly introduced omission within this range.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g191/l1",
+        "line": 14,
+        "disposition": "rejected",
+        "group": "grid-osc12-cursor-color-not-transmitted",
+        "bucket": "other",
+        "recording": "covered",
+        "queue_target_candidate": "review_feedback_queue/program-selected-cursor-color-never-reaches-viewer.md",
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named covered proposal from claims-120 after inspecting it. The omission is source-established, but the exact trigger, consequence and scope are already recorded in the queue. The existing item already says it affects both live updates and reconnects. Exact existing-queue coverage, not source refutation or an accepted product exception. Optional provenance extension may add f560058d's retained replacement-gap confirmation and baseline attribution; it adds no new user-visible consequence. Checked source/results: [\"At f560058da19e02716e6f943883a9508b447aff4e, vte ansi.rs:1486-1511 accepts OSC 12; term/mod.rs:2145-2154 stores the cursor color; queries.rs:357-358 delegates it and :476-486 answers queries from stored colors.\",\"grid_output.rs:329-362 and :461-477 omit cursor color; proto grid.rs:1040-1048,1128-1153 has no field. grid-style.js:225-233 returns theme.cursor and grid-terminal.js:792-819 paints it.\",\"Baseline grid-style.js:220-240 already has the same fixed-theme mapping. Complete baseline-to-tip diffs for grid-style.js and grid_output.rs change comments only. It is not a new f560058d regression for existing grid terminals; retain the supplied deletion/replacement-contract attribution caveat. No runtime reproduction.\"] Current coverage/results: [\"Current SPEC.md:2860 requires fidelity; SPEC_impl.md:2670-2704 describes program-set color query answers and its complete Grid streams section has no cursor-color exception.\",\"TODO Planned empty; BUGS unrelated. Matching plans/queue sections remove obsolete code/docs and retain cursor defaults but do not specify transmission of OSC 12 overrides.\",\"INDEX.md:1315-1317 points to program-selected-cursor-color-never-reaches-viewer.md, read fully. Its existing g173/f4 evidence covers the same accepted OSC12 -> omitted field -> theme-only painter chain, with live/reconnect scope. Active TRIAGE_OUTCOMES search found no further exact decision. FILTER rare/self-correcting does not cover an ordinary program color change remaining wrong after reconnect.\"] Exact cited cover: [\"review_feedback_queue/program-selected-cursor-color-never-reaches-viewer.md, TLDR: A program that changes its text cursor color continues to show the theme's fixed cursor color, even though Farhelm's emulator accepts the new color.\",\"Same file, Details: No transmitted value can represent the accepted OSC12 change, on live update or reconnect.\"] Original stronger consequence and missing premise remain preserved: \"Cursor-color display/query disagreement, other throughout. Earlier parser/theme ownership refutation never established preservation of every ThemeService capability.\"; \"None for the conditional source omission. No runtime occurrence/frequency was measured. The current review does not establish a newly introduced omission within this range.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-120",
+          "key": "g191/l1",
+          "latest_line": 14,
+          "recommendation": "covered",
+          "bucket": "other",
+          "underlying_key": "grid-osc12-cursor-color-not-transmitted",
+          "aliases": [
+            "existing queue provenance g173/f4"
+          ],
+          "target_queue_file": "review_feedback_queue/program-selected-cursor-color-never-reaches-viewer.md",
+          "why": "The omission is source-established, but the exact trigger, consequence and scope are already recorded in the queue. The existing item already says it affects both live updates and reconnects.",
+          "checks": [
+            "At f560058da19e02716e6f943883a9508b447aff4e, vte ansi.rs:1486-1511 accepts OSC 12; term/mod.rs:2145-2154 stores the cursor color; queries.rs:357-358 delegates it and :476-486 answers queries from stored colors.",
+            "grid_output.rs:329-362 and :461-477 omit cursor color; proto grid.rs:1040-1048,1128-1153 has no field. grid-style.js:225-233 returns theme.cursor and grid-terminal.js:792-819 paints it.",
+            "Baseline grid-style.js:220-240 already has the same fixed-theme mapping. Complete baseline-to-tip diffs for grid-style.js and grid_output.rs change comments only. It is not a new f560058d regression for existing grid terminals; retain the supplied deletion/replacement-contract attribution caveat. No runtime reproduction."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:2860 requires fidelity; SPEC_impl.md:2670-2704 describes program-set color query answers and its complete Grid streams section has no cursor-color exception.",
+            "TODO Planned empty; BUGS unrelated. Matching plans/queue sections remove obsolete code/docs and retain cursor defaults but do not specify transmission of OSC 12 overrides.",
+            "INDEX.md:1315-1317 points to program-selected-cursor-color-never-reaches-viewer.md, read fully. Its existing g173/f4 evidence covers the same accepted OSC12 -> omitted field -> theme-only painter chain, with live/reconnect scope. Active TRIAGE_OUTCOMES search found no further exact decision. FILTER rare/self-correcting does not cover an ordinary program color change remaining wrong after reconnect."
+          ],
+          "exact_cover_quotes": [
+            "review_feedback_queue/program-selected-cursor-color-never-reaches-viewer.md, TLDR: A program that changes its text cursor color continues to show the theme's fixed cursor color, even though Farhelm's emulator accepts the new color.",
+            "Same file, Details: No transmitted value can represent the accepted OSC12 change, on live update or reconnect."
+          ],
+          "missing_premise": "None for the conditional source omission. No runtime occurrence/frequency was measured. The current review does not establish a newly introduced omission within this range.",
+          "original_stronger_consequence": "Cursor-color display/query disagreement, other throughout. Earlier parser/theme ownership refutation never established preservation of every ThemeService capability.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Exact existing-queue coverage, not source refutation or an accepted product exception. Optional provenance extension may add f560058d's retained replacement-gap confirmation and baseline attribution; it adds no new user-visible consequence."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "grid-osc12-cursor-color-not-transmitted",
+        "destination": "program-selected-cursor-color-never-reaches-viewer.md"
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial pass complete. All four assigned packets reviewed at the recorded commit.\n\nNo reportable findings or unresolved leads. Four source-refuted candidates are recorded in `g191/findings.jsonl`; coverage and next state are in `g191/progress.md`.\n\nNo tests, reproductions, or checkout changes."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised `c1`–`c4` with cross-layer source evidence. Dispositions unchanged; no new findings.\n\nSynthesis complete. Unresolved lead IDs: none."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass complete. Checked auxiliary-service consumers, retained attribution, and cursor-color propagation against the full pinned range.\n\n- New verified: `l1` — grid rendering ignores program-requested cursor colors. This predates the range; recorded as a replacement-contract gap.\n- New unverified: none.\n- Open leads: none.\n- New rejected candidate: `c5`, attribution retention.\n\nSomething new was found. Records and progress updated; no runtime execution."
+    }
+  ],
+  "progress": "# g191 progress\n\nInitial review completed, turn 1. Discovery passes: 0. Awaiting the caller's later-turn instructions; no synthesis or discovery pass was performed in this turn.\n\nScope: retired xterm modules 2079, 9078, 2486, 8811, removed at f560058da19e02716e6f943883a9508b447aff4e. Read the entire brief and inventory commits field only. All four mandatory packets were read through the evidence command, each in its own tool call: 01085-008.patch:1, 01085-009.patch:1, 01085-010.patch:1, 01085-017.patch:1. Unread assigned material: none.\n\nDurable records: c1-c4 are source-refuted candidates. No reportable findings, no unresolved leads, no verified or unverified finding IDs in this pass. The first c1 recording attempt rejected an unsupported state value and wrote nothing; the corrected event was recorded with state open. Candidate disposition and full required fields are in each detail.\n\nInterfaces checked at the recorded revision: lib.rs:1479-1496,1914-1926 ships grid assets; terminal.js:3191-3234,3382-3408,4280-4365 builds grid-only surfaces; the parent terminal.js:3580-3605 already bypassed xterm globals for host terminals. Supervisor core.rs:6138-6190 ends the old private server before reload; :6370-6435 documents old rows reloading without terminals. No live xterm constructor or removed asset dependency appeared in pinned product UI searches. Grid selection, color mapping, emulator parsing/query ownership and OSC link recognition have independent implementations. c1-c4 name their source ranges and limits.\n\nGoverning contracts read at f560058da19e02716e6f943883a9508b447aff4e: SPEC.md:2855-3177 (complete Terminal experience); SPEC_impl.md:1504-1887 (complete Terminal widget including The grid client), :2671-2730 (complete supervisor emulator subsection), and :1069-1100 (Answers bind to what was drawn paragraph). Queue priority and recording instructions were read; prohibited coverage sources were not searched.\n\nSupporting source reads: grid-buffer.js:125-185,240-405,440-470; grid-terminal.js:1040-1167,1665-1693,1740-1812; grid-style.js:1-200; emulator.rs:106-162; queries.rs:1-180,232-278,300-370,468-502; terminal.js:1002-1063,1102-1138,3410-3510 in addition to factory/gate ranges above. Targeted symbol searches supplied surrounding references, including grid default-color updates and current/parent mount paths. One broad core.rs search was clipped; it was replaced with narrow symbol searches and the bounded startup/reload reads above, and the clipped portion was not treated as coverage.\n\nNo runtime tests, reproductions, builds, fixes or checkout writes. Conclusions are source analysis only. No claim that pre-existing grid/emulator behavior was exhaustively audited beyond deletion and replacement contracts.\n\nNext action: return the initial-pass outcome to the caller, then wait for a later-turn request.\n\n## Turn 2: later-turn synthesis\n\nCompleted synthesis of interactions between all four removal packets and their replacement callers. Turn count: 2. Discovery passes: 0. No new verified/unverified finding IDs, no new candidates and no open leads. Revised c1-c4 under their original IDs with additional source evidence; dispositions are unchanged. All assigned mandatory material remains read; unread assigned scope: none.\n\nRead the complete pinned patches for grid-buffer.js, grid-style.js, grid-input.js and grid-terminal.js as supporting interface context. The first three only change comments. Grid selection/copy and hyperlink admission paths are retained; the grid-terminal executable sizing changes remove the old renderer-swap exception. Read grid_output.rs:135-175,266-290,461-480 to connect emulator hyperlink/color state to outgoing rows and terminal state; this resolves the cross-layer assumptions behind c3/c4. Read queries.rs:284-307 to verify the forwarding macro, not merely its method declarations.\n\nChecked c1's old-peer assumption in source: parent protocol 76 versus reviewed protocol 77, farhelm-proto/src/io.rs:595-659 rejects mismatches, and farhelm-helm/src/manager.rs:4500-4542 returns skew instead of a connected client. Additional targeted searches were limited to protocol/version and grid-output symbols. No coverage sources were searched.\n\nAll conclusions remain source-supported. No tests, builds, reproductions or checkout writes. Next: return this turn's delta and wait for the caller's next instruction.\n\n## Turn 3: discovery pass 1, interface synthesis\n\nRead discovery-neighbours.json completely in chunks 1-160,161-200,201-246 before the new source search. Named pending questions: none. Supplied substantive interfaces: old-page valid JSON input reinterpretation (g196/l1, g082/c2, g083/c5), failed-mount fixture mismatch (g083/l1, g135/l2, g136/l1), primary-write guidance (g186/c2), single-write explanation (g010/f1). These remain the caller's known findings, not new discoveries here. Unrelated container implementation records supplied in the same context are outside g191 and will not be pursued.\n\nRevised c1 immediately to make the browser-versus-supervisor compatibility boundary explicit: its old-supervisor handshake check does not refute or lower the supplied old-page highest route. Existing c2-c4 settle only their named removal hypotheses, not separate test-oracle, clipboard-guidance or documentation defects. No drop/lowering accepted. State: beginning an additional discovery search limited to the assigned deleted services and their removal implications. No new IDs or open local leads yet.\n\n## Turn 3: discovery pass 1 complete\n\nDiscovery count: 1. New verified finding: l1, program cursor-color changes do not reach the grid painter; retains the explicit baseline/pre-existing replacement-contract attribution caveat. New unverified-after-investigation findings: none. Open leads: none (l1 was promoted after source checks). New source-refuted candidate: c5, retained selection-port attribution. Revised existing c1 for interface scope only. New substantive behavior found: yes, l1. The finding does not claim f560058d introduced the baseline grid omission or that runtime behavior was observed.\n\nAdditional checks beyond known candidates: full-range history of xterm.js confirms a single in-range deletion commit. Auxiliary deleted services (CircularList, UnicodeService, color/contrast helpers, dependency registry and browser feature/zoom exports) have no surviving symbol consumers in the checked pinned UI source. The retained MIT notice file was read fully and its asset declaration and source attribution checked; c5 records that rejected candidate immediately. No additional removal defect arose from those checks.\n\nl1 source checks: grid-style.js:225-310, grid-terminal.js:780-840, grid_output.rs:1-60,329-366,461-477, grid.rs Cursor/TerminalState declarations, queries.rs:350-365,470-489, vendor/vte/src/ansi.rs:1466-1515, and alacritty Term::set_color:2145-2154. Compared range-baseline cursor style and terminal_state implementations, the entire baseline-to-tip grid-style.js/grid_output.rs diffs and their full-range commit history. Re-read complete SPEC_impl.md Grid streams:3009-3110 and SPEC.md Terminal experience opening. The behavioral gap predates the range on the grid path; its only review attribution is the assigned removed ThemeService's replacement contract. It is not a distinct documentation/test-oracle claim, and no production correctness assertion was used to dismiss the supplied documentation or test findings.\n\nAll four assigned packets remain read. No unread assigned scope. No reproductions, runtime tests, builds, live-install actions or checkout writes. All findings and candidates are durable in findings.jsonl. Next: return this discovery delta; a substantive new discovery means a later additional pass is still needed under the charter.\n"
+}

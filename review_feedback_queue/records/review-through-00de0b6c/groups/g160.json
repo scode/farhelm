@@ -1,0 +1,897 @@
+{
+  "group": {
+    "id": "g160",
+    "domain": "retired-supervisor-tmux",
+    "purpose": "retired-supervisor-tmux: crates/farhelm-supervisor/src/tmux.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g001",
+      "g007",
+      "g008",
+      "g009",
+      "g071",
+      "g072",
+      "g073",
+      "g097",
+      "g098",
+      "g099",
+      "g100",
+      "g101",
+      "g102",
+      "g103",
+      "g104",
+      "g105",
+      "g106",
+      "g107",
+      "g108",
+      "g109",
+      "g110",
+      "g111",
+      "g112",
+      "g113",
+      "g114",
+      "g115",
+      "g116",
+      "g117",
+      "g118",
+      "g119",
+      "g120",
+      "g121",
+      "g127",
+      "g128",
+      "g129",
+      "g130",
+      "g131",
+      "g132",
+      "g133",
+      "g134",
+      "g144",
+      "g145",
+      "g146",
+      "g149",
+      "g150",
+      "g151",
+      "g152",
+      "g153",
+      "g154",
+      "g155",
+      "g156",
+      "g157",
+      "g158",
+      "g159",
+      "g161",
+      "g162",
+      "g163",
+      "g164",
+      "g165",
+      "g166",
+      "g169",
+      "g173"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00951-000.patch",
+        "ranges": [
+          [
+            1,
+            1207
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/tmux.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,59558)",
+        "lines": 1207,
+        "bytes": 59658,
+        "start": 0,
+        "end": 59558,
+        "original": "[private-run]/prep/originals/00951.patch"
+      }
+    ],
+    "lines": 1207,
+    "bytes": 59658
+  },
+  "records": [
+    {
+      "key": "g160/c1",
+      "owner": "g160",
+      "id": "c1",
+      "domain": "retired-supervisor-tmux",
+      "purpose": "retired-supervisor-tmux: crates/farhelm-supervisor/src/tmux.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removing the tmux driver ends old terminals and removes their restart scrollback",
+            "location": "crates/farhelm-supervisor/src/tmux.rs:1",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Users upgrading with old tmux-backed sessions lose those running terminals and their retained screens; restarting them starts an empty terminal. Could-be-highest: yes, ending user-owned processes and losing retained output would ordinarily qualify. Suggested bucket: highest if contrary to the upgrade contract. Confidence: confirmed source and specification analysis; no runtime behavior observed. Proposed_drop: exact specification acceptance. SPEC.md:3004-3016 explicitly says: 'This release ends them: the first time a host’s supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.' (The source uses a straight apostrophe in host's.) It also says: 'After an update to this release, Restart, Clone and Replace start such a session in a new, empty terminal.' SPEC_impl.md:2882-2889 states the running supervisor runs no tmux and its driver of old terminals is gone. The assigned patch removes TmuxDriver exports and the HISTORY_LIMIT/restart-seed invariant at tmux.rs parent lines 23-75; this is the specified retirement, not an independent defect in deleted code. Possible_cover: none; no coverage sources searched. Caveat: this candidate accepts only deliberate retirement and empty restart, not an accidental effect on sessions already in terminal hosts; replacement and cleanup callers still require source checking."
+          }
+        },
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removing the tmux driver ends old terminals and removes their restart scrollback",
+            "location": "crates/farhelm-supervisor/src/tmux.rs:1",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Users upgrading with old tmux-backed sessions lose those running terminals and their retained screens; restarting them starts an empty terminal. Could-be-highest: yes, ending user-owned processes and losing retained output would ordinarily qualify. Suggested bucket: highest if contrary to the upgrade contract. Confidence: confirmed source and specification analysis; no runtime behavior observed. Proposed_drop: exact specification acceptance. SPEC.md:3004-3016 explicitly says: 'This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.' It also says: 'After an update to this release, Restart, Clone and Replace start such a session in a new, empty terminal.' SPEC_impl.md:2882-2889 states the running supervisor runs no tmux and its driver of old terminals is gone. The assigned patch removes TmuxDriver exports and the HISTORY_LIMIT/restart-seed invariant at tmux.rs parent lines 23-75; this is the specified retirement, not an independent defect in deleted code. Possible_cover: none; no coverage sources searched. Caveat: this candidate accepts only deliberate retirement and empty restart, not an accidental effect on sessions already in terminal hosts; replacement and cleanup callers still require source checking."
+          }
+        },
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removing the tmux driver ends old terminals and removes their restart scrollback",
+            "location": "crates/farhelm-supervisor/src/tmux.rs:1",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Users upgrading with old tmux-backed sessions lose those running terminals and their retained screens; restarting them starts an empty terminal. Could-be-highest: yes, ending user-owned processes and losing retained output would ordinarily qualify. Suggested bucket: highest if contrary to the upgrade contract. Confidence: confirmed source and specification analysis; no runtime behavior observed. Proposed_drop: exact specification acceptance. SPEC.md:3004-3016 explicitly says: 'This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.' It also says: 'After an update to this release, Restart, Clone and Replace start such a session in a new, empty terminal.' SPEC_impl.md:2882-2889 states the running supervisor runs no tmux and its driver of old terminals is gone. The assigned patch removes TmuxDriver exports and the HISTORY_LIMIT/restart-seed invariant at tmux.rs parent lines 23-75; this is the specified retirement, not an independent defect in deleted code. Possible_cover: none; no coverage sources searched. Caveat: this candidate accepts only deliberate retirement and empty restart, not an accidental effect on sessions already in terminal hosts; replacement and cleanup callers still require source checking."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c1",
+            "state": "open",
+            "summary": "Old-terminal retirement loses running terminals and retained screens, as explicitly specified",
+            "location": "crates/farhelm-supervisor/src/tmux.rs:1",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Users upgrading with old tmux-backed sessions lose those running terminals and their retained screens; restarting them starts an empty terminal. Could-be-highest: yes, ending user-owned processes and losing retained output would ordinarily qualify. Suggested bucket: highest if contrary to the upgrade contract. Confidence: confirmed source and specification analysis; no runtime behavior observed. Proposed_drop: exact specification acceptance, additionally retirement already exists in this commit's parent. SPEC.md:3004-3016 explicitly says: 'This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.' It also says: 'After an update to this release, Restart, Clone and Replace start such a session in a new, empty terminal.' SPEC_impl.md:2882-2889 states the running supervisor runs no tmux and its driver of old terminals is gone. The assigned patch removes driver exports and the HISTORY_LIMIT/restart-seed invariant from tmux.rs. Parent-revision source search establishes that core.rs:6434 already calls OldTerminals::end_private_server and core.rs:6969 already resolves TerminalKind::Tmux as None; thus ending old terminals predates the assigned deletion. In the reviewed revision, core.rs:6142-6184 preserves that ordering and 6675-6715 preserves distinct host lookup; core/old_terminals.rs:300-342 sweeps AgentOnly or individual Tab targets and old_tabs:399-402 excludes new host tab records. Possible_cover: none; no coverage sources searched. Caveats: retains the original loss-of-work consequence for independent checking even though accepted by contract and not newly introduced by this deletion. No accidental destruction of already-host-backed sessions was established. Replacement implementations were read only to judge deletion contracts, not independently reviewed in full."
+          }
+        },
+        {
+          "line": 14,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c1",
+            "state": "open",
+            "summary": "Old-terminal retirement loses running terminals and retained screens, as explicitly specified",
+            "location": "crates/farhelm-supervisor/src/tmux.rs:1",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Original TLDR retained: Users upgrading with old tmux-backed sessions lose those running terminals and their retained screens; restarting them starts an empty terminal. Could-be-highest: yes, ending user-owned processes and losing retained output would ordinarily qualify. Suggested bucket: highest if contrary to the upgrade contract. Confidence: confirmed source and specification analysis; no runtime behavior observed. Proposed_drop: exact specification acceptance, additionally retirement already exists in this commit's parent. The drop is proposed only and has not been independently accepted. SPEC.md:3004-3016 explicitly says: 'This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.' It also says: 'After an update to this release, Restart, Clone and Replace start such a session in a new, empty terminal.' The known residual retains its provenance rather than being counted as new discovery: the same paragraph says, 'A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running.' SPEC_impl.md:2882-2889 states the supervisor runs no tmux and its driver is gone. The assigned patch removes driver exports and the HISTORY_LIMIT/restart-seed invariant from tmux.rs. Parent source already calls OldTerminals::end_private_server at core.rs:6434 and resolves TerminalKind::Tmux as None at 6969; ending old terminals predates this deletion. Reviewed source preserves startup ordering at core.rs:6142-6184 and distinct host lookup at 6675-6715; old_terminals.rs:300-342 sweeps AgentOnly or individual Tab targets, excluding new host tab records at 399-402. Synthesis traced the retained host-only lifecycle: host_restart.rs:216-257 supplies an old-host history seed or an empty default to the new host; 294-388 confirms/publishes the replacement before ending the held old host; restart_seed:418-490 uses the held host runtime, with explicit bounded/gone-history behavior. The assigned source supplied no distinct route to missing update warnings or misleading update-survival guidance, so retirement acceptance was not used to settle such a separate defect. Wrong-target fallback and later unconfirmed Delete were instead checked against source and retained test assertions under l1 and c2. Possible_cover: none. Caveats: the original loss-of-work consequence and accepted duplicate-agent residual remain for independent checking. No accidental destruction of already-host-backed sessions was established. This is source-only analysis of deletion interfaces, not an exhaustive independent review of all replacement code."
+          }
+        }
+      ],
+      "latest": {
+        "line": 14,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "c1",
+          "state": "open",
+          "summary": "Old-terminal retirement loses running terminals and retained screens, as explicitly specified",
+          "location": "crates/farhelm-supervisor/src/tmux.rs:1",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Original TLDR retained: Users upgrading with old tmux-backed sessions lose those running terminals and their retained screens; restarting them starts an empty terminal. Could-be-highest: yes, ending user-owned processes and losing retained output would ordinarily qualify. Suggested bucket: highest if contrary to the upgrade contract. Confidence: confirmed source and specification analysis; no runtime behavior observed. Proposed_drop: exact specification acceptance, additionally retirement already exists in this commit's parent. The drop is proposed only and has not been independently accepted. SPEC.md:3004-3016 explicitly says: 'This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.' It also says: 'After an update to this release, Restart, Clone and Replace start such a session in a new, empty terminal.' The known residual retains its provenance rather than being counted as new discovery: the same paragraph says, 'A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running.' SPEC_impl.md:2882-2889 states the supervisor runs no tmux and its driver is gone. The assigned patch removes driver exports and the HISTORY_LIMIT/restart-seed invariant from tmux.rs. Parent source already calls OldTerminals::end_private_server at core.rs:6434 and resolves TerminalKind::Tmux as None at 6969; ending old terminals predates this deletion. Reviewed source preserves startup ordering at core.rs:6142-6184 and distinct host lookup at 6675-6715; old_terminals.rs:300-342 sweeps AgentOnly or individual Tab targets, excluding new host tab records at 399-402. Synthesis traced the retained host-only lifecycle: host_restart.rs:216-257 supplies an old-host history seed or an empty default to the new host; 294-388 confirms/publishes the replacement before ending the held old host; restart_seed:418-490 uses the held host runtime, with explicit bounded/gone-history behavior. The assigned source supplied no distinct route to missing update warnings or misleading update-survival guidance, so retirement acceptance was not used to settle such a separate defect. Wrong-target fallback and later unconfirmed Delete were instead checked against source and retained test assertions under l1 and c2. Possible_cover: none. Caveats: the original loss-of-work consequence and accepted duplicate-agent residual remain for independent checking. No accidental destruction of already-host-backed sessions was established. This is source-only analysis of deletion interfaces, not an exhaustive independent review of all replacement code."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g160/findings.jsonl",
+        "id": "c1",
+        "line": 14,
+        "disposition": "under-investigation",
+        "group": "g160-c1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-101",
+          "key": "g160/c1",
+          "latest_line": 14,
+          "recommendation": "duplicate",
+          "bucket": "highest",
+          "underlying_key": "intentional-old-tmux-terminal-retirement",
+          "aliases": [
+            "g159/f1"
+          ],
+          "target_queue_file": null,
+          "why": "This is the same intentional retirement, retained-screen loss, empty restart and accepted duplicate-agent fallback as g159/f1. Consolidate without losing its explicit caveat that no accidental destruction of already-host-backed terminals was established. The deletion commit's parent already retired old terminals, but retirement is still inside the full review range; do not mark it out-of-range on immediate-parent attribution alone.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333:SPEC.md:3004-3016 explicitly requires these consequences; current SPEC.md:2998-3011 preserves them.",
+            "Reviewed core.rs:6142-6184 retires before reload; :6675-6715 maps old-kind rows to no terminal while independently adopting host-kind rows.",
+            "Reviewed host_restart.rs:34-60 preserves host scrollback above a blank screen and identifies empty fallback cases; :216-257 passes the retained history blob to the new host. This is source-only deletion-interface checking, not an exhaustive review of replacement code."
+          ],
+          "coverage_checked": [
+            "Exact coverage is current SPEC.md:2998-3011 and SPEC_impl.md:2780-2823, as quoted below and in g159/f1.",
+            "TODO Planned is empty. Matching retirement and subsequent removal plans do not accept accidental loss of host-backed work; no such loss is established here.",
+            "BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md searched for exact retirement/history/duplicate-Restart consequences; no exact queued item or active decision found. No archive read.",
+            "FILTER.md read; no filter asserted. Exact specification acceptance, rather than a generic upgrade filter, supplies the proposed basis."
+          ],
+          "exact_cover_quotes": [
+            "SPEC.md:3000-3002: A supervisor that finds that tmux server when it starts ends it, and with it everything that still ran in an old terminal, without needing a tmux program.",
+            "SPEC.md:3008-3011: A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running. Restart, Clone and Replace start such a session in a new, empty terminal."
+          ],
+          "missing_premise": null,
+          "original_stronger_consequence": "Ending old-terminal agents and tabs loses running work and retained screens; Restart starts empty. Failed cleanup can leave an old agent running beside a restarted one. The highest consequence is preserved despite explicit acceptance.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Exact same-root alias of g159/f1, with explicit specification acceptance. Separate independent check required before either record is dropped."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "intentional-old-tmux-terminal-retirement",
+        "destination": "trailing-intentional-old-tmux-terminal-retirement.md"
+      }
+    },
+    {
+      "key": "g160/c2",
+      "owner": "g160",
+      "id": "c2",
+      "domain": "retired-supervisor-tmux",
+      "purpose": "retired-supervisor-tmux: crates/farhelm-supervisor/src/tmux.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Deleted control-mode interfaces leave no remaining executable callers",
+            "location": "crates/farhelm-supervisor/src/tmux.rs:15",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered whether deleting the old terminal driver could leave current sessions unable to attach, receive input, or clean up. Suggested bucket: high if an active terminal path were removed without replacement; could-be-highest: yes if this also prevented owned-process cleanup, but no such route was found. Confidence: confirmed source refutation, no runtime execution. Proposed_drop: source refutation. A git grep across crates at the reviewed revision for TmuxDriver, TmuxBudgets, InputClient, SessionSink, ReplayStreamCandidate, LaunchExcerptFence, PaneModes, TAB_WINDOW_OPTION, AGENT_WINDOW_OPTION, TAB_SCOPED_WINDOW_OPTION, CONTROL_EXCHANGE_TIMEOUT, CONTROL_CLIENT_SHUTDOWN_TIMEOUT, PANE_DIED_CHANNEL, PANE_LIST_TIMEOUT, resolve_tmux_program_from_env, require_supported_tmux, tmux_not_found_message, retain_pane_tail, unescape_control_output, TMUX_PAUSE_AFTER_SECS and HISTORY_LIMIT found only old names inside comments, no executable callers. service/terminals.rs:1-10 and 105-141 resolve agent and tab terminals as HostTerminal values. core.rs:6142-6184 ends the old server before reloading; core.rs:6675-6715 keeps distinct old-kind and host-kind lookup paths. core/old_terminals.rs:300-342 sweeps converted agents with AgentOnly and old tabs with Tab; old_tabs at 399-402 excludes tab IDs with host launch records. The host restart contract and replacement remain in core/host_restart.rs:34-60 and 177-194. SPEC_impl.md:2209-2235 names those host runtime switch points and promises host tabs remain. Possible_cover: none. Caveats: source-only interface review of the deletion; this is not a comprehensive review of replacement implementations assigned to other groups."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Deleted control-mode interfaces leave no remaining executable callers",
+            "location": "crates/farhelm-supervisor/src/tmux.rs:15",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Original TLDR retained: Considered whether deleting the old terminal driver could leave current sessions unable to attach, receive input, or clean up. Suggested bucket: high if an active terminal path were removed without replacement; could-be-highest: yes if this also prevented owned-process cleanup, but no such route was found. Confidence: confirmed source refutation, no runtime execution. Proposed_drop: source refutation, still pending independent check. Possible_cover: none. Earlier source checks found no executable callers of removed control-mode interfaces across crates; terminal resolution is host-only and startup cleanup separates old rows and host rows (original event has precise references). Synthesis adds prompt-path checks: core.rs:11913-11924 holds the target lifecycle claim while selecting its entry; 11944-11958 requires a live host; 11963-11975 rejects waiting/unknown status; 11999-12010 refuses an unreplayed terminal and paste mode off before delivery. deliver_prompt_to_host at 2192-2232 writes one bracketed paste through an input sequence and waits for Written before submitting, with a ten-second whole-delivery bound and explicit partial-delivery errors. This replaces the deleted raw tmux boolean-expansion parser without retaining its grammar. Test sensitivity was checked separately from production: core/tests/host_terminals.rs:541-589 asserts the exact paste-off refusal and zero received bytes, then enables emulator paste mode and asserts exact bytes for both a one-part prompt and a cap-sized multipart prompt. Removing the production paste-mode guard would make its first expect_err fail. The recovered-terminal test at 1484-1535 establishes paste-on plus caught_up=false, asserts the specific restoration refusal and no received input, then completes replay and asserts exact prompt bytes. Removing the caught-up guard would fail its refusal. No runtime tests or mutations were run. Caveats: production-correctness and test-sensitivity conclusions are limited to the examined prompt branches; this event does not claim comprehensive coverage of all host input transport failures or cleanup paths. The original possible loss-of-work consequence remains preserved for independent checking."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Deleted control-mode interfaces leave no remaining executable callers",
+            "location": "crates/farhelm-supervisor/src/tmux.rs:15",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Original TLDR retained: Considered whether deleting the old terminal driver could leave current sessions unable to attach, receive input, or clean up. Suggested bucket: high if an active terminal path were removed without replacement; could-be-highest: yes if this also prevented owned-process cleanup, but no such route was found. Confidence: confirmed source refutation, no runtime execution. Proposed_drop: source refutation, still pending independent check. Possible_cover: none. Interface checks found no executable callers of removed control-mode interfaces across crates; terminals.rs:105-141 and 225-248 resolve host runtimes; core.rs:6142-6184 ends old terminals before distinct old-kind/host-kind reload lookup at 6675-6715. Prompt delivery remains under the target lifecycle claim (core.rs:11913-11924), requires a live host and acceptable status (11944-11975), rejects unreplayed or paste-off modes (11999-12010), and writes a whole paste before acknowledged submit through one input sequence (2192-2232). Separate test-sensitivity checks: core/tests/host_terminals.rs:541-589 asserts the paste-off refusal and zero bytes, enables paste mode, then asserts exact small and multipart prompt bytes; 1484-1535 establishes paste-on/caught_up=false, asserts a restoration-specific refusal with zero bytes, completes replay and asserts exact successful input. Removing either guard breaks the corresponding expect_err. Synthesis additionally checked unconfirmed cleanup rather than inferring it from deliberate retirement acceptance: session_hosts.rs:686-792 ends every held/recorded host, accumulates failures and deadline misses, and returns Err for any unconfirmed host. teardown.rs:531-561 propagates sweep or host-shutdown failure before artifact removal (651) or row removal; it does not report successful Delete on that error. core/tests/host_terminals.rs:1151-1193 establishes an unreadable host and live child, then requires unconditional Delete to kill that child yet fail with the row and map entry retained when host termination cannot be confirmed. Its recorded-host case at 1216-1254 uses a terminal-less old-kind row plus launch record and requires guarded refusal, an unconditional unconfirmed result, exactly one settle connection per Delete, and retained row. The tab-close test at 3703-3780 establishes a pinned peer, removes its socket, waits for Gone, then requires close to refuse and retain the tab's launch record and retry mark. These assertions test surviving cleanup responsibilities rather than relying on obsolete tmux tests or production correctness alone. Caveats: no mutation testing or runtime observation; no comprehensive review of every replacement failure path. The original possible loss-of-work consequence remains preserved for independent checking, with no concrete wrong-target or later unconfirmed-Delete route established by the assigned deletion."
+          }
+        },
+        {
+          "line": 16,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c2",
+            "state": "open",
+            "summary": "Reconcile unconfirmed-Delete refutation with Gone tab runtime bypass",
+            "location": "crates/farhelm-supervisor/src/tmux.rs:15",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Original TLDR/consequence retained: Considered whether deleting the old terminal driver could leave current sessions unable to attach, receive input, or clean up. Could-be-highest remains yes for an established owned-process loss route; the newly supplied orphan terminal-host consequence alone is other unless further harm is established. Confidence: synthesis lead pending accessible collection/attribution checks; no execution. Proposed_drop: prior source-refutation remains valid for missing removed-symbol callers and examined prompt gates, but withdrawn as a blanket conclusion that all unconfirmed host-ending outcomes necessarily propagate to Delete. Possible_cover: neighbour g166/c5 directly supplies the known Gone-tab bypass; not a new discovery. Own source reads already show host_tabs.rs:1052-1062 checks an adopted process when a close sees Gone, whereas session_hosts.rs:733-740 calls end_launch_host directly and host_launch.rs:694-696 returns Ok on shutdown Err(Gone). The earlier tests establish unreadable-host error propagation and tab-close Gone confirmation, not Delete's Gone-runtime branch. Readily checkable remaining premises: whether Gone non-placeholder tabs remain in SessionHosts.tabs and their launch record is excluded from settling; whether child-root checking can independently establish host process exit; and attribution across the full pinned range. No parent drop is accepted. Preserve the original possible loss-of-work consequence and its narrower source refutations; this lead is about the distinct false-success cleanup consequence identified by the neighbour."
+          }
+        },
+        {
+          "line": 17,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c2",
+            "state": "open",
+            "summary": "Gone-tab Delete bypass is distinct from the refuted removed-interface concern",
+            "location": "crates/farhelm-supervisor/src/tmux.rs:15",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Original TLDR preserved: Considered whether deleting the old terminal driver could leave current sessions unable to attach, receive input, or clean up. Original possible owned-process loss remains could-be-highest if a shipped loss route is established; the distinct confirmed consequence here is an orphan terminal-host process, bucket other, without established child/work loss. Confidence: confirmed conditional source route, no execution. Proposed_drop: prior source refutation remains valid only for missing removed-symbol callers, examined prompt gates and ordinary propagated cleanup errors; it is withdrawn for the broad claim that every unconfirmed tab-host end necessarily retains the session. No parent drop accepted. Known cross-group consequence, not new discovery: g166/c5 supplies Delete's Gone-runtime bypass. Own direct checks confirm session_hosts.rs:245-260 partitions only placeholders, keeps a non-placeholder Gone tab in tabs, and excludes its held socket's record from independent settling; :317-323 retains that vector. HostTerminal::is_placeholder at terminal.rs:2091-2097 describes construction rather than liveness. pinned_child_root at :771-785 checks only the child and can return None when it exited, not proof of host termination. SessionHosts::end:733-740 calls end_launch_host directly; host_launch.rs:694-696 returns Ok for shutdown Err(Gone), unlike close's special adopted-process verification in host_tabs.rs:1052-1062. HostTerminal::shutdown:2374-2385 returns final liveness when its runtime ended. Thus a tab whose socket disappears and connection ends can be forgotten by Delete while its adopted host process still runs; its host has no session marker and is not ended by the child sweep (teardown.rs:542-545). Existing error propagation at teardown.rs:557-561 cannot catch a branch that already returned Ok. The retained close test at core/tests/host_terminals.rs:3703-3780 confirms the relevant source fixture and requires preservation there; it does not test Delete's distinct caller. Contract: SPEC_impl.md:2423-2461 requires ending every session host and keeping the row/records when one is not confirmed ended; the source route violates that distinction. Full-range attribution checked rather than merely the immediate parent: exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a already has the same tab call at session_hosts.rs:746-752 and Gone-success branch at host_launch.rs:684-686; base-to-reviewed diffs do not change those branches. Therefore this is not introduced by the assigned deletion or elsewhere in this pinned range. Possible_cover: known neighbour g166/c5, preserving its provenance; parent owns consolidation and scope disposition. Earlier ordinary-path tests and prompt checks remain valid with their precise source/assertion references in prior events. Material caveats: socket loss plus ended runtime is required; normal Delete is not alleged to remove the socket first. No user-work loss, wrong-target kill, runtime occurrence or test execution is claimed for this distinct bypass. Original possible highest consequence is not silently replaced by the narrower orphan-host consequence. No unresolved source premise remains for this known route."
+          }
+        },
+        {
+          "line": 21,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c2",
+            "state": "open",
+            "summary": "Recheck supported producer for the conditional Gone-tab Delete bypass",
+            "location": "crates/farhelm-supervisor/src/tmux.rs:15",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Original consequence preserved: deleted control-mode interfaces might leave sessions unable to attach, receive input, or clean up; a distinct Gone-tab route might report deletion with a terminal host still running. Original possible highest owned-process/work loss remains separate; established orphan-host consequence would be other. No parent drop or lowering accepted. Confidence: reopened source lead on producer premise; previous c2 conclusion that no source premise remained is withdrawn pending checks. Parent supplied latest g166/f1 limiting evidence: actual hosts/client.rs connect/reconnect confirms socket absence against process discovery, and a live process naming --socket or whole-walk failure changes Gone to Unavailable; the stand-in test process lacks the shipped host argv. Thus the prior close-test fixture alone is not proof a supported live host reaches this branch. Possible_cover: g166/f1, g163/l1 and g168/c1 supplied by caller, known concern only. Proposed_drop: no broad drop; retain earlier branch/collection proof and original source-refuted wrong-target route, but investigate actual producer before asserting a supported orphan. Next: read exact latest neighbour records, then client confirm_with_process, socket_process and runtime reconnect callers plus real-host listener lifetime. No runtime execution. This is reconciliation, not new discovery."
+          }
+        },
+        {
+          "line": 23,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c2",
+            "state": "open",
+            "summary": "Gone-tab Delete bypass is unverified after investigating the shipped producer",
+            "location": "crates/farhelm-supervisor/src/tmux.rs:15",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Original TLDR/consequences preserved: Considered whether deleting the old terminal driver could leave current sessions unable to attach, receive input, or clean up. Could-be-highest remains yes for a shipped owned-process/work-loss route; those original wrong-target/lost-control concerns and their precise source refutations remain in prior events. Distinct known consequence retained verbatim: a tab whose socket disappears and connection ends could be forgotten by Delete while its adopted host process still runs. Suggested bucket for that distinct orphan-only consequence: other; no child/work loss established. Confidence correction: unverified after investigation for a supported production defect, confirmed only as conditional dispatch. Previous 'no unresolved source premise' and 'confirmed production route' wording is withdrawn; no parent lowering/drop accepted. Proposed_drop: no forced drop; source-route and attribution limitations are preserved for independent judgment, not retirement-based acceptance. Possible_cover: exact latest supplied g166/f1 and directly read g163/l1, same known conditional orphan concern, not new discovery. Conditional branch proof remains: session_hosts.rs:245-260 keeps adopted non-placeholder Gone tabs and excludes their records from settling; :733-740 calls end_launch_host, whose host_launch.rs:694-696 accepts shutdown Err(Gone), unlike close's adopted-process check at host_tabs.rs:1052-1062. Child-root checks do not prove the host process exited. New direct producer checks: hosts/client.rs:639-646 always routes failed connection attempts through confirm_with_process; :1220-1238 turns Gone into Unavailable when a matching live host is found or the overall search fails/times out. hosts/process.rs:190-247 recognizes this user's real host by its absolute trailing --socket argument and random file name regardless of directory spelling; unreadable individual rows/argv can be skipped, but a whole-walk failure is not absence. Runtime reconnect at terminal.rs:4128-4142 uses that guarded outcome; shutdown at :4280-4306 sets Gone only on its end verdict and its reconnect fallback at :4319-4332 uses the same guarded client. The real host run loop at terminal-host/src/host.rs:256-265 removes its socket only when it is leaving service; abandon:247-253 belongs to failed readiness, before successful adoption. The retained close regression's peer is the test runner, with no real-host --socket argv, so its manually removed socket is not proof of an ordinary shipped-host producer. Exact missing premise: a supported event that leaves an adopted real host alive, makes its socket unusable and owning connection end, and still lets runtime become Gone despite the live-host process guard (for example a concrete supported per-row/argv-read omission paired with that actual socket/connection transition). No inspected normal caller supplies that conjunction. Source proves skipped-row possibilities but cannot establish an unspecified external event or their conjunction; a concrete supported source/caller sequence or existing retained real-host trace with Gone and a live pinned peer would settle it. No reproduction requested or performed. Whole-range attribution remains checked: exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a has the tab dispatch at session_hosts.rs:746-752 and Gone-success branch at host_launch.rs:684-686; no in-range introduction was found in those branches. Contract remains SPEC_impl.md:2423-2461: unconfirmed hosts keep the session/records. That would be violated if the missing real-host producer were established; this record does not allege a separate test-oracle or documentation defect and correct normal callers are not used to refute such an allegation. All useful accessible source checks for this lead are complete, with the missing supported-producer premise retained explicitly. Original potential-highest routes are neither replaced nor accepted as dropped by the narrower orphan-host discussion. No runtime observation, tests, builds or live-install action."
+          }
+        },
+        {
+          "line": 25,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c2",
+            "state": "open",
+            "summary": "Gone-tab Delete bypass is unverified after investigating the shipped producer",
+            "location": "crates/farhelm-supervisor/src/tmux.rs:15",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Original TLDR/consequences preserved: Considered whether deleting the old terminal driver could leave current sessions unable to attach, receive input, or clean up. Could-be-highest remains yes for a shipped owned-process/work-loss route; those original wrong-target/lost-control concerns and their precise source refutations remain in prior events. Distinct known consequence retained verbatim: a tab whose socket disappears and connection ends could be forgotten by Delete while its adopted host process still runs. Suggested bucket for that distinct orphan-only consequence: other; no child/work loss established. Confidence correction: unverified after investigation for a supported production defect, confirmed only as conditional dispatch. Previous 'no unresolved source premise' and 'confirmed production route' wording is withdrawn; no parent lowering/drop accepted. Proposed_drop: no forced drop; source-route and attribution limitations are preserved for independent judgment, not retirement-based acceptance. Possible_cover: exact latest supplied g166/f1 and directly read g163/l1, same known conditional orphan concern, not new discovery. Conditional branch proof remains: session_hosts.rs:245-260 keeps adopted non-placeholder Gone tabs and excludes their records from settling; :733-740 calls end_launch_host, whose host_launch.rs:694-696 accepts shutdown Err(Gone), unlike close's adopted-process check at host_tabs.rs:1052-1062. Child-root checks do not prove the host process exited. New direct producer checks: hosts/client.rs:639-646 always routes failed connection attempts through confirm_with_process; :1220-1238 turns Gone into Unavailable when a matching live host is found or the overall search fails/times out. hosts/process.rs:190-247 recognizes this user's real host by its absolute trailing --socket argument and random file name regardless of directory spelling; unreadable individual rows/argv can be skipped, but a whole-walk failure is not absence. Runtime reconnect at terminal.rs:4128-4142 uses that guarded outcome; shutdown at :4280-4306 sets Gone only on its end verdict and its reconnect fallback at :4319-4332 uses the same guarded client. The real host run loop at terminal-host/src/host.rs:256-265 removes its socket only when it is leaving service; abandon:247-253 belongs to failed readiness, before successful adoption. The retained close regression's peer is the test runner, with no real-host --socket argv, so its manually removed socket is not proof of an ordinary shipped-host producer. Exact missing premise: a supported event that leaves an adopted real host alive, makes its socket unusable and owning connection end, and still lets runtime become Gone despite the live-host process guard (for example a concrete supported per-row/argv-read omission paired with that actual socket/connection transition). No inspected normal caller supplies that conjunction. Source proves skipped-row possibilities but cannot establish an unspecified external event or their conjunction; a concrete supported source/caller sequence or existing retained real-host trace with Gone and a live pinned peer would settle it. No reproduction requested or performed. Whole-range attribution remains checked: exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a has the tab dispatch at session_hosts.rs:746-752 and Gone-success branch at host_launch.rs:684-686; no in-range introduction was found in those branches. Contract remains SPEC_impl.md:2423-2461: unconfirmed hosts keep the session/records. That would be violated if the missing real-host producer were established; this record does not allege a separate test-oracle or documentation defect and correct normal callers are not used to refute such an allegation. All useful accessible source checks for this lead are complete, with the missing supported-producer premise retained explicitly. Original potential-highest routes are neither replaced nor accepted as dropped by the narrower orphan-host discussion. No runtime observation, tests, builds or live-install action. Discovery pass 3 source check: considered whether deleting PANE_DIED_CHANNEL strands terminal-host exit handling. This distinct deletion hypothesis is source-refuted, not a revision of the conditional Gone/Delete producer uncertainty above. core.rs:6160-6175 constructs the host notifier before reload and supplies it to adopted runtimes; :7420-7431 preserves it in reload options; host_launch.rs:603 and host_tabs.rs:684 supply it to newly started agents and tabs. hosts/terminal.rs:4031-4054 publishes forward liveness transitions through that channel. ticker.rs:925-957 receives those transitions and runs reap_pass, with periodic ticks still available. Separate surviving assertion check: hosts/terminal/tests.rs:1593-1645 establishes a running root, sends Exited(3), requires Exited/dead evidence and the exact socket/liveness notification; removing the notification would leave its bounded receive incomplete. This establishes sensitivity of the runtime notification oracle, not comprehensive integrated ticker-wakeup coverage. No new defect, runtime observation or new uncertainty is claimed; original consequences, producer uncertainty and all prior proposed-drop bases remain unchanged and preserved."
+          }
+        },
+        {
+          "line": 26,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c2",
+            "state": "open",
+            "summary": "Gone-tab Delete bypass is unverified after investigating the shipped producer",
+            "location": "crates/farhelm-supervisor/src/tmux.rs:15",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Original TLDR/consequences preserved: Considered whether deleting the old terminal driver could leave current sessions unable to attach, receive input, or clean up. Could-be-highest remains yes for a shipped owned-process/work-loss route; those original wrong-target/lost-control concerns and their precise source refutations remain in prior events. Distinct known consequence retained verbatim: a tab whose socket disappears and connection ends could be forgotten by Delete while its adopted host process still runs. Suggested bucket for that distinct orphan-only consequence: other; no child/work loss established. Confidence correction: unverified after investigation for a supported production defect, confirmed only as conditional dispatch. Previous 'no unresolved source premise' and 'confirmed production route' wording is withdrawn; no parent lowering/drop accepted. Proposed_drop: no forced drop; source-route and attribution limitations are preserved for independent judgment, not retirement-based acceptance. Possible_cover: exact latest supplied g166/f1 and directly read g163/l1, same known conditional orphan concern, not new discovery. Conditional branch proof remains: session_hosts.rs:245-260 keeps adopted non-placeholder Gone tabs and excludes their records from settling; :733-740 calls end_launch_host, whose host_launch.rs:694-696 accepts shutdown Err(Gone), unlike close's adopted-process check at host_tabs.rs:1052-1062. Child-root checks do not prove the host process exited. New direct producer checks: hosts/client.rs:639-646 always routes failed connection attempts through confirm_with_process; :1220-1238 turns Gone into Unavailable when a matching live host is found or the overall search fails/times out. hosts/process.rs:190-247 recognizes this user's real host by its absolute trailing --socket argument and random file name regardless of directory spelling; unreadable individual rows/argv can be skipped, but a whole-walk failure is not absence. Runtime reconnect at terminal.rs:4128-4142 uses that guarded outcome; shutdown at :4280-4306 sets Gone only on its end verdict and its reconnect fallback at :4319-4332 uses the same guarded client. The real host run loop at terminal-host/src/host.rs:256-265 removes its socket only when it is leaving service; abandon:247-253 belongs to failed readiness, before successful adoption. The retained close regression's peer is the test runner, with no real-host --socket argv, so its manually removed socket is not proof of an ordinary shipped-host producer. Exact missing premise: a supported event that leaves an adopted real host alive, makes its socket unusable and owning connection end, and still lets runtime become Gone despite the live-host process guard (for example a concrete supported per-row/argv-read omission paired with that actual socket/connection transition). No inspected normal caller supplies that conjunction. Source proves skipped-row possibilities but cannot establish an unspecified external event or their conjunction; a concrete supported source/caller sequence or existing retained real-host trace with Gone and a live pinned peer would settle it. No reproduction requested or performed. Whole-range attribution remains checked: exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a has the tab dispatch at session_hosts.rs:746-752 and Gone-success branch at host_launch.rs:684-686; no in-range introduction was found in those branches. Contract remains SPEC_impl.md:2423-2461: unconfirmed hosts keep the session/records. That would be violated if the missing real-host producer were established; this record does not allege a separate test-oracle or documentation defect and correct normal callers are not used to refute such an allegation. All useful accessible source checks for this lead are complete, with the missing supported-producer premise retained explicitly. Original potential-highest routes are neither replaced nor accepted as dropped by the narrower orphan-host discussion. No runtime observation, tests, builds or live-install action. Discovery pass 3 source check: considered whether deleting PANE_DIED_CHANNEL strands terminal-host exit handling. This distinct deletion hypothesis is source-refuted, not a revision of the conditional Gone/Delete producer uncertainty above. core.rs:6160-6175 constructs the host notifier before reload and supplies it to adopted runtimes; :7420-7431 preserves it in reload options; host_launch.rs:603 and host_tabs.rs:684 supply it to newly started agents and tabs. hosts/terminal.rs:4031-4054 publishes forward liveness transitions through that channel. ticker.rs:925-957 receives those transitions and runs reap_pass, with periodic ticks still available. Separate surviving assertion check: hosts/terminal/tests.rs:1593-1645 establishes a running root, sends Exited(3), requires Exited/dead evidence and the exact socket/liveness notification; removing the notification would leave its bounded receive incomplete. This establishes sensitivity of the runtime notification oracle, not comprehensive integrated ticker-wakeup coverage. No new defect, runtime observation or new uncertainty is claimed; original consequences, producer uncertainty and all prior proposed-drop bases remain unchanged and preserved. Same pass, second considered deletion route: losing PaneModes pre/post-content restoration does not establish a current-host replay or input regression. Source refutation: grid_stream.rs:423-461 attaches by reading grid_output::screen plus state directly from the held emulator; grid_output.rs:328-360 reads the active grid and absolute cursor instead of replaying a textual prefill through the viewer terminal. Emulator Modes at modes.rs:57-109 still supplies paste/mouse/cursor-key/keypad/alternate/cursor-visibility state; HostTerminal::modes at terminal.rs:2252-2253 reads it from live or published emulator state. Origin, scroll region and autowrap remain emulator state, and snapshot/v1/paint.rs:321-395 explicitly restores private modes, keypad, scroll region before origin/cursor and autowrap for supervisor recovery. They do not have to be additional input-encoding fields. Separate actual assertion check: emulator tests/modes.rs:39-67 sets and resets each listed input/screen mode with literal sequences and asserts both states; :80-124 asserts mutually exclusive mouse protocols and encoding precedence with explicit enum expectations. This is evidence for the surviving accessors, not a claim that production correctness refutes any alleged test-sensitivity defect. Full-range diff of these mode accessors and grid screen reader is empty; snapshot paint changes only remove an unrelated SGR helper and do not change the checked restoration logic. grid_input.rs:30-32 deliberately keeps keypad digits as the old xterm.js path did; that is not a new deletion loss. Contract checked: SPEC.md:2860 full terminal fidelity and :2908-2917 current-screen/history replay; no new contract violation or independent test-oracle defect established from this assigned PaneModes deletion. This narrows only the considered removal hypothesis; original consequences, Gone/Delete uncertainty and unaccepted proposed-drop history remain."
+          }
+        }
+      ],
+      "latest": {
+        "line": 26,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "c2",
+          "state": "open",
+          "summary": "Gone-tab Delete bypass is unverified after investigating the shipped producer",
+          "location": "crates/farhelm-supervisor/src/tmux.rs:15",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Original TLDR/consequences preserved: Considered whether deleting the old terminal driver could leave current sessions unable to attach, receive input, or clean up. Could-be-highest remains yes for a shipped owned-process/work-loss route; those original wrong-target/lost-control concerns and their precise source refutations remain in prior events. Distinct known consequence retained verbatim: a tab whose socket disappears and connection ends could be forgotten by Delete while its adopted host process still runs. Suggested bucket for that distinct orphan-only consequence: other; no child/work loss established. Confidence correction: unverified after investigation for a supported production defect, confirmed only as conditional dispatch. Previous 'no unresolved source premise' and 'confirmed production route' wording is withdrawn; no parent lowering/drop accepted. Proposed_drop: no forced drop; source-route and attribution limitations are preserved for independent judgment, not retirement-based acceptance. Possible_cover: exact latest supplied g166/f1 and directly read g163/l1, same known conditional orphan concern, not new discovery. Conditional branch proof remains: session_hosts.rs:245-260 keeps adopted non-placeholder Gone tabs and excludes their records from settling; :733-740 calls end_launch_host, whose host_launch.rs:694-696 accepts shutdown Err(Gone), unlike close's adopted-process check at host_tabs.rs:1052-1062. Child-root checks do not prove the host process exited. New direct producer checks: hosts/client.rs:639-646 always routes failed connection attempts through confirm_with_process; :1220-1238 turns Gone into Unavailable when a matching live host is found or the overall search fails/times out. hosts/process.rs:190-247 recognizes this user's real host by its absolute trailing --socket argument and random file name regardless of directory spelling; unreadable individual rows/argv can be skipped, but a whole-walk failure is not absence. Runtime reconnect at terminal.rs:4128-4142 uses that guarded outcome; shutdown at :4280-4306 sets Gone only on its end verdict and its reconnect fallback at :4319-4332 uses the same guarded client. The real host run loop at terminal-host/src/host.rs:256-265 removes its socket only when it is leaving service; abandon:247-253 belongs to failed readiness, before successful adoption. The retained close regression's peer is the test runner, with no real-host --socket argv, so its manually removed socket is not proof of an ordinary shipped-host producer. Exact missing premise: a supported event that leaves an adopted real host alive, makes its socket unusable and owning connection end, and still lets runtime become Gone despite the live-host process guard (for example a concrete supported per-row/argv-read omission paired with that actual socket/connection transition). No inspected normal caller supplies that conjunction. Source proves skipped-row possibilities but cannot establish an unspecified external event or their conjunction; a concrete supported source/caller sequence or existing retained real-host trace with Gone and a live pinned peer would settle it. No reproduction requested or performed. Whole-range attribution remains checked: exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a has the tab dispatch at session_hosts.rs:746-752 and Gone-success branch at host_launch.rs:684-686; no in-range introduction was found in those branches. Contract remains SPEC_impl.md:2423-2461: unconfirmed hosts keep the session/records. That would be violated if the missing real-host producer were established; this record does not allege a separate test-oracle or documentation defect and correct normal callers are not used to refute such an allegation. All useful accessible source checks for this lead are complete, with the missing supported-producer premise retained explicitly. Original potential-highest routes are neither replaced nor accepted as dropped by the narrower orphan-host discussion. No runtime observation, tests, builds or live-install action. Discovery pass 3 source check: considered whether deleting PANE_DIED_CHANNEL strands terminal-host exit handling. This distinct deletion hypothesis is source-refuted, not a revision of the conditional Gone/Delete producer uncertainty above. core.rs:6160-6175 constructs the host notifier before reload and supplies it to adopted runtimes; :7420-7431 preserves it in reload options; host_launch.rs:603 and host_tabs.rs:684 supply it to newly started agents and tabs. hosts/terminal.rs:4031-4054 publishes forward liveness transitions through that channel. ticker.rs:925-957 receives those transitions and runs reap_pass, with periodic ticks still available. Separate surviving assertion check: hosts/terminal/tests.rs:1593-1645 establishes a running root, sends Exited(3), requires Exited/dead evidence and the exact socket/liveness notification; removing the notification would leave its bounded receive incomplete. This establishes sensitivity of the runtime notification oracle, not comprehensive integrated ticker-wakeup coverage. No new defect, runtime observation or new uncertainty is claimed; original consequences, producer uncertainty and all prior proposed-drop bases remain unchanged and preserved. Same pass, second considered deletion route: losing PaneModes pre/post-content restoration does not establish a current-host replay or input regression. Source refutation: grid_stream.rs:423-461 attaches by reading grid_output::screen plus state directly from the held emulator; grid_output.rs:328-360 reads the active grid and absolute cursor instead of replaying a textual prefill through the viewer terminal. Emulator Modes at modes.rs:57-109 still supplies paste/mouse/cursor-key/keypad/alternate/cursor-visibility state; HostTerminal::modes at terminal.rs:2252-2253 reads it from live or published emulator state. Origin, scroll region and autowrap remain emulator state, and snapshot/v1/paint.rs:321-395 explicitly restores private modes, keypad, scroll region before origin/cursor and autowrap for supervisor recovery. They do not have to be additional input-encoding fields. Separate actual assertion check: emulator tests/modes.rs:39-67 sets and resets each listed input/screen mode with literal sequences and asserts both states; :80-124 asserts mutually exclusive mouse protocols and encoding precedence with explicit enum expectations. This is evidence for the surviving accessors, not a claim that production correctness refutes any alleged test-sensitivity defect. Full-range diff of these mode accessors and grid screen reader is empty; snapshot paint changes only remove an unrelated SGR helper and do not change the checked restoration logic. grid_input.rs:30-32 deliberately keeps keypad digits as the old xterm.js path did; that is not a new deletion loss. Contract checked: SPEC.md:2860 full terminal fidelity and :2908-2917 current-screen/history replay; no new contract violation or independent test-oracle defect established from this assigned PaneModes deletion. This narrows only the considered removal hypothesis; original consequences, Gone/Delete uncertainty and unaccepted proposed-drop history remain."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g160/findings.jsonl",
+        "id": "c2",
+        "line": 26,
+        "disposition": "under-investigation",
+        "group": "g160-c2",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-101",
+          "key": "g160/c2",
+          "latest_line": 26,
+          "recommendation": "retain-unverified",
+          "bucket": "other",
+          "underlying_key": "delete-gone-adopted-tab-host-without-process-confirmation",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Keep the conditional orphan-host concern and its missing production premise visible for parent consolidation. The dispatch mismatch is real, but a live real host becoming Gone despite process discovery is unestablished; the core branches already existed at the exclusive range base. Earlier blanket production-route confirmation was withdrawn. Earlier missing-symbol, prompt-gate, exit-notifier and mode-replay deletion hypotheses remain narrowly source-refuted. The former potential highest lost-control/work-loss consequences are preserved for independent judgment rather than silently replaced by the orphan-only consequence.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333:service/session_hosts.rs:245-260 retains non-placeholder tabs and excludes their held sockets from record settlement. :733-740 ends them through end_launch_host; core/host_launch.rs:694-696 treats shutdown Err(Gone) as success. core/host_tabs.rs:1052-1062 instead checks the adopted process for Gone close. session_hosts.rs:771-790 only aggregates errors actually returned.",
+            "Reviewed hosts/client.rs:1220-1238 converts Gone to Unavailable when a matching process exists or the whole search fails. hosts/process.rs:190-247 recognizes a real host's trailing --socket absolute path by random file name, while unreadable individual rows/argv may be skipped. The test runner stand-in does not establish a shipped real-host producer.",
+            "Reviewed terminal.rs:4280-4332 retains unconfirmed shutdown as Unavailable and uses guarded reconnect; terminal-host/src/host.rs:247-265 removes the real socket during failed readiness or service exit, not an ordinary adopted-live-host transition.",
+            "Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a already has the same tab dispatch at service/session_hosts.rs:746-752 and Gone-success branch at core/host_launch.rs:684-686. This is not sufficient by itself to certify that no other in-range caller change could expose it.",
+            "Reviewed service/terminals.rs:105-141 resolves interactive terminals as HostTerminal. grid_stream.rs:423-461 reads emulator screen/state directly, and grid_output.rs:328-360 reads grid and absolute cursor, supporting the narrow refutation of textual PaneModes-prefill loss. No runtime tests, mutation tests or observed orphan claimed."
+          ],
+          "coverage_checked": [
+            "Reviewed SPEC_impl.md:2423-2461 and current :2345 onward require Delete to end every host and retain records/session for unconfirmed ends. They do not accept the conditional bypass.",
+            "Both specifications searched for Gone, orphan hosts, cleanup, input and replay. TODO Planned is empty. Searched plans/queue for Gone-tab/end_launch_host and exact cleanup consequence; no stated unlanded fix found.",
+            "Searched BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md. Read review_feedback_queue/gone-retry-forgets-pinned-foreground-child.md: it concerns discarding an already pinned foreground child during retry, not forgetting the adopted host process itself. It is related but not exact coverage or an exact alias.",
+            "FILTER.md does not cover false successful Delete or a host that ordinary operations can no longer reach. No filter asserted. Known neighbour identities in the supplied history are parent consolidation context, not independently inspected claims in this batch."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "A supported event must leave an adopted real host alive, make its socket unusable and owning connection end, and still allow Gone despite the live-host process guard. A concrete per-row/argv-read omission combined with that actual transition, or an existing real-host trace, would settle it. A stand-in whose argv does not identify a real host does not supply this premise. In-range introduction also remains unsupported for the identified branches.",
+          "original_stronger_consequence": "Deleted control-mode interfaces might leave current sessions unable to attach, receive input or clean up, potentially losing control of owned processes/work. Later conditional claim: Delete could forget a tab while its adopted host still runs. The latter establishes no child/work loss, wrong-target kill, ordinary shipped producer, runtime occurrence or new test-oracle defect. Prior blanket refutation, subsequent production-route assertion, and that assertion's withdrawal are all retained.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Retain uncertainty for parent consolidation and scope judgment. If proposing out-of-range, refutation or a consequence lowering, independently check both the original highest routes and the narrow conditional orphan route; do not use intentional old-terminal retirement as acceptance."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "delete-gone-adopted-tab-host-without-process-confirmation",
+        "destination": "trailing-delete-gone-adopted-tab-host-without-process-confirmation.md"
+      }
+    },
+    {
+      "key": "g160/c3",
+      "owner": "g160",
+      "id": "c3",
+      "domain": "retired-supervisor-tmux",
+      "purpose": "retired-supervisor-tmux: crates/farhelm-supervisor/src/tmux.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Shared screen helpers survive outside the retired driver",
+            "location": "crates/farhelm-supervisor/src/tmux.rs:154",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered whether deleting the launch-error excerpt reducer and scrollback constants also removes useful diagnostics or shortens current terminals' retained history. Suggested bucket: other for lost optional error detail; could-be-highest: yes for an established loss of retained terminal history, but source refutes that route. Confidence: confirmed source refutation; no execution. Proposed_drop: source refutation. service/launch_artifacts.rs:59-123 retains the host-only append path, checks Owned dead evidence before reading the screen, keeps five nonblank trimmed lines, escapes presentation-unsafe characters, and truncates to 500 bytes at a UTF-8 boundary. Its same-commit diff shows that this replaces the previous host branch's call to crate::tmux::launch_excerpt_of_text. The deleted generation fences were for reusable tmux panes; a host runs one child and the replacement comments at launch_artifacts.rs:44-58 explain why a fresh blank screen does not need those fences. hosts/terminal.rs:329-336 retains DEFAULT_SCROLLBACK_LINES = 12_000. core/host_restart.rs:34-52 preserves the host history-seed contract and the explicit empty-terminal case. SPEC.md:2890-2901 permits bounded optional launch diagnostics, and its old-terminal retirement paragraph expressly accepts empty restart for old terminals (c1). Possible_cover: none. Caveats: the replacement reducer uses temporary storage proportional to its already materialized bounded screen rather than the retired capture stream; no claim of a reproduced memory fault or exhaustive emulator review."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Shared screen helpers survive outside the retired driver",
+            "location": "crates/farhelm-supervisor/src/tmux.rs:154",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Original TLDR retained: Considered whether deleting the launch-error excerpt reducer and scrollback constants also removes useful diagnostics or shortens current terminals' retained history. Suggested bucket: other for lost optional error detail; could-be-highest: yes for an established loss of retained terminal history, but source refutes that route. Confidence: confirmed source refutation; no execution. Proposed_drop: source refutation, still awaiting independent check. Possible_cover: none. Original checks remain: service/launch_artifacts.rs:59-123 checks final Owned dead evidence, retains the last five nonblank trimmed lines with unsafe characters escaped and a 500-byte UTF-8-safe bound; hosts/terminal.rs:329-336 retains 12,000 scrollback lines and host_restart.rs:34-52 retains history seeding into a blank current screen. Synthesis checks actual surviving tests separately: launch_artifacts.rs:815-839 passes 20,000 blank padding rows after six nonblank lines, asserts the exact final five-line escaped output, then asserts the bound and absence of raw unsafe characters on long Unicode input and None for a blank screen. Dropping blank suppression, escaping, the five-line selection, or the 500-byte bound would violate these assertions. Host lifecycle tests in core/tests/host_terminals.rs:654-719 establish a withdrawn child root but no host exit record, verify Stop stores a plain exit, then send complaint plus exit record and require the later error to quote the complaint and exit code. The direct holds_final_state test at 795-821 checks that a child-dead probe alone gives no final screen, uses pending_once to prove the wait remains pending, and sends the exit record before requiring completion and the final complaint. Production handlers.rs:1009-1039 gates inferred failure and append_launch_excerpt on that final-state boundary. Removed streamed-capture UTF-8 chunk handling is no longer a surviving responsibility of this helper: its only caller passes an already materialized Rust String from the host screen. Caveats: source-based sensitivity analysis only; no test mutation, execution, or claim that all error-classification paths are covered. The original retained-history loss concern is preserved for independent checking."
+          }
+        },
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Shared screen helpers survive outside the retired driver",
+            "location": "crates/farhelm-supervisor/src/tmux.rs:154",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Original TLDR retained: Considered whether deleting the launch-error excerpt reducer and scrollback constants also removes useful diagnostics or shortens current terminals' retained history. Suggested bucket: other for lost optional error detail; could-be-highest: yes for an established loss of retained terminal history, but source refutes that route. Confidence: confirmed source refutation; no execution. Proposed_drop: source refutation, awaiting independent check. Possible_cover: none. Production: launch_artifacts.rs:59-123 checks final Owned dead evidence and retains five nonblank lines, unsafe characters escaped, at most 500 UTF-8-safe bytes. hosts/terminal.rs:329-336 retains 12,000 scrollback lines; host_restart.rs:34-52 retains history seeding into a blank current screen. Surviving test sensitivity: launch_artifacts.rs:815-839 asserts the exact final five escaped lines despite 20,000 blank padding rows, the byte bound on long Unicode input, no raw unsafe characters, and None for a blank screen. core/tests/host_terminals.rs:654-719 establishes child-dead/no-exit-record, requires a plain Stop exit, then sends complaint and exit record and requires the later error to quote complaint and code. The direct final-state test at 795-821 proves a wait remains pending before the exit record and completes with the last complaint after it. handlers.rs:1009-1039 gates inferred failure and excerpt on that boundary. Synthesis compared removed tests as well: parent tmux.rs:7158-7177 tests padding, suffix retention and Unicode cuts for retain_pane_tail; the surviving emulator tests/screen.rs:141-168 independently exercise those same responsibilities through both Emulator::screen_tail and trim_screen_tail, with explicit expected suffixes and Unicode cut boundaries. Parent tmux.rs:7183-7216 tests streamed excerpt reduction, including bytewise split UTF-8 and invalid trailing bytes. The replacement preserves its output/bound/padding assertions in launch_artifacts.rs:815-839; incremental and malformed byte-stream decoding no longer belongs to this helper because its only caller passes a materialized Rust String. No test-sensitivity defect was established merely from deleting these old tests. Caveats: byte-cap assertions in both old and replacement excerpt tests use LAUNCH_EXCERPT_BYTES; this pass does not claim they independently detect a mistaken constant increase. No mutation testing, execution, or exhaustive error-classification review. The original retained-history loss concern is preserved for independent checking."
+          }
+        },
+        {
+          "line": 15,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c3",
+            "state": "open",
+            "summary": "Reconcile screen-helper refutation with neighbouring provenance and allocation findings",
+            "location": "crates/farhelm-supervisor/src/tmux.rs:154",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Original TLDR/consequence preserved: Considered whether deleting the launch-error excerpt reducer and scrollback constants also removes useful diagnostics or shortens current terminals' retained history. Could-be-highest remains yes for established retained-history loss, but no such loss is established by this helper. Suggested bucket: other for diagnostic/resource effects. Confidence: synthesis lead pending readily accessible source checks, not a new discovery. Proposed_drop: previous source-refutation basis preserved but withdrawn as a blanket refutation of provenance or resource regressions; final-state ordering and retained output bounds alone do not settle those distinct effects. Possible_cover: neighbour g100/c1 and g100/l1 supplied directly in discovery-neighbours.json concern inherited history promoted by resize and new temporary excerpt allocations. Own earlier source reads already establish that launch_artifacts.rs:97-121 collects nonblank rows and copies/escapes five whole rows before truncation, unlike parent tmux.rs:191-299's bounded reducer. Need after completing the required neighbour read: inspect actual resize/history-seed caller path and full-range attribution; compare temporary-allocation responsibility with the deleted reducer. Preserve original prior checks and their narrower valid conclusions: host final-exit gates and retained tests prove ordering/format responsibilities, not absence of inherited-history provenance contamination or equivalence of intermediate resource bounds. Missing premises are readily checkable in source; no unverified-after-investigation conclusion is claimed. No runtime execution. Neighbour findings are known context, not new discovery in this pass, and no parent drops have been accepted."
+          }
+        },
+        {
+          "line": 18,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c3",
+            "state": "open",
+            "summary": "Deleted reducer has distinct provenance and temporary-allocation consequences",
+            "location": "crates/farhelm-supervisor/src/tmux.rs:154",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Original TLDR preserved: Considered whether deleting the launch-error excerpt reducer and scrollback constants also removes useful diagnostics or shortens current terminals' retained history. Original could-be-highest retained for actual terminal-history loss; no such loss is established from this helper removal, and c1 separately preserves deliberate old-terminal loss. Established distinct consequences are other: a misleading durable launch diagnostic and additional bounded temporary allocation, as already reported by neighbour g100/c1 and g100/l1. Confidence: confirmed conditional source analysis, no execution. Proposed_drop: prior blanket source refutation withdrawn for these distinct effects; no parent drop accepted. The narrower final-output cap, final-exit ordering and surviving test-sensitivity checks in earlier events remain valid, but do not establish screen provenance or bounded intermediate copying. Source checks: parent tmux.rs:191-299 reduces incrementally with bounded line/whitespace suffixes and at most five lines; replacement launch_artifacts.rs:97-121 collects references to every nonblank screen row and appends/escapes five whole rows before trimming to 500 bytes. This changes intermediate allocation/work bounds even though the final result meets the same cap. The full-screen input extraction predates the patch and is not this new cost; no OOM, measured latency or hard RSS-contract breach is claimed. For provenance, snapshot/v1/mod.rs:242-268 encodes old primary history above a blank screen. vendor grid/resize.rs:25-28 and 46-71 grows the visible grid by pulling available history rows; term/mod.rs:756-758 uses that path for the primary grid. The published replacement host can receive an owned viewer resize (handlers.rs:2060-2082); if its shell subsequently exits without consuming the spec and leaves an imported row visible, status.rs:642-652 calls the screen excerpt helper, whose last-five-nonblank selection can quote that old row. Processed exit evidence establishes final output ordering, not provenance of inherited cells. The comment at launch_artifacts.rs:44-56 claiming the blank new screen never quotes a previous run is therefore too strong. Full-range attribution checked: exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a already has the same host-screen quoting path and blank-seed rationale at launch_artifacts.rs:52-94; base-to-reviewed diffs of grid/resize.rs and term/mod.rs are empty. Thus do not attribute new runtime contamination to this helper move. The bounded reducer-to-whole-row allocation change does occur in the assigned removal/replacement commit. Contract: SPEC.md:2890-2893 requires omitting excerpts that cannot safely be attributed to the launch. Possible_cover: known g100/c1 and g100/l1; parent owns consolidation rather than counting new discoveries here. Material caveats: a height increase between replacement publication and failed-shell classification, retained old history and an unoverwritten imported row are needed for the diagnostic route. No user-work loss or security route is established by either distinct helper effect. The original potential retained-history-loss consequence and prior proposed-drop bases remain preserved in the append-only history; their existence is not being used to dismiss these different diagnostic/resource defects. Readily accessible source premises are settled; this ID is no longer an open lead."
+          }
+        }
+      ],
+      "latest": {
+        "line": 18,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "c3",
+          "state": "open",
+          "summary": "Deleted reducer has distinct provenance and temporary-allocation consequences",
+          "location": "crates/farhelm-supervisor/src/tmux.rs:154",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Original TLDR preserved: Considered whether deleting the launch-error excerpt reducer and scrollback constants also removes useful diagnostics or shortens current terminals' retained history. Original could-be-highest retained for actual terminal-history loss; no such loss is established from this helper removal, and c1 separately preserves deliberate old-terminal loss. Established distinct consequences are other: a misleading durable launch diagnostic and additional bounded temporary allocation, as already reported by neighbour g100/c1 and g100/l1. Confidence: confirmed conditional source analysis, no execution. Proposed_drop: prior blanket source refutation withdrawn for these distinct effects; no parent drop accepted. The narrower final-output cap, final-exit ordering and surviving test-sensitivity checks in earlier events remain valid, but do not establish screen provenance or bounded intermediate copying. Source checks: parent tmux.rs:191-299 reduces incrementally with bounded line/whitespace suffixes and at most five lines; replacement launch_artifacts.rs:97-121 collects references to every nonblank screen row and appends/escapes five whole rows before trimming to 500 bytes. This changes intermediate allocation/work bounds even though the final result meets the same cap. The full-screen input extraction predates the patch and is not this new cost; no OOM, measured latency or hard RSS-contract breach is claimed. For provenance, snapshot/v1/mod.rs:242-268 encodes old primary history above a blank screen. vendor grid/resize.rs:25-28 and 46-71 grows the visible grid by pulling available history rows; term/mod.rs:756-758 uses that path for the primary grid. The published replacement host can receive an owned viewer resize (handlers.rs:2060-2082); if its shell subsequently exits without consuming the spec and leaves an imported row visible, status.rs:642-652 calls the screen excerpt helper, whose last-five-nonblank selection can quote that old row. Processed exit evidence establishes final output ordering, not provenance of inherited cells. The comment at launch_artifacts.rs:44-56 claiming the blank new screen never quotes a previous run is therefore too strong. Full-range attribution checked: exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a already has the same host-screen quoting path and blank-seed rationale at launch_artifacts.rs:52-94; base-to-reviewed diffs of grid/resize.rs and term/mod.rs are empty. Thus do not attribute new runtime contamination to this helper move. The bounded reducer-to-whole-row allocation change does occur in the assigned removal/replacement commit. Contract: SPEC.md:2890-2893 requires omitting excerpts that cannot safely be attributed to the launch. Possible_cover: known g100/c1 and g100/l1; parent owns consolidation rather than counting new discoveries here. Material caveats: a height increase between replacement publication and failed-shell classification, retained old history and an unoverwritten imported row are needed for the diagnostic route. No user-work loss or security route is established by either distinct helper effect. The original potential retained-history-loss consequence and prior proposed-drop bases remain preserved in the append-only history; their existence is not being used to dismiss these different diagnostic/resource defects. Readily accessible source premises are settled; this ID is no longer an open lead."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g160/findings.jsonl",
+        "id": "c3",
+        "line": 18,
+        "disposition": "under-investigation",
+        "group": "g160-c3",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-101",
+          "key": "g160/c3",
+          "latest_line": 18,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "launch-excerpt-whole-row-intermediate-allocation",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The replacement adds screen-row indexing and whole-row escaped copies before truncation, where the old reducer retained bounded suffixes. That in-range resource-bound change is source-established, with no demonstrated latency, OOM or hard memory-budget breach. The separate inherited-history diagnostic route is conditionally established but already present at the exclusive base. Earlier blanket refutation was withdrawn for both distinct effects; final-output and final-exit ordering checks still stand. Parent should consolidate with its named excerpt records without counting new discoveries here.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333^:tmux.rs:175-299 bounds each line/pending-whitespace suffix and keeps five lines. Reviewed service/launch_artifacts.rs:97-121 instead collects every nonblank row reference, copies/escapes all of five selected rows, then trims to 500 UTF-8 bytes. Full-screen extraction was already present at exclusive base launch_artifacts.rs:52-94 and is not the new cost.",
+            "Reviewed launch_artifacts.rs:801-839 asserts exact five escaped lines through blank padding, unsafe-character absence, blank None and byte cap. These assertions support output format/bounds, not equal intermediate allocation; cap assertions use the implementation constant and do not independently detect a mistaken constant increase.",
+            "Reviewed snapshot/v1/mod.rs:242-268 seeds old history above a blank screen. vendor/alacritty_terminal/src/grid/resize.rs:25-28,46-71 pulls available history into a taller visible screen. handlers.rs:2060-2082 permits an owned viewer resize; status.rs:642-652 can quote the resulting screen for an unconsumed-spec failed shell. An unoverwritten imported row is required. Final processed-exit evidence proves ordering, not cell provenance.",
+            "The same no-previous-run rationale and host quoting path are at exclusive base launch_artifacts.rs:52-94; base-to-reviewed diffs for vendor grid/resize.rs and term/mod.rs are empty. Do not attribute runtime provenance contamination newly to this helper move.",
+            "Reviewed hosts/terminal.rs:329-336 still retains 12,000 scrollback lines; core/host_restart.rs:34-60 and :216-257 preserve bounded history seeding and explicit empty fallback. No modern-host history-loss route established from deleting these helpers. No runtime observations or exhaustive replacement/error-classification review."
+          ],
+          "coverage_checked": [
+            "Both specifications searched for excerpts, history seeding, attribution and bounds. SPEC.md:2890-2893 forbids unsafe attribution; SPEC_impl.md:2658-2666 repeats the too-strong blank-screen rationale. That promise is not acceptance of inherited history being misquoted.",
+            "TODO Planned is empty. Matching retirement plan section at plans/queue/tmux-end-old-terminals.md:273-274 says shared excerpt helpers move out, not away; it does not prescribe a later fix for the replacement's intermediate copying. The tmux-docs comment sweep does not exactly cover this provenance rationale or allocation consequence.",
+            "Searched BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md for excerpt/nonblank/reducer/allocation/history-diagnostic claims; no exact queued item or active decision. Read host-restart-history-painter-omits-palette.md: palette recoloring is a separate cause/consequence.",
+            "FILTER.md's session-status/history-after-partial-failure boundary may cover the pre-range diagnostic-only consequence if ordinary lifecycle recovery remains available; that does not cover the distinct new allocation consequence. No full-record filter match asserted."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "Material user-visible delay, OOM or a hard memory-contract breach is not established. The diagnostic route requires retained history, a height increase after replacement publication and before failed-shell classification, an unconsumed spec and a still-visible inherited row. It is conditional source analysis, not a reproduction.",
+          "original_stronger_consequence": "Potential loss of optional launch diagnostics or retained terminal history after deleting shared helpers. No modern-host retained-history loss was established. The historical highest possibility remains preserved for independent checking, alongside deliberate old-terminal loss in g160/c1. Later effects are a misleading durable launch diagnostic and additional bounded temporary allocation; neither establishes security or user-work loss.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Retain the in-range intermediate-allocation change as other; preserve the conditional pre-range provenance effect and the earlier highest-history-loss refutation for separate scope/drop judgment. No exact alias among this batch or existing queue items was established."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "launch-excerpt-whole-row-intermediate-allocation",
+        "destination": "trailing-launch-excerpt-whole-row-intermediate-allocation.md"
+      }
+    },
+    {
+      "key": "g160/c4",
+      "owner": "g160",
+      "id": "c4",
+      "domain": "retired-supervisor-tmux",
+      "purpose": "retired-supervisor-tmux: crates/farhelm-supervisor/src/tmux.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Removing supervisor tmux checks preserves the specified installation policy",
+            "location": "crates/farhelm-supervisor/src/tmux.rs:546",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered both whether removing the supervisor's version enforcement bypasses required installation checks, and whether keeping installation's tmux prerequisite now blocks users needlessly. Suggested bucket: high for a material startup refusal if contrary to contract; could-be-highest: no established security or loss-of-work route. Confidence: confirmed source and contract analysis, no execution. Proposed_drop: source refutation for bypass; explicit specification acceptance for retained prerequisite. The deleted require_supported_tmux helper has no executable callers left in crates. The retained classify_tmux_version at tmux.rs:226-231 and probe_tmux at 311 onward remain public. farhelm/src/setup.rs:1599-1624 applies probe.support and refuses BelowFloor; farhelm-ui/src/desktop/tmux_preflight.rs:150-185 likewise handles BelowFloor and probe errors, and lines 347-349 call the retained resolver and probe. SPEC_impl.md:2882-2889 says: 'Installation keeps requiring, installing and version-checking tmux exactly as below for now (the installer, the desktop app's preflight, Linux provisioning and `farhelm helm setup`).' The same section states: 'The running supervisor runs no tmux at all'. SPEC.md:3017-3018 keeps the installation prerequisite except for remote Macs. Possible_cover: none. Caveats: no independent review of unchanged probe containment or provisioning implementation; only the deletion's interface consequences were checked."
+          }
+        }
+      ],
+      "latest": {
+        "line": 6,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c4",
+          "state": "open",
+          "summary": "Removing supervisor tmux checks preserves the specified installation policy",
+          "location": "crates/farhelm-supervisor/src/tmux.rs:546",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered both whether removing the supervisor's version enforcement bypasses required installation checks, and whether keeping installation's tmux prerequisite now blocks users needlessly. Suggested bucket: high for a material startup refusal if contrary to contract; could-be-highest: no established security or loss-of-work route. Confidence: confirmed source and contract analysis, no execution. Proposed_drop: source refutation for bypass; explicit specification acceptance for retained prerequisite. The deleted require_supported_tmux helper has no executable callers left in crates. The retained classify_tmux_version at tmux.rs:226-231 and probe_tmux at 311 onward remain public. farhelm/src/setup.rs:1599-1624 applies probe.support and refuses BelowFloor; farhelm-ui/src/desktop/tmux_preflight.rs:150-185 likewise handles BelowFloor and probe errors, and lines 347-349 call the retained resolver and probe. SPEC_impl.md:2882-2889 says: 'Installation keeps requiring, installing and version-checking tmux exactly as below for now (the installer, the desktop app's preflight, Linux provisioning and `farhelm helm setup`).' The same section states: 'The running supervisor runs no tmux at all'. SPEC.md:3017-3018 keeps the installation prerequisite except for remote Macs. Possible_cover: none. Caveats: no independent review of unchanged probe containment or provisioning implementation; only the deletion's interface consequences were checked."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g160/findings.jsonl",
+        "id": "c4",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "retired-tmux-installation-version-check-separation",
+        "reason": "Parent explicitly accepted named covered proposal from claims-102 after inspecting it. The deletion does not bypass the retained installation checks. Keeping the otherwise unused dependency was expressly accepted at this intermediate revision and was later removed within the review range. Explicit intermediate contract acceptance of retained installation requirements, plus source refutation of bypass. This does not dispose of g160/l2's separate historical warning mismatch. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333:crates/farhelm-supervisor/src/tmux.rs:200-231,378-387 retains pure classification and probing. An all-crates git grep found no require_supported_tmux/driver caller among the retired-symbol searches.\",\"1ed482d:crates/farhelm/src/setup.rs:1599-1629 refuses BelowFloor and constructs an AbovePin warning; crates/farhelm-ui/src/desktop/tmux_preflight.rs:148-185 still refuses BelowFloor/probe failure.\",\"1ed482d:SPEC_impl.md:2882-2889 explicitly separates the retired running driver from installation policy. 17a3fe858c5511a24b7403af15dd41c93bf69fd7 deletes the Mac preflight and setup prerequisite. No runtime check was performed.\"] Current coverage/results: {\"SPEC.md/SPEC_impl.md\":\"Historical installation prerequisite explicitly accepted; current SPEC.md:5257-5258 and SPEC_impl.md:7996-8000 remove the prerequisite entirely.\",\"TODO.md Planned\":\"Empty at recording main.\",\"plans/queue\":\"tmux-drop-from-install matches the later removal but is already landed (plans/REPORTS.md:30), so it is not unlanded-plan coverage.\",\"BUGS.md\":\"Only the unrelated retained SSH-output install hang; no matching version policy defect.\",\"INDEX.md/matching queue files/TRIAGE_OUTCOMES.md\":\"Searched tmux/version/unaudited/startup-prerequisite claims; no exact unresolved item or active decision found.\",\"FILTER.md\":\"No filter needed; no established rare-trigger defect.\"} Exact cited cover: [\"1ed482d:SPEC_impl.md:2884-2885: Installation keeps requiring, installing and version-checking tmux exactly as below for now (the installer, the desktop app's preflight, Linux provisioning and `farhelm helm setup`).\",\"Current SPEC.md:5257-5258: A tmux the user runs in a session is one of their own programs, like any other they run there; Farhelm neither requires nor looks for one on any machine.\"] Original stronger consequence and missing premise remain preserved: \"A material startup refusal could merit high if the retained requirement contradicted the contract; no security or user-work-loss route was claimed.\"; \"No surviving caller loses an installation refusal because of this deletion.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g160/c4",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "retired-tmux-installation-version-check-separation",
+        "bucket": "other",
+        "recording": "covered",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named covered proposal from claims-102 after inspecting it. The deletion does not bypass the retained installation checks. Keeping the otherwise unused dependency was expressly accepted at this intermediate revision and was later removed within the review range. Explicit intermediate contract acceptance of retained installation requirements, plus source refutation of bypass. This does not dispose of g160/l2's separate historical warning mismatch. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333:crates/farhelm-supervisor/src/tmux.rs:200-231,378-387 retains pure classification and probing. An all-crates git grep found no require_supported_tmux/driver caller among the retired-symbol searches.\",\"1ed482d:crates/farhelm/src/setup.rs:1599-1629 refuses BelowFloor and constructs an AbovePin warning; crates/farhelm-ui/src/desktop/tmux_preflight.rs:148-185 still refuses BelowFloor/probe failure.\",\"1ed482d:SPEC_impl.md:2882-2889 explicitly separates the retired running driver from installation policy. 17a3fe858c5511a24b7403af15dd41c93bf69fd7 deletes the Mac preflight and setup prerequisite. No runtime check was performed.\"] Current coverage/results: {\"SPEC.md/SPEC_impl.md\":\"Historical installation prerequisite explicitly accepted; current SPEC.md:5257-5258 and SPEC_impl.md:7996-8000 remove the prerequisite entirely.\",\"TODO.md Planned\":\"Empty at recording main.\",\"plans/queue\":\"tmux-drop-from-install matches the later removal but is already landed (plans/REPORTS.md:30), so it is not unlanded-plan coverage.\",\"BUGS.md\":\"Only the unrelated retained SSH-output install hang; no matching version policy defect.\",\"INDEX.md/matching queue files/TRIAGE_OUTCOMES.md\":\"Searched tmux/version/unaudited/startup-prerequisite claims; no exact unresolved item or active decision found.\",\"FILTER.md\":\"No filter needed; no established rare-trigger defect.\"} Exact cited cover: [\"1ed482d:SPEC_impl.md:2884-2885: Installation keeps requiring, installing and version-checking tmux exactly as below for now (the installer, the desktop app's preflight, Linux provisioning and `farhelm helm setup`).\",\"Current SPEC.md:5257-5258: A tmux the user runs in a session is one of their own programs, like any other they run there; Farhelm neither requires nor looks for one on any machine.\"] Original stronger consequence and missing premise remain preserved: \"A material startup refusal could merit high if the retained requirement contradicted the contract; no security or user-work-loss route was claimed.\"; \"No surviving caller loses an installation refusal because of this deletion.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-102",
+          "key": "g160/c4",
+          "latest_line": 6,
+          "recommendation": "covered",
+          "bucket": "other",
+          "underlying_key": "retired-tmux-installation-version-check-separation",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The deletion does not bypass the retained installation checks. Keeping the otherwise unused dependency was expressly accepted at this intermediate revision and was later removed within the review range.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333:crates/farhelm-supervisor/src/tmux.rs:200-231,378-387 retains pure classification and probing. An all-crates git grep found no require_supported_tmux/driver caller among the retired-symbol searches.",
+            "1ed482d:crates/farhelm/src/setup.rs:1599-1629 refuses BelowFloor and constructs an AbovePin warning; crates/farhelm-ui/src/desktop/tmux_preflight.rs:148-185 still refuses BelowFloor/probe failure.",
+            "1ed482d:SPEC_impl.md:2882-2889 explicitly separates the retired running driver from installation policy. 17a3fe858c5511a24b7403af15dd41c93bf69fd7 deletes the Mac preflight and setup prerequisite. No runtime check was performed."
+          ],
+          "coverage_checked": {
+            "SPEC.md/SPEC_impl.md": "Historical installation prerequisite explicitly accepted; current SPEC.md:5257-5258 and SPEC_impl.md:7996-8000 remove the prerequisite entirely.",
+            "TODO.md Planned": "Empty at recording main.",
+            "plans/queue": "tmux-drop-from-install matches the later removal but is already landed (plans/REPORTS.md:30), so it is not unlanded-plan coverage.",
+            "BUGS.md": "Only the unrelated retained SSH-output install hang; no matching version policy defect.",
+            "INDEX.md/matching queue files/TRIAGE_OUTCOMES.md": "Searched tmux/version/unaudited/startup-prerequisite claims; no exact unresolved item or active decision found.",
+            "FILTER.md": "No filter needed; no established rare-trigger defect."
+          },
+          "exact_cover_quotes": [
+            "1ed482d:SPEC_impl.md:2884-2885: Installation keeps requiring, installing and version-checking tmux exactly as below for now (the installer, the desktop app's preflight, Linux provisioning and `farhelm helm setup`).",
+            "Current SPEC.md:5257-5258: A tmux the user runs in a session is one of their own programs, like any other they run there; Farhelm neither requires nor looks for one on any machine."
+          ],
+          "missing_premise": "No surviving caller loses an installation refusal because of this deletion.",
+          "original_stronger_consequence": "A material startup refusal could merit high if the retained requirement contradicted the contract; no security or user-work-loss route was claimed.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Explicit intermediate contract acceptance of retained installation requirements, plus source refutation of bypass. This does not dispose of g160/l2's separate historical warning mismatch."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retired-tmux-installation-version-check-separation",
+        "destination": null
+      }
+    },
+    {
+      "key": "g160/l1",
+      "owner": "g160",
+      "id": "l1",
+      "domain": "retired-supervisor-tmux",
+      "purpose": "retired-supervisor-tmux: crates/farhelm-supervisor/src/tmux.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Check tab-specific identity through the host termination fallback",
+            "location": "crates/farhelm-supervisor/src/service/core/host_tabs.rs:1061",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Investigating whether closing one tab could end a different tab's terminal if the old tmux pane/session identity guard was replaced by a host fallback that only knows the session. Suspected consequence: unintended loss of another tab's shell and work; could-be-highest: yes, if a shipped route establishes wrong-target termination. Suggested bucket: highest if established; currently an unresolved source premise, not a confirmed defect. Confidence: uninvestigated lead. Proposed_drop: false. Possible_cover: none. Source basis: host_tabs.rs:916-928 checks the requested tab's current runtime and excludes the agent runtime; names_tab at 1476-1478 checks session and tab during adoption, but end_tab_host at 1061 passes only session_id plus host handle/socket to end_launch_host. Readily checkable missing premises: how end_launch_host pins peer process/socket identity; which platforms may lack a peer; whether a supported shipped path can substitute a sibling host at that socket without out-of-contract same-account tampering. Next checks: read end_launch_host and its fallback termination helpers, the host process identity contract, then retained tests. No reproduction or runtime behavior observed."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Host termination preserves tab identity without the retired tmux target guard",
+            "location": "crates/farhelm-supervisor/src/service/core/host_tabs.rs:1061",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Original TLDR/consequence preserved: Investigating whether closing one tab could end a different tab's terminal if the old tmux pane/session identity guard was replaced by a host fallback that only knows the session. Suspected consequence: unintended loss of another tab's shell and work; could-be-highest: yes, if a shipped route establishes wrong-target termination. Suggested bucket: highest if established; no such route is established. Confidence: confirmed source refutation of the proposed deletion route, no runtime execution. Proposed_drop: source refutation, awaiting independent check. Possible_cover: none. Actual checks: host_tabs.rs:916-928 revalidates tab ID plus exact runtime and excludes the agent; names_tab:1476-1478 checks both session and tab at adoption; open_host_tab:404-418 mints a UUID and records it in the tag. end_launch_host at host_launch.rs:688-719 first shuts down the already-held runtime, then uses its adopted process and fixed socket rather than reconnecting; only absence of a pinned process reaches the session-tag fallback at 753-793. hosts/process.rs:106-160 obtains peer PID plus start identity on Linux/macOS; verified signalling also requires the exact socket argv. Crucially a new sibling host is not installed over that socket by shipped start code: hosts/spawn.rs:612-620 draws a free random name, and terminal-host/src/spawn.rs:73-74 refuses an existing path. A current tab handle cannot silently become its sibling solely because the deleted tmux target guard is absent. The previously missing socket-substitution premise therefore is not supplied by normal open/restart/close callers. Retained tests independently assert relevant responsibilities: tab_lifecycle_edges.rs:115-148 sends a well-formed unknown tab UUID, requires NotFound, requires the real tab listing unchanged, and proves the agent still accepts input; core/tests/host_terminals.rs:2861-2875 establishes a pinned peer, loses discovery, then requires the gone handle to retain that same process identity. These are sensitivity checks for surviving lookup/pinning responsibilities, not a claim that production correctness alone proves tests sufficient. Caveats: the fallback intentionally reads a session tag rather than a tab tag, but no shipped route replacing one tab's random socket with a sibling was found. Deliberate socket renames by trusted same-account code are not claimed as a reproduced or source-established accidental path. Original possible loss-of-work consequence remains in this record for independent checking."
+          }
+        }
+      ],
+      "latest": {
+        "line": 11,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l1",
+          "state": "open",
+          "summary": "Host termination preserves tab identity without the retired tmux target guard",
+          "location": "crates/farhelm-supervisor/src/service/core/host_tabs.rs:1061",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Original TLDR/consequence preserved: Investigating whether closing one tab could end a different tab's terminal if the old tmux pane/session identity guard was replaced by a host fallback that only knows the session. Suspected consequence: unintended loss of another tab's shell and work; could-be-highest: yes, if a shipped route establishes wrong-target termination. Suggested bucket: highest if established; no such route is established. Confidence: confirmed source refutation of the proposed deletion route, no runtime execution. Proposed_drop: source refutation, awaiting independent check. Possible_cover: none. Actual checks: host_tabs.rs:916-928 revalidates tab ID plus exact runtime and excludes the agent; names_tab:1476-1478 checks both session and tab at adoption; open_host_tab:404-418 mints a UUID and records it in the tag. end_launch_host at host_launch.rs:688-719 first shuts down the already-held runtime, then uses its adopted process and fixed socket rather than reconnecting; only absence of a pinned process reaches the session-tag fallback at 753-793. hosts/process.rs:106-160 obtains peer PID plus start identity on Linux/macOS; verified signalling also requires the exact socket argv. Crucially a new sibling host is not installed over that socket by shipped start code: hosts/spawn.rs:612-620 draws a free random name, and terminal-host/src/spawn.rs:73-74 refuses an existing path. A current tab handle cannot silently become its sibling solely because the deleted tmux target guard is absent. The previously missing socket-substitution premise therefore is not supplied by normal open/restart/close callers. Retained tests independently assert relevant responsibilities: tab_lifecycle_edges.rs:115-148 sends a well-formed unknown tab UUID, requires NotFound, requires the real tab listing unchanged, and proves the agent still accepts input; core/tests/host_terminals.rs:2861-2875 establishes a pinned peer, loses discovery, then requires the gone handle to retain that same process identity. These are sensitivity checks for surviving lookup/pinning responsibilities, not a claim that production correctness alone proves tests sufficient. Caveats: the fallback intentionally reads a session tag rather than a tab tag, but no shipped route replacing one tab's random socket with a sibling was found. Deliberate socket renames by trusted same-account code are not claimed as a reproduced or source-established accidental path. Original possible loss-of-work consequence remains in this record for independent checking."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g160/findings.jsonl",
+        "id": "l1",
+        "line": 11,
+        "disposition": "under-investigation",
+        "group": "g160-l1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-102",
+          "key": "g160/l1",
+          "latest_line": 11,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "retired-tmux-tab-target-guard-host-fallback",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The proposed deletion-induced loss of tab binding has no surviving tmux mutation route. Current tab handles are selected by session/tab/runtime identity; the fallback's weaker session-only tag is real, but the record supplies no ordinary socket substitution that turns this into a sibling-tab kill.",
+          "checks": [
+            "1ed482d:service/core/host_tabs.rs:396-422 mints a tab UUID and records session plus tab; :907-929 checks that requested tab's exact runtime and excludes the agent; :1474-1478 matches session and tab on adoption.",
+            "1ed482d:service/core/host_launch.rs:688-719 shuts down the held runtime, then uses its adopted process; :753-793 reconnects only in the no-pinned-process fallback and checks the session tag. This is a narrow source refutation, not proof against arbitrary pathname replacement.",
+            "1ed482d:hosts/process.rs:106-160 obtains platform peer PID and start identity; hosts/spawn.rs:606-625 chooses a free random name; terminal-host/src/spawn.rs:73-75 refuses an existing socket path. No test or reproduction was run."
+          ],
+          "coverage_checked": {
+            "SPEC.md/SPEC_impl.md": "Terminal-host and tab contracts govern identity; old-terminal retirement acceptance does not authorize wrong-tab kills.",
+            "TODO.md Planned": "Empty.",
+            "plans/queue": "Searches for tab identity, pane guards, socket replacement and wrong-target shutdown found no unlanded plan covering this exact concern; tmux removal plans are landed (REPORTS.md:29-32).",
+            "BUGS.md": "No matching item.",
+            "INDEX.md/matching queue files": "Read hosts-directory-replacement-stop-uncertainty.md fully. It retains a distinct directory-substitution uncertainty and explicitly distinguishes selective host_launch fallback analysis. It is useful context, not exact coverage or an established alias.",
+            "TRIAGE_OUTCOMES.md": "No matching tab-fallback or socket-substitution decision found.",
+            "FILTER.md": "Wrong-target termination is excluded from general rare-glitch filtering. The named random-collision filter covers only its collision-plus-interrupted-start route, not this general tab fallback."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "An ordinary supported sequence replacing this already-held tab's socket with a sibling host before the session-only fallback. No claim is made that unspecified filesystem interference is universally impossible.",
+          "original_stronger_consequence": "Closing one tab could end another tab's shell and running work; highest if that route were established. The initial lead and later proposed source refutation remain distinct; no drop was accepted.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Refute only the retired-driver deletion route and normal tab selection losing identity. Do not use this to dismiss the existing directory-replacement uncertainty, a distinct fallback collision route, or other host lifecycle defects."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retired-tmux-tab-target-guard-host-fallback",
+        "destination": null
+      }
+    },
+    {
+      "key": "g160/l2",
+      "owner": "g160",
+      "id": "l2",
+      "domain": "retired-supervisor-tmux",
+      "purpose": "retired-supervisor-tmux: crates/farhelm-supervisor/src/tmux.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 19,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l2",
+            "state": "open",
+            "summary": "Check whether deleting the supervisor floor helper also removes the desktop's newer-version warning",
+            "location": "crates/farhelm-supervisor/src/tmux.rs:546",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: A Mac user starting Farhelm with a newer-than-pinned tmux may stop receiving the one-time unaudited-version warning even though the installation still checks and requires tmux. Suggested bucket: other (diagnostic/contract correctness); could-be-highest: no established security or work-loss route, particularly since this supervisor no longer drives tmux. Confidence: new uninvestigated source lead; not execution observed. Proposed_drop: false pending caller check. Possible_cover: no same warning-loss finding in the fully read supplied neighbour context. Source basis: assigned patch deletes require_supported_tmux, including the AbovePin tracing warning. Retained desktop/tmux_preflight.rs:155-159 handles AtFloor and AbovePin identically by accepting with None. SPEC_impl.md's pinned private-tmux policy says versions above the floor earn a one-time unaudited warning, and the updated classify_tmux_version docs at tmux.rs:213-224 still say callers warn. Readily checkable missing premise: whether the desktop/bootstrap or probe itself emits the warning elsewhere, so removal actually leaves the desktop path silent. Next: search and trace those retained callers, compare the parent and full pinned range for introduction/repair. No new finding claimed until these source premises are checked. No reproduction or runtime tests."
+          }
+        },
+        {
+          "line": 20,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l2",
+            "state": "open",
+            "summary": "Newer-tmux warning loss is not introduced by the assigned helper deletion",
+            "location": "crates/farhelm-supervisor/src/tmux.rs:546",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Original TLDR preserved: A Mac user starting Farhelm with a newer-than-pinned tmux may stop receiving the one-time unaudited-version warning even though the installation still checks and requires tmux. Suggested bucket: other for the diagnostic/contract discrepancy; could-be-highest: no established security or work-loss route. Confidence: confirmed source/attribution checks, no execution. Proposed_drop: source refutation of the assigned deletion being a new warning-loss cause, with the separate broader warning-policy discrepancy retained explicitly rather than declared nonexistent. Possible_cover: no matching warning-loss record in supplied neighbour context; no prohibited coverage search. Checks/results: desktop/tmux_preflight.rs:155-159 accepts AtFloor/AbovePin alike, and 342-378 only prints a refusal; probe_tmux at tmux.rs:378-387 returns the pure classification without emitting an AbovePin warning. No other AbovePin/newer/unaudited emission was found in desktop.rs or its preflight module. However parent driver adoption at tmux.rs:3083-3094 checks the floor only when its private socket answers, and the parent has no production adoption caller after dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 already replaced that startup call with old-terminal retirement and no_server_after_startup (core.rs parent:6426-6438). Thus the assigned helper deletion removes an already unused warning implementation. Full-range attribution was checked, not assumed from immediate-parent preexistence: exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:core.rs:6630-6636 still calls adoption, but even there a fresh desktop with no private server skips the warning; preflight.rs has no diff from base to reviewed commit. The narrower warning for an adopted old server is lost with the earlier in-range retirement commit dbfc6975, not this assigned deletion. That is a distinct retirement/app/spec policy interaction, and this assigned-source pass does not broaden into a separate review of it. SPEC_impl.md:2958-2959 still says a newer version earns a one-time unaudited warning, so no blanket claim is made that the broader documentation promise was satisfied or explicitly waived. Later in-range 17a3fe858c5511a24b7403af15dd41c93bf69fd7 deletes desktop/tmux_preflight.rs and the Mac prerequisite; do not claim an ongoing endpoint Mac preflight issue. Material caveats: this candidate does not use deliberate terminal retirement as acceptance of every diagnostic omission, nor does it treat correct BelowFloor refusal as proof of correct AbovePin warnings. The initial assigned-deletion hypothesis is resolved; no readily checkable premise or open lead remains, and no new in-scope defect is established."
+          }
+        },
+        {
+          "line": 22,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l2",
+            "state": "open",
+            "summary": "Settle the historical warning contract rather than excluding an earlier in-range change",
+            "location": "crates/farhelm-supervisor/src/tmux.rs:546",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Original TLDR retained: a Mac user starting with newer-than-pinned tmux can stop receiving the one-time unaudited warning while installation still requires/checks tmux. Suggested bucket other; could-be-highest no established security or work-loss route. Confidence: reopened contract/attribution lead, not new discovery. Proposed_drop: earlier candidate proposal based on the helper already being unused is not sufficient to exclude an earlier in-range warning loss or newly false authoritative documentation; no parent drop accepted. Previous useful checks remain: unchanged desktop preflight accepts AbovePin silently, old driver warned on adoption of an answering private server, dbfc6975 removes that adoption, and 17a3fe8 later removes Mac preflight. Missing check now: read exact warning-policy text before/after dbfc and its scope qualifications to determine whether it still governs the retired/unqueried installation dependency. If it does, preserve l2 as a historical finding with dbfc attribution and later repair, not as a new 1ed implementation change. Possible_cover: parent-supplied g093/l1 historical prerequisite documentation if it is the same cause, without searching coverage sources. No runtime tests or reproduction."
+          }
+        },
+        {
+          "line": 24,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l2",
+            "state": "open",
+            "summary": "Historical installation policy keeps a newer-tmux warning promise after its desktop emitter retires",
+            "location": "crates/farhelm-supervisor/src/tmux.rs:546",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333; warning path retires earlier within the range at dbfc69751215dbf15e1d31d5bed73c3754c4ebc4; Mac prerequisite/preflight is removed later at 17a3fe858c5511a24b7403af15dd41c93bf69fd7. Original TLDR preserved: A Mac user starting Farhelm with a newer-than-pinned tmux may stop receiving the one-time unaudited-version warning even though the installation still checks and requires tmux. Suggested bucket: other for historical diagnostic/authoritative-documentation mismatch; could-be-highest: no established security or work-loss route. Confidence: confirmed source/control-flow and current-at-reviewed-revision contract mismatch, not execution. Proposed_drop: false for that historical finding; prior proposal based on the helper already being unused is withdrawn as a full-range exclusion, while preserving its valid attribution correction that the 1ed deletion is not itself the first lost emitter. No parent drop accepted. Exact contract at reviewed SPEC_impl.md:2882-2889 makes the remainder the installation's current tmux policy and says 'Installation keeps requiring, installing and version-checking tmux exactly as below for now (the installer, the desktop app's preflight, Linux provisioning and `farhelm helm setup`).' The floor paragraph at :2957-2959 says 'a version newer than the pinned one earns a one-time warning that it is unaudited, never a refusal.' It supplies no exception for native desktop preflight or an unqueried dependency. Source: preflight.rs:155-159 maps AtFloor and AbovePin to acceptance with None; :342-378 emits only refusal, and tmux.rs:378-387 returns the pure classification without a warning. Desktop contains no other AbovePin/newer/unaudited emitter. Its preflight still probes and requires this dependency, so the warning promise cannot be satisfied by an absent probe result or by the supervisor that now runs no tmux. Full-range condition/attribution: at exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a core.rs:6630-6636 calls driver adoption. An answering private server reaches the floor check, whose AbovePin arm at base tmux.rs:1197-1203 emits the warning. dbfc removes that production adoption and marks the driver absent; the assigned 1ed patch then deletes this already-unused helper. The base fresh-no-server case already omitted the warning, so do not claim all desktop warning silence first begins here. The narrower previously-warning adopted-old-server installation loses its emitter at the in-range retirement, while the installation-policy text is retained as current at 1ed. Explicit historical-scope caveat: dbfc SPEC_impl.md:2962-2963 says most following prose describes the old driver, and :3005 says 'What follows describes the old terminals as the supervisor ran them.' That can qualify its old operational prose. It does not settle the current-at-1ed mismatch: 1ed removes that historical driver exposition, expressly retains the installation policy, and presents the same unqualified newer-version warning rule within that retained policy. Even if dbfc's warning sentence is read as historical, 1ed's current-policy map remains inaccurate until the Mac requirement goes away. Remedy at that intermediate revision: either make desktop preflight emit the stated warning or state the retained version policy's actual narrower warning behavior. Later repair/scope: 17a3fe8 removes the entire Mac preflight and tmux prerequisite, so no ongoing endpoint Mac-preflight defect is claimed. Possible_cover: parent-supplied g093/l1 historical tmux-prerequisite documentation if the parent judges the same cause; no prohibited coverage source was searched. Caveats: this is not a security claim about running an unaudited terminal substrate, because this supervisor no longer uses tmux. Runtime disappearance, documentation truth and later policy retirement are distinguished. All readily checkable source/contract premises are resolved; no open l2 lead. This revises a known ID from the named pending synthesis, not a new discovery."
+          }
+        }
+      ],
+      "latest": {
+        "line": 24,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l2",
+          "state": "open",
+          "summary": "Historical installation policy keeps a newer-tmux warning promise after its desktop emitter retires",
+          "location": "crates/farhelm-supervisor/src/tmux.rs:546",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333; warning path retires earlier within the range at dbfc69751215dbf15e1d31d5bed73c3754c4ebc4; Mac prerequisite/preflight is removed later at 17a3fe858c5511a24b7403af15dd41c93bf69fd7. Original TLDR preserved: A Mac user starting Farhelm with a newer-than-pinned tmux may stop receiving the one-time unaudited-version warning even though the installation still checks and requires tmux. Suggested bucket: other for historical diagnostic/authoritative-documentation mismatch; could-be-highest: no established security or work-loss route. Confidence: confirmed source/control-flow and current-at-reviewed-revision contract mismatch, not execution. Proposed_drop: false for that historical finding; prior proposal based on the helper already being unused is withdrawn as a full-range exclusion, while preserving its valid attribution correction that the 1ed deletion is not itself the first lost emitter. No parent drop accepted. Exact contract at reviewed SPEC_impl.md:2882-2889 makes the remainder the installation's current tmux policy and says 'Installation keeps requiring, installing and version-checking tmux exactly as below for now (the installer, the desktop app's preflight, Linux provisioning and `farhelm helm setup`).' The floor paragraph at :2957-2959 says 'a version newer than the pinned one earns a one-time warning that it is unaudited, never a refusal.' It supplies no exception for native desktop preflight or an unqueried dependency. Source: preflight.rs:155-159 maps AtFloor and AbovePin to acceptance with None; :342-378 emits only refusal, and tmux.rs:378-387 returns the pure classification without a warning. Desktop contains no other AbovePin/newer/unaudited emitter. Its preflight still probes and requires this dependency, so the warning promise cannot be satisfied by an absent probe result or by the supervisor that now runs no tmux. Full-range condition/attribution: at exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a core.rs:6630-6636 calls driver adoption. An answering private server reaches the floor check, whose AbovePin arm at base tmux.rs:1197-1203 emits the warning. dbfc removes that production adoption and marks the driver absent; the assigned 1ed patch then deletes this already-unused helper. The base fresh-no-server case already omitted the warning, so do not claim all desktop warning silence first begins here. The narrower previously-warning adopted-old-server installation loses its emitter at the in-range retirement, while the installation-policy text is retained as current at 1ed. Explicit historical-scope caveat: dbfc SPEC_impl.md:2962-2963 says most following prose describes the old driver, and :3005 says 'What follows describes the old terminals as the supervisor ran them.' That can qualify its old operational prose. It does not settle the current-at-1ed mismatch: 1ed removes that historical driver exposition, expressly retains the installation policy, and presents the same unqualified newer-version warning rule within that retained policy. Even if dbfc's warning sentence is read as historical, 1ed's current-policy map remains inaccurate until the Mac requirement goes away. Remedy at that intermediate revision: either make desktop preflight emit the stated warning or state the retained version policy's actual narrower warning behavior. Later repair/scope: 17a3fe8 removes the entire Mac preflight and tmux prerequisite, so no ongoing endpoint Mac-preflight defect is claimed. Possible_cover: parent-supplied g093/l1 historical tmux-prerequisite documentation if the parent judges the same cause; no prohibited coverage source was searched. Caveats: this is not a security claim about running an unaudited terminal substrate, because this supervisor no longer uses tmux. Runtime disappearance, documentation truth and later policy retirement are distinguished. All readily checkable source/contract premises are resolved; no open l2 lead. This revises a known ID from the named pending synthesis, not a new discovery."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g160/findings.jsonl",
+        "id": "l2",
+        "line": 24,
+        "disposition": "rejected",
+        "group": "historical-desktop-tmux-abovepin-warning-after-retirement",
+        "reason": "Full102: dbfc retires supervisor AbovePin emitter whiledesktopstillclassifiesAbovePinsilently, andnew1edauthoritativeinstallationpolicy retainswarningpromise. Sourceconfirmedintermediatecontract/diagnosticmismatch, not refuted byunusedhelperat1ed or prebasefreshnoserversilence.17a3 deletes preflight/requirement endingtriggerandobligationbeforetip. Preserve originalattributionexclusionwithdrawal; no currentwarningfix or runtimeobservation/workloss."
+      },
+      "accepted_parent_decision": {
+        "key": "g160/l2",
+        "line": 24,
+        "disposition": "rejected",
+        "group": "historical-desktop-tmux-abovepin-warning-after-retirement",
+        "bucket": "other",
+        "recording": "retired-in-range",
+        "needs_independent_drop_check": false,
+        "reason": "Full102: dbfc retires supervisor AbovePin emitter whiledesktopstillclassifiesAbovePinsilently, andnew1edauthoritativeinstallationpolicy retainswarningpromise. Sourceconfirmedintermediatecontract/diagnosticmismatch, not refuted byunusedhelperat1ed or prebasefreshnoserversilence.17a3 deletes preflight/requirement endingtriggerandobligationbeforetip. Preserve originalattributionexclusionwithdrawal; no currentwarningfix or runtimeobservation/workloss."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-102",
+          "key": "g160/l2",
+          "latest_line": 24,
+          "recommendation": "covered",
+          "bucket": "other",
+          "underlying_key": "historical-desktop-tmux-abovepin-warning-after-retirement",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The historical mismatch is source-established, including newly current authoritative wording at 1ed482d. It is repaired within this same range by deleting the Mac preflight and requirement; no ongoing endpoint warning obligation survives. Preserve the withdrawn attribution-based exclusion and the historical finding in the recording register.",
+          "checks": [
+            "1ed482d:SPEC_impl.md:2882-2889 expressly retains current installation policy, while :2957-2960 promises an unaudited warning above the pin. desktop/tmux_preflight.rs:155-159 accepts AbovePin silently, :342-378 only emits a refusal, and tmux.rs:378-387 merely returns classification.",
+            "Pinned git grep of desktop.rs and desktop/ found only comments assigning the warning to the supervisor, classification, and test wording; no warning emission. preflight.rs:104-108 and :506-508 explicitly defer the warning to the now-retired supervisor path.",
+            "Base 6e423e3:tmux.rs:1188-1207 emits AbovePin warning from require_supported_tmux. dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:core.rs diff replaces adoption with end_private_server/no_server_after_startup. Thus 1ed deletes an already-unused emitter; it is not the first runtime warning loss.",
+            "17a3fe858c5511a24b7403af15dd41c93bf69fd7 deletes all 769 lines of desktop/tmux_preflight.rs and removes the desktop/setup prerequisite. Current specifications say the Mac needs no tmux. No execution occurred."
+          ],
+          "coverage_checked": {
+            "SPEC.md/SPEC_impl.md": "Historical mismatch verified; current SPEC.md:5257-5258 and SPEC_impl.md:7996-8000 remove its trigger and obligation.",
+            "TODO.md Planned": "Empty.",
+            "plans/queue": "tmux-drop-from-install's matching removal already landed (REPORTS.md:30); no unlanded warning fix found.",
+            "BUGS.md": "No warning-policy item.",
+            "INDEX.md/matching queue files/TRIAGE_OUTCOMES.md": "Searched tmux, AbovePin, unaudited, version warning and historical prerequisite wording; no exact item or active decision found. g093/l1 is mentioned by the supplied history but is outside this batch, so no alias verdict is made.",
+            "FILTER.md": "Newer Homebrew tmux is not established as a rare trigger; diagnostic-only impact alone is insufficient to apply the rare-glitch filter."
+          },
+          "exact_cover_quotes": [
+            "Current SPEC_impl.md:7998-7999: The Mac app bundles none and needs none, and hands its managed supervisor no tmux.",
+            "Current SPEC.md:5257-5258: Farhelm neither requires nor looks for one on any machine."
+          ],
+          "missing_premise": "None for the historical documentation/control-flow mismatch. Occurrence and frequency were not measured. Fresh no-server installations were already silent at the base, so do not attribute every silent preflight to this range.",
+          "original_stronger_consequence": "Lost one-time unaudited warning while installation still required/probed tmux; diagnostic/contract correctness, other. The earlier proposal to exclude the whole issue because the helper was already unused was explicitly withdrawn.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Already repaired within the reviewed range, not source-refuted and not accepted as historically correct. If recording policy intentionally retains already-repaired historical documentation findings, the parent should keep that narrower historical record under this key."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "historical-desktop-tmux-abovepin-warning-after-retirement",
+        "destination": "trailing-historical-desktop-tmux-abovepin-warning-after-retirement.md"
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete; all 1,207 assigned patch lines read.\n\nNo unaccepted defect established. Logged `c1` for independent checking of specification-accepted loss of old terminals, plus refuted candidates `c2–c4`. No open leads or unread assigned scope.\n\nFindings and progress are saved in the assigned group directory. No runtime tests or reproductions were run."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised `c1–c3` with lifecycle, caller, and test-sensitivity checks. Recorded and resolved `l1` as a source-refuted candidate concerning tab termination identity.\n\nNo new defect established. All proposed drops remain pending independent review. Unresolved lead IDs: none. No runtime execution."
+    },
+    {
+      "turn": 3,
+      "reply": "Checked assigned declarations, removed-helper callers, warning paths, and full-range attribution. Revised `c2` and `c3` to reconcile known neighbour findings.\n\n- New verified defects: none.\n- New source-refuted candidate: `l2`.\n- New unverified findings: none.\n- Open leads: none.\n\nNo new in-scope defect found. Discovery count: 1. No runtime execution."
+    },
+    {
+      "turn": 4,
+      "reply": "Revised `c2` to unverified after checking the real-host producer. Retained `l2` as a historical finding with full-range attribution and later repair.\n\nSeparate discovery checked removed-symbol callers, retained policy prose, screen-tail delegation, and environment scrubbing. Nothing new found.\n\n- New verified/unverified IDs: none.\n- Open uninvestigated leads: none.\n- Remaining investigated uncertainty: `c2`.\n- Discovery passes completed: 2.\n\nNo runtime execution."
+    },
+    {
+      "turn": 5,
+      "reply": "Discovery pass 3 complete. Nothing new found.\n\n- Checked terminal-mode replay, exit notifications, callers and surviving test assertions.\n- Revised `c2` with source-refuted deletion routes; its existing producer uncertainty remains.\n- New verified IDs: none.\n- New unverified IDs: none.\n- Remaining unresolved ID: `c2`; no uninvestigated leads.\n- Progress and findings logs updated. No runtime execution."
+    }
+  ],
+  "progress": "# g160 progress\n\nInitial review complete, turn 1. Discovery-pass count: 0; no later synthesis or discovery turn has been performed.\n\nAssigned scope: crates/farhelm-supervisor/src/tmux.rs patch segment in 1ed482dde220452e424973faf38a5e1318986333, evidence lines 1-1207. All assigned lines were delivered through the evidence reader in packets 1-200, 201-400, 401-600, 601-800, 801-1000, 1001-1200 and 1201-1207. Read the brief fully and inventory.json's complete commits field only. No unread assigned material.\n\nContracts read at the reviewed revision: SPEC.md's complete Terminal experience section (2855-3187); SPEC_impl.md's complete Terminal substrate: private tmux server section (2880 through the transport heading), relevant host-terminal switch-point and creation bullets (2209-2254), and Answers bind to what was drawn (1071 onward). Read the required priority buckets and feedback-file format. Root AGENTS.md End sentinel was present. Loaded skillette, scode-voice, and scratch-space instructions.\n\nInterface checks: the parent revision already ends old private tmux terminals and treats old-kind rows as terminal-less. The reviewed revision preserves startup ordering before reload, treats host rows through host discovery, and scopes retirement sweeps to agents and individually identified old tabs. No executable callers of the removed driver/control-mode interfaces remain in crates. Host terminal resolution, retained 12,000-line history, restart history seed and bounded launch-error excerpts remain implemented. Setup and desktop preflight retain the installation version policy. Replacement implementations were read only as interface context, not reviewed exhaustively.\n\nDurable records: c1 is a verified loss-of-work consequence with proposed_drop based on exact specification acceptance and parent-revision source; it remains kind finding for independent drop checking. c2-c4 are verified source/contract-refuted candidates. No unverified IDs and no open leads. No unaccepted defect established. New verified IDs this pass: c1, c2, c3, c4; new unverified IDs: none.\n\nNo runtime tests, builds, reproductions, checkout mutations, live-install actions or helper agents. Context outputs clipped by combined output limits were not treated as complete mandatory evidence; the needed old-terminal and replacement source was subsequently read in bounded ranges. No claim of runtime-observed behavior.\n\nNext action: return these initial-review results to the caller. A later turn must supply synthesis/discovery instructions; do not run that protocol inside this initial turn. Re-read brief.md and governing instructions after compaction.\n\n## Turn 2 in progress\n\nLater-turn synthesis. Revisit surviving prompt/excerpt/tab identity paths and test sensitivity against the deletion. Existing c1-c4 remain proposed drops awaiting independent review; no drop has been accepted. No open leads at start. Next: trace surviving callers and compare removed tests with surviving tests for responsibilities retained outside tmux.rs.\n\n## Turn 2 complete\n\nLater-turn synthesis complete; turn count 2, discovery-pass count 0. No new verified or unverified defect. New verified source-refuted ID: l1, recorded immediately as a lead and resolved under the same ID as a candidate. Revised IDs: c1 (known retirement/duplicate residual provenance and replacement lifecycle), c2 (prompt and unconfirmed-cleanup callers plus actual test sensitivity), c3 (excerpt final-state tests and direct comparison of removed tests with surviving responsibilities). c4 unchanged. Every proposed drop remains pending independent review. Open lead IDs: none.\n\nUseful checks: traced target lifecycle claim, liveness/status/caught-up/paste gates and acknowledged prompt delivery; final-screen classification and quote gates; tab UUID/tag lookup and exact runtime revalidation; host shutdown's pinned-process fallback; socket-name allocation and existing-path refusal; Restart's history seed, replacement publication and old-host end; Delete's propagation of unconfirmed host endings before record/row removal. Inspected retained test assertions rather than treating correct production as proof of test sensitivity. Compared removed raw capture/tail/excerpt tests with surviving emulator screen-tail and host excerpt tests. No distinct route from this assigned deletion to missing update warnings or misleading update-survival guidance was supplied by the assigned source.\n\nThe original loss-of-work wording is retained in the event history and revisions. c1 remains kind finding with exact acceptance quotations, including the known duplicate-agent residual; c2, c3 and l1 are source-refuted candidates, not accepted drops. No unread assigned patch scope. Broader replacement files were read at the pinned revision as interface context; no claim of whole-file review of every neighbouring group's implementation.\n\nNo runtime tests, builds, reproductions, mutation tests, helper agents, checkout changes or live-install actions. Conclusions are from source/contracts and assertion sensitivity, not observed execution. Next: return only this turn's deltas and await caller instructions.\n\n## Turn 3 in progress\n\nSeparate discovery turn, discovery-pass count 1. Read discovery-neighbours.json lines 1-905 in bounded chunks before source search. Reopened c3 for known g100 provenance/allocation findings and c2 for known g166 Gone-tab Delete bypass; previous general source refutations are limited, not accepted drops. Complete those source reconciliations before the separate search of assigned patch material. Original consequences and IDs remain append-only. No new discovery yet.\n\n## Turn 3 complete\n\nSeparate discovery pass complete. Turn count 3; discovery-pass count 1. Result: no new in-scope defect found. New verified defect IDs: none. New verified source-refuted candidate ID: l2. New unverified-after-investigation IDs: none. Open lead IDs: none.\n\nNeighbour synthesis completed before the separate new search: c2 and c3 were reopened and revised under original IDs, preserving original consequences and proposed-drop history. c2 now incorporates the known g166/c5 Gone-tab Delete bypass, directly checked against collection, non-placeholder semantics, child-only roots and shutdown branches; the relevant source also exists at the exclusive range base, not just the immediate parent. c3 now incorporates known g100/c1 and g100/l1 provenance and bounded temporary-allocation effects; direct resize/history/caller checks invalidate the earlier blanket provenance/refutation claim, while final-state/output-format test evidence remains valid. These are reconciliations of supplied known findings, not new discoveries. No proposed drop or lowering is treated as accepted.\n\nNew search reviewed the assigned patch's added declarations/docs and removed driver/helper contracts beyond the prior known routes. Investigated l2: removing require_supported_tmux appears to remove the newer-than-pin warning, but tracing current preflight/probe and full-range startup changes shows that the helper was already unreachable from production after the earlier in-range retirement change. Base startup still adopted old servers, but already skipped the warning without a server; the desktop preflight itself is unchanged from base. The separate retirement/app/spec warning discrepancy is retained in l2's detail, without attributing it to this assigned deletion or expanding this assignment. Later 17a3fe858c5511a24b7403af15dd41c93bf69fd7 removes the Mac preflight entirely.\n\nNo unread assigned patch material. No tests, builds, reproductions, mutation experiments, agents, checkout changes or live-install actions. All conclusions are source/contract analysis, not execution observations. Next: return only discovery deltas and useful checks to caller; await further instructions.\n\n## Turn 4 in progress\n\nDiscovery pass 2 requested, after named synthesis. The neighbour snapshot is updated (1,146 lines); reading bounded chunks before new source investigation. Revisit c2's claimed supported producer and l2's historical warning-contract attribution before new search. Previous proposed drops remain unaccepted. No new finding yet.\n\n## Turn 4 complete\n\nNamed synthesis complete, then a separate second discovery pass. Turn count 4; discovery-pass count 2. Updated neighbour file read completely (lines 1-1146) in bounded chunks. Also directly read exact latest g166/f1 and g163/l1 as requested, because g163/l1 was not in the neighbour snapshot's record list.\n\nExisting c2 revised: conditional Gone-tab dispatch remains source-established, but supported real-host producer is unverified after investigation. Direct checks of HostConnection::connect_with -> confirm_with_process, socket_process and runtime reconnect/shutdown show that a readable live --socket host or whole-walk failure normally converts Gone to Unavailable. The fake close fixture is not a shipped producer; per-row argv omissions still need pairing with an actual supported socket-loss/ended-connection/live-host sequence. This missing premise and what would settle it are retained explicitly. Original potential-highest wrong-target/work-loss consequences remain separate and preserved, with no accepted drop/lowering.\n\nExisting l2 retained as a historical other-bucket finding rather than excluded on immediate-parent attribution. Exact current-at-1ed installation policy retains the unaudited-newer-version warning promise while desktop preflight is silent. Narrow old-server adoption warning loss occurs at in-range dbfc retirement; the base no-server silence was already present and is disclosed. dbfc's historical-prose qualifier is preserved as a scope caveat; the 1ed rewrite expressly presents the retained installation policy as current. Later 17a3fe8 both removes Mac preflight/prerequisite and replaces the one-time-warning promise with newer versions accepted without the warning statement. This is known-ID reconciliation, not new discovery.\n\nSeparate new search results: reviewed the assigned declaration/export/constant deletions and updated module/resolve/probe policy prose; searched crate callers for removed public and crate-private driver/codec/control/input/history names; found no surviving executable references. Checked retained emulator screen_tail delegation and the host-launch FARHELM_TMUX scrub responsibility. No additional concrete lead or new in-scope defect established beyond the already recorded concerns.\n\nNew verified finding IDs: none. New unverified-after-investigation IDs: none (c2 is a confidence revision of an existing finding). Revised IDs this turn: c2, l2. Open uninvestigated lead IDs: none. Remaining investigated uncertainty: c2's supported real-host producer, recorded in full. No unread assigned patch scope. All proposed-drop decisions remain the parent's; none accepted here.\n\nNo runtime tests, builds, reproductions, mutation tests, helper agents, checkout changes or live-install actions. Conclusions are source/contract analysis only. Next: return this turn's deltas and await caller instructions.\n\n## Turn 5 in progress\n\nSeparate discovery pass 3, with no named pending synthesis questions. Re-read brief and complete own 24-event history; reused prior complete neighbour read and read the current snapshot's entire 62-group record inventory in three bounded chunks for novelty. Current snapshot has the same 1,146 lines / 371,051 bytes; that alone is not proof of unchanged bodies. No new neighbour premise is being asserted from file-size equality. Existing c2 production-producer uncertainty remains explicitly unresolved; no forced drop or lowering. New search will check the removed PaneModes and pane-death notification responsibilities against retained host callers, contracts and assertions. Discovery count 3 in progress; no new finding yet. No tests, reproductions or live-install work.\n\n## Turn 5 complete\n\nSeparate discovery pass 3 complete; turn count 5. Result: nothing new found. New verified defect IDs: none. New unverified-after-investigation IDs: none. Revised ID: c2, twice, immediately when each considered removal route was source-refuted. No newly opened lead. Remaining investigated uncertainty: c2's supported real-host producer, unchanged; no parent drop or lowering accepted.\n\nUseful new checks: traced removal of PaneModes to emulator-held modes, grid_screen cell/cursor transmission and recovery snapshot's mode/region/origin/autowrap restoration; inspected literal set/reset and mouse-precedence assertions in emulator tests/modes.rs rather than deriving test sensitivity from production correctness. Compared the checked replacement source to the exclusive range base; mode accessor/grid screen implementations are unchanged and snapshot paint's mode restoration is unaffected by its separate SGR-helper removal. Traced removal of PANE_DIED_CHANNEL to the notifier created before reload, options used by adopted/new agent/tab runtimes, forward liveness publication and ticker select/reap receipt; inspected the runtime test's exact exit/socket notification assertions. The ticker exit-commit test calls reap_pass directly, so it was not claimed as an integrated channel-wakeup oracle.\n\nNeighbour context: reused the prior complete snapshot read; this turn read the current snapshot's header/initial chunk and all 62 groups' current ID/kind/state/summary/location records in bounded projections. The prior oversized 81-230 output failed and was not counted as delivered. No new named cross-group input was supplied. No current-body equality is claimed from matching file size. Existing known finding history remains complete in findings.jsonl and was read fully this turn.\n\nNo unread assigned patch material, no new substantive discovery and no outstanding uninvestigated lead. No runtime tests, builds, reproductions, mutation tests, agents, checkout changes or live-install actions. All results are source and contract analysis. Next: return only this turn's changes/checks and await caller instructions.\n"
+}

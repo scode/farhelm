@@ -1,0 +1,505 @@
+{
+  "group": {
+    "id": "g102",
+    "domain": "supervisor-core-integration",
+    "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs, crates/farhelm-supervisor/src/agent_kind/mod.rs, crates/farhelm-supervisor/src/service/mod.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g001",
+      "g005",
+      "g006",
+      "g007",
+      "g008",
+      "g009",
+      "g097",
+      "g098",
+      "g099",
+      "g100",
+      "g101",
+      "g103",
+      "g104",
+      "g105",
+      "g106",
+      "g107",
+      "g108",
+      "g109",
+      "g110",
+      "g111",
+      "g112",
+      "g113",
+      "g114",
+      "g115",
+      "g116",
+      "g117",
+      "g118",
+      "g119",
+      "g120",
+      "g121",
+      "g122",
+      "g123",
+      "g124",
+      "g125",
+      "g126",
+      "g127",
+      "g128",
+      "g129",
+      "g130",
+      "g131",
+      "g132",
+      "g133",
+      "g134",
+      "g149",
+      "g150",
+      "g159",
+      "g160",
+      "g161",
+      "g162",
+      "g163",
+      "g164",
+      "g165",
+      "g166",
+      "g167",
+      "g168",
+      "g169",
+      "g170",
+      "g171",
+      "g172",
+      "g173"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00294-000.patch",
+        "ranges": [
+          [
+            1,
+            1021
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/core.rs",
+        "commit": "04d85f0c98a9b635709d00b056719a0baa7fd3fc",
+        "notes": "patch header; patch character offsets [0,46696)",
+        "lines": 1021,
+        "bytes": 46702,
+        "start": 0,
+        "end": 46696,
+        "original": "[private-run]/prep/originals/00294.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00659-000.patch",
+        "ranges": [
+          [
+            1,
+            26
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/core.rs",
+        "commit": "190d844e58c96cf197aa838d0b0eea8062f48435",
+        "notes": "patch header; patch character offsets [0,1609)",
+        "lines": 26,
+        "bytes": 1609,
+        "start": 0,
+        "end": 1609,
+        "original": "[private-run]/prep/originals/00659.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00682-000.patch",
+        "ranges": [
+          [
+            1,
+            171
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/core.rs",
+        "commit": "47f33bbdbd5ff4a6e437e97a800f9083be43096e",
+        "notes": "patch header; patch character offsets [0,9235)",
+        "lines": 171,
+        "bytes": 9235,
+        "start": 0,
+        "end": 9235,
+        "original": "[private-run]/prep/originals/00682.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00763-000.patch",
+        "ranges": [
+          [
+            1,
+            73
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/agent_kind/mod.rs",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,4795)",
+        "lines": 73,
+        "bytes": 4807,
+        "start": 0,
+        "end": 4795,
+        "original": "[private-run]/prep/originals/00763.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00771-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/mod.rs",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,888)",
+        "lines": 13,
+        "bytes": 888,
+        "start": 0,
+        "end": 888,
+        "original": "[private-run]/prep/originals/00771.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00901-000.patch",
+        "ranges": [
+          [
+            1,
+            34
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/agent_kind/mod.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,2128)",
+        "lines": 34,
+        "bytes": 2134,
+        "start": 0,
+        "end": 2128,
+        "original": "[private-run]/prep/originals/00901.patch"
+      }
+    ],
+    "lines": 1338,
+    "bytes": 65375
+  },
+  "records": [
+    {
+      "key": "g102/c1",
+      "owner": "g102",
+      "id": "c1",
+      "domain": "supervisor-core-integration",
+      "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs, crates/farhelm-supervisor/src/agent_kind/mod.rs, crates/farhelm-supervisor/src/service/mod.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Retired tab refusal does not prevent legacy Delete",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:16157",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: considered whether refusing retired sessions in close_tab_under_claim would leave users unable to delete their old container session. Details: core.rs:16157 adds require_active_launch to individual tab close, but teardown.rs:500-625 performs whole-session scope enumeration, legacy ContainerRuntime acquisition/revocation/confirmed removal (533-577), process reaping, and direct host ending without calling close_tab_under_claim. A targeted symbol search across teardown.rs found no close_tab call. SPEC.md, Retired containerized sessions (4816-4823), requires Delete only and retains legacy removal. Refuted by the separate teardown route; no established Delete failure from the changed close-tab gate. Suggested bucket if real: highest (loss of the final cleanup handle/process ownership could matter); could-be-highest: yes, but source refutes the alleged route. Confidence: confirmed source analysis, no execution. proposed_drop: source refutation above. possible_cover: none. Caveat: this conclusion is narrowly about interaction with the new tab gate, not a blanket audit of legacy teardown."
+          }
+        },
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Retired tab refusal does not prevent legacy Delete",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:16157",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: original potentially highest hypothesis preserved: refusing retired sessions in individual tab cleanup might prevent whole-session Delete or lose its final cleanup handle, leaving user processes or container ownership unreachable. Suggested bucket if established: highest; could-be-highest: yes. Synthesis revision: source refutation is narrowly that the new require_active_launch in core.rs:16157 is not on the whole-session Delete route. handlers.rs:1240-1327 owns the agent fence, admission, directory admission, then lifecycle claim, and reads the current map entry only after claiming lifecycle; it passes that entry directly to teardown_session_with_hosts. teardown.rs:224-324 states and implements this whole-session contract without reacquiring lifecycle; 533-577 derives the legacy runtime from the current entry's launch and session UUID and acquires the old permanent lock, revokes the ticket and confirms removal directly. No individual close_tab/close_tab_under_claim call occurs on this route. Its scope enumeration combines recorded and derived launch/tab units (500-553), the process sweep uses WholeSession (578-591), hosts are directly ended (603-625), and per-generation launch artifacts are removed as a complete session set (847-856). These cleanup decisions therefore do not depend on a successful individual-tab close or only the current launch generation. The removal and sweep errors propagate before artifact/row removal; teardown.rs:690-890 additionally retains the row for output-reaper, tmux, artifact-listing or quarantine failures. This does not assert that all other teardown failure modes are harmless. Parent-provided interface evidence: g095 independently confirms flock/ticket revocation, lazy Podman lookup and explicitly accepted missing-engine cleanup; no broader unconfirmed cleanup is authorized by that exception. SPEC.md, Retired containerized sessions, 4818-4821: 'Existing sessions support Delete only.' and 'Delete retains the legacy container-removal path and confirms absence. Missing Podman counts as nothing left to remove.' SPEC_impl.md, Rootless Podman sessions, 8652-8655 requires legacy removal, confirmed absence and lock/ticket handling, and says other unconfirmed cleanup keeps the session for retry. Confidence: confirmed narrow source refutation; no execution. proposed_drop: the new individual-tab retirement gate is bypassed by the separately locked whole-session cleanup route, as cited; this is a proposal for independent check, not an accepted drop or blanket teardown clearance. possible_cover: none. Caveats: preserve original potentially highest loss-of-handle/process consequence for independent review; success under the missing-Podman exception is specification acceptance only, and cannot generalize to an installed engine failure or an unconfirmed process/host sweep."
+          }
+        }
+      ],
+      "latest": {
+        "line": 3,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Retired tab refusal does not prevent legacy Delete",
+          "location": "crates/farhelm-supervisor/src/service/core.rs:16157",
+          "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: original potentially highest hypothesis preserved: refusing retired sessions in individual tab cleanup might prevent whole-session Delete or lose its final cleanup handle, leaving user processes or container ownership unreachable. Suggested bucket if established: highest; could-be-highest: yes. Synthesis revision: source refutation is narrowly that the new require_active_launch in core.rs:16157 is not on the whole-session Delete route. handlers.rs:1240-1327 owns the agent fence, admission, directory admission, then lifecycle claim, and reads the current map entry only after claiming lifecycle; it passes that entry directly to teardown_session_with_hosts. teardown.rs:224-324 states and implements this whole-session contract without reacquiring lifecycle; 533-577 derives the legacy runtime from the current entry's launch and session UUID and acquires the old permanent lock, revokes the ticket and confirms removal directly. No individual close_tab/close_tab_under_claim call occurs on this route. Its scope enumeration combines recorded and derived launch/tab units (500-553), the process sweep uses WholeSession (578-591), hosts are directly ended (603-625), and per-generation launch artifacts are removed as a complete session set (847-856). These cleanup decisions therefore do not depend on a successful individual-tab close or only the current launch generation. The removal and sweep errors propagate before artifact/row removal; teardown.rs:690-890 additionally retains the row for output-reaper, tmux, artifact-listing or quarantine failures. This does not assert that all other teardown failure modes are harmless. Parent-provided interface evidence: g095 independently confirms flock/ticket revocation, lazy Podman lookup and explicitly accepted missing-engine cleanup; no broader unconfirmed cleanup is authorized by that exception. SPEC.md, Retired containerized sessions, 4818-4821: 'Existing sessions support Delete only.' and 'Delete retains the legacy container-removal path and confirms absence. Missing Podman counts as nothing left to remove.' SPEC_impl.md, Rootless Podman sessions, 8652-8655 requires legacy removal, confirmed absence and lock/ticket handling, and says other unconfirmed cleanup keeps the session for retry. Confidence: confirmed narrow source refutation; no execution. proposed_drop: the new individual-tab retirement gate is bypassed by the separately locked whole-session cleanup route, as cited; this is a proposal for independent check, not an accepted drop or blanket teardown clearance. possible_cover: none. Caveats: preserve original potentially highest loss-of-handle/process consequence for independent review; success under the missing-Podman exception is specification acceptance only, and cannot generalize to an installed engine failure or an unconfirmed process/host sweep."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g102/findings.jsonl",
+        "id": "c1",
+        "line": 3,
+        "disposition": "under-investigation",
+        "group": "g102-c1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-067",
+          "key": "g102/c1",
+          "latest_line": 3,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "retired-container-tab-gate-versus-whole-session-delete",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The new retired-session gate applies to individual tab close. Whole-session Delete takes a separate cleanup route and never calls that gate. This refutes only the alleged gate interaction.",
+          "checks": [
+            "04d85f0c98a9b635709d00b056719a0baa7fd3fc:crates/farhelm-supervisor/src/service/core.rs:16142-16170: close_tab_under_claim applies require_active_launch.",
+            "Same revision:service/handlers.rs:1240-1327: Delete takes agent fence, directory admission and lifecycle, reads the current entry, and calls teardown_session_with_hosts directly.",
+            "Same revision:service/teardown.rs:495-625: independently enumerates scopes, derives legacy ContainerRuntime from the entry, holds its permanent lock through revoke/remove, runs WholeSession reap, then ends hosts. Each removal/sweep/end error propagates. No close_tab invocation is needed.",
+            "Current SPEC.md:4892-4899 and SPEC_impl.md:8314-8330 preserve legacy Delete, confirmed absence and lock/ticket serialization. Missing Podman is an explicit exception, not permission to treat other unconfirmed cleanup as successful. Source analysis only."
+          ],
+          "coverage_checked": {
+            "TODO.md:25-27": "Planned is empty; no cover.",
+            "BUGS.md": "Only the local SSH output-holder provisioning hang is recorded; no matching trigger/consequence/scope.",
+            "TRIAGE_OUTCOMES.md": "Searched active ledger for the actual lifecycle, marker, replay, shim, metadata and terminal-field claims; no exact matching disposition. Archive not read.",
+            "plans/queue": "Searched named behavior and symbols. Podman and tmux plans provide retirement context; none explicitly accepts the claimed test-oracle gap or fixes the named timer/serialization hypothesis. No plan used as cover merely because its subsystem matches.",
+            "FILTER.md": "Read in full. No entire filter boundary matches the retained integrated test gap; rarity alone was not used. Refuted hypotheses are resolved from source rather than filtered.",
+            "SPEC.md / SPEC_impl.md": "Retired-container sections explicitly require Delete-only operation and the legacy cleanup route; they do not accept losing the final cleanup handle.",
+            "INDEX.md / matching files": "No exact gate-interaction item found. gone-retry-forgets-pinned-foreground-child.md was read and concerns a different recovery identity-loss route."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "No premise establishes whole-session Delete calling the newly gated individual-tab path.",
+          "original_stronger_consequence": "Retired-tab refusal might block whole-session Delete or lose its final cleanup handle, leaving user-owned processes/container ownership unreachable. Highest if established; no blanket teardown clearance follows from this refutation.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Narrow source refutation: the new gate is absent from the separately locked whole-session cleanup route. Preserve the original potential process/work-loss consequence in the independent drop register."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-067.json",
+          "key": "g102/c1",
+          "proposal": "claim-checks/claims-067/result.json",
+          "parent_proposal": "source-refuted-retired-tab-gate-blocks-whole-session-delete",
+          "final_independent_gate": "required-before-original-possible-work-loss-drop",
+          "reason": "Full flagged067 read. require_active_launch is on individual close, while Delete directly owns directory/lifecycle admission and calls teardown_session_with_hosts, derives legacy runtime, holds permanent lock through removal and runs WholeSession sweep and confirmed host end. Refute only alleged gate interaction, not all cleanup reachability. Missing Podman is a named exception, other errors propagate. Preserve unreachable user-process/work consequence pending gate."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retired-container-tab-gate-versus-whole-session-delete",
+        "destination": null
+      }
+    },
+    {
+      "key": "g102/c2",
+      "owner": "g102",
+      "id": "c2",
+      "domain": "supervisor-core-integration",
+      "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs, crates/farhelm-supervisor/src/agent_kind/mod.rs, crates/farhelm-supervisor/src/service/mod.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Tab open cannot slip past the seal despite lacking directory admission",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:15630",
+            "detail": "Reviewed commit: 47f33bbdbd5ff4a6e437e97a800f9083be43096e. TLDR: considered whether a terminal tab could start after an environment was sealed for deletion. Details: core.rs:15630-15637 acquires that session's lifecycle claim before reading the atomic seal and moves the claim into its supervisor-owned open task at 15740-15743. handlers.rs:1461-1469 takes directory admission and the same target lifecycle claim before deciding, and 1515-1551 counts other durable session rows and sets the atomic seal. If the open session is the deleted session, the claim serializes both actions; if it is another session, that row prevents sealing. Restart retains its row and creates are serialized under directory admission. SPEC_impl.md, Environment Delete and the seal, 6623-6625 explicitly states: 'A tab open takes no directory admission, which is still sound: a seal happens only when no other row exists, and a tab of the deleted session is serialized by its lifecycle claim, which the seal holds.' Source implements that contract. Suggested bucket if real: high for a late shell; a highest consequence would additionally require an unestablished route to work beyond the already confirmed environment destruction. could-be-highest: no established route; uncertainty preserved as stated. Confidence: confirmed source refutation; no execution. proposed_drop: source serialization proof and exact specification acceptance above. possible_cover: none."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Tab open cannot slip past the seal despite lacking directory admission",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:15630",
+            "detail": "Reviewed commit: 47f33bbdbd5ff4a6e437e97a800f9083be43096e; later interaction checked at 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: considered whether a terminal tab could start after the environment was sealed for deletion, particularly while a Restart or create retry temporarily removes its current in-memory entry. Synthesis revision: core.rs:15630-15638 claims lifecycle by stable session ID before reading the seal or current map entry; the same guard moves into the supervisor-owned open task (15740-15743), so cancellation cannot release it while a shell starts. handlers.rs:1459-1469 takes directory admission and that same target lifecycle claim, then reads the current entry (1487-1503), runs preflight and counts durable rows (1515-1518), and sets the in-memory seal after the commit (1550). A tab on the target session is therefore ordered before or after the seal; a tab on a different session requires that different session's row, which store.rs:5966-5973 counts regardless of outcome, terminal kind or generation. The current-row/generation premise was checked: Restart's begin_relaunch_named reads the existing row and updates it in place (store.rs:4512-4626), incrementing generation while keeping its sessions row; only afterward does core.rs:13621-13670 remove the map entry. Its lifecycle claim moves into the owned relaunch task (13466-13474). Create retry also takes lifecycle before durable takeover/map removal (core.rs:11418-11472), but create directory admission remains held through launch; hence the shorter retry lifecycle lifetime cannot race the sealing decision. A missing map entry does not make these rows disappear from the count, and a missing row yields Gone rather than an authorized Restart. The later host-tab-only simplification preserves ordering: at 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 core.rs:14538-14546 still claims lifecycle, checks seal, then fetches entry; 14622-14626 moves the claim into the owned open_host_tab task. SPEC_impl.md, Environment Delete and the seal, 6623-6625 explicitly states: 'A tab open takes no directory admission, which is still sound: a seal happens only when no other row exists, and a tab of the deleted session is serialized by its lifecycle claim, which the seal holds.' Source implements this contract; acceptance alone is not the refutation. Suggested bucket if real: high for a late shell; the earlier potential highest extension required an unestablished route to work beyond the already confirmed environment destruction, and no such route is established here. could-be-highest: no established route, retaining that earlier caveat. Confidence: confirmed narrow source refutation, no execution. proposed_drop: source serialization and durable-row preservation proof above, supported by the exact contract; remains a proposal, no parent drop accepted. possible_cover: none. Caveat: this resolves the seal/open and generation/current-row hypotheses, not unrelated tab lifecycle or provider destruction defects."
+          }
+        }
+      ],
+      "latest": {
+        "line": 4,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Tab open cannot slip past the seal despite lacking directory admission",
+          "location": "crates/farhelm-supervisor/src/service/core.rs:15630",
+          "detail": "Reviewed commit: 47f33bbdbd5ff4a6e437e97a800f9083be43096e; later interaction checked at 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: considered whether a terminal tab could start after the environment was sealed for deletion, particularly while a Restart or create retry temporarily removes its current in-memory entry. Synthesis revision: core.rs:15630-15638 claims lifecycle by stable session ID before reading the seal or current map entry; the same guard moves into the supervisor-owned open task (15740-15743), so cancellation cannot release it while a shell starts. handlers.rs:1459-1469 takes directory admission and that same target lifecycle claim, then reads the current entry (1487-1503), runs preflight and counts durable rows (1515-1518), and sets the in-memory seal after the commit (1550). A tab on the target session is therefore ordered before or after the seal; a tab on a different session requires that different session's row, which store.rs:5966-5973 counts regardless of outcome, terminal kind or generation. The current-row/generation premise was checked: Restart's begin_relaunch_named reads the existing row and updates it in place (store.rs:4512-4626), incrementing generation while keeping its sessions row; only afterward does core.rs:13621-13670 remove the map entry. Its lifecycle claim moves into the owned relaunch task (13466-13474). Create retry also takes lifecycle before durable takeover/map removal (core.rs:11418-11472), but create directory admission remains held through launch; hence the shorter retry lifecycle lifetime cannot race the sealing decision. A missing map entry does not make these rows disappear from the count, and a missing row yields Gone rather than an authorized Restart. The later host-tab-only simplification preserves ordering: at 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 core.rs:14538-14546 still claims lifecycle, checks seal, then fetches entry; 14622-14626 moves the claim into the owned open_host_tab task. SPEC_impl.md, Environment Delete and the seal, 6623-6625 explicitly states: 'A tab open takes no directory admission, which is still sound: a seal happens only when no other row exists, and a tab of the deleted session is serialized by its lifecycle claim, which the seal holds.' Source implements this contract; acceptance alone is not the refutation. Suggested bucket if real: high for a late shell; the earlier potential highest extension required an unestablished route to work beyond the already confirmed environment destruction, and no such route is established here. could-be-highest: no established route, retaining that earlier caveat. Confidence: confirmed narrow source refutation, no execution. proposed_drop: source serialization and durable-row preservation proof above, supported by the exact contract; remains a proposal, no parent drop accepted. possible_cover: none. Caveat: this resolves the seal/open and generation/current-row hypotheses, not unrelated tab lifecycle or provider destruction defects."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g102/findings.jsonl",
+        "id": "c2",
+        "line": 4,
+        "disposition": "under-investigation",
+        "group": "g102-c2",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-067",
+          "key": "g102/c2",
+          "latest_line": 4,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "environment-seal-tab-open-lifecycle-ordering",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "A tab on the session being deleted shares its lifecycle claim with sealing; a tab on another session requires another durable row, which prevents sealing. Removing an entry during Restart does not remove that row.",
+          "checks": [
+            "47f33bbdbd5ff4a6e437e97a800f9083be43096e:service/core.rs:15617-15665,15730-15748: open_tab claims lifecycle before checking seal/map and moves that guard into its owned task.",
+            "Same revision:service/handlers.rs:1450-1560: sealing takes directory admission and the target lifecycle claim before reading entry, preflight, seal_unless_other_sessions and the committed in-memory seal.",
+            "Same revision:store.rs:5950-6000: other-session count is SELECT COUNT(*) FROM sessions WHERE id <> ?1, without state/kind/generation filtering. begin_relaunch_named at 4512-4632 reads and updates the existing row instead of deleting it.",
+            "Current SPEC_impl.md:6106-6135 states the same durable-row and lifecycle ordering. Source only; no execution."
+          ],
+          "coverage_checked": {
+            "TODO.md:25-27": "Planned is empty; no cover.",
+            "BUGS.md": "Only the local SSH output-holder provisioning hang is recorded; no matching trigger/consequence/scope.",
+            "TRIAGE_OUTCOMES.md": "Searched active ledger for the actual lifecycle, marker, replay, shim, metadata and terminal-field claims; no exact matching disposition. Archive not read.",
+            "plans/queue": "Searched named behavior and symbols. Podman and tmux plans provide retirement context; none explicitly accepts the claimed test-oracle gap or fixes the named timer/serialization hypothesis. No plan used as cover merely because its subsystem matches.",
+            "FILTER.md": "Read in full. No entire filter boundary matches the retained integrated test gap; rarity alone was not used. Refuted hypotheses are resolved from source rather than filtered.",
+            "SPEC.md / SPEC_impl.md": "Environment Delete and the seal explicitly documents why tab open needs no directory admission. Product deletion rules do not accept unconfirmed extra destruction.",
+            "INDEX.md / matching files": "No exact seal/tab-open serialization defect found."
+          },
+          "exact_cover_quotes": [
+            "SPEC_impl.md:6132-6135: A tab open takes no directory admission, which is still sound: a seal happens only when no other row exists, and a tab of the deleted session is serialized by its lifecycle claim, which the seal holds."
+          ],
+          "missing_premise": "The alleged late-open route would need a tab admitted without either the shared target lifecycle claim or another durable row. Neither appears in the checked paths.",
+          "original_stronger_consequence": "A shell could start after the environment was sealed, including while Restart/create retry temporarily removes the map entry. High for a late shell; highest would need a route to harm beyond the environment destruction the user already confirmed. That stronger route remains unestablished.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Source serialization plus durable-row preservation, corroborated by the exact implementation contract. The possible stronger user-work consequence must remain visible to the independent check."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-067.json",
+          "key": "g102/c2",
+          "proposal": "claim-checks/claims-067/result.json",
+          "parent_proposal": "source-refuted-tab-start-crosses-environment-seal-without-serialization",
+          "final_independent_gate": "required-before-original-possible-work-loss-drop",
+          "reason": "Full067 same-session tab open owns the lifecycle claim sealing holds, moved into its owned task; other-session tab requires a durable row counted without state/kind/generation exclusions. Restart removes the map entry but retains its row. Exact impl6132-6135 corroborates rather than accepts a harmful race. Bound to this lifecycle/durable-row route; do not assume every later cancellation safe or harm beyond consent established."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "environment-seal-tab-open-lifecycle-ordering",
+        "destination": null
+      }
+    },
+    {
+      "key": "g102/c3",
+      "owner": "g102",
+      "id": "c3",
+      "domain": "supervisor-core-integration",
+      "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs, crates/farhelm-supervisor/src/agent_kind/mod.rs, crates/farhelm-supervisor/src/service/mod.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "The longer environment answer wait does not expire its delete fence early",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:436",
+            "detail": "Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435. TLDR: considered whether extending the environment-launch answer wait beyond the ordinary wait leaves the asking session's delete fence running on an earlier timer, allowing teardown while its request is still pending. Details: the added SupervisorTimeouts.agent_environment_launch is consumed in agent_relay.rs:650-651 as part of one answer allowance. HelmLink::upcall holds the supplied fence as an owned local while waiting for the answer (agent_relay.rs:283-349); only after an answer timeout does it move that fence to a retained task and begin tokio::time::timeout(retain, rx) (350-378). The retention timer therefore cannot elapse during the newly lengthened answer wait. An ordinary completed response drops the fence only afterward. Even retention expiry retires the link rather than silently treating the request as completed. SPEC_impl.md at this revision, Agent requests and environments, 6692-6699 defines the additive approval/environment wait and says expiry leaves the helm-owned launch task running; the existing relay's separate retention semantics remain unchanged. Suggested bucket if the hypothesized premature release existed: high for lifecycle interference, potentially highest only with an additional established process/work-loss route; could-be-highest: uncertain hypothetical impact, no such route is established and source refutes the timer-order premise. Confidence: confirmed source refutation; no runtime execution or reproduction. proposed_drop: exact source ownership/timer ordering above, not absence of observed failures or specification acceptance of premature release. possible_cover: none. Caveat: this rules out a retention timer overlapping the new answer allowance, not every possible cancellation or post-timeout lifecycle issue."
+          }
+        }
+      ],
+      "latest": {
+        "line": 5,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "The longer environment answer wait does not expire its delete fence early",
+          "location": "crates/farhelm-supervisor/src/service/core.rs:436",
+          "detail": "Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435. TLDR: considered whether extending the environment-launch answer wait beyond the ordinary wait leaves the asking session's delete fence running on an earlier timer, allowing teardown while its request is still pending. Details: the added SupervisorTimeouts.agent_environment_launch is consumed in agent_relay.rs:650-651 as part of one answer allowance. HelmLink::upcall holds the supplied fence as an owned local while waiting for the answer (agent_relay.rs:283-349); only after an answer timeout does it move that fence to a retained task and begin tokio::time::timeout(retain, rx) (350-378). The retention timer therefore cannot elapse during the newly lengthened answer wait. An ordinary completed response drops the fence only afterward. Even retention expiry retires the link rather than silently treating the request as completed. SPEC_impl.md at this revision, Agent requests and environments, 6692-6699 defines the additive approval/environment wait and says expiry leaves the helm-owned launch task running; the existing relay's separate retention semantics remain unchanged. Suggested bucket if the hypothesized premature release existed: high for lifecycle interference, potentially highest only with an additional established process/work-loss route; could-be-highest: uncertain hypothetical impact, no such route is established and source refutes the timer-order premise. Confidence: confirmed source refutation; no runtime execution or reproduction. proposed_drop: exact source ownership/timer ordering above, not absence of observed failures or specification acceptance of premature release. possible_cover: none. Caveat: this rules out a retention timer overlapping the new answer allowance, not every possible cancellation or post-timeout lifecycle issue."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g102/findings.jsonl",
+        "id": "c3",
+        "line": 5,
+        "disposition": "under-investigation",
+        "group": "g102-c3",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-067",
+          "key": "g102/c3",
+          "latest_line": 5,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "environment-answer-budget-delete-fence-retention-order",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The retention timeout starts after the full answer timeout expires. Extending the answer allowance cannot make that later timer expire during the answer wait.",
+          "checks": [
+            "190d844e58c96cf197aa838d0b0eea8062f48435:service/agent_relay.rs:283-378: upcall owns fence through delivery and timeout(answer, &mut rx), then moves it to a retained task that begins timeout(retain, rx). Ordinary completion drops it afterward; retention expiry retires the link.",
+            "Same revision:service/agent_relay.rs:635-660: may_launch_environment adds agent_environment_launch to the same answer duration after the approval allowance.",
+            "Current SPEC_impl.md:6167-6212, especially 6200-6208: one additive allowance, helm-owned task survives expiry. No timer-overlap acceptance or runtime pass claimed."
+          ],
+          "coverage_checked": {
+            "TODO.md:25-27": "Planned is empty; no cover.",
+            "BUGS.md": "Only the local SSH output-holder provisioning hang is recorded; no matching trigger/consequence/scope.",
+            "TRIAGE_OUTCOMES.md": "Searched active ledger for the actual lifecycle, marker, replay, shim, metadata and terminal-field claims; no exact matching disposition. Archive not read.",
+            "plans/queue": "Searched named behavior and symbols. Podman and tmux plans provide retirement context; none explicitly accepts the claimed test-oracle gap or fixes the named timer/serialization hypothesis. No plan used as cover merely because its subsystem matches.",
+            "FILTER.md": "Read in full. No entire filter boundary matches the retained integrated test gap; rarity alone was not used. Refuted hypotheses are resolved from source rather than filtered.",
+            "SPEC.md / SPEC_impl.md": "Agents and environments / Agent requests and environments define the additive launch wait and continuing task; no acceptance of premature fence release.",
+            "INDEX.md / matching files": "No exact answer-wait/retention-timer item found."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "The hypothesis requires the retention clock to begin before the answer wait ends; the source begins it afterward.",
+          "original_stronger_consequence": "A longer environment-launch answer wait might outlive the asking session's delete fence and allow lifecycle teardown during its pending request. High if established; potentially highest only with an additional process/work-loss route, which was never established.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Narrow source ownership/timer-order refutation. This does not settle every cancellation or post-timeout lifecycle case."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-067.json",
+          "key": "g102/c3",
+          "proposal": "claim-checks/claims-067/result.json",
+          "parent_proposal": "source-refuted-longer-answer-budget-expires-retention-during-answer",
+          "final_independent_gate": "required-before-original-possible-work-loss-drop",
+          "reason": "Full067 upcall owns delete fence through additive answer timeout, then moves ownership into retained task whose separate timer begins afterward; lengthening answer cannot expire a timer not started. Refutation does not certify other post-timeout lifecycle/cancellation cases. Preserve original possible teardown/process harm for gate; no runtime pass."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "environment-answer-budget-delete-fence-retention-order",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial g102 review complete. All six assigned patches and the full commits list were read.\n\nNo reportable findings established. Candidates c1 and c2 were recorded with source refutations; no unresolved leads remain. Findings log and progress are updated. No tests, reproductions, or checkout changes performed."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised c1 and c2 with current-row, generation, and lifecycle evidence. Preserved c1’s potentially highest cleanup-handle hypothesis and narrow proposed refutation for independent checking.\n\nNo new findings. Unresolved lead IDs: none."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass complete. Checked retry-test oracles, retirement gate ordering, timeout/fence lifetimes, and assigned documentation/export changes.\n\nNo new defect found. Recorded source-refuted candidate c3.\n\nNew verified IDs: none. New unverified IDs: none. Open leads: none. Progress updated; no runtime execution."
+    }
+  ],
+  "progress": "Group: g102 supervisor-core-integration\nState: initial review started; findings.jsonl verified present without truncation.\nTurn: initial, count 1. Discovery passes: 0.\nRead: full brief, complete inventory commits field only, root AGENTS End sentinel, machine rules, review priority and recording rules; skillette loaded.\nInterfaces: core phase extraction and agent-kind/service integration; review at each recorded revision.\nNext: deliver all six assigned patches through evidence reader; find/read governing pinned contracts and trace callers.\nUnread: all assigned patch ranges and governing SPEC sections.\nNew verified/unverified IDs: none. No execution or reproductions requested.\n\nInitial turn completion\nTurn type/count: initial / 1. Discovery-pass count: 0 (later discovery/synthesis not performed in this turn).\nState: assigned initial source review complete; await caller's next-turn synthesis/discovery instruction.\nNew verified findings: none. New unverified findings: none. Candidates appended: c1, c2. Open leads: none.\nAssigned unread scope: none. All 1,338 assigned patch lines delivered through separate evidence-read calls: 00294-000.patch 1-200, 201-400, 401-600, 601-800, 801-1000, 1001-1021; 00659-000.patch 1-26; 00682-000.patch 1-171; 00763-000.patch 1-73; 00771-000.patch 1-13; 00901-000.patch 1-34.\nInventory: complete commits field read; excluded metadata not read. No coverage sources outside specifications consulted.\nInterface conclusions: retired launch gate covers new launch and retry validation; refusal settlement preserves the old row and membership. Whole-session Delete owns direct legacy container cleanup and bypasses the refused individual-tab close. Seal counts durable rows; directory admission orders create/restart with the decision, and lifecycle claims order tab opening. Environment-launch timeout is consumed by the relay and uses the shared 30-minute proto allowance. Later agent-kind patches only update documentation to the shared prepare_launch boundary and terminal-host-only substrate.\nPinned source context read (non-mandatory investigation):\n- 04d85f0c98a9b635709d00b056719a0baa7fd3fc: SPEC.md 4816-4835; SPEC_impl.md 8590-8670; service/core.rs 9270-9377, 10100-10390, 10470-10755, 16870-17110, 17530-17655; service/teardown.rs 500-695; container.rs 1-170. Targeted symbol searches located other retirement guards and launch/retry callers.\n- 190d844e58c96cf197aa838d0b0eea8062f48435: SPEC_impl.md 6610-6723; service/agent_relay.rs 608-674; proto/approvals.rs 1-70; proto/lib.rs 2290-2340. Searches verified timeouts field references.\n- 47f33bbdbd5ff4a6e437e97a800f9083be43096e: SPEC.md 1470-1544; SPEC_impl.md 6597-6658; service/core.rs 9085-9255, 9330-9460, 12960-13050, 15610-15785; service/handlers.rs 1430-1620; store.rs 5910-5992. Searches verified launch_session production callers and seal publication sites.\n- 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513: agent_kind/mod.rs 1-140; SPEC.md 970-1140; SPEC_impl.md 3200-3258, 8940-9028; core/host_launch.rs 415-510. Searches found fill_cwd and prepare_launch callers, and no remaining NewTerminals symbol.\n- 1ed482dde220452e424973faf38a5e1318986333: agent_kind/mod.rs 2235-2299; SPEC_impl.md 2880-2988, 8668-8715. Targeted heading searches located governing sections. An optional broad cross-revision SPEC diff was clipped and is not claimed as read; the governing later sections were read directly at the pinned revision instead.\nRecording note: the first c1 record attempt used unsupported state closed and was rejected without append; immediately corrected to state open and appended successfully. c1 and c2 stand as candidates, not open leads. No logs were truncated.\nChecks: source/contract and caller analysis only. No execution, tests, reproductions, checkout changes, or live-install actions.\nNext action: caller audits delivered reads and durable records, then requests the later turn.\n\nSynthesis turn started\nTurn type/count: synthesis / 2. Discovery-pass count: 0.\nParent: supported delivery audited complete; no drop accepted. g095 confirms legacy flock/ticket revocation, lazy Podman lookup, and the specification's missing-engine exception only.\nFocus: revisit c1 cleanup-handle hypothesis and c2 lifecycle serialization against current-row/generation transitions; check deletion callers and retained-row behavior. Preserve potentially highest original c1 impact and narrow source refutation for independent review.\nNext: pinned source checks of teardown admission, generation/current-row fencing, tab-opening claim lifetime, durable row count and retired retry publication.\nUnread assigned scope: none. Open leads: none.\n\nSynthesis turn completion\nTurn type/count: synthesis / 2. Discovery-pass count: 0.\nRevised original IDs: c1, c2. New verified/unverified findings: none. Open lead IDs: none. No parent drop accepted; c1 remains a potentially highest proposed source refutation for independent check.\nResults: current-map lookup occurs after lifecycle admission on the ordinary and seal Delete paths. Whole-session cleanup bypasses the individual-tab gate, retains state on unconfirmed removal/sweep, and removes launch artifacts across generations. Restart's durable generation transition is an UPDATE, not row removal; retry holds directory admission despite releasing its shorter takeover claim. Tab open resolves its entry after the stable session-ID lifecycle claim, retained through the owned task. The later host-tab-only path retains those same properties.\nAdditional source checks this turn:\n- At 04d85f0c98a9b635709d00b056719a0baa7fd3fc: service/teardown.rs 210-400 and 690-890; core.rs 16035-16235 and 14860-15020; handlers.rs 1240-1435. still_alive_for_delete contains no retirement gate: an unconditional delete proceeds directly; guarded refusals preserve consent and do not discard the cleanup handle.\n- At 47f33bbdbd5ff4a6e437e97a800f9083be43096e: core.rs 13160-13350, 11900-11995, 13410-13495, 13480-13670, 11590-11790, 8815-8880, 8870-8920, 11375-11500; handlers.rs 1436-1568; store.rs 4512-4705. admit_create constructs CreateGuards with the owned directory mutex guard; searches located the guard declaration and its only explicit restart drop.\n- At 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513: core.rs 14525-14650 and targeted seal/tab-call searches.\nInterface assumption disposition: g095 evidence accepted only as confirmation of the legacy cleanup implementation and explicit missing-engine exception; no inference that other unconfirmed teardown may forget ownership. Durable records retain this limit.\nAssigned unread scope: none. Source-only review; no execution, tests, reproductions, checkout edits or live-install actions. Next: parent synthesis/independent handling of proposed candidates, or a requested discovery turn.\n\nDiscovery turn started\nTurn type/count: discovery / 3. Discovery-pass count: 1.\nRead complete discovery-neighbours.json in 50-line chunks 1-850. Initial 1-160 attempt clipped; replaced with complete bounded reads. Interface novelty context synthesized before source search; no named pending questions. Existing c1/c2 remain proposed candidates, with no accepted drop or lowering.\nSearch focus beyond c1/c2: changed retirement create/retry gates and retained-retry regression test's distinct oracle; launch preparation removal boundaries; timeout field consumption/defaults; accuracy of the assigned agent-kind documentation-only patches and service export removal. Avoid independently re-reporting supplied neighbouring retirement, lifecycle/test and documentation records outside these patches.\nUnread assigned scope: none. Open leads: none. New IDs: none.\n\nDiscovery turn completion\nTurn type/count: discovery / 3. Discovery-pass count: 1.\nResult: no new reportable defect found. New verified IDs: none. New unverified-after-investigation IDs: none. New source-refuted candidate: c3. Remaining lead IDs: none. Earlier c1/c2 unchanged; no parent drop or lowering assumed.\nUseful checks/results beyond prior hypotheses:\n- Re-read the new retired prompt-drift retry regression at 04d85f0c98a9b635709d00b056719a0baa7fd3fc core.rs:31980-32285. Its actual fixture establishes matching agent request digest, changed prompt identity, Pending reservation, generation zero, absent physical launch evidence, second membership making ordinary borrower rollback legal, and active incoming launch. Its assertions distinguish a retained refusal from generic failure by downcast, exact message, complete durable-row comparison, failed reservation contents, preserved memberships, visible entry, untouched creation fences and zero launch-pipeline dispatch. No distinct test-oracle defect established in this assigned addition. Runtime tests were not run.\n- At that revision read core.rs:11800-11900, 12630-12740 and 15365-15460: retry artifact handling retains ownership on failure; prompt and rename fetch their current entries under lifecycle then apply the new retirement gate before terminal writes/durable rename. No new gate-order defect found.\n- At 190d844e58c96cf197aa838d0b0eea8062f48435 read agent_relay.rs:250-440 to check the new timeout field's fence lifetime. The retention timer starts only after the lengthened answer timeout and owns the same fence; c3 records the complete source refutation immediately. No premature fence expiry was established.\n- At 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 read core.rs:15505-15610 and agent_kind/mod.rs:1758-1802 and searched fill_cwd/has_cwd_placeholder/NewTerminals. The assigned doc references name the actual common preparation boundary; production cwd fill remains there before hook arguments and literal initial prompt. No remaining NewTerminals reference was found to contradict the assigned re-export removal. The adjacent unrelated stale core wording is not a new assigned-patch finding.\n- At 1ed482dde220452e424973faf38a5e1318986333 read agent_kind/mod.rs:1565-1645: removing the old tmux explanation leaves the unchanged screen-text normalization contract correctly attributed to the emulator. No new documentation discrepancy established in the assigned hunk.\nComplete neighbour context was used only for interactions and novelty. No prohibited queue/coverage files or excluded inventory metadata read. No checkout changes, runtime tests, reproductions, builds or live-install actions. All conclusions are source/contract analysis.\nAssigned unread scope: none. Next: parent audits this discovery delta; c3's potential-impact caveat and source refutation remain durable for any independent handling.\n"
+}

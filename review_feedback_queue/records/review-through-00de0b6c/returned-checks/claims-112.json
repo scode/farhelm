@@ -1,0 +1,280 @@
+[
+  {
+    "key": "g180/c2",
+    "latest_line": 5,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "grid-test-reader-primary-surface",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The removed fallback does not make these readers inspect a missing or different supported terminal. The primary grid is the mounted agent component, and its selection API remains available. This is a source conclusion, not a runtime observation.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e:e2e/tests/terminal-clipboard.spec.ts:68-89 and terminal-links.spec.ts:355-361 replace the old-renderer fallback with the existing grid selection/mode readers.",
+      "f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/assets/terminal.js:4313-4334 creates that grid and routes its selection copies through the clipboard queue; :4658-4668 publishes it as the primary singleton and island component.",
+      "Same revision grid-terminal.js:2057-2059 exposes hasSelection and selectionText; terminal.js:4810-4849 closes the departing socket, disposes or freezes its component, and removes its published aliases. No missing-surface premise was found."
+    ],
+    "coverage_checked": [
+      "SPEC.md Terminal experience and SPEC_impl.md Terminal widget/The grid client require the host/grid surface; they do not accept incorrect test readers.",
+      "TODO.md Planned is empty. Searches of plans/queue, BUGS.md, INDEX.md/matching queue files and active TRIAGE_OUTCOMES.md found no exact reader-regression cover. The tmux removal plans are already landed (plans/REPORTS.md:29,32).",
+      "FILTER.md: no complete filter boundary applies; proposed disposition is source refutation."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Clipboard/link regression tests might inspect a missing, stale or different terminal after removal of the old fallback. No product disclosure or user-work loss route was established.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Refute only the alleged missing/wrong supported surface. Clipboard/link tests touch security-relevant operations, so send this narrow dismissal through the independent check conservatively. This consultation does not authorize a drop."
+  },
+  {
+    "key": "g180/c3",
+    "latest_line": 9,
+    "recommendation": "out-of-range",
+    "bucket": "other",
+    "underlying_key": "browser-shift-enter-overstates-read-boundary-proof",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The unconditional read-boundary explanation can mislead a maintainer, but the disputed oracle, wording and contradicting host caveat all predate the exclusive base. The in-range patch keeps the existing grid assertion. Earlier rationales based only on the immediate parent or accepted production behavior were insufficient and are superseded by the base comparison.",
+    "checks": [
+      "6e423e30068b62c6cfa276c6d720ee35bb70387a:e2e/tests/terminal-keys.spec.ts:178-197 already says a genuinely single write can never read as two and calls the browser capture deterministic. The base fixture already uses RAWREADY and grouped dd reads.",
+      "6e423e30068b62c6cfa276c6d720ee35bb70387a:crates/terminal-host/SPEC.md:399-403 already allows OS short writes and arbitrary program read division. This is contract/oracle tension, not a refutation of the documentation defect.",
+      "git log over the entire exclusive-base..00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db range for terminal-keys.spec.ts reports only f560058da19e02716e6f943883a9508b447aff4e. Its patch at :178-191,:324-376 preserves the grid one-message assertion and PTY observation, while replacing the retired branch and changing two-byte-frame wording to input-message wording."
+    ],
+    "coverage_checked": [
+      "SPEC.md:2869-2875 and SPEC_impl.md:1721-1725 retain the stronger single-write language; neither accepts inaccurate test claims. The separately supplied g010/f1 is outside this batch and concerns SPEC_impl, not this test.",
+      "TODO Planned is empty; plans/queue, BUGS, INDEX/matching queue files and active TRIAGE_OUTCOMES searches found no exact browser-oracle cover. shift-enter-test-lacks-reader-readiness.md concerns a different Rust integration test and is not an alias.",
+      "FILTER.md does not match the whole test-documentation defect."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No runtime false failure or physical write/read grouping was measured. That does not prevent the source attribution conclusion.",
+    "original_stronger_consequence": "A maintainer could mistake one browser message or one observed PTY read for unconditional physical write/read atomicity; an OS partial write could also fail the overstrong oracle. The initial removed-branch weakening suspicion was source-refuted; the distinct documentation concern was reopened and then attributed to pre-base source.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Exclude only the pre-base browser test claim from this review range. Do not describe the overstrong explanation as correct or merge it with the distinct new implementation-spec claim."
+  },
+  {
+    "key": "g180/l4",
+    "latest_line": 13,
+    "recommendation": "out-of-range",
+    "bucket": "other",
+    "underlying_key": "grid-copy-tests-describe-retired-page-handler",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Both copy-owner and deferred-selection explanations already misdescribe the ordinary grid fixtures before the range. Their diagnostic/documentation consequences remain real; this range did not introduce them.",
+    "checks": [
+      "6e423e30068b62c6cfa276c6d720ee35bb70387a:e2e/tests/terminal-clipboard.spec.ts:567-606 already contains the outside-drag case and exact DOCUMENT-level mouseup diagnostic. Base terminal-links.spec.ts:944-961 already names handleCopyOnSelectMouseUp and deferred selection reading.",
+      "Base e2e/suite-terminals.ts:4-20 explicitly makes ordinary untagged cases host/grid cases; the outside-drag test is untagged. Thus the contradiction was present before renderer retirement.",
+      "Base grid-terminal.js:1686-1707 already reads selection and calls onCopy synchronously on document mouseup. At f560058da19e02716e6f943883a9508b447aff4e grid-terminal.js:1668-1684 retains that mechanism; terminal.js:4334 wires onCopy and :4373-4375 limits the separate page driver to program-drag guidance."
+    ],
+    "coverage_checked": [
+      "SPEC.md Terminal experience and SPEC_impl.md:1727-1745 describe the clipboard contract and shared queue, not acceptance of stale test explanations.",
+      "TODO Planned empty; searches of plans/queue, BUGS, INDEX/matching files and active TRIAGE_OUTCOMES found no exact diagnostic/scheduling cover. The broad tmux documentation plan is landed, not future coverage.",
+      "FILTER.md does not fully match the scheduling-documentation consequence; no filter disposition proposed."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "A failing maintainer can be directed to the page guidance listener rather than the grid's copy handler, and the link-copy comment teaches an obsolete deferred-selection scheduling model. Waiting for clipboard completion is still useful; no functional copy failure was alleged or reproduced.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Pre-base attribution of both named statements; no claim that correct production copying cures inaccurate commentary."
+  },
+  {
+    "key": "g181/c1",
+    "latest_line": 5,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "reopen-test-retired-output-watermark-counters",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The removed counters belong to retired page output backpressure. The surviving test still observes replacement identity, complete socket teardown, old replayed output and new live output, so it does not newly admit the named dead/reused attachment failure.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e:e2e/tests/terminal.spec.ts:445-563 stamps the old component, requires a defined replacement, CLOSED old socket and four null old handlers, then fresh grid/distinct defined hook, old marker and marker-after-reopen echo.",
+      "The same commit's patch removes paused/pauseCount/resumeCount while preserving these independent assertions. These counters measured output backpressure, not an input path.",
+      "SPEC_impl.md Terminal widget states the grid page sends no flow control; The grid client assigns grid flow control to the helm. This supports retirement of the old counters without asserting broad stress coverage."
+    ],
+    "coverage_checked": [
+      "SPEC.md Terminal experience replay and SPEC_impl Terminal widget/The grid client checked. They require replay/liveness; no accepted dead attachment behavior found.",
+      "TODO Planned empty; searches of unlanded plans/queue, BUGS, INDEX/matching files and active TRIAGE_OUTCOMES found no exact counter-removal test defect cover. Related server flow-control items have different scope.",
+      "No FILTER.md boundary is used."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No general server flow-control stress proof is claimed by this fixture or this disposition.",
+    "original_stronger_consequence": "A reused attachment or leaked paused state could show only old output and ignore new work. The retained post-reopen live echo discriminates that fixture failure; no shipped user-work loss route was established.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Refute the alleged newly lost attachment-liveness oracle, preserving the limitation that fixture liveness is not a general stress proof."
+  },
+  {
+    "key": "g181/c2",
+    "latest_line": 7,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "held-replay-helper-misstates-history-drained-boundary",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The newly changed helper docstring claims replay has been applied, but the helper observes only marker arrival. Queued older history can still be pending. This establishes an inaccurate test synchronization contract, not shipped output loss or a reproduced false pass.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e:e2e/tests/terminal-replay-rename.spec.ts:127-154 newly says replay has arrived and been applied, then polls only test.replay.heldReason == marker. The commit patch confirms this wording is newly authored.",
+      "Same revision terminal.js:4073-4082 calls endCatchUp(marker) directly on replay_complete; :3886-3888 records heldReason without a history-drain condition. :3774-3776 explicitly permits history still applying at reveal.",
+      "Same revision grid-terminal.js:1876-1930 drains history in slices scheduled on future animation frames/message-channel tasks. helpers/term.ts:162-215 explicitly excludes unapplied history from text reads. helpers/terminal-readiness.ts:40-55 waits for revealed, not historyPending == 0.",
+      "The patch retains hidden/placeholder, marker-reason, first-visible-frame-tail and current-screen/live-input checks. Removed bufferBytes/bufferChunks/bufferedBytes are old byte-buffer observations. The existing spam-line-200/TABSPAM-200 checks do not independently prove all historical rows; that weakness predates this patch."
+    ],
+    "coverage_checked": [
+      "SPEC.md Terminal experience requires replayed screen and scrollback; SPEC_impl.md The grid client explicitly permits large history application in slices. That acceptance does not accept a falsely documented test boundary.",
+      "TODO Planned is empty. Searches of plans/queue found no unlanded fix for this helper contract; empty-scrollback-messages and tmux removal plans are landed (plans/REPORTS.md:9,29,32). BUGS has no matching item.",
+      "INDEX/matching queue search found replacement-history-absence-asserted-before-delivery.md. Its full record concerns a negative old-history assertion in replace.spec.ts without a delivery witness, not this positive held-marker helper docstring. Shared sliced-history mechanism is context, not exact coverage or an alias.",
+      "Active TRIAGE_OUTCOMES searches found no matching decision. FILTER.md does not match this ordinary, persistent documentation overstatement."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No runtime ordering, false pass or shipped history-loss consequence was observed. Those stronger claims need separate evidence; the false helper contract is established by source.",
+    "original_stronger_consequence": "Initially considered lost replay completeness coverage after removal of byte buffers. That broad dismissal was reopened: a test can observe marker/current screen while older output remains queued. Latest scope retains only the newly false helper contract; weak last-line completeness assertions already existed. No actual product loss was established or lowered from highest.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Record as other: clarify marker/current-screen readiness versus fully applied history. If a caller needs all history, give it an explicit drained-history witness; this finding does not require delaying every reveal. Preserve the prior dismissal only for retired byte-buffer controls."
+  },
+  {
+    "key": "g181/c3",
+    "latest_line": 8,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "grid-tab-test-identity-geometry-coordinate-oracles",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The retained grid assertions are non-vacuous and use consistent screen coordinates. They still discriminate surviving old attachments, unusable hidden geometry and visible residue in a new tab.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e:e2e/tests/terminal-tabs.spec.ts:668-723 requires exactly the three original island keys, closes all retained sockets, waits for those exact keys after reopening and compares each component with retained old components.",
+      "Same file :1294-1324 observes hidden pane, actual positive dimensions, nondegenerate grid.size and a live shell marker after selection. :1963-1973 checks snapshot.lines below snapshot.cursor.y.",
+      "Same revision grid-terminal.js:2091-2105 returns screen lines and screen cursor, with history separately. terminal.js:4313 and :4658-4668 create/publish those same grids. SPEC_impl The grid client distinguishes fit proposals from committed drawn size."
+    ],
+    "coverage_checked": [
+      "SPEC.md Terminal experience and SPEC_impl Terminal widget/The grid client checked for size, tab and renderer contract; no active second renderer exists.",
+      "TODO Planned empty; searches of plans/queue, BUGS, INDEX/matching files and active TRIAGE_OUTCOMES found no exact oracle-loss cover. No same-root alias among supplied claims.",
+      "No FILTER.md disposition proposed."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "Object replacement and closed sockets do not measure heap reclamation. Neither the removed alternative nor the retained grid branch measured it.",
+    "original_stronger_consequence": "Simplifications might pass with old tab attachments surviving, hidden tabs unusably sized or fresh tabs containing residue; an additional concern was history/screen cursor coordinate mismatch. These named assertion failures are source-refuted, not empirically tested.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Refute the alleged newly vacuous/coordinate-mismatched grid assertions, without certifying unrelated heap reclamation."
+  },
+  {
+    "key": "g181/c4",
+    "latest_line": 9,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "terminal-host-comment-refresh-preserves-test-contracts",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The named patches update explanations to the terminal-host/grid mechanism without changing the test actions or security assertions. The restart explanation matches the governing history-versus-screen contract. No new contradictory contract was established in these named changes.",
+    "checks": [
+      "61e632323dbc6b4a35ed27bf5b9833102ffd5a4e patches for terminal-restart.spec.ts, terminal-clipboard.spec.ts, terminal-flood.spec.ts, terminal-unicode.spec.ts and grid-client/grid-terminal.spec.ts contain only comment changes. 4b489b4f2eeade14f119b186ecb16eeaaf027021 changes hexecho's historical tense only.",
+      "61e632323dbc6b4a35ed27bf5b9833102ffd5a4e:SPEC.md:1939-1953 expressly retains old scrollback above a blank default-mode screen in a new terminal and discards the previous visible screen; the refreshed restart comments preserve this distinction.",
+      "Clipboard comment refresh describes creation-time process launch and current screen/scrollback replay rather than escape-byte replay; SPEC_impl Terminal widget's write-only clipboard contract agrees. The patch removes no OSC52 read/query assertion or clipboard witness.",
+      "The Unicode cursor substrate rename and grid rounding/sendUserInput comments do not alter their assertions. Existing replay timing limitations are not cured merely by this comment-only conclusion."
+    ],
+    "coverage_checked": [
+      "SPEC.md Lifecycle operations/Terminal experience and SPEC_impl Terminal widget/The grid client govern the named explanations; no contrary intended behavior found.",
+      "TODO Planned empty; plans/queue, BUGS, INDEX/matching files and active TRIAGE_OUTCOMES searches found no exact new comment-contract defect cover. Landed documentation cleanup is not unlanded coverage.",
+      "No FILTER.md rule is used. g182/l1 is a separately named stale restart-status paragraph, not an alias of these consistent explanations."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No general clipboard-security certification, input-loss route or runtime history-loss observation follows from reading these comment-only patches.",
+    "original_stronger_consequence": "Renamed mechanisms might conceal tests that no longer prove restart history, live clipboard delivery or Unicode replay. The clipboard read contract is security-sensitive; no removed security observable or executable change was found in these patches.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Refute only the alleged newly inconsistent explanations/oracle removal. Preserve the security-sensitive clipboard context for the independent drop check, even though the established consequence is test commentary only."
+  },
+  {
+    "key": "g181/c5",
+    "latest_line": 10,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "grid-theme-tests-retain-painted-surface-observable",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The simplified selectors still inspect the actual grid element's drawn default background and compare it with the surrounding terminal. The pre-existing grid branch keeps the same visual observations.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e:e2e/tests/terminal.spec.ts:113-133 reads __farhelmGrid.element.style.backgroundColor and computed grid/wrapper colors, requires rgb(40,44,52), and compares wrapper equality.",
+      "The patch at :150-213 scopes the grid inside the selected outer island and retains frame, color and client-dimension checks across Settings/host appearance changes. It removes the old renderer alternative, not a grid observable.",
+      "terminal.js:4313-4334 constructs that grid using the real theme and :4658-4668 publishes it. SPEC.md Terminal experience requires host-colored frames without changing terminal background, palette or size."
+    ],
+    "coverage_checked": [
+      "SPEC.md Terminal experience and SPEC_impl The grid client/Terminal widget checked for painted grid/frame contract.",
+      "TODO Planned empty; plans/queue, BUGS, INDEX/matching files and active TRIAGE_OUTCOMES searches found no exact surface-selector defect cover. Palette bugs elsewhere do not cover this alleged removed assertion.",
+      "No FILTER.md boundary used."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "Background observations do not certify all ANSI foreground/palette entries. No such independent grid assertion was removed here.",
+    "original_stronger_consequence": "Theme/frame tests might inspect an unrelated wrapper or accept a missing renderer after selector cleanup. The actual grid dereference and computed background assertions refute those routes; no runtime visual verification performed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Refute only the named newly lost painted-surface oracle, preserving the narrower palette-coverage limitation."
+  },
+  {
+    "key": "g181/c6",
+    "latest_line": 11,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "failed-mount-test-retains-grid-guard-remount-oracle",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The removed assertion checked the retired singleton in addition to the same grid singleton. It never independently measured DOM disposal or heap reclamation. The test still exercises a post-grid-construction failure and successful same-session retry.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e:terminal.spec.ts patch :784-850 changes the construction-order explanation and removes only __farhelmTerm from the absence assertion. It retains WebSocket-constructor sabotage, failure banner, __farhelmGrid absence and same-session remount.",
+      "Exclusive-base 6e423e30068b62c6cfa276c6d720ee35bb70387a:e2e/tests/terminal.spec.ts:814-869 has the same sabotage, singleton-only teardown observation and bounce-back retry. Thus the broader disposal-oracle limitation predates the range.",
+      "SPEC_impl.md The grid client states that terminal.js mounts the component before creating its socket. This validates the revised injection-boundary explanation; production cleanup correctness alone is not the basis for rejecting a test defect."
+    ],
+    "coverage_checked": [
+      "Both specifications searched for mount/terminal lifetime; SPEC_impl The grid client supplies construction order, not acceptance of missing disposal tests.",
+      "TODO Planned empty; plans/queue, BUGS, INDEX/matching files and active TRIAGE_OUTCOMES searches found no exact newly lost rollback-oracle cover. The supplied g083/l1 concerns a different pre-grid FileLinks failure and is not used as coverage.",
+      "No FILTER.md disposition used."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "Singleton absence plus remount does not certify heap reclamation or every cleanup-throw path; those broader guarantees were not introduced or removed by this patch.",
+    "original_stronger_consequence": "The test might pass while a half-created grid remains because an unpublished singleton alone does not prove disposal. That limitation is preserved as pre-base context; no newly lost independent assertion or newly false construction-order explanation was found.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Refute the in-range regression claim; preserve the real pre-existing limit of its disposal evidence."
+  },
+  {
+    "key": "g181/c7",
+    "latest_line": 12,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "snapshot-grid-selector-retains-detached-gesture-evidence",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The changed selectors reach the actual frozen grid rows, and the test independently proves there is no live attachment while it exercises links, downloads and selection copy. No distinct snapshot state or gesture witness is removed.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e:e2e/tests/terminal-reconnect.spec.ts:775-864 requires an empty island registry, visible DOM marker, painted link rows/real coordinates, no open after drag, exact clicked URL/download bytes, real selection copy, and registry still empty.",
+      "Same revision terminal.js:4810-4849 freezes retained components while closing/unpublishing their sockets; grid-terminal.js:2075-2085 freeze stops sending and resizing but retains screen, selection and links.",
+      "SPEC.md Terminal experience requires a displaced client to keep a non-live snapshot. These assertions distinguish that snapshot from a newly attached replacement. This is source evidence only."
+    ],
+    "coverage_checked": [
+      "SPEC.md Terminal experience and SPEC_impl Terminal widget/The grid client checked for snapshot and rendering contract; no acceptance of losing snapshot gesture coverage found.",
+      "TODO Planned empty; plans/queue, BUGS, INDEX/matching files and active TRIAGE_OUTCOMES searches found no exact selector/state-oracle defect cover. Link-admission findings elsewhere concern distinct gaps, not these controlled-target assertions.",
+      "No FILTER.md rule used."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "These fixture gestures do not exhaust every link admission or overlay case and establish no product security defect.",
+    "original_stronger_consequence": "A grid-only selector might stop testing the retained non-live screen or mistake an active replacement for a snapshot. The test retains both detached-state and exact gesture outcomes; no production admission change or loss-of-work route was established.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Refute the named newly lost snapshot observables. Conservatively retain the link/download boundary in the independent drop register; this is not a broad security assurance."
+  },
+  {
+    "key": "g182/l1",
+    "latest_line": 12,
+    "recommendation": "out-of-range",
+    "bucket": "other",
+    "underlying_key": "restart-status-comment-universal-exited-overgeneralization",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The test paragraph's universal Exited claim is overbroad, but both that wording and its reboot-to-Interrupted contradiction already exist before the range. The patch changes the terminal substrate noun and wrapping rather than introducing the wrong status rule.",
+    "checks": [
+      "6e423e30068b62c6cfa276c6d720ee35bb70387a:e2e/tests/terminal.spec.ts:2797-2815 already says non-survival yields Exited with no code and uses Alive/Exited/Unknown framing.",
+      "Base SPEC.md:2625-2630 already defines Interrupted for a host reboot while last known live. Base service/core.rs:7086-7096 already converts rebooted Launching/Running/StopRequested rows to LastOutcome::Interrupted. Therefore pre-base wrongness, not merely pre-base wording, is established.",
+      "61e632323dbc6b4a35ed27bf5b9833102ffd5a4e:terminal.spec.ts patch :2357-2368 preserves the status rule while replacing tmux with the session's terminal. Same revision core.rs:6924-6955 confirms the valid subset: a same-boot missing terminal from Running/StopRequested yields ObservedExit(None), with Launching and terminal outcomes treated differently."
+    ],
+    "coverage_checked": [
+      "Both specifications searched for restart/lost-terminal status; SPEC.md Status contradicts the universal claim rather than accepting it. The same-boot valid route does not refute the overgeneralization.",
+      "TODO Planned empty; plans/queue, BUGS, INDEX/matching files and active TRIAGE_OUTCOMES searches found no exact stale-comment cover. The tmux documentation plan is already landed.",
+      "FILTER.md's recovery-status filter concerns product state after failure, not this ordinary explanatory paragraph; no complete filter match."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "A maintainer can infer an overbroad Exited model and miss Interrupted after reboot or old live-terminal retirement. Earlier immediate-parent-only exclusion was reopened because wrongness could have become new in-range; exact base contract and implementation now settle that question. No executable behavior or loss-causing instruction was changed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Exclude the original overgeneralization as pre-base documentation debt. Preserve both the reboot contradiction and the valid ordinary same-boot subset; do not label the stale paragraph correct."
+  }
+]

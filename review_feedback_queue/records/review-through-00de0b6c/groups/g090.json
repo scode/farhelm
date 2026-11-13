@@ -1,0 +1,1159 @@
+{
+  "group": {
+    "id": "g090",
+    "domain": "cli-integration",
+    "purpose": "cli-integration: crates/farhelm/src/main.rs, crates/farhelm/Cargo.toml; phases complete small per-commit changes",
+    "interfaces": [
+      "g001",
+      "g005",
+      "g006",
+      "g007",
+      "g008",
+      "g009",
+      "g012",
+      "g018",
+      "g019",
+      "g020",
+      "g021",
+      "g122"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00257-000.patch",
+        "ranges": [
+          [
+            1,
+            12
+          ]
+        ],
+        "original_path": "crates/farhelm/src/main.rs",
+        "commit": "350a4b33b6d4476f4a78e43cea124bc2b828f462",
+        "notes": "patch header; patch character offsets [0,593)",
+        "lines": 12,
+        "bytes": 593,
+        "start": 0,
+        "end": 593,
+        "original": "[private-run]/prep/originals/00257.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00321-000.patch",
+        "ranges": [
+          [
+            1,
+            95
+          ]
+        ],
+        "original_path": "crates/farhelm/src/main.rs",
+        "commit": "04d85f0c98a9b635709d00b056719a0baa7fd3fc",
+        "notes": "patch header; patch character offsets [0,4258)",
+        "lines": 95,
+        "bytes": 4258,
+        "start": 0,
+        "end": 4258,
+        "original": "[private-run]/prep/originals/00321.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00665-000.patch",
+        "ranges": [
+          [
+            1,
+            179
+          ]
+        ],
+        "original_path": "crates/farhelm/src/main.rs",
+        "commit": "190d844e58c96cf197aa838d0b0eea8062f48435",
+        "notes": "patch header; patch character offsets [0,7399)",
+        "lines": 179,
+        "bytes": 7399,
+        "start": 0,
+        "end": 7399,
+        "original": "[private-run]/prep/originals/00665.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00780-000.patch",
+        "ranges": [
+          [
+            1,
+            106
+          ]
+        ],
+        "original_path": "crates/farhelm/src/main.rs",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,5055)",
+        "lines": 106,
+        "bytes": 5055,
+        "start": 0,
+        "end": 5055,
+        "original": "[private-run]/prep/originals/00780.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00967-000.patch",
+        "ranges": [
+          [
+            1,
+            72
+          ]
+        ],
+        "original_path": "crates/farhelm/src/main.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,4016)",
+        "lines": 72,
+        "bytes": 4028,
+        "start": 0,
+        "end": 4016,
+        "original": "[private-run]/prep/originals/00967.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01242-000.patch",
+        "ranges": [
+          [
+            1,
+            28
+          ]
+        ],
+        "original_path": "crates/farhelm/src/main.rs",
+        "commit": "17a3fe858c5511a24b7403af15dd41c93bf69fd7",
+        "notes": "patch header; patch character offsets [0,1600)",
+        "lines": 28,
+        "bytes": 1608,
+        "start": 0,
+        "end": 1600,
+        "original": "[private-run]/prep/originals/01242.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01326-000.patch",
+        "ranges": [
+          [
+            1,
+            37
+          ]
+        ],
+        "original_path": "crates/farhelm/Cargo.toml",
+        "commit": "cb762a313abbe6da03ae0bf041f07486c4ed4df9",
+        "notes": "patch header; patch character offsets [0,1626)",
+        "lines": 37,
+        "bytes": 1630,
+        "start": 0,
+        "end": 1626,
+        "original": "[private-run]/prep/originals/01326.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01327-000.patch",
+        "ranges": [
+          [
+            1,
+            104
+          ]
+        ],
+        "original_path": "crates/farhelm/src/main.rs",
+        "commit": "cb762a313abbe6da03ae0bf041f07486c4ed4df9",
+        "notes": "patch header; patch character offsets [0,4865)",
+        "lines": 104,
+        "bytes": 4865,
+        "start": 0,
+        "end": 4865,
+        "original": "[private-run]/prep/originals/01327.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01560-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "crates/farhelm/src/main.rs",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,572)",
+        "lines": 13,
+        "bytes": 572,
+        "start": 0,
+        "end": 572,
+        "original": "[private-run]/prep/originals/01560.patch"
+      }
+    ],
+    "lines": 646,
+    "bytes": 30008
+  },
+  "records": [
+    {
+      "key": "g090/l1",
+      "owner": "g090",
+      "id": "l1",
+      "domain": "cli-integration",
+      "purpose": "cli-integration: crates/farhelm/src/main.rs, crates/farhelm/Cargo.toml; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Check trust boundary after removing release-sum CLI verifier",
+            "location": "crates/farhelm/src/main.rs:1454",
+            "detail": "Reviewed commit: cb762a313abbe6da03ae0bf041f07486c4ed4df9. TLDR: removing the release checksum verifier would be security-impacting if any remaining development or installation path downloaded and executed release payloads without the replacement authentication contract. Source basis: assigned patch removes InternalCmd::VerifyReleaseSums, its handler and verified_release_sums. Checks so far: git grep at this revision for verify-release-sums, build-tmux-assets and tmux-assets across scripts, crates, dist-workspace.toml and .github returned no matches. Missing premise: whether the former caller stopped downloading those payloads and whether other release download authentication remains intact. Next source checks: inspect the devbuild diff and remaining download/copy path, then the release verification contract. Suggested bucket: highest if a shipped unauthenticated executable route is established; currently no route established. Could-be-highest: yes. Confidence: unresolved lead. proposed_drop: false. possible_cover: none. Source-only review; no behavior observed through execution."
+          }
+        },
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Removed checksum verifier has no remaining payload-download caller",
+            "location": "crates/farhelm/src/main.rs:1454",
+            "detail": "Reviewed commit: cb762a313abbe6da03ae0bf041f07486c4ed4df9. TLDR: considered whether removal of the release checksum verifier leaves a downloaded executable unauthenticated. That security consequence is refuted for the removed helper's caller: the same commit removes the complete tmux download, cache, verification and payload-copy block from scripts/devbuild-mac.sh (parent lines 544–631; resulting file resumes at line 533 with stamp publication). The diff removes both curl downloads and the cp into the trusted payload directory, rather than leaving downloads while deleting their verification. The replacement comment at scripts/devbuild-mac.sh:39–44 explicitly says the Linux farhelm is built from this working copy and that files in FARHELM_HELM_PAYLOAD_DIR are trusted as the operator's. A pinned git grep for verify-release-sums, build-tmux-assets and tmux-assets over scripts, crates, dist-workspace.toml and .github returned no matches. Source-only conclusion: this helper removal does not establish a new unauthenticated download route. Could-be-highest: yes, the original suspected consequence was remote execution of an unauthenticated payload, but no such route survives in this caller. Suggested bucket if the route existed: highest/security; candidate has no established impact. Confidence: confirmed source refutation of this deletion concern, not an audit of every release-verification implementation. proposed_drop: no remaining caller or download in the path whose verification was removed; exact replacement text: 'this build has no release, so the script builds the Linux `farhelm` from this working copy and points the app at it with `FARHELM_HELM_PAYLOAD_DIR`. Files there are trusted as the operator’s and not verified' (ASCII apostrophe in source). possible_cover: none. No runtime behavior observed. This closes l1."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Removed checksum verifier leaves no downloaded executable in its former caller",
+            "location": "crates/farhelm/src/main.rs:1454",
+            "detail": "Reviewed commit: cb762a313abbe6da03ae0bf041f07486c4ed4df9. TLDR: the original suspected highest consequence was executing an unauthenticated downloaded tmux payload after removal of its release-signature check. Synthesis preserves that consequence for independent review and confirms source refutation: the same commit removes the whole old download/cache/copy block, not merely its verification call. At scripts/devbuild-mac.sh:494–532 the operator payload directory is rebuilt and populated only with tar archives of the checkout-built Linux farhelm binaries at CARGO_TARGET_DIR/<target>/release/farhelm; after that loop the script publishes its build stamp. No old cached tmux artifact is copied into the operator-trusted directory. Literal script contract at lines 39–44: 'this build has no release, so the script builds the Linux `farhelm` from this working copy and points the app at it with `FARHELM_HELM_PAYLOAD_DIR`. Files there are trusted as the operator\\'s and not verified'. Literal SPEC_impl.md:8059–8060: 'files in an explicitly selected local directory are treated as operator-trusted and are not verified, on ANY build, developer or release.' Release-download authentication elsewhere retains its separate D3 contract: signatures must verify under the compiled release key ring, the trusted comment must name the version, and each payload must match its SHA-256 (SPEC_impl.md:8081–8088). Prior pinned search found no remaining verify-release-sums caller across scripts/crates/dist configuration. Caller independently supplied g094/c6's corroboration that the complete old tmux path was removed and no new unverified downloaded asset remains in this former caller; that corroboration agrees with this source check and is not a parent acceptance of the drop. Could-be-highest: yes; original unauthenticated executable/security consequence remains recorded, but no surviving route is established. Suggested bucket if established: highest/security. Confidence: confirmed source refutation of this removed-caller concern, not an audit of all release downloads. proposed_drop: complete removal of the downloaded asset route plus source-built replacement under the literal operator-trust contract. possible_cover: g094/c6 corroboration supplied by caller; no queued coverage files inspected. No parent drop accepted; retained for independent check. Source-only; no execution."
+          }
+        }
+      ],
+      "latest": {
+        "line": 12,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l1",
+          "state": "open",
+          "summary": "Removed checksum verifier leaves no downloaded executable in its former caller",
+          "location": "crates/farhelm/src/main.rs:1454",
+          "detail": "Reviewed commit: cb762a313abbe6da03ae0bf041f07486c4ed4df9. TLDR: the original suspected highest consequence was executing an unauthenticated downloaded tmux payload after removal of its release-signature check. Synthesis preserves that consequence for independent review and confirms source refutation: the same commit removes the whole old download/cache/copy block, not merely its verification call. At scripts/devbuild-mac.sh:494–532 the operator payload directory is rebuilt and populated only with tar archives of the checkout-built Linux farhelm binaries at CARGO_TARGET_DIR/<target>/release/farhelm; after that loop the script publishes its build stamp. No old cached tmux artifact is copied into the operator-trusted directory. Literal script contract at lines 39–44: 'this build has no release, so the script builds the Linux `farhelm` from this working copy and points the app at it with `FARHELM_HELM_PAYLOAD_DIR`. Files there are trusted as the operator\\'s and not verified'. Literal SPEC_impl.md:8059–8060: 'files in an explicitly selected local directory are treated as operator-trusted and are not verified, on ANY build, developer or release.' Release-download authentication elsewhere retains its separate D3 contract: signatures must verify under the compiled release key ring, the trusted comment must name the version, and each payload must match its SHA-256 (SPEC_impl.md:8081–8088). Prior pinned search found no remaining verify-release-sums caller across scripts/crates/dist configuration. Caller independently supplied g094/c6's corroboration that the complete old tmux path was removed and no new unverified downloaded asset remains in this former caller; that corroboration agrees with this source check and is not a parent acceptance of the drop. Could-be-highest: yes; original unauthenticated executable/security consequence remains recorded, but no surviving route is established. Suggested bucket if established: highest/security. Confidence: confirmed source refutation of this removed-caller concern, not an audit of all release downloads. proposed_drop: complete removal of the downloaded asset route plus source-built replacement under the literal operator-trust contract. possible_cover: g094/c6 corroboration supplied by caller; no queued coverage files inspected. No parent drop accepted; retained for independent check. Source-only; no execution."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g090/findings.jsonl",
+        "id": "l1",
+        "line": 12,
+        "disposition": "under-investigation",
+        "group": "g090-l1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-059",
+          "key": "g090/l1",
+          "latest_line": 12,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "removed-tmux-checksum-verifier-former-devbuild-caller",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The removed verifier's former caller no longer downloads or stages tmux. This refutes this specific authentication-removal concern; it is not a verdict on every release download.",
+          "checks": [
+            "cb762a313abbe6da03ae0bf041f07486c4ed4df9 diff scripts/devbuild-mac.sh removes the entire parent 544–631 tmux download/cache/signature/hash/copy block.",
+            "Same revision scripts/devbuild-mac.sh:494–532 clears the payload directory and stages only archives of checkout-built Linux farhelm binaries, followed directly by stamp publication at 533.",
+            "Pinned git grep for verify-release-sums|build-tmux-assets|tmux-assets across scripts, crates, dist-workspace.toml and .github returned no matches (exit 1).",
+            "Current SPEC_impl.md:8038–8085 keeps the operator-trusted local-directory exception separate from the signed release-download contract. Source only; no execution."
+          ],
+          "coverage_checked": [
+            "SPEC.md and SPEC_impl.md searched for payload, checksum, verification and tmux; SPEC_impl.md Provisioning local-payload and D3 paragraphs read. The local trust exception matches the replacement path, not an unauthenticated download.",
+            "TODO.md Planned is empty (25–26). BUGS.md has only the unrelated local-SSH-output hang.",
+            "plans/queue searched for verifier/payload/tmux removal. tmux-drop-from-install.md criterion 6 explicitly removes the devbuild downloads; plans/REPORTS.md:30 confirms this plan already landed. No unlanded fix is needed for this concern.",
+            "Full queue INDEX read; targeted queue and active TRIAGE_OUTCOMES searches found no exact surviving verifier-removal defect. No archive read.",
+            "FILTER.md read; no filter needed for a source-refuted concern."
+          ],
+          "exact_cover_quotes": [
+            "SPEC_impl.md:8047–8048: files in an explicitly selected local directory are treated as operator-trusted and are not verified, on ANY build, developer or release."
+          ],
+          "missing_premise": "The original stronger claim would require a surviving downloaded executable that depended on the removed verifier. No such route remains in the former caller; other download paths were not comprehensively audited.",
+          "original_stronger_consequence": "Executing an unauthenticated downloaded tmux payload after removing its release-signature verification; highest/security if established. History lines 2 and 12 propose refutation, not parent acceptance.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Complete removal of the only identified downloaded-payload route and source-built replacement under the explicit local-payload trust contract."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-059.json",
+          "key": "g090/l1",
+          "proposal": "claim-checks/claims-059/result.json",
+          "parent_proposal": "source-refuted-removed-release-verifier-leaves-devbuild-download-unauthenticated",
+          "final_independent_gate": "required-before-highest-executable-authentication-drop",
+          "reason": "Parent read full059. Entire former tmux download/cache/signature/hash/copy block removed, staged payload dir cleared and only checkout-built Linux farhelm archives/stamp remain; pinned consumer-name search has no surviving verifier/tmux asset route. Explicit selected local-directory operator trust applies to replacement, not permission for unauthenticated download. Refute only identified former caller, not every external release/download/signing path. Preserve original untrusted executable consequence for fresh gate."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "removed-tmux-checksum-verifier-former-devbuild-caller",
+        "destination": null
+      }
+    },
+    {
+      "key": "g090/c2",
+      "owner": "g090",
+      "id": "c2",
+      "domain": "cli-integration",
+      "purpose": "cli-integration: crates/farhelm/src/main.rs, crates/farhelm/Cargo.toml; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Absent CLI target preserves template placement",
+            "location": "crates/farhelm/src/main.rs:1041",
+            "detail": "Reviewed commit: 350a4b33b6d4476f4a78e43cea124bc2b828f462. TLDR: considered whether adding target: None to CLI launcher edits erases a template's sandbox/container placement and launches on another host. Source refutation: TemplateFields.target at crates/farhelm-proto/src/launcher.rs:305–306 uses #[serde(default, skip_serializing_if = \"Option::is_none\")], so this value adds no wire field. Template application at lines 932–970 changes placement only in if let Some(target), or when a host edit is present; LaunchFlags::edits also sends host: None and recipe: None. The flags therefore leave the preceding templates' target intact. Contract: CLI flags apply after templates as further edits, and omitted fields do not change choices. Exact implementation text: 'let target = fields.target.clone().or_else(|| {' and 'if let Some(target) = target {'. Could-be-highest: yes if an unintended placement let a command act on a different host's files, but the suspected route is refuted. Suggested bucket if established: highest/security or loss of work; no established consequence here. Confidence: confirmed source refutation. proposed_drop: target None is absence, not a reset; placement setters are conditional. possible_cover: none. Source-only; no execution."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Absent CLI target cannot redirect a template launch",
+            "location": "crates/farhelm/src/main.rs:1041",
+            "detail": "Reviewed commit: 350a4b33b6d4476f4a78e43cea124bc2b828f462. TLDR: the suspected highest consequence was executing a command on an unintended host after a CLI edit discarded sandbox/container placement. Synthesis corrects the initial record's caller assumption: the pure template setter preserves an omitted target, but at this exact revision the agent CLI resolver does not support recipe-target templates at all. crates/farhelm-helm/src/agent_launch.rs:173–181 creates TemplateContext with known_recipes: &[] and known_places: &[]; it applies named templates before CLI edits. crates/farhelm-proto/src/launcher.rs:932–958 turns either target or legacy recipe into an environment target and refuses when its recipe is absent from known_recipes. Exact refusal reason: 'names a recipe that is unavailable here'. Thus an environment template is refused before the CLI's target: None edit is applied; it cannot fall through to an ordinary host. For non-environment templates, target is omitted from serialized edits by #[serde(default, skip_serializing_if = \"Option::is_none\")] on TemplateFields.target, and apply_template changes placement only for a present host or target. Literal CLI contract at SPEC_impl.md:9104 onward: 'an omitted flag sends nothing.' The later 190d844e58c96cf197aa838d0b0eea8062f48435 adds the environment-aware path; it must be judged separately rather than projected backward into this revision. Could-be-highest: yes; original unintended-host execution/security or loss-of-work consequence preserved for independent review, but source establishes fail-closed refusal at this revision. Suggested bucket if established: highest; no established consequence from the assigned target: None addition. Confidence: confirmed source refutation. proposed_drop: no redirect route; exact recipe refusal and omission behavior above. possible_cover: none. Parent has accepted no drop; this remains a candidate for independent check. Source-only; no runtime execution."
+          }
+        }
+      ],
+      "latest": {
+        "line": 7,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Absent CLI target cannot redirect a template launch",
+          "location": "crates/farhelm/src/main.rs:1041",
+          "detail": "Reviewed commit: 350a4b33b6d4476f4a78e43cea124bc2b828f462. TLDR: the suspected highest consequence was executing a command on an unintended host after a CLI edit discarded sandbox/container placement. Synthesis corrects the initial record's caller assumption: the pure template setter preserves an omitted target, but at this exact revision the agent CLI resolver does not support recipe-target templates at all. crates/farhelm-helm/src/agent_launch.rs:173–181 creates TemplateContext with known_recipes: &[] and known_places: &[]; it applies named templates before CLI edits. crates/farhelm-proto/src/launcher.rs:932–958 turns either target or legacy recipe into an environment target and refuses when its recipe is absent from known_recipes. Exact refusal reason: 'names a recipe that is unavailable here'. Thus an environment template is refused before the CLI's target: None edit is applied; it cannot fall through to an ordinary host. For non-environment templates, target is omitted from serialized edits by #[serde(default, skip_serializing_if = \"Option::is_none\")] on TemplateFields.target, and apply_template changes placement only for a present host or target. Literal CLI contract at SPEC_impl.md:9104 onward: 'an omitted flag sends nothing.' The later 190d844e58c96cf197aa838d0b0eea8062f48435 adds the environment-aware path; it must be judged separately rather than projected backward into this revision. Could-be-highest: yes; original unintended-host execution/security or loss-of-work consequence preserved for independent review, but source establishes fail-closed refusal at this revision. Suggested bucket if established: highest; no established consequence from the assigned target: None addition. Confidence: confirmed source refutation. proposed_drop: no redirect route; exact recipe refusal and omission behavior above. possible_cover: none. Parent has accepted no drop; this remains a candidate for independent check. Source-only; no runtime execution."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g090/findings.jsonl",
+        "id": "c2",
+        "line": 7,
+        "disposition": "under-investigation",
+        "group": "g090-c2",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-059",
+          "key": "g090/c2",
+          "latest_line": 7,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "cli-none-target-template-placement-reset",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "At this revision recipe-target templates fail before CLI edits, and absent placement fields do not clear ordinary template placement. The initial setter-preservation explanation alone missed the earlier refusal; the latest record corrects it.",
+          "checks": [
+            "350a4b33b6d4476f4a78e43cea124bc2b828f462 agent_launch.rs:173–196 supplies empty known_recipes/known_places and applies templates before flags.",
+            "Same revision launcher.rs:904–982 conditionally updates host/target, refuses unknown recipe at 946–950, and changes destination only when present.",
+            "Same revision launcher.rs:298–308 omits None host/recipe/target fields in serialization; main.rs:1041 and 1070–1073 supplies target/host/recipe None. No host redirection is established. Source only."
+          ],
+          "coverage_checked": [
+            "Both specs searched; current SPEC_impl.md Agent launches from the CLI states omitted flags send nothing, and Agents and environments documents the later environment-aware route. Neither licenses redirection.",
+            "TODO Planned empty; BUGS unrelated SSH hang. plans/queue environment-agent-operations describes later environment launching and is already landed per plans/REPORTS.md:28, not pending coverage.",
+            "Queue INDEX fully read; targeted queue and active ledger searches for target omission, recipe/template and clone/host found no exact item. FILTER boundaries do not establish a drop."
+          ],
+          "exact_cover_quotes": [
+            "SPEC_impl.md:8788: an omitted flag sends nothing."
+          ],
+          "missing_premise": "Unintended-host execution would require None clearing placement or a recipe-unaware resolver falling back to an ordinary host; the inspected source does neither.",
+          "original_stronger_consequence": "CLI edits erase sandbox/container placement, causing a command to execute on an unintended host and possibly damage user-owned work; highest if established. The later environment-aware feature is separate from this reviewed revision.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Fail-closed unavailable-recipe validation before flag application, plus conditional placement setters and omitted None fields."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-059.json",
+          "key": "g090/c2",
+          "proposal": "claim-checks/claims-059/result.json",
+          "parent_proposal": "source-refuted-recipe-unaware-CLI-None-fields-reset-placement",
+          "final_independent_gate": "required-before-original-highest-wrong-host-drop",
+          "reason": "Full059 at350 CLI resolves templates first with empty recipe/place catalogs and fails unknown environment recipe before flag edits; ordinary Host/target setters conditional and None serialization omitted. Earlier setter-preservation explanation alone missed earlier fail-closed refusal, now corrected. No silent ordinary fallback or erased placement shown; later190d environment-aware feature is separate. Preserve original command-on-unintended-host/work risk for gate, no broad later CLI certificate."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "cli-none-target-template-placement-reset",
+        "destination": null
+      }
+    },
+    {
+      "key": "g090/c3",
+      "owner": "g090",
+      "id": "c3",
+      "domain": "cli-integration",
+      "purpose": "cli-integration: crates/farhelm/src/main.rs, crates/farhelm/Cargo.toml; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Optional clone host does not select an implicit ordinary host",
+            "location": "crates/farhelm/src/main.rs:417",
+            "detail": "Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435. TLDR: considered whether making --host optional for clone lets an ordinary session copy land on an unintended host. Source refutation: AgentCmd::verb sends host.clone() without introducing a default (crates/farhelm/src/main.rs:737–740). The helm's clone_for_agent resolves the source first and branches to clone_environment_for_agent only for a session-owned host, then requires request.host for every ordinary source (crates/farhelm-helm/src/agent_requests.rs:3856–3890). Exact refusal: '--host is required and must not be empty'. Contract at SPEC.md:4323–4326: 'farhelm agent clone of a sandbox or container session takes no --host or --cwd; it targets the source’s recipe at the source’s place' (formatting omitted; apostrophe ASCII in source). This CLI relaxation is needed to express the environment route and does not relax the ordinary target-host contract. Could-be-highest: yes if an implicit target let copied commands alter another host's files; no such route is present. Suggested bucket if established: highest/security or loss of work; no established consequence here. Confidence: confirmed source refutation. proposed_drop: ordinary clones still fail closed without an explicit host. possible_cover: none. Source-only; no execution."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Optional clone host remains fail closed across ordinary and environment sources",
+            "location": "crates/farhelm/src/main.rs:417",
+            "detail": "Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435. TLDR: synthesis reconfirms that omitting --host cannot silently place a cloned command on a different ordinary host. Original suspected highest consequence preserved: copied commands running on an unintended host could damage user-owned work; that route is source-refuted. AgentCmd::verb passes Option<String> unchanged. clone_for_agent (crates/farhelm-helm/src/agent_requests.rs:3856–3890) branches on the resolved source host's session ownership before ordinary host admission; ordinary sources still refuse absent --host with exact text '--host is required and must not be empty'. The environment branch at lines 4306–4390 refuses any explicit host, cwd or idempotency key before routing or launching. Exact host refusal: 'a copy of a sandbox or container session is a new sandbox or container, so clone takes no --host for it'. It obtains recipe/place from the source row's environment_view, reads the source launch live via its owning supervisor, and carries SourceOwner into the always-asking launch path; that path rechecks the same source claim/client after approval (lines 4517 onward), rather than choosing another host from mutable CLI state. Literal contract, SPEC.md:4326–4327: 'it targets the source\\'s recipe at the source\\'s place, with the source\\'s launch and repository intent, never a copy of its disk.' Confinement is earlier than dispatch: agent_requests.rs:516–531 refuses Clone and CreateEnvironment from a session-owned origin. Could-be-highest: yes for the original unintended-host execution consequence, which remains refuted. Suggested bucket if established: highest/security or loss of work; no established impact. Confidence: confirmed source refutation, strengthened by the environment branch and post-approval ownership check. proposed_drop: no ordinary-host fallback and no environment-host override; literal refusal and contract above. possible_cover: none. No parent drop accepted; retained for independent check. Source-only; no runtime observations."
+          }
+        },
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Optional clone host fails closed; wire comment still describes only ordinary clones",
+            "location": "crates/farhelm/src/main.rs:417",
+            "detail": "Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435. TLDR: source again refutes the original highest concern that an omitted clone host could run copied commands on an unintended ordinary host. AgentCmd::verb sends host unchanged; clone_for_agent (agent_requests.rs:3856–3890) sends session-owned sources to clone_environment_for_agent before ordinary admission and otherwise refuses absent host with '--host is required and must not be empty'. clone_environment_for_agent:4306–4390 refuses host, cwd and idempotency-key overrides before creating anything, derives the target from the source environment row and launch from the source's live owning supervisor, and carries that owner into the approval path. launch_environment_for_agent:4517–4530 refuses an owner claim/client change after approval. Earlier confinement at agent_requests.rs:516–531 refuses clone from an environment origin. Literal SPEC.md:4326–4327: 'it targets the source\\'s recipe at the source\\'s place, with the source\\'s launch and repository intent, never a copy of its disk.' Synthesis caveat: the unchanged wire comment at crates/farhelm-proto/src/lib.rs:2077–2078 still says 'The target host\\'s display NAME. `None` is retained only so an old wire shape can be decoded and refused.' That statement is stale for environment sources at this revision; actual consumers and the governing SPEC now explicitly support None there. This is a documentation discrepancy at the interface, outside the assigned main.rs/Cargo.toml patches; proposed not to open a separate runtime finding for it. If independently queued as documentation feedback its bucket would be other, with wording limited to ordinary clones. No runtime fallback follows from the stale comment. Original suspected security/loss-of-work consequence remains highest if established; it is source-refuted. Could-be-highest: yes for that original consequence, not for the comment itself. Confidence: confirmed source refutation; explicit stale-comment caveat. proposed_drop: no ordinary-host fallback or environment-host override; stale interface wording does not change the source route. possible_cover: none. No parent drop accepted; retained for independent check. No tests/reproductions; source-only."
+          }
+        },
+        {
+          "line": 14,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c3",
+            "state": "open",
+            "summary": "Trace when clone host documentation became false",
+            "location": "crates/farhelm-proto/src/lib.rs:2077",
+            "detail": "Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435; exclusive base: 6e423e30068b62c6cfa276c6d720ee35bb70387a. TLDR: the wire documentation says clone requires a target host and that None is decoded only to be refused, while the reviewed revision supports None for environment-source clones. This is a distinct documentation defect, not refuted by correct runtime behavior or the assigned CLI file boundary. Original highest concern remains source-refuted: ordinary clone still refuses absent host, so no unintended-host command execution has been established. Current source basis: AgentVerb::Clone host comment at lib.rs:2077–2078; clone_for_agent branches on session-owned source before host-required admission; clone_environment_for_agent:4306–4390 requires absent host and derives source recipe/place. The exclusive-base AgentVerb module docs also require clone host; pinned lib.rs history includes the in-range 190d844e environment-clone feature. Missing premise for exact semantic attribution: confirm the pre-feature parent and exclusive-base clone consumers required host, and check whether tip repairs the stale comment. Next checks are those bounded source reads. Suggested bucket for this documentation discrepancy: other; confidence confirmed discrepancy at reviewed revision, attribution check open. Could-be-highest: original unintended-host execution consequence yes but refuted; documentation defect no established security or work-loss route. proposed_drop: false for documentation; prior outside-main.rs/low-impact proposal is superseded, not accepted. possible_cover: none. Source-only; no execution."
+          }
+        },
+        {
+          "line": 15,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c3",
+            "state": "open",
+            "summary": "Clone wire documentation still forbids the new environment clone form",
+            "location": "crates/farhelm-proto/src/lib.rs:2077",
+            "detail": "# Clone wire documentation still forbids the new environment clone form\n\nReviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435.\n\n## TLDR\n\nDevelopers following the agent protocol documentation are told that clone always requires a target host and that an omitted host is accepted only to return an error. This release introduces environment clones that require the host to be omitted. The stale contract describes a valid request as invalid and hides the source-dependent routing rule.\n\n## Details\n\nAt the reviewed revision, crates/farhelm-proto/src/lib.rs:1911–1914 says '`Clone` requires it (an absent one is decoded only to be refused)'. The Clone.host field at :2077–2078 repeats: 'The target host\\'s display NAME. `None` is retained only so an old wire shape can be decoded and refused.' The variant introduction at :2064–2066 also describes only copying to an explicitly named host. These statements must distinguish ordinary sources from environment sources.\n\nSemantic introduction is established across the full pinned range, not inferred from unchanged comment lines: at exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a, agent_requests.rs:1203–1215 requires NonEmptyString::required(host, \"--host\") while parsing every Clone; the base tests at :4271–4278 explicitly require refusal of None. The immediate parent of 190d844e has the same required-host parser at :1321–1323 and refusal tests at :4495–4502. Commit 190d844e changes that parser to optional_host(host) at :1353, changes CloneRequest.host to Option<String>, and adds the environment-source branch in clone_for_agent at :3872–3880 before ordinary-host admission. clone_environment_for_agent at :4316–4323 rejects an explicitly supplied host, then derives the recipe/place from the source environment row. The assigned CLI patch changes AgentCmd::Clone.host to Option<String> and sends it unchanged, enabling this exact valid None form. SPEC.md:4326–4327 says it 'takes no `--host` or `--cwd`; it targets the source\\'s recipe at the source\\'s place'. Thus the old wording was true at the exclusive base and parent, and becomes false with the in-range feature, despite its lines remaining unchanged. At pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, the same claims remain at lib.rs:1789–1791 and :1954–1955; no later in-range repair.\n\nSuggested bucket: other, documentation correctness. Confidence: confirmed by pinned source, feature diff, exclusive-base/parent comparison and governing contract; no runtime observation. proposed_drop: false for this documentation defect. The earlier proposal to dismiss it as outside main.rs or too minor is superseded; production correctness does not refute wrong interface documentation. possible_cover: none in supplied interface records; parent owns coverage.\n\nOriginal c3 consequence preserved: a hostless clone silently placing copied commands on another ordinary host could be highest/security or loss of work, but that runtime concern remains source-refuted. Ordinary clone_for_agent still refuses None after excluding environment sources; environment clones derive the source target, reject host/cwd/key overrides, require direct approval and revalidate the source owner. No unintended-host runtime execution or work-loss route is asserted by this documentation finding. Could-be-highest: original runtime concern yes, refuted; distinct documentation defect has no established security or work-loss route and is other. No parent drop or lowering has been accepted. This revision closes c3's attribution lead and retains the separate factual documentation defect under its original ID."
+          }
+        }
+      ],
+      "latest": {
+        "line": 15,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "c3",
+          "state": "open",
+          "summary": "Clone wire documentation still forbids the new environment clone form",
+          "location": "crates/farhelm-proto/src/lib.rs:2077",
+          "detail": "# Clone wire documentation still forbids the new environment clone form\n\nReviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435.\n\n## TLDR\n\nDevelopers following the agent protocol documentation are told that clone always requires a target host and that an omitted host is accepted only to return an error. This release introduces environment clones that require the host to be omitted. The stale contract describes a valid request as invalid and hides the source-dependent routing rule.\n\n## Details\n\nAt the reviewed revision, crates/farhelm-proto/src/lib.rs:1911–1914 says '`Clone` requires it (an absent one is decoded only to be refused)'. The Clone.host field at :2077–2078 repeats: 'The target host\\'s display NAME. `None` is retained only so an old wire shape can be decoded and refused.' The variant introduction at :2064–2066 also describes only copying to an explicitly named host. These statements must distinguish ordinary sources from environment sources.\n\nSemantic introduction is established across the full pinned range, not inferred from unchanged comment lines: at exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a, agent_requests.rs:1203–1215 requires NonEmptyString::required(host, \"--host\") while parsing every Clone; the base tests at :4271–4278 explicitly require refusal of None. The immediate parent of 190d844e has the same required-host parser at :1321–1323 and refusal tests at :4495–4502. Commit 190d844e changes that parser to optional_host(host) at :1353, changes CloneRequest.host to Option<String>, and adds the environment-source branch in clone_for_agent at :3872–3880 before ordinary-host admission. clone_environment_for_agent at :4316–4323 rejects an explicitly supplied host, then derives the recipe/place from the source environment row. The assigned CLI patch changes AgentCmd::Clone.host to Option<String> and sends it unchanged, enabling this exact valid None form. SPEC.md:4326–4327 says it 'takes no `--host` or `--cwd`; it targets the source\\'s recipe at the source\\'s place'. Thus the old wording was true at the exclusive base and parent, and becomes false with the in-range feature, despite its lines remaining unchanged. At pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, the same claims remain at lib.rs:1789–1791 and :1954–1955; no later in-range repair.\n\nSuggested bucket: other, documentation correctness. Confidence: confirmed by pinned source, feature diff, exclusive-base/parent comparison and governing contract; no runtime observation. proposed_drop: false for this documentation defect. The earlier proposal to dismiss it as outside main.rs or too minor is superseded; production correctness does not refute wrong interface documentation. possible_cover: none in supplied interface records; parent owns coverage.\n\nOriginal c3 consequence preserved: a hostless clone silently placing copied commands on another ordinary host could be highest/security or loss of work, but that runtime concern remains source-refuted. Ordinary clone_for_agent still refuses None after excluding environment sources; environment clones derive the source target, reject host/cwd/key overrides, require direct approval and revalidate the source owner. No unintended-host runtime execution or work-loss route is asserted by this documentation finding. Could-be-highest: original runtime concern yes, refuted; distinct documentation defect has no established security or work-loss route and is other. No parent drop or lowering has been accepted. This revision closes c3's attribution lead and retains the separate factual documentation defect under its original ID."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g090/findings.jsonl",
+        "id": "c3",
+        "line": 15,
+        "disposition": "under-investigation",
+        "group": "g090-c3",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-059",
+          "key": "g090/c3",
+          "latest_line": 15,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "agent-clone-wire-docs-unconditional-host-requirement",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The in-range environment-clone feature makes the wire documentation's unconditional host requirement false. Preserve this documentation finding separately from the source-refuted unintended-host concern. The earlier suggestion to dismiss it as outside the assigned file or too minor was explicitly superseded.",
+          "checks": [
+            "190d844e58c96cf197aa838d0b0eea8062f48435 proto/lib.rs:1911–1914 says Clone requires host; :2064–2078 describes an explicitly named host and says None is decoded only to refuse.",
+            "Same revision agent_requests.rs:3856–3890 branches environment sources before requiring ordinary host; :4306–4390 rejects host/cwd/key overrides and derives recipe/place from the source. :4517–4530 revalidates source owner after approval. :516–531 confines environment origins.",
+            "Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a agent_requests.rs:1203–1215 and refusal test :4271–4278 require clone host. Immediate parent 190d844e^:1321–1323 and :4495–4502 agrees. Thus the semantic contradiction is introduced in range.",
+            "Pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db proto/lib.rs:1789–1791 and :1954–1955 retains the stale claims. Source only; no runtime observation."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md Agents and environments (4253 onward) and SPEC_impl.md Agent requests and environments (6167 onward) explicitly support hostless environment clones; neither accepts false wire documentation.",
+            "TODO Planned empty; BUGS unrelated SSH hang. plans/queue search found environment-agent-operations' feature criteria, already landed per plans/REPORTS.md:28, with no pending repair of clone host documentation.",
+            "Full queue INDEX and targeted queue-body searches for clone wire/host requirement found no exact item. Active TRIAGE_OUTCOMES search had no matching protocol-documentation decision; archive not read.",
+            "FILTER does not match: this is ordinary valid environment-clone usage, not a rare diagnostic trigger."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "None for the documentation contradiction. Unintended-host execution remains unestablished and is directly refused for ordinary clones.",
+          "original_stronger_consequence": "A hostless clone silently chooses another ordinary host and runs copied commands against its work (highest/security or work loss). Lines 4, 9 and 13 refute that route. Lines 14–15 retain a distinct other-priority documentation defect; no parent lowering or drop was accepted.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Retain wrong protocol documentation with exact in-range semantic attribution. Independently check the proposed refutation of the earlier highest runtime concern."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-059.json",
+          "key": "g090/c3",
+          "proposal": "claim-checks/claims-059/result.json",
+          "parent_proposal": "retain-wire-Clone-host-documentation-with-original-runtime-refutation-gate",
+          "final_independent_gate": "required-before-original-highest-runtime-drop-or-lowering",
+          "reason": "Full059 new190d hostless environment Clone derives source recipe/place and rejects host/cwd/key overrides before approval/revalidation; ordinary clones still require host. This refutes original ordinary host fallback/security/work route but makes unchanged unconditional wire host-required/None-only-refused prose newly false, persisting to tip. Retain distinct other documentation defect; earlier assigned-file/too-minor dismissal superseded. Preserve both paths and original stronger consequence for fresh gate, not treat correct runtime as prose refutation."
+        }
+      ],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "agent-clone-wire-docs-unconditional-host-requirement",
+        "destination": "trailing-agent-clone-wire-docs-unconditional-host-requirement.md"
+      }
+    },
+    {
+      "key": "g090/c4",
+      "owner": "g090",
+      "id": "c4",
+      "domain": "cli-integration",
+      "purpose": "cli-integration: crates/farhelm/src/main.rs, crates/farhelm/Cargo.toml; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Retired container helpers intentionally refuse old invocations",
+            "location": "crates/farhelm/src/main.rs:1419",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: considered the compatibility consequence that delayed old container-prepare or tab-shell --container invocations now fail parsing. This is specified retirement, not an accidental loss of a supported operation. SPEC.md:4816–4823, Retired containerized sessions, says exactly: 'Existing sessions support Delete only. Opening terminals or tabs, exec, Stop, Restart, Clone, Replace and Replace with are refused.' It also says: 'Delete retains the legacy container-removal path and confirms absence.' The assigned change removes only the retired create/entry dispatch, while the ordinary tab helper call remains; its current caller constructs only directory and shell argv (crates/farhelm-supervisor/src/launch.rs:760–780). The new parser test at crates/farhelm/src/main.rs:2886–2917 asserts InvalidSubcommand for the retired creator and UnknownArgument for the retired tab option, distinguishing removal from a later unrelated failure. Suggested bucket for the accepted access regression: high/material UX. Could-be-highest: no established security or loss-of-work consequence from these CLI removals; no signal, deletion or process termination is introduced in this patch. Confidence: confirmed source and specification acceptance. proposed_drop: exact retirement contract quoted above explicitly refuses creation and tab access; existing Delete remains outside the removed CLI dispatch. possible_cover: none. Source-only; no runtime observations."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Retired helpers refuse both old CLI entry and old queued isolation intent",
+            "location": "crates/farhelm/src/main.rs:1419",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: old container helper invocations are intentionally unavailable; synthesis also checked that a queued old launch cannot become an ordinary outside-host command after removal of its container implementation. Existing accepted access consequence remains high/material UX. Literal SPEC.md:4819–4820 contract: 'Existing sessions support Delete only. Opening terminals or tabs, exec, Stop, Restart, Clone, Replace and Replace with are refused.' Literal cleanup contract: 'Delete retains the legacy container-removal path and confirms absence.' The CLI test distinguishes removal by InvalidSubcommand and UnknownArgument. More importantly, launch.rs:1171–1175 checks spec.container.is_some() immediately after decode and before checkout preparation or exec, writes RETIRED_MESSAGE to the launch-failure status, then returns. Exact source rationale: 'Deserializing an old spec must not erase its isolation intent and turn the same argv into an ordinary launch on the outside host.' Ordinary tab-shell callers emit only directory and shell arguments (launch.rs:760–780). Cleanup continues to derive ContainerRuntime from the stored launch (service/teardown.rs:533–550); container.rs:107–166 retains the permanent creation-lock inode, waits for already-running old helpers, and revokes the creation ticket before removal; its removal confirms absence via container exists status 1 (lines 168–194). This checks the current-binary entry/queued-spec boundary and the retained cleanup handoff, not unrelated retired implementation defects. Could-be-highest: yes for the source-refuted new concern of executing a previously container-bound command on the outside host; the current binary's explicit guard prevents that route. Suggested bucket for that hypothetical: highest/security or loss of work. The actual specified helper unavailability stays high/material UX. Confidence: confirmed source refutation for host-execution concern, specification acceptance for access removal. proposed_drop: outside-host execution is refuted by the explicit pre-exec guard; helper unavailability is expressly required by the literal retirement contract. possible_cover: none. No parent drop accepted; retained for independent check. Source-only; no runtime observations."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c4",
+          "state": "open",
+          "summary": "Retired helpers refuse both old CLI entry and old queued isolation intent",
+          "location": "crates/farhelm/src/main.rs:1419",
+          "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: old container helper invocations are intentionally unavailable; synthesis also checked that a queued old launch cannot become an ordinary outside-host command after removal of its container implementation. Existing accepted access consequence remains high/material UX. Literal SPEC.md:4819–4820 contract: 'Existing sessions support Delete only. Opening terminals or tabs, exec, Stop, Restart, Clone, Replace and Replace with are refused.' Literal cleanup contract: 'Delete retains the legacy container-removal path and confirms absence.' The CLI test distinguishes removal by InvalidSubcommand and UnknownArgument. More importantly, launch.rs:1171–1175 checks spec.container.is_some() immediately after decode and before checkout preparation or exec, writes RETIRED_MESSAGE to the launch-failure status, then returns. Exact source rationale: 'Deserializing an old spec must not erase its isolation intent and turn the same argv into an ordinary launch on the outside host.' Ordinary tab-shell callers emit only directory and shell arguments (launch.rs:760–780). Cleanup continues to derive ContainerRuntime from the stored launch (service/teardown.rs:533–550); container.rs:107–166 retains the permanent creation-lock inode, waits for already-running old helpers, and revokes the creation ticket before removal; its removal confirms absence via container exists status 1 (lines 168–194). This checks the current-binary entry/queued-spec boundary and the retained cleanup handoff, not unrelated retired implementation defects. Could-be-highest: yes for the source-refuted new concern of executing a previously container-bound command on the outside host; the current binary's explicit guard prevents that route. Suggested bucket for that hypothetical: highest/security or loss of work. The actual specified helper unavailability stays high/material UX. Confidence: confirmed source refutation for host-execution concern, specification acceptance for access removal. proposed_drop: outside-host execution is refuted by the explicit pre-exec guard; helper unavailability is expressly required by the literal retirement contract. possible_cover: none. No parent drop accepted; retained for independent check. Source-only; no runtime observations."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g090/findings.jsonl",
+        "id": "c4",
+        "line": 10,
+        "disposition": "under-investigation",
+        "group": "g090-c4",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-059",
+          "key": "g090/c4",
+          "latest_line": 10,
+          "recommendation": "covered",
+          "bucket": "high",
+          "underlying_key": "retired-container-cli-helper-removal",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Refusal of retired container entry points is explicitly specified. The separate stronger concern that queued old isolation intent becomes an outside-host launch is source-refuted by the pre-exec guard.",
+          "checks": [
+            "04d85f0c98a9b635709d00b056719a0baa7fd3fc launch.rs:1171–1175 rejects decoded spec.container before argv execution or checkout preparation. launch.rs:760–780 ordinary tab-shell argv has only directory/shell arguments.",
+            "Same revision container.rs:107–194 keeps the creation-lock inode, waits for existing creators, revokes tickets and confirms removal via container-exists status 1. service/teardown.rs:533–550 derives legacy cleanup from stored launch configuration.",
+            "Pinned SPEC.md:4816–4823 and current SPEC.md:4892–4900 carry the same retirement contract. Source only; no execution."
+          ],
+          "coverage_checked": [
+            "Both specs searched for retired containers, tab-shell and container preparation. SPEC.md Retired containerized sessions directly covers the access refusal and preserves Delete.",
+            "TODO Planned empty; BUGS unrelated. Relevant plans/queue podman/environment entries implement the replacement architecture; no further plan is required for the accepted refusal.",
+            "Full queue INDEX and targeted queue/active-ledger searches found no exact extra helper-removal item. No archive read. FILTER not used."
+          ],
+          "exact_cover_quotes": [
+            "SPEC.md:4895–4899: Existing sessions support Delete only. Opening terminals or tabs, exec, Stop, Restart, Clone, Replace and Replace with are refused. Delete retains the legacy container-removal path and confirms absence.",
+            "SPEC.md:4899–4900: Using them drops or refuses the retired choice with an explanation and cannot create another old-style session."
+          ],
+          "missing_premise": "Outside-host execution would require bypassing the explicit old-container launch refusal. No such route is established by the removed CLI dispatch.",
+          "original_stronger_consequence": "Line 5 considered accepted loss of retired access (high UX). Line 10 additionally considers queued container-bound commands executing on the outside host (highest/security or work loss), refuted by the launch guard. Both bases need preservation.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Exact specification acceptance for retired access; explicit pre-exec refusal for the stronger isolation-loss concern."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-059.json",
+          "key": "g090/c4",
+          "proposal": "claim-checks/claims-059/result.json",
+          "parent_proposal": "exact-retired-CLI-access-cover-plus-source-refuted-queued-isolation-fallback",
+          "final_independent_gate": "required-before-original-highest-isolation-drop",
+          "reason": "Full059 explicit retired entry-point refusal is product contract, with Delete locking/ticket revocation/absence-confirming legacy teardown preserved. Stronger queued old-container command executing outside host separately blocked before argv/checkout by decoded container guard. Cover access retirement and refute pre-exec bypass only, not all container lifetimes; keep original high UX and later highest security/work theories as separate bases for independent gate, no rarity filter."
+        }
+      ],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retired-container-cli-helper-removal",
+        "destination": "trailing-retired-container-cli-helper-removal.md"
+      }
+    },
+    {
+      "key": "g090/c5",
+      "owner": "g090",
+      "id": "c5",
+      "domain": "cli-integration",
+      "purpose": "cli-integration: crates/farhelm/src/main.rs, crates/farhelm/Cargo.toml; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c5",
+            "state": "open",
+            "summary": "Removed supervisor and setup flags match the terminal transition",
+            "location": "crates/farhelm/src/main.rs:1267",
+            "detail": "Reviewed commits: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513, 1ed482dde220452e424973faf38a5e1318986333 and 17a3fe858c5511a24b7403af15dd41c93bf69fd7. TLDR: considered whether removing --new-terminals, supervisor --tmux and setup's tmux environment capture breaks a still-supported way to start Farhelm. --new-terminals was a hidden harness seam; SPEC_impl.md at 647f0227:2954–2963 says exactly: 'Every terminal a supervisor creates runs in a terminal host instead'. Its removal leaves startup's hook, instruction, boot-id and stdin-lifetime settings intact (crates/farhelm/src/main.rs:1786–1867). At 1ed482d, SPEC_impl.md:2962–2966 says: 'The supervisor runs no tmux, and `farhelm supervisor run` no longer takes a `--tmux` of its own'; the CLI removal agrees. At 17a3fe8, SPEC_impl.md:2865–2873 specifies that neither supervisor run nor helm setup takes --tmux, and the supervisor unit adds no tmux directory to PATH. SetupContext at crates/farhelm/src/setup.rs:78–86 contains exactly the remaining fields captured by run_helm_setup at crates/farhelm/src/main.rs:2598–2611; relative-path and XDG resolution inputs remain. A custom invocation still passing removed flags will fail parsing, an accepted compatibility break, rather than silently honoring an inert setting. Suggested bucket for that accepted consequence: high/material UX for an affected hand-written service command. Could-be-highest: no source-established destruction or security route in these CLI removals; startup refusal itself does not kill terminal-host children. Confidence: confirmed source and specification acceptance. proposed_drop: explicit terminal-transition and removed-flag contracts quoted above; no surviving production caller in the inspected main, desktop, managed-supervisor and unit boundary names the removed supervisor flags. possible_cover: none. Source-only; no runtime observations."
+          }
+        }
+      ],
+      "latest": {
+        "line": 6,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c5",
+          "state": "open",
+          "summary": "Removed supervisor and setup flags match the terminal transition",
+          "location": "crates/farhelm/src/main.rs:1267",
+          "detail": "Reviewed commits: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513, 1ed482dde220452e424973faf38a5e1318986333 and 17a3fe858c5511a24b7403af15dd41c93bf69fd7. TLDR: considered whether removing --new-terminals, supervisor --tmux and setup's tmux environment capture breaks a still-supported way to start Farhelm. --new-terminals was a hidden harness seam; SPEC_impl.md at 647f0227:2954–2963 says exactly: 'Every terminal a supervisor creates runs in a terminal host instead'. Its removal leaves startup's hook, instruction, boot-id and stdin-lifetime settings intact (crates/farhelm/src/main.rs:1786–1867). At 1ed482d, SPEC_impl.md:2962–2966 says: 'The supervisor runs no tmux, and `farhelm supervisor run` no longer takes a `--tmux` of its own'; the CLI removal agrees. At 17a3fe8, SPEC_impl.md:2865–2873 specifies that neither supervisor run nor helm setup takes --tmux, and the supervisor unit adds no tmux directory to PATH. SetupContext at crates/farhelm/src/setup.rs:78–86 contains exactly the remaining fields captured by run_helm_setup at crates/farhelm/src/main.rs:2598–2611; relative-path and XDG resolution inputs remain. A custom invocation still passing removed flags will fail parsing, an accepted compatibility break, rather than silently honoring an inert setting. Suggested bucket for that accepted consequence: high/material UX for an affected hand-written service command. Could-be-highest: no source-established destruction or security route in these CLI removals; startup refusal itself does not kill terminal-host children. Confidence: confirmed source and specification acceptance. proposed_drop: explicit terminal-transition and removed-flag contracts quoted above; no surviving production caller in the inspected main, desktop, managed-supervisor and unit boundary names the removed supervisor flags. possible_cover: none. Source-only; no runtime observations."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g090/findings.jsonl",
+        "id": "c5",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "terminal-transition-removes-supervisor-tmux-flags",
+        "reason": "Parent explicitly accepted named covered proposal from claims-059 after inspecting it. Old custom commands retaining removed flags can fail parsing, but the terminal transition expressly removes those knobs. No source-established security or user-work-loss route is claimed. Explicit terminal-transition and removed-flag specification contracts. Checked source/results: [\"647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 main.rs diff removes hidden new-terminals selector and startup mapping; SPEC_impl.md:2954–2963 says every newly created terminal runs in a terminal host.\",\"1ed482dde220452e424973faf38a5e1318986333 main.rs diff removes supervisor --tmux parsing/resolution, preserving other startup fields; SPEC_impl.md:2962–2966 explicitly removes that flag.\",\"17a3fe858c5511a24b7403af15dd41c93bf69fd7 main.rs:2598–2611 diff removes PATH/tmux capture from setup while preserving home/cwd/XDG/temp inputs; SPEC_impl.md:2865–2873 explicitly removes setup --tmux and tmux unit PATH. Source only.\"] Current coverage/results: [\"Both specs searched for tmux, new-terminals and startup flags; current SPEC_impl.md:7996 onward describes the resulting no-tmux supervisor/unit contract.\",\"TODO Planned empty; BUGS unrelated. plans/queue tmux-end-old-terminals criterion 2 and tmux-drop-from-install cover removals but are already landed (plans/REPORTS.md:29–30).\",\"Full queue INDEX and targeted queue/active-ledger searches found no exact removed-flag compatibility item. No archive read. FILTER not used.\"] Exact cited cover: [\"647f0227 SPEC_impl.md:2955–2956: Every terminal a supervisor creates runs in a terminal host instead.\",\"1ed482dd SPEC_impl.md:2962–2964: The supervisor runs no tmux, and `farhelm supervisor run` no longer takes a `--tmux` of its own.\",\"17a3fe85 SPEC_impl.md:2865–2866: The supervisor runs no tmux, and neither `farhelm supervisor run` nor `farhelm helm setup` takes a `--tmux`.\"] Original stronger consequence and missing premise remain preserved: \"Affected hand-written service invocations can stop starting (high UX). The supplied history asserts no security/destruction route from these CLI removals and no terminal-host children killed by parser refusal.\"; \"None for the accepted parse refusal. No destructive consequence was established; this narrow check does not audit the separate startup shutdown of historical tmux sessions.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g090/c5",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "terminal-transition-removes-supervisor-tmux-flags",
+        "bucket": "high",
+        "recording": "covered",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named covered proposal from claims-059 after inspecting it. Old custom commands retaining removed flags can fail parsing, but the terminal transition expressly removes those knobs. No source-established security or user-work-loss route is claimed. Explicit terminal-transition and removed-flag specification contracts. Checked source/results: [\"647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 main.rs diff removes hidden new-terminals selector and startup mapping; SPEC_impl.md:2954–2963 says every newly created terminal runs in a terminal host.\",\"1ed482dde220452e424973faf38a5e1318986333 main.rs diff removes supervisor --tmux parsing/resolution, preserving other startup fields; SPEC_impl.md:2962–2966 explicitly removes that flag.\",\"17a3fe858c5511a24b7403af15dd41c93bf69fd7 main.rs:2598–2611 diff removes PATH/tmux capture from setup while preserving home/cwd/XDG/temp inputs; SPEC_impl.md:2865–2873 explicitly removes setup --tmux and tmux unit PATH. Source only.\"] Current coverage/results: [\"Both specs searched for tmux, new-terminals and startup flags; current SPEC_impl.md:7996 onward describes the resulting no-tmux supervisor/unit contract.\",\"TODO Planned empty; BUGS unrelated. plans/queue tmux-end-old-terminals criterion 2 and tmux-drop-from-install cover removals but are already landed (plans/REPORTS.md:29–30).\",\"Full queue INDEX and targeted queue/active-ledger searches found no exact removed-flag compatibility item. No archive read. FILTER not used.\"] Exact cited cover: [\"647f0227 SPEC_impl.md:2955–2956: Every terminal a supervisor creates runs in a terminal host instead.\",\"1ed482dd SPEC_impl.md:2962–2964: The supervisor runs no tmux, and `farhelm supervisor run` no longer takes a `--tmux` of its own.\",\"17a3fe85 SPEC_impl.md:2865–2866: The supervisor runs no tmux, and neither `farhelm supervisor run` nor `farhelm helm setup` takes a `--tmux`.\"] Original stronger consequence and missing premise remain preserved: \"Affected hand-written service invocations can stop starting (high UX). The supplied history asserts no security/destruction route from these CLI removals and no terminal-host children killed by parser refusal.\"; \"None for the accepted parse refusal. No destructive consequence was established; this narrow check does not audit the separate startup shutdown of historical tmux sessions.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-059",
+          "key": "g090/c5",
+          "latest_line": 6,
+          "recommendation": "covered",
+          "bucket": "high",
+          "underlying_key": "terminal-transition-removes-supervisor-tmux-flags",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Old custom commands retaining removed flags can fail parsing, but the terminal transition expressly removes those knobs. No source-established security or user-work-loss route is claimed.",
+          "checks": [
+            "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 main.rs diff removes hidden new-terminals selector and startup mapping; SPEC_impl.md:2954–2963 says every newly created terminal runs in a terminal host.",
+            "1ed482dde220452e424973faf38a5e1318986333 main.rs diff removes supervisor --tmux parsing/resolution, preserving other startup fields; SPEC_impl.md:2962–2966 explicitly removes that flag.",
+            "17a3fe858c5511a24b7403af15dd41c93bf69fd7 main.rs:2598–2611 diff removes PATH/tmux capture from setup while preserving home/cwd/XDG/temp inputs; SPEC_impl.md:2865–2873 explicitly removes setup --tmux and tmux unit PATH. Source only."
+          ],
+          "coverage_checked": [
+            "Both specs searched for tmux, new-terminals and startup flags; current SPEC_impl.md:7996 onward describes the resulting no-tmux supervisor/unit contract.",
+            "TODO Planned empty; BUGS unrelated. plans/queue tmux-end-old-terminals criterion 2 and tmux-drop-from-install cover removals but are already landed (plans/REPORTS.md:29–30).",
+            "Full queue INDEX and targeted queue/active-ledger searches found no exact removed-flag compatibility item. No archive read. FILTER not used."
+          ],
+          "exact_cover_quotes": [
+            "647f0227 SPEC_impl.md:2955–2956: Every terminal a supervisor creates runs in a terminal host instead.",
+            "1ed482dd SPEC_impl.md:2962–2964: The supervisor runs no tmux, and `farhelm supervisor run` no longer takes a `--tmux` of its own.",
+            "17a3fe85 SPEC_impl.md:2865–2866: The supervisor runs no tmux, and neither `farhelm supervisor run` nor `farhelm helm setup` takes a `--tmux`."
+          ],
+          "missing_premise": "None for the accepted parse refusal. No destructive consequence was established; this narrow check does not audit the separate startup shutdown of historical tmux sessions.",
+          "original_stronger_consequence": "Affected hand-written service invocations can stop starting (high UX). The supplied history asserts no security/destruction route from these CLI removals and no terminal-host children killed by parser refusal.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Explicit terminal-transition and removed-flag specification contracts."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "terminal-transition-removes-supervisor-tmux-flags",
+        "destination": null
+      }
+    },
+    {
+      "key": "g090/l6",
+      "owner": "g090",
+      "id": "l6",
+      "domain": "cli-integration",
+      "purpose": "cli-integration: crates/farhelm/src/main.rs, crates/farhelm/Cargo.toml; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l6",
+            "state": "open",
+            "summary": "Check mixed recipe-to-host template stack falling back through ordinary resolver",
+            "location": "crates/farhelm-helm/src/agent_requests.rs:1996",
+            "detail": "Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435. TLDR: an agent create whose earlier template selects a recipe and later template selects an installed host may be refused even though the combined launch is valid. Source basis: create_for_agent at crates/farhelm-helm/src/agent_requests.rs:1995–2010 uses plan_environment_create and returns only when it yields Some(plan); when the final template placement is a host, that planner returns None. The request then reaches resolve_agent_create. agent_launch::resolve at crates/farhelm-helm/src/agent_launch.rs:135–155 uses no known recipes or places, and apply_templates validates templates in order before their later overrides. The potential result is an early unavailable-recipe refusal in that second resolution. Contract stated directly in agent_launch.rs:174–183: 'a stack of an ordinary-host template and a recipe template is valid, and only the final result says which kind of create it is.' Missing readily checkable premise: whether resolve_agent_create reuses the already-resolved mixed stack or calls the recipe-unaware ordinary resolver unmodified. Need inspect that function and names_recipe_template, then verify apply_template performs recipe availability validation before later host override. Suggested bucket: high/material UX if valid template-composed creates fail, possibly other if confined to a narrow convenience corner; no security/loss-of-work consequence established. Could-be-highest: no, suspected consequence is fail-closed refusal. Confidence: unresolved lead; source-only, no reproduction. proposed_drop: false. possible_cover: none. This is a new synthesis interaction lead, separate from c2's refuted unintended-host execution concern."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l6",
+            "state": "open",
+            "summary": "Mixed recipe-to-host template stack uses environment-aware resolution",
+            "location": "crates/farhelm-helm/src/agent_requests.rs:2446",
+            "detail": "Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435. TLDR: the suspected refusal of a valid recipe-template then installed-host-template stack is source-refuted. The missing caller premise is now resolved: resolve_agent_create (crates/farhelm-helm/src/agent_requests.rs:2424–2480) calls recipe-unaware agent_launch::resolve only for spawn. Ordinary creates instead load the available recipe names and container places, call agent_launch::resolve_placed with them, and require the final target to be None before selecting the resolved installed host. Exact source rationale: 'An ordinary create may stack a recipe template under an installed-host one, which replaces it; the recipes must be known for that earlier template to apply at all.' create_for_agent:1990–2010 first plans recipe-bearing hostless requests and dispatches environment creation only for Some(plan); a final-host plan returns None and reaches this correctly environment-aware ordinary path. names_recipe_template:4128–4140 detects either legacy recipe or canonical target through launch_target(). agent_launch.rs:215–219 drops all template placement fields when an explicit --host wins. The shared launcher setter (launcher.rs:904–969) validates each recipe while it is applied, then a later installed host clears both recipe and target; available recipes/places are therefore supplied in both resolutions. Contract at agent_launch.rs:174–183: 'Templates apply in order with the usual rule that a later placement replaces an earlier one' and 'only the final result says which kind of create it is.' Checks: inspected the complete relevant caller, detector, shared resolver and placement setter at the reviewed revision. Missing premises: none for this concern. Original suspected consequence preserved: valid composed create rejected, provisionally high/material UX; no actual rejection route remains. Could-be-highest: no, this was a fail-closed UX concern. Confidence: confirmed source refutation. proposed_drop: the allegedly recipe-unaware ordinary caller actually invokes resolve_placed with known recipes and places. possible_cover: none. No parent drop accepted; candidate retained for independent check. Source-only; no tests or reproductions."
+          }
+        }
+      ],
+      "latest": {
+        "line": 11,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l6",
+          "state": "open",
+          "summary": "Mixed recipe-to-host template stack uses environment-aware resolution",
+          "location": "crates/farhelm-helm/src/agent_requests.rs:2446",
+          "detail": "Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435. TLDR: the suspected refusal of a valid recipe-template then installed-host-template stack is source-refuted. The missing caller premise is now resolved: resolve_agent_create (crates/farhelm-helm/src/agent_requests.rs:2424–2480) calls recipe-unaware agent_launch::resolve only for spawn. Ordinary creates instead load the available recipe names and container places, call agent_launch::resolve_placed with them, and require the final target to be None before selecting the resolved installed host. Exact source rationale: 'An ordinary create may stack a recipe template under an installed-host one, which replaces it; the recipes must be known for that earlier template to apply at all.' create_for_agent:1990–2010 first plans recipe-bearing hostless requests and dispatches environment creation only for Some(plan); a final-host plan returns None and reaches this correctly environment-aware ordinary path. names_recipe_template:4128–4140 detects either legacy recipe or canonical target through launch_target(). agent_launch.rs:215–219 drops all template placement fields when an explicit --host wins. The shared launcher setter (launcher.rs:904–969) validates each recipe while it is applied, then a later installed host clears both recipe and target; available recipes/places are therefore supplied in both resolutions. Contract at agent_launch.rs:174–183: 'Templates apply in order with the usual rule that a later placement replaces an earlier one' and 'only the final result says which kind of create it is.' Checks: inspected the complete relevant caller, detector, shared resolver and placement setter at the reviewed revision. Missing premises: none for this concern. Original suspected consequence preserved: valid composed create rejected, provisionally high/material UX; no actual rejection route remains. Could-be-highest: no, this was a fail-closed UX concern. Confidence: confirmed source refutation. proposed_drop: the allegedly recipe-unaware ordinary caller actually invokes resolve_placed with known recipes and places. possible_cover: none. No parent drop accepted; candidate retained for independent check. Source-only; no tests or reproductions."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g090/findings.jsonl",
+        "id": "l6",
+        "line": 11,
+        "disposition": "excluded",
+        "group": "mixed-template-create-recipe-unaware-second-resolution",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-059 after inspecting it. The suspected second recipe-unaware resolution is not the ordinary create path. That caller supplies available recipes and places again, so an earlier valid recipe template can be overridden by a later installed-host template. Ordinary creates call resolve_placed with known recipes and places, rather than the recipe-unaware spawn resolver. Checked source/results: [\"190d844e58c96cf197aa838d0b0eea8062f48435 agent_requests.rs:1990–2010 dispatches environment creation only for a final environment plan; :2424–2480 uses recipe-unaware resolve only for spawn and resolve_placed with recipes/places for ordinary creates.\",\"Same revision :4128–4140 detects canonical or legacy recipe targets; :4220–4260 supplies known recipes/places to first planning and returns None for a final ordinary host.\",\"agent_launch.rs:174–240 documents later-placement replacement and clears all template placements when explicit host wins. launcher.rs:904–969 validates supplied recipes and clears recipe/target when a later host is applied. Source only.\"] Current coverage/results: [\"Both specs searched for CLI/template stacking and environments. SPEC_impl.md Agent launches from the CLI documents ordered templates/edits, and Agent requests and environments describes shared environment planning.\",\"TODO Planned empty; BUGS unrelated. Environment-agent-operations is already landed per plans/REPORTS.md:28, with no pending mixed-stack fix.\",\"Full queue INDEX plus targeted queue and active ledger searches found no exact mixed-stack resolver item. FILTER not used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Line 8 alleged valid recipe-template then host-template creates fail closed, provisionally high UX. Line 11 withdraws that route after resolving the missing caller premise. No highest consequence was alleged.\"; \"The alleged recipe-unaware ordinary caller premise is false; no rejection route remains for the stated valid stack.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g090/l6",
+        "line": 11,
+        "disposition": "excluded",
+        "group": "mixed-template-create-recipe-unaware-second-resolution",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-059 after inspecting it. The suspected second recipe-unaware resolution is not the ordinary create path. That caller supplies available recipes and places again, so an earlier valid recipe template can be overridden by a later installed-host template. Ordinary creates call resolve_placed with known recipes and places, rather than the recipe-unaware spawn resolver. Checked source/results: [\"190d844e58c96cf197aa838d0b0eea8062f48435 agent_requests.rs:1990–2010 dispatches environment creation only for a final environment plan; :2424–2480 uses recipe-unaware resolve only for spawn and resolve_placed with recipes/places for ordinary creates.\",\"Same revision :4128–4140 detects canonical or legacy recipe targets; :4220–4260 supplies known recipes/places to first planning and returns None for a final ordinary host.\",\"agent_launch.rs:174–240 documents later-placement replacement and clears all template placements when explicit host wins. launcher.rs:904–969 validates supplied recipes and clears recipe/target when a later host is applied. Source only.\"] Current coverage/results: [\"Both specs searched for CLI/template stacking and environments. SPEC_impl.md Agent launches from the CLI documents ordered templates/edits, and Agent requests and environments describes shared environment planning.\",\"TODO Planned empty; BUGS unrelated. Environment-agent-operations is already landed per plans/REPORTS.md:28, with no pending mixed-stack fix.\",\"Full queue INDEX plus targeted queue and active ledger searches found no exact mixed-stack resolver item. FILTER not used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Line 8 alleged valid recipe-template then host-template creates fail closed, provisionally high UX. Line 11 withdraws that route after resolving the missing caller premise. No highest consequence was alleged.\"; \"The alleged recipe-unaware ordinary caller premise is false; no rejection route remains for the stated valid stack.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-059",
+          "key": "g090/l6",
+          "latest_line": 11,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "mixed-template-create-recipe-unaware-second-resolution",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The suspected second recipe-unaware resolution is not the ordinary create path. That caller supplies available recipes and places again, so an earlier valid recipe template can be overridden by a later installed-host template.",
+          "checks": [
+            "190d844e58c96cf197aa838d0b0eea8062f48435 agent_requests.rs:1990–2010 dispatches environment creation only for a final environment plan; :2424–2480 uses recipe-unaware resolve only for spawn and resolve_placed with recipes/places for ordinary creates.",
+            "Same revision :4128–4140 detects canonical or legacy recipe targets; :4220–4260 supplies known recipes/places to first planning and returns None for a final ordinary host.",
+            "agent_launch.rs:174–240 documents later-placement replacement and clears all template placements when explicit host wins. launcher.rs:904–969 validates supplied recipes and clears recipe/target when a later host is applied. Source only."
+          ],
+          "coverage_checked": [
+            "Both specs searched for CLI/template stacking and environments. SPEC_impl.md Agent launches from the CLI documents ordered templates/edits, and Agent requests and environments describes shared environment planning.",
+            "TODO Planned empty; BUGS unrelated. Environment-agent-operations is already landed per plans/REPORTS.md:28, with no pending mixed-stack fix.",
+            "Full queue INDEX plus targeted queue and active ledger searches found no exact mixed-stack resolver item. FILTER not used."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "The alleged recipe-unaware ordinary caller premise is false; no rejection route remains for the stated valid stack.",
+          "original_stronger_consequence": "Line 8 alleged valid recipe-template then host-template creates fail closed, provisionally high UX. Line 11 withdraws that route after resolving the missing caller premise. No highest consequence was alleged.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Ordinary creates call resolve_placed with known recipes and places, rather than the recipe-unaware spawn resolver."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "mixed-template-create-recipe-unaware-second-resolution",
+        "destination": null
+      }
+    },
+    {
+      "key": "g090/l7",
+      "owner": "g090",
+      "id": "l7",
+      "domain": "cli-integration",
+      "purpose": "cli-integration: crates/farhelm/src/main.rs, crates/farhelm/Cargo.toml; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 16,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l7",
+            "state": "open",
+            "summary": "Check whether create folder help still claims recipe launches require --cwd",
+            "location": "crates/farhelm/src/main.rs:313",
+            "detail": "Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435. TLDR: agent create's --cwd help may tell callers it is required unless a template supplies a folder even though new --recipe creates supply the new environment's home without either. Source basis: the previously read Create.cwd doc says 'Required unless a template sets the folder'; the feature's explicit recipe path builds a target and the shared launcher application gives a fresh environment destination '~'. Missing check: reread the exact pinned CLI help declaration, prove the no-template/no-cwd explicit-recipe path supplies '~', and establish the parent/base wording was true before recipe launches. Suggested bucket if confirmed: other/documentation correctness. Could-be-highest: no; suspected consequence is misleading command usage and avoidable invalid folder choices, no security or loss-of-work route. Confidence: unresolved source lead, not observed help output. proposed_drop: false. possible_cover: none in supplied interface context. No tests or reproductions."
+          }
+        },
+        {
+          "line": 17,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l7",
+            "state": "open",
+            "summary": "Create folder help omits the new recipe launch default",
+            "location": "crates/farhelm/src/main.rs:314",
+            "detail": "# Create folder help omits the new recipe launch default\n\nReviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435.\n\n## TLDR\n\nThe agent create CLI documents --cwd as required unless a template supplies a folder, even for the newly supported recipe launch that supplies the new environment's home automatically. A caller following that requirement is told to provide unnecessary folder input; an ordinary project path is then rejected because a new environment must start at home or in its managed checkout.\n\n## Details\n\nThe --cwd help declaration at crates/farhelm/src/main.rs:312–325 says 'Required unless a template sets the folder'. The new --recipe declaration at :334–343 introduces a no-template creation form and says 'Folder is the new home (--gh clones there).' AgentCmd::verb at :703–719 sends destination: None when neither cwd nor gh was provided. In the explicit-recipe consumer, agent_requests.rs:4208–4213 sets edits.target; resolve_placed applies these flags; launcher.rs:960–965 sets destination to Folder(\"~\") when that target is applied without a GitHub destination. Thus a valid recipe and complete launch need no --cwd and no folder template. A supplied non-home path is refused at launcher.rs:970–978 with 'a new environment starts in its home directory'. SPEC.md:4323–4325 explicitly establishes this rule: 'The destination follows the launcher\\'s rules for a new environment: a folder is the new environment\\'s home, and `--gh` clones the repository inside it.' The field documentation should state this new exception and its folder restriction, alongside ordinary-host behavior.\n\nAttribution caveat from full-range comparison: the identical --cwd wording exists at exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:314 and at the immediate parent; --gh also already existed there, so the broader claim that --cwd was ever universally required without a folder template was already inaccurate for that old managed-checkout alternative. This finding is specifically the new recipe-launch exception introduced and exposed by the assigned 190d844e CLI patch, not a claim that it introduced the older --gh omission. Before that feature the explicit --recipe form did not exist. The new host help in the same patch is updated for --recipe, while the folder help retains its incompatible requirement. At pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:314 the same folder declaration remains.\n\nSuggested bucket: other, user-facing command documentation correctness. Confidence: confirmed by declarations, exact new verb construction and destination resolution; no generated help output or runtime failure was observed. proposed_drop: false. possible_cover: none in supplied neighbour records; parent owns consolidation. Could-be-highest: no; this is misleading usage guidance and avoidable validation refusal, not a security or loss-of-work route. Ordinary execution and the recipe home default are correct; they establish the documentation contradiction rather than refute it. This closes l7's source and attribution checks, preserving the pre-existing --gh caveat. No tests or reproductions."
+          }
+        }
+      ],
+      "latest": {
+        "line": 17,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l7",
+          "state": "open",
+          "summary": "Create folder help omits the new recipe launch default",
+          "location": "crates/farhelm/src/main.rs:314",
+          "detail": "# Create folder help omits the new recipe launch default\n\nReviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435.\n\n## TLDR\n\nThe agent create CLI documents --cwd as required unless a template supplies a folder, even for the newly supported recipe launch that supplies the new environment's home automatically. A caller following that requirement is told to provide unnecessary folder input; an ordinary project path is then rejected because a new environment must start at home or in its managed checkout.\n\n## Details\n\nThe --cwd help declaration at crates/farhelm/src/main.rs:312–325 says 'Required unless a template sets the folder'. The new --recipe declaration at :334–343 introduces a no-template creation form and says 'Folder is the new home (--gh clones there).' AgentCmd::verb at :703–719 sends destination: None when neither cwd nor gh was provided. In the explicit-recipe consumer, agent_requests.rs:4208–4213 sets edits.target; resolve_placed applies these flags; launcher.rs:960–965 sets destination to Folder(\"~\") when that target is applied without a GitHub destination. Thus a valid recipe and complete launch need no --cwd and no folder template. A supplied non-home path is refused at launcher.rs:970–978 with 'a new environment starts in its home directory'. SPEC.md:4323–4325 explicitly establishes this rule: 'The destination follows the launcher\\'s rules for a new environment: a folder is the new environment\\'s home, and `--gh` clones the repository inside it.' The field documentation should state this new exception and its folder restriction, alongside ordinary-host behavior.\n\nAttribution caveat from full-range comparison: the identical --cwd wording exists at exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:314 and at the immediate parent; --gh also already existed there, so the broader claim that --cwd was ever universally required without a folder template was already inaccurate for that old managed-checkout alternative. This finding is specifically the new recipe-launch exception introduced and exposed by the assigned 190d844e CLI patch, not a claim that it introduced the older --gh omission. Before that feature the explicit --recipe form did not exist. The new host help in the same patch is updated for --recipe, while the folder help retains its incompatible requirement. At pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:314 the same folder declaration remains.\n\nSuggested bucket: other, user-facing command documentation correctness. Confidence: confirmed by declarations, exact new verb construction and destination resolution; no generated help output or runtime failure was observed. proposed_drop: false. possible_cover: none in supplied neighbour records; parent owns consolidation. Could-be-highest: no; this is misleading usage guidance and avoidable validation refusal, not a security or loss-of-work route. Ordinary execution and the recipe home default are correct; they establish the documentation contradiction rather than refute it. This closes l7's source and attribution checks, preserving the pre-existing --gh caveat. No tests or reproductions."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g090/findings.jsonl",
+        "id": "l7",
+        "line": 17,
+        "disposition": "verified",
+        "group": "agent-create-cwd-help-omits-recipe-home-default",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-059 after inspecting it. The new recipe create form needs neither cwd nor a folder template, while cwd help still says one is required. The recipe help partially explains the home destination but does not cure that contradictory requirement. Retain the new recipe-specific help contradiction; correct production home-default behavior demonstrates the documentation defect. Checked source/results: [\"190d844e58c96cf197aa838d0b0eea8062f48435 main.rs:312–325 says cwd is required unless a template sets folder; :334–343 introduces recipe and says Folder is the new home.\",\"Same revision main.rs:703–719 leaves destination absent without cwd/gh. agent_requests.rs:4208–4213 adds target, :4241–4256 calls resolve_placed; launcher.rs:960–978 supplies home '~' and refuses an explicit non-home folder.\",\"Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a and immediate parent main.rs:310–335 already contain identical cwd text and --gh. The older gh omission predates the range; the new recipe exception is in range. Pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:314 retains the wording. Source only; generated help was not executed.\"] Current coverage/results: [\"SPEC.md Agents and environments explicitly gives fresh environments their home/managed-checkout destination. SPEC_impl.md Agent requests and environments and Agent launches from the CLI were read; neither accepts contradictory cwd help.\",\"TODO Planned empty; BUGS unrelated. plans/queue searched for cwd/folder help and environment CLI; environment-agent-operations already landed, with no pending help repair. tmux docs/tooling sweeps do not address this recipe documentation.\",\"Full queue INDEX and targeted queue-body/active-ledger searches found no matching cwd help item. No archive read.\",\"FILTER does not match: valid recipe creation is ordinary usage, not rare input or a timing fault.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Misleading usage guidance can cause unnecessary folder input and avoidable validation refusal. No security or user-work-loss route alleged. Preserve the pre-existing --gh caveat; do not attribute that older omission to this patch.\"; \"None for the help declaration contradiction. No runtime failure or user reliance was observed; supplying an ordinary non-home path is conditionally refused by source.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g090/l7",
+        "line": 17,
+        "disposition": "verified",
+        "group": "agent-create-cwd-help-omits-recipe-home-default",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-059 after inspecting it. The new recipe create form needs neither cwd nor a folder template, while cwd help still says one is required. The recipe help partially explains the home destination but does not cure that contradictory requirement. Retain the new recipe-specific help contradiction; correct production home-default behavior demonstrates the documentation defect. Checked source/results: [\"190d844e58c96cf197aa838d0b0eea8062f48435 main.rs:312–325 says cwd is required unless a template sets folder; :334–343 introduces recipe and says Folder is the new home.\",\"Same revision main.rs:703–719 leaves destination absent without cwd/gh. agent_requests.rs:4208–4213 adds target, :4241–4256 calls resolve_placed; launcher.rs:960–978 supplies home '~' and refuses an explicit non-home folder.\",\"Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a and immediate parent main.rs:310–335 already contain identical cwd text and --gh. The older gh omission predates the range; the new recipe exception is in range. Pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:314 retains the wording. Source only; generated help was not executed.\"] Current coverage/results: [\"SPEC.md Agents and environments explicitly gives fresh environments their home/managed-checkout destination. SPEC_impl.md Agent requests and environments and Agent launches from the CLI were read; neither accepts contradictory cwd help.\",\"TODO Planned empty; BUGS unrelated. plans/queue searched for cwd/folder help and environment CLI; environment-agent-operations already landed, with no pending help repair. tmux docs/tooling sweeps do not address this recipe documentation.\",\"Full queue INDEX and targeted queue-body/active-ledger searches found no matching cwd help item. No archive read.\",\"FILTER does not match: valid recipe creation is ordinary usage, not rare input or a timing fault.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Misleading usage guidance can cause unnecessary folder input and avoidable validation refusal. No security or user-work-loss route alleged. Preserve the pre-existing --gh caveat; do not attribute that older omission to this patch.\"; \"None for the help declaration contradiction. No runtime failure or user reliance was observed; supplying an ordinary non-home path is conditionally refused by source.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-059",
+          "key": "g090/l7",
+          "latest_line": 17,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "agent-create-cwd-help-omits-recipe-home-default",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The new recipe create form needs neither cwd nor a folder template, while cwd help still says one is required. The recipe help partially explains the home destination but does not cure that contradictory requirement.",
+          "checks": [
+            "190d844e58c96cf197aa838d0b0eea8062f48435 main.rs:312–325 says cwd is required unless a template sets folder; :334–343 introduces recipe and says Folder is the new home.",
+            "Same revision main.rs:703–719 leaves destination absent without cwd/gh. agent_requests.rs:4208–4213 adds target, :4241–4256 calls resolve_placed; launcher.rs:960–978 supplies home '~' and refuses an explicit non-home folder.",
+            "Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a and immediate parent main.rs:310–335 already contain identical cwd text and --gh. The older gh omission predates the range; the new recipe exception is in range. Pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:314 retains the wording. Source only; generated help was not executed."
+          ],
+          "coverage_checked": [
+            "SPEC.md Agents and environments explicitly gives fresh environments their home/managed-checkout destination. SPEC_impl.md Agent requests and environments and Agent launches from the CLI were read; neither accepts contradictory cwd help.",
+            "TODO Planned empty; BUGS unrelated. plans/queue searched for cwd/folder help and environment CLI; environment-agent-operations already landed, with no pending help repair. tmux docs/tooling sweeps do not address this recipe documentation.",
+            "Full queue INDEX and targeted queue-body/active-ledger searches found no matching cwd help item. No archive read.",
+            "FILTER does not match: valid recipe creation is ordinary usage, not rare input or a timing fault."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "None for the help declaration contradiction. No runtime failure or user reliance was observed; supplying an ordinary non-home path is conditionally refused by source.",
+          "original_stronger_consequence": "Misleading usage guidance can cause unnecessary folder input and avoidable validation refusal. No security or user-work-loss route alleged. Preserve the pre-existing --gh caveat; do not attribute that older omission to this patch.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain the new recipe-specific help contradiction; correct production home-default behavior demonstrates the documentation defect."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "agent-create-cwd-help-omits-recipe-home-default",
+        "destination": "trailing-agent-create-cwd-help-omits-recipe-home-default.md"
+      }
+    },
+    {
+      "key": "g090/c8",
+      "owner": "g090",
+      "id": "c8",
+      "domain": "cli-integration",
+      "purpose": "cli-integration: crates/farhelm/src/main.rs, crates/farhelm/Cargo.toml; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 18,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c8",
+            "state": "open",
+            "summary": "CLI accepts the environment create reply through the ordinary create output path",
+            "location": "crates/farhelm/src/main.rs:2494",
+            "detail": "Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435. TLDR: checked whether the new CreateEnvironment wire verb would be rejected by the CLI's retained reply expectation even after a successful environment launch. Source refutation: main.rs:714–719 emits CreateEnvironment from AgentCmd::Create, so run_agent reaches its existing Create/Clone output arm at :2494 onward. agent_client.rs:681–683 explicitly includes CreateEnvironment beside Create and Clone in ReplyKind::of_verb, requiring AgentReply::Created. The main arm expects that same tag, prints only session.id on stdout and best-effort human confirmation on stderr; no new command variant falls into instructions or listing dispatch. Contract: main module docs promise a creating command's new session ID as its sole stdout value; the new route retains that shape. Suggested bucket for the hypothetical rejected-success reply: other/diagnostic correctness; no established consequence. Could-be-highest: no established security or loss-of-work route from this checked concern. Confidence: confirmed source refutation. proposed_drop: explicit matching new-verb reply discriminator and existing command output dispatch; not based merely on runtime correctness elsewhere. possible_cover: none in supplied interface records. Source-only; no runtime observation or reproduction."
+          }
+        }
+      ],
+      "latest": {
+        "line": 18,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c8",
+          "state": "open",
+          "summary": "CLI accepts the environment create reply through the ordinary create output path",
+          "location": "crates/farhelm/src/main.rs:2494",
+          "detail": "Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435. TLDR: checked whether the new CreateEnvironment wire verb would be rejected by the CLI's retained reply expectation even after a successful environment launch. Source refutation: main.rs:714–719 emits CreateEnvironment from AgentCmd::Create, so run_agent reaches its existing Create/Clone output arm at :2494 onward. agent_client.rs:681–683 explicitly includes CreateEnvironment beside Create and Clone in ReplyKind::of_verb, requiring AgentReply::Created. The main arm expects that same tag, prints only session.id on stdout and best-effort human confirmation on stderr; no new command variant falls into instructions or listing dispatch. Contract: main module docs promise a creating command's new session ID as its sole stdout value; the new route retains that shape. Suggested bucket for the hypothetical rejected-success reply: other/diagnostic correctness; no established consequence. Could-be-highest: no established security or loss-of-work route from this checked concern. Confidence: confirmed source refutation. proposed_drop: explicit matching new-verb reply discriminator and existing command output dispatch; not based merely on runtime correctness elsewhere. possible_cover: none in supplied interface records. Source-only; no runtime observation or reproduction."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g090/findings.jsonl",
+        "id": "c8",
+        "line": 18,
+        "disposition": "excluded",
+        "group": "cli-create-environment-reply-discriminator",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-059 after inspecting it. The new wire verb is accepted as Created, and it still originates from the existing Create CLI command output arm. Explicit new-verb Created mapping agrees with the existing Create command output arm. Checked source/results: [\"190d844e58c96cf197aa838d0b0eea8062f48435 main.rs:714–719 constructs CreateEnvironment from AgentCmd::Create.\",\"Same revision agent_client.rs:681–683 explicitly maps CreateEnvironment/Create/Clone to ReplyKind::Created. main.rs:2494 onward expects AgentReply::Created and prints session.id, with human confirmation written best-effort to stderr. Source only.\"] Current coverage/results: [\"Both specs searched for environment launch reply/output. SPEC.md Agents and environments says the command waits and prints the new ID; SPEC_impl.md Agent requests and environments describes the response wait.\",\"TODO Planned empty; BUGS unrelated. Environment-agent-operations feature plan is already landed; no pending reply repair found.\",\"Full queue INDEX and targeted queue/active-ledger searches found no exact reply-discriminator item. No filter needed.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A successful environment launch is rejected by the CLI reply expectation, producing misleading command failure. Other/diagnostic consequence only; no highest route alleged.\"; \"A rejected-success reply would require omitting CreateEnvironment from the expected reply mapping or changing the CLI output dispatch; neither occurs.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g090/c8",
+        "line": 18,
+        "disposition": "excluded",
+        "group": "cli-create-environment-reply-discriminator",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-059 after inspecting it. The new wire verb is accepted as Created, and it still originates from the existing Create CLI command output arm. Explicit new-verb Created mapping agrees with the existing Create command output arm. Checked source/results: [\"190d844e58c96cf197aa838d0b0eea8062f48435 main.rs:714–719 constructs CreateEnvironment from AgentCmd::Create.\",\"Same revision agent_client.rs:681–683 explicitly maps CreateEnvironment/Create/Clone to ReplyKind::Created. main.rs:2494 onward expects AgentReply::Created and prints session.id, with human confirmation written best-effort to stderr. Source only.\"] Current coverage/results: [\"Both specs searched for environment launch reply/output. SPEC.md Agents and environments says the command waits and prints the new ID; SPEC_impl.md Agent requests and environments describes the response wait.\",\"TODO Planned empty; BUGS unrelated. Environment-agent-operations feature plan is already landed; no pending reply repair found.\",\"Full queue INDEX and targeted queue/active-ledger searches found no exact reply-discriminator item. No filter needed.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A successful environment launch is rejected by the CLI reply expectation, producing misleading command failure. Other/diagnostic consequence only; no highest route alleged.\"; \"A rejected-success reply would require omitting CreateEnvironment from the expected reply mapping or changing the CLI output dispatch; neither occurs.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-059",
+          "key": "g090/c8",
+          "latest_line": 18,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "cli-create-environment-reply-discriminator",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The new wire verb is accepted as Created, and it still originates from the existing Create CLI command output arm.",
+          "checks": [
+            "190d844e58c96cf197aa838d0b0eea8062f48435 main.rs:714–719 constructs CreateEnvironment from AgentCmd::Create.",
+            "Same revision agent_client.rs:681–683 explicitly maps CreateEnvironment/Create/Clone to ReplyKind::Created. main.rs:2494 onward expects AgentReply::Created and prints session.id, with human confirmation written best-effort to stderr. Source only."
+          ],
+          "coverage_checked": [
+            "Both specs searched for environment launch reply/output. SPEC.md Agents and environments says the command waits and prints the new ID; SPEC_impl.md Agent requests and environments describes the response wait.",
+            "TODO Planned empty; BUGS unrelated. Environment-agent-operations feature plan is already landed; no pending reply repair found.",
+            "Full queue INDEX and targeted queue/active-ledger searches found no exact reply-discriminator item. No filter needed."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "A rejected-success reply would require omitting CreateEnvironment from the expected reply mapping or changing the CLI output dispatch; neither occurs.",
+          "original_stronger_consequence": "A successful environment launch is rejected by the CLI reply expectation, producing misleading command failure. Other/diagnostic consequence only; no highest route alleged.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Explicit new-verb Created mapping agrees with the existing Create command output arm."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "cli-create-environment-reply-discriminator",
+        "destination": null
+      }
+    },
+    {
+      "key": "g090/c9",
+      "owner": "g090",
+      "id": "c9",
+      "domain": "cli-integration",
+      "purpose": "cli-integration: crates/farhelm/src/main.rs, crates/farhelm/Cargo.toml; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 19,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c9",
+            "state": "open",
+            "summary": "Recipe conflict tests are not passing on absent launch choices",
+            "location": "crates/farhelm/src/main.rs:2968",
+            "detail": "Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435. TLDR: checked whether the new parser test's is_err assertions could succeed merely because their argv omit --agent/--command or a folder, making them unable to detect removal of the placement conflicts they claim to protect. Source refutation: Create.cwd, host, recipe and container_host are optional fields (main.rs:324–353); LaunchFlags at :992–1047 has no required group and its launch-choice fields are optional/defaulted. Whole-launch validation is deliberately left to the helm, as the declaration at :985–991 says: 'Nothing is checked against a launch here, because a template may supply what a flag leaves out.' Hence omitting launch details does not independently cause these parser calls to fail. The first two refused cases at :2969–2970 exercise recipe versus host/key; the final case at :2972 exercises the container-host recipe prerequisite. The no-recipe container-host-plus-host case also tests an already-invalid mix, but the independent first and last cases protect the intended placement invariant and do not claim the conflict and prerequisite as separately necessary redundant guards. The successful first argv checks the emitted CreateEnvironment tag and exact recipe/place values, and the clone argv checks host None. Suggested bucket for the considered false-positive test oracle: other/maintainer test validity, with no defect established. Could-be-highest: no security or user-work-loss route alleged. Confidence: confirmed source refutation, no test execution. proposed_drop: absence of whole-launch prerequisites is accepted by this parser rather than an unrelated error hiding the missing conflict. possible_cover: none in supplied interface records. No parent drop accepted; candidate retained for independent check. Source-only; no reproduction."
+          }
+        }
+      ],
+      "latest": {
+        "line": 19,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c9",
+          "state": "open",
+          "summary": "Recipe conflict tests are not passing on absent launch choices",
+          "location": "crates/farhelm/src/main.rs:2968",
+          "detail": "Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435. TLDR: checked whether the new parser test's is_err assertions could succeed merely because their argv omit --agent/--command or a folder, making them unable to detect removal of the placement conflicts they claim to protect. Source refutation: Create.cwd, host, recipe and container_host are optional fields (main.rs:324–353); LaunchFlags at :992–1047 has no required group and its launch-choice fields are optional/defaulted. Whole-launch validation is deliberately left to the helm, as the declaration at :985–991 says: 'Nothing is checked against a launch here, because a template may supply what a flag leaves out.' Hence omitting launch details does not independently cause these parser calls to fail. The first two refused cases at :2969–2970 exercise recipe versus host/key; the final case at :2972 exercises the container-host recipe prerequisite. The no-recipe container-host-plus-host case also tests an already-invalid mix, but the independent first and last cases protect the intended placement invariant and do not claim the conflict and prerequisite as separately necessary redundant guards. The successful first argv checks the emitted CreateEnvironment tag and exact recipe/place values, and the clone argv checks host None. Suggested bucket for the considered false-positive test oracle: other/maintainer test validity, with no defect established. Could-be-highest: no security or user-work-loss route alleged. Confidence: confirmed source refutation, no test execution. proposed_drop: absence of whole-launch prerequisites is accepted by this parser rather than an unrelated error hiding the missing conflict. possible_cover: none in supplied interface records. No parent drop accepted; candidate retained for independent check. Source-only; no reproduction."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g090/findings.jsonl",
+        "id": "c9",
+        "line": 19,
+        "disposition": "excluded",
+        "group": "cli-recipe-conflict-tests-unrelated-required-launch-fields",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-059 after inspecting it. Missing agent/command/folder fields do not independently fail clap parsing, so these is_err assertions are not masked by that alleged unrelated error. One mixed invalid argv has redundant reasons to fail; the independent recipe/host and recipe/key cases and the hostless container prerequisite case remain meaningful. Optional parser fields and no required launch group refute the named masking premise; independent argv cover the actual conflict/prerequisite invariants. Checked source/results: [\"190d844e58c96cf197aa838d0b0eea8062f48435 main.rs:324–353 defines optional cwd/host/recipe/container_host, explicit recipe conflicts and container-host requires recipe.\",\"Same revision main.rs:982–1047 defines optional/defaulted LaunchFlags and explicitly defers complete-launch validation to helm; no required launch-choice group exists there.\",\"Same revision main.rs:2940–2980 supplies a positive environment-verb construction case, three placement conflict argv, a standalone missing-recipe case, and hostless clone success. Source only; no test execution.\"] Current coverage/results: [\"Both specs searched for CLI parsing, recipe conflicts and deferred launch validation. SPEC_impl.md Agent launches from the CLI explicitly leaves launch completeness to helm, matching parser declarations.\",\"TODO Planned empty; BUGS unrelated. plans/queue environment-agent-operations already landed; no pending false-oracle fix found.\",\"Full queue INDEX and targeted queue/active-ledger searches found no exact recipe parser-oracle item. FILTER not used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Parser conflict tests pass because omitted launch details cause unrelated errors, hiding future placement-validation regressions. Maintainer-test validity only; no security or user-work-loss route alleged.\"; \"The alleged unrelated parser prerequisite is absent. The redundant invalid combination alone cannot independently prove both guards, but the test does not depend solely on it.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g090/c9",
+        "line": 19,
+        "disposition": "excluded",
+        "group": "cli-recipe-conflict-tests-unrelated-required-launch-fields",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-059 after inspecting it. Missing agent/command/folder fields do not independently fail clap parsing, so these is_err assertions are not masked by that alleged unrelated error. One mixed invalid argv has redundant reasons to fail; the independent recipe/host and recipe/key cases and the hostless container prerequisite case remain meaningful. Optional parser fields and no required launch group refute the named masking premise; independent argv cover the actual conflict/prerequisite invariants. Checked source/results: [\"190d844e58c96cf197aa838d0b0eea8062f48435 main.rs:324–353 defines optional cwd/host/recipe/container_host, explicit recipe conflicts and container-host requires recipe.\",\"Same revision main.rs:982–1047 defines optional/defaulted LaunchFlags and explicitly defers complete-launch validation to helm; no required launch-choice group exists there.\",\"Same revision main.rs:2940–2980 supplies a positive environment-verb construction case, three placement conflict argv, a standalone missing-recipe case, and hostless clone success. Source only; no test execution.\"] Current coverage/results: [\"Both specs searched for CLI parsing, recipe conflicts and deferred launch validation. SPEC_impl.md Agent launches from the CLI explicitly leaves launch completeness to helm, matching parser declarations.\",\"TODO Planned empty; BUGS unrelated. plans/queue environment-agent-operations already landed; no pending false-oracle fix found.\",\"Full queue INDEX and targeted queue/active-ledger searches found no exact recipe parser-oracle item. FILTER not used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Parser conflict tests pass because omitted launch details cause unrelated errors, hiding future placement-validation regressions. Maintainer-test validity only; no security or user-work-loss route alleged.\"; \"The alleged unrelated parser prerequisite is absent. The redundant invalid combination alone cannot independently prove both guards, but the test does not depend solely on it.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-059",
+          "key": "g090/c9",
+          "latest_line": 19,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "cli-recipe-conflict-tests-unrelated-required-launch-fields",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Missing agent/command/folder fields do not independently fail clap parsing, so these is_err assertions are not masked by that alleged unrelated error. One mixed invalid argv has redundant reasons to fail; the independent recipe/host and recipe/key cases and the hostless container prerequisite case remain meaningful.",
+          "checks": [
+            "190d844e58c96cf197aa838d0b0eea8062f48435 main.rs:324–353 defines optional cwd/host/recipe/container_host, explicit recipe conflicts and container-host requires recipe.",
+            "Same revision main.rs:982–1047 defines optional/defaulted LaunchFlags and explicitly defers complete-launch validation to helm; no required launch-choice group exists there.",
+            "Same revision main.rs:2940–2980 supplies a positive environment-verb construction case, three placement conflict argv, a standalone missing-recipe case, and hostless clone success. Source only; no test execution."
+          ],
+          "coverage_checked": [
+            "Both specs searched for CLI parsing, recipe conflicts and deferred launch validation. SPEC_impl.md Agent launches from the CLI explicitly leaves launch completeness to helm, matching parser declarations.",
+            "TODO Planned empty; BUGS unrelated. plans/queue environment-agent-operations already landed; no pending false-oracle fix found.",
+            "Full queue INDEX and targeted queue/active-ledger searches found no exact recipe parser-oracle item. FILTER not used."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "The alleged unrelated parser prerequisite is absent. The redundant invalid combination alone cannot independently prove both guards, but the test does not depend solely on it.",
+          "original_stronger_consequence": "Parser conflict tests pass because omitted launch details cause unrelated errors, hiding future placement-validation regressions. Maintainer-test validity only; no security or user-work-loss route alleged.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Optional parser fields and no required launch group refute the named masking premise; independent argv cover the actual conflict/prerequisite invariants."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "cli-recipe-conflict-tests-unrelated-required-launch-fields",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete: all nine assigned patch packets reviewed at their recorded revisions.\n\nNo reportable findings or unresolved leads. Five considered concerns are documented in [findings.jsonl]([private-run]/g090/findings.jsonl). Progress updated; no assigned material remains unread. No tests or reproductions run."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised `c2`, `c3`, `c4`, and `l1` with exact-revision caller checks and literal contract bases. Corrected `c2`’s earlier caller assumption; noted stale clone wire documentation in `c3`.\n\nNew lead `l6` was investigated and closed as source-refuted. No new reportable findings.\n\nUnresolved lead IDs: none."
+    },
+    {
+      "turn": 3,
+      "reply": "Checked base/parent/tip attribution, CLI help, recipe defaults, reply dispatch, wait budgets, and remaining removals.\n\n- Verified: `c3` promoted to a documentation finding; new `l7` records misleading recipe folder help.\n- Source-refuted: `c8` reply-dispatch concern.\n- New unverified IDs: none.\n- Open leads: none.\n\nNew discovery: **yes, `l7`**. Source-only; no tests or reproductions."
+    },
+    {
+      "turn": 4,
+      "reply": "Checked parser-test oracles, remaining argument combinations, helper argv, setup inputs, terminal bounds and dist metadata. Recorded `c9` as source-refuted.\n\n- New verified IDs: none.\n- New unverified IDs: none.\n- Open leads: none.\n- New issues found: **no**.\n\nDiscovery pass 2 complete. No runtime execution."
+    }
+  ],
+  "progress": "# g090 progress\n\nInitial review turn 1 complete. Discovery-pass count: 0 (no later synthesis or discovery turn attempted). All nine assigned patch packets, 646 lines, were read through the supplied evidence launcher. The complete inventory commits field was read; excluded coverage metadata was not read. No assigned scope remains unread.\n\nNo reportable findings. Durable records: l1 began as a trust-boundary lead and was closed as a source-refuted candidate; c2 and c3 are source-refuted placement concerns; c4 and c5 are specified compatibility removals. Current log has five candidates and no open leads. New verified finding IDs: none. New unverified finding IDs: none. No checkout file was changed by this reviewer. No tests, builds or reproductions were run; conclusions are from pinned source and contracts.\n\nReviewed boundaries: 350a4b33's absent target edit against TemplateFields serialization and apply_template placement setters; 04d85f0c's retired helpers against the ordinary tab-shell argv and Delete-only retirement contract; 190d844e's recipe verb and optional clone host against helm request dispatch, ordinary clone host admission, explicit recipe replacement, confinement and the environment approval/task path; 647f0227 and 1ed482dd's removed terminal flags against startup settings, production launch boundaries and their transition contracts; 17a3fe85's removed setup captures against SetupContext and unit PATH policy; cb762a31's removed release artifacts/verifier against the deleted devbuild download/copy block and release payload trust contract; 08399d09's comment against CLI validation, host launch/tab dimension clamps and protocol MAX_DIMENSION.\n\nInterface assumptions checked: launcher omission preserves a template target; the helm retains authoritative placement, confinement and approval; environment clones depart before ordinary --host admission; ordinary clones have no host fallback; no surviving inspected caller invokes removed helpers/flags; the removed checksum helper's download consumer was removed with it. No unresolved interface premise is retained as a finding.\n\nGoverning reads: injected root AGENTS.md included End sentinel; queue Priority buckets and recording template read; complete relevant SPEC/SPEC_impl sections read at the patch revisions. Additional contract packets and their revision/range mapping are retained under contracts-manifest.json and contracts-*.txt. Filenames use commit prefixes; mappings: 350 templates = SPEC_impl.md 8918–9103; 190 env = SPEC.md 4289–4341; 190 env-impl = SPEC_impl.md 6658–6702; 190 cli = SPEC_impl.md 9232–9306; 04 retirement = SPEC.md 4816–4824; 1ed terminal = SPEC_impl.md 2880–2991; 17 terminal = SPEC_impl.md 2784–2876; cb payload = SPEC_impl.md 8054–8093 (paragraph boundaries additionally read at 8048–8054 and 8093–8096); 647 terminal = SPEC_impl.md 2954–3310; 190 answers = SPEC_impl.md 1071–1101. The test review checklist supplied verbatim in the brief was applied to the changed parser tests; no process-environment mutation, timing premise, or inherited-resource issue was found there.\n\n## Synthesis turn 2\n\nLater-turn synthesis complete. Discovery-pass count remains 0; synthesis turns completed: 1. No assigned scope remains unread. No tests, builds or reproductions were run. No checkout changes.\n\nRevised c2: corrected the exact-revision caller premise. At 350a4b33 the CLI's ordinary resolver supplies no recipes or places and rejects an environment-target template before applying the absent target flag. The original highest unintended-host execution concern remains source-refuted. At 190d844e the environment-aware routing is added separately; it must not be projected backward into 350a4b33.\n\nRevised c3: checked both source types, environmental override/key refusals, confinement and the post-Allow owner check. Retained the original highest source-refuted consequence and literal SPEC basis. Recorded the stale wire Clone.host comment as an interface documentation caveat, outside the assigned main/Cargo patches; the runtime behavior remains fail closed.\n\nRevised c4: checked queued old LaunchSpec rejection before preparation/exec, in addition to removed parser entry points. The hypothetical outside-host execution consequence is highest but source-refuted by the explicit spec.container guard. Delete-only access removal remains specification-accepted. Checked teardown's actual acquire/revoke/remove sequence (teardown.rs 566–577) and retained permanent lock/ticket cleanup boundary.\n\nRevised l1: retained the original highest unauthenticated-executable concern and literal operator-trust contract, confirmed payload directory rebuilding and local archive creation, and recorded caller-supplied g094/c6 corroboration. No parent drop has been accepted.\n\nNew l6 was logged immediately as a mixed recipe-to-host template-stack lead, then closed under the same ID as a source-refuted candidate. Missing caller premise resolved: ordinary resolve_agent_create uses resolve_placed with real recipes and places; only spawn uses the recipe-unaware resolve. No unresolved lead IDs. New verified findings: none. New unverified findings: none. Current durable log has six candidates, zero findings and zero leads; this turn appended events 7–13.\n\nNext action: return synthesis delta to caller. Parent owns disposition and any later discovery turn; no additional pass was performed within this turn.\n\n## Discovery turn 3\n\nSeparate discovery pass 1 complete. Pending cross-group question was synthesized before the fresh search: c3 was reopened as an attribution lead, then retained as a confirmed other/documentation finding under its original ID. The exclusive-base and immediate-parent parsers required a host for every clone, while 190d844e makes host optional and supports environment-source clones; unchanged wire comments become false with that in-range feature and remain false at the pinned tip. Correct runtime behavior and the main.rs assignment do not refute the interface documentation defect. Original highest unintended-host execution consequence and its source refutation remain in c3; the prior documentation-drop proposal is superseded, with no parent drop accepted.\n\nRead discovery-neighbours.json in full for context and novelty. An initial oversized read clipped; then the whole text was reread in independent bounded 10,000-character chunks, including the final closing braces. No prohibited queue/coverage sources were searched. The supplied records cover retirement cleanup/authority, environment timeout wording, stale migration/architecture documentation, placement documentation and environment approval/precondition defects. This pass did not duplicate or broaden those routes.\n\nFresh search covered CLI recipe argument/help declarations and verb construction, the no-template recipe destination default, post-reply output dispatch and reply-tag expectations, CLI/relay wait ownership, removed helper and supervisor selectors, setup context wiring, removed dist metadata, and the final size-comment change. Source was read at each relevant recorded revision. Removal and test changes were reread after the new finding; finding a documentation issue did not end the pass early.\n\nNew discovery l7: confirmed other/documentation finding that create --cwd help omits the new recipe default. Explicit recipe edits supply a target, whose shared setter supplies home without --cwd or a folder template, while the help says a folder/template is required. Full-range attribution caveat recorded: the generic wording was already inaccurate for the pre-existing --gh alternative; this finding concerns the new recipe exception, not that older omission. Current tip retains the declaration. l7 was logged as a lead immediately and closed as a finding after source/contract checks.\n\nNew c8: source-refuted candidate that the new environment wire verb might be rejected by CLI reply dispatch. ReplyKind explicitly maps CreateEnvironment to Created, and AgentCmd::Create reaches the existing ID-only stdout arm. The additional wait check found no CLI deadline; the relay adds approval/environment allowances from the verb, so no additional client-budget issue was retained.\n\nThis turn appended events 14–18. New verified finding IDs: c3 (promotion of the known documentation concern), l7 (new discovery). New unverified-after-investigation IDs: none. Remaining lead IDs: none. Current latest records: two findings and six candidates. Anything new found: yes, l7; c3 is resolution of the named pending question. No assigned scope unread. No runtime tests, reproductions, live-install actions or checkout changes.\n\nNext action: return checks/results and ID delta to caller. A substantive new discovery was made; any next pass must be a later turn, not another pass hidden inside this one.\n\n## Discovery turn 4\n\nSeparate discovery pass 2 complete. No pending cross-group questions were supplied. Reread the updated discovery-neighbours.json completely in bounded 10,000-character chunks through its final closing braces (90,121 encoded bytes); used it only for interface context and novelty. No prohibited coverage sources searched.\n\nFresh checks beyond recorded findings: revisited the new CLI parser tests for unrelated-error false positives and real placement observations; checked all launch-choice fields and groups for hidden required inputs; checked generated ordinary tab-shell argv against the simplified helper signature; searched source/caller trees for surviving removed container/new-terminal invocations; checked setup's remaining captured inputs against its context and options; checked the terminal-size comment against the production clamp and protocol bound; checked that removing dist extra-artifacts leaves the ordinary package dist declaration and dependency section intact. Source checks remained at their recorded revisions, and no runtime tests, builds, reproductions or live-install actions were performed.\n\nRecorded c9 immediately as a source-refuted test-oracle candidate: the negative recipe-conflict argv omit launch details, but the CLI does not require those details, so their is_err checks are not accidentally passing on an unrelated missing-launch error. This is a considered/refuted concern, not a new defect. Removed-name searches found only the intended negative tests and historical schema commentary, with no surviving production invocation in the inspected crates/scripts/e2e/workflow trees. Generated tab argv retains the option terminator and exactly the two required positionals. No additional setup, terminal-size or manifest defect was found.\n\nThis turn appended event 19. New verified finding IDs: none. New unverified-after-investigation IDs: none. Remaining lead IDs: none. Anything new found: no new reportable issue; one new source-refuted candidate c9 is retained. Existing findings were not repeated or reclassified. No assigned material unread; no checkout changes. Discovery count now 2.\n\nNext action: return this pass's empty finding result and checks to caller. Parent owns disposition and continuation.\n"
+}

@@ -1,0 +1,580 @@
+{
+  "group": {
+    "id": "g009",
+    "domain": "product-contracts",
+    "purpose": "product-contracts: SPEC_impl.md, SPEC.md; phases @@ -2597,23 +2461,22 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:",
+    "interfaces": [
+      "g001",
+      "g002",
+      "g003",
+      "g004",
+      "g005",
+      "g006",
+      "g007",
+      "g008",
+      "g010",
+      "g011",
+      "g012",
+      "g013",
+      "g014",
+      "g015",
+      "g016",
+      "g017",
+      "g020",
+      "g026",
+      "g027",
+      "g030",
+      "g032",
+      "g033",
+      "g035",
+      "g036",
+      "g037",
+      "g038",
+      "g040",
+      "g044",
+      "g045",
+      "g049",
+      "g053",
+      "g070",
+      "g071",
+      "g074",
+      "g075",
+      "g076",
+      "g079",
+      "g080",
+      "g081",
+      "g082",
+      "g083",
+      "g087",
+      "g088",
+      "g089",
+      "g090",
+      "g091",
+      "g092",
+      "g093",
+      "g095",
+      "g096",
+      "g097",
+      "g098",
+      "g099",
+      "g100",
+      "g101",
+      "g102",
+      "g103",
+      "g104",
+      "g110",
+      "g111",
+      "g112",
+      "g113",
+      "g114",
+      "g115",
+      "g117",
+      "g118",
+      "g119",
+      "g120",
+      "g121",
+      "g122",
+      "g124",
+      "g125",
+      "g126",
+      "g127",
+      "g128",
+      "g129",
+      "g130",
+      "g131",
+      "g132",
+      "g133",
+      "g134",
+      "g135",
+      "g136",
+      "g138",
+      "g139",
+      "g140",
+      "g141",
+      "g142",
+      "g144",
+      "g145",
+      "g146",
+      "g150",
+      "g151",
+      "g152",
+      "g153",
+      "g154",
+      "g155",
+      "g156",
+      "g157",
+      "g159",
+      "g160",
+      "g161",
+      "g162",
+      "g163",
+      "g164",
+      "g165",
+      "g166",
+      "g167",
+      "g168",
+      "g169",
+      "g170",
+      "g171",
+      "g172",
+      "g178",
+      "g179",
+      "g180",
+      "g181",
+      "g183",
+      "g184",
+      "g185",
+      "g186",
+      "g188",
+      "g189",
+      "g190",
+      "g191",
+      "g192",
+      "g193",
+      "g194",
+      "g195",
+      "g196",
+      "g197",
+      "g198"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00900-001.patch",
+        "ranges": [
+          [
+            1,
+            374
+          ]
+        ],
+        "original_path": "SPEC_impl.md",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "@@ -2597,23 +2461,22 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:; patch character offsets [55902,97365)",
+        "lines": 374,
+        "bytes": 41489,
+        "start": 55902,
+        "end": 97365,
+        "original": "[private-run]/prep/originals/00900.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01017-000.patch",
+        "ranges": [
+          [
+            1,
+            174
+          ]
+        ],
+        "original_path": "SPEC.md",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,19529)",
+        "lines": 174,
+        "bytes": 19550,
+        "start": 0,
+        "end": 19529,
+        "original": "[private-run]/prep/originals/01017.patch"
+      }
+    ],
+    "lines": 548,
+    "bytes": 61039
+  },
+  "records": [
+    {
+      "key": "g009/l1",
+      "owner": "g009",
+      "id": "l1",
+      "domain": "product-contracts",
+      "purpose": "product-contracts: SPEC_impl.md, SPEC.md; phases @@ -2597,23 +2461,22 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Check whether a restart seed can contaminate a new launch's error excerpt",
+            "location": "SPEC_impl.md:2752",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: The newly relocated launch-failure contract says a failed restart cannot quote the previous run's screen; if the seed copied that screen, its durable error could attribute old output to the failed launch. Details: SPEC_impl.md:2752-2765 promises a blank new screen and a quote only after the host's drained exit record. Source checks so far: service/launch_artifacts.rs:59-80 gates the excerpt on HostEvidence::Owned { dead: true }; service/core/host_restart.rs:418-488 requests a bounded history seed and handles a missing seed; terminal-emulator/src/snapshot/mod.rs:541-570 calls v1::encode_history rather than the full snapshot encoder. Remaining check: inspect encode_history to establish that it really constructs a blank screen. Suggested bucket: other for misdiagnosis if established; could-be-highest: no established security or loss-of-work route, and same-session retained history is already accessible. Confidence: unresolved lead, not a reported defect. proposed_drop: false. possible_cover: none. No execution or reproduction performed."
+          }
+        },
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Restart history cannot contaminate the new launch's screen excerpt",
+            "location": "SPEC_impl.md:2752",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered whether a failed restart could misdiagnose the new launch by quoting the previous run's final screen. The source excludes that route. Details: SPEC_impl.md:2752-2765 promises an excerpt of at most five nonblank final-screen lines and 500 escaped UTF-8 bytes, from the current host only. service/launch_artifacts.rs:59-80 gates quoting on HostEvidence::Owned { dead: true }; :89-132 implements the line and byte bounds. service/core/host_restart.rs:418-488 obtains the old host's history seed. terminal-emulator/src/snapshot/mod.rs:541-570 selects v1::encode_history; snapshot/v1/mod.rs:246-268 delegates to paint_history. snapshot/v1/paint.rs:404-436 truncates the source rows to primary history, adds blank rows for the entire new screen, and restores fresh cursor state. Thus old history survives only above a blank screen, as the contract says. Suggested bucket: other for the originally suspected misdiagnosis, but no defect established. Could-be-highest: no; no established security or loss-of-work route, and retained same-session history is already accessible. Confidence: confirmed source refutation. proposed_drop: refuted by the history-only encoder, not an exception accepted only by specification. possible_cover: none. This closes lead l1. No execution or reproduction performed."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Restart history cannot contaminate the new launch's screen excerpt",
+            "location": "SPEC_impl.md:2752",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered whether a failed restart could misdiagnose the new launch by quoting the previous run's final screen. The source excludes that route. Details: SPEC_impl.md:2752-2765 promises an excerpt of at most five nonblank final-screen lines and 500 escaped UTF-8 bytes, from the current host only. service/launch_artifacts.rs:59-80 gates quoting on HostEvidence::Owned { dead: true }; :89-132 implements the line and byte bounds. service/core/host_restart.rs:418-488 obtains the old host's history seed. terminal-emulator/src/snapshot/mod.rs:541-570 selects v1::encode_history; snapshot/v1/mod.rs:246-268 delegates to paint_history. snapshot/v1/paint.rs:404-436 truncates the source rows to primary history, adds blank rows for the entire new screen, and restores fresh cursor state. Thus old history survives only above a blank screen, as the contract says. Suggested bucket: other for the originally suspected misdiagnosis, but no defect established. Could-be-highest: no; no established security or loss-of-work route, and retained same-session history is already accessible. Confidence: confirmed source refutation. proposed_drop: refuted by the history-only encoder, not an exception accepted only by specification. possible_cover: none. This closes lead l1. No execution or reproduction performed. Synthesis turn 3: git diff 1ed482dde220452e424973faf38a5e1318986333 f560058da19e02716e6f943883a9508b447aff4e over terminal-emulator/src/snapshot, service/launch_artifacts.rs and service/core/host_restart.rs is empty. The next assigned commit therefore does not change the seed, blank-screen or final-screen-excerpt premises. Original consequence and source-refuted disposition are unchanged."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Recheck restart excerpt attribution after inherited history is resized onto the screen",
+            "location": "SPEC_impl.md:2752",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered whether a failed restart could misdiagnose the new launch by quoting the previous run's final screen. The source excludes that route. Details: SPEC_impl.md:2752-2765 promises an excerpt of at most five nonblank final-screen lines and 500 escaped UTF-8 bytes, from the current host only. service/launch_artifacts.rs:59-80 gates quoting on HostEvidence::Owned { dead: true }; :89-132 implements the line and byte bounds. service/core/host_restart.rs:418-488 obtains the old host's history seed. terminal-emulator/src/snapshot/mod.rs:541-570 selects v1::encode_history; snapshot/v1/mod.rs:246-268 delegates to paint_history. snapshot/v1/paint.rs:404-436 truncates the source rows to primary history, adds blank rows for the entire new screen, and restores fresh cursor state. Thus old history survives only above a blank screen, as the contract says. Suggested bucket: other for the originally suspected misdiagnosis, but no defect established. Could-be-highest: no; no established security or loss-of-work route, and retained same-session history is already accessible. Confidence: confirmed source refutation. proposed_drop: refuted by the history-only encoder, not an exception accepted only by specification. possible_cover: none. This closes lead l1. No execution or reproduction performed. Synthesis turn 3: git diff 1ed482dde220452e424973faf38a5e1318986333 f560058da19e02716e6f943883a9508b447aff4e over terminal-emulator/src/snapshot, service/launch_artifacts.rs and service/core/host_restart.rs is empty. The next assigned commit therefore does not change the seed, blank-screen or final-screen-excerpt premises. Original consequence and source-refuted disposition are unchanged. Discovery input from g013/f2:11 challenges the earlier refutation: primary-grid growth can promote inherited scrollback to the visible screen before a still-unconsumed launch spec fails. Reopened under original ID before source investigation. The original misdiagnosis consequence remains; the initial blank-seed proof alone does not settle later resize behavior. Need to verify resize admission, grid promotion, final-screen quoting and introduction within the full pinned range. No new runtime observation, bucket change or accepted drop."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Restart resize invalidates the launch-excerpt provenance contract",
+            "location": "SPEC_impl.md:2752",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered whether a failed restart could misdiagnose the new launch by quoting the previous run's final screen. The source excludes that route. Details: SPEC_impl.md:2752-2765 promises an excerpt of at most five nonblank final-screen lines and 500 escaped UTF-8 bytes, from the current host only. service/launch_artifacts.rs:59-80 gates quoting on HostEvidence::Owned { dead: true }; :89-132 implements the line and byte bounds. service/core/host_restart.rs:418-488 obtains the old host's history seed. terminal-emulator/src/snapshot/mod.rs:541-570 selects v1::encode_history; snapshot/v1/mod.rs:246-268 delegates to paint_history. snapshot/v1/paint.rs:404-436 truncates the source rows to primary history, adds blank rows for the entire new screen, and restores fresh cursor state. Thus old history survives only above a blank screen, as the contract says. Suggested bucket: other for the originally suspected misdiagnosis, but no defect established. Could-be-highest: no; no established security or loss-of-work route, and retained same-session history is already accessible. Confidence: confirmed source refutation. proposed_drop: refuted by the history-only encoder, not an exception accepted only by specification. possible_cover: none. This closes lead l1. No execution or reproduction performed. Synthesis turn 3: git diff 1ed482dde220452e424973faf38a5e1318986333 f560058da19e02716e6f943883a9508b447aff4e over terminal-emulator/src/snapshot, service/launch_artifacts.rs and service/core/host_restart.rs is empty. The next assigned commit therefore does not change the seed, blank-screen or final-screen-excerpt premises. Original consequence and source-refuted disposition are unchanged. Discovery input from g013/f2:11 challenges the earlier refutation: primary-grid growth can promote inherited scrollback to the visible screen before a still-unconsumed launch spec fails. Reopened under original ID before source investigation. The original misdiagnosis consequence remains; the initial blank-seed proof alone does not settle later resize behavior. Need to verify resize admission, grid promotion, final-screen quoting and introduction within the full pinned range. No new runtime observation, bucket change or accepted drop. Source result supersedes the earlier candidate refutation: at reviewed commit 1ed482dde220452e424973faf38a5e1318986333, vendor/alacritty_terminal/src/grid/resize.rs:25-28 calls grow_lines; :46-71 pulls inherited history into visible rows on height increase. term/mod.rs:756-758 enables this on the primary grid. host_launch.rs:508-518 supplies the Restart snapshot; :579-645 awaits host start/adoption, then tracks the still-pending spec and returns. host_restart.rs:294-305 confirms the socket and :363-388 publishes the terminal without awaiting shim consumption. handlers.rs:2050-2083 resolves the attached terminal and admits a valid viewer resize; hosts/terminal.rs:2344-2353 queues it with no launch-readiness condition, :3358-3362 routes its resize record to on_resized, and :3872-3885/:4063-4070 apply it to the emulator. status.rs:630-652 calls append_launch_excerpt for a dead host with an unconsumed spec and no sentinel. screen.rs:50-96 includes all visible rows; launch_artifacts.rs:97-105 discards blank rows before selecting the last five nonblank rows. Consequently a height increase during ordinary login-shell initialization can expose inherited prior-run history, and a subsequent shell failure can quote those old messages as this failed launch output. Processed final-exit evidence establishes ordering, not cell provenance. Current TLDR: a failed restarted session can durably quote an unrelated previous-run message as its last terminal output. Suggested bucket remains other (misleading diagnostic); could-be-highest: no established security or work-loss route. Confidence: confirmed conditional source/control-flow route, not runtime observed. Preconditions: inherited history, growth after new-host publication and before classification, shell failure before shim consumes its spec, and at least one promoted row not overwritten. proposed_drop: false; withdraw the earlier source-refuted proposal, retaining its exact historical rationale above. Contract defect in assigned patch: SPEC_impl.md:2759-2763 says everything on the screen is this launch output and a blank initial screen means no quote reaches the previous run. This unqualified provenance statement is false after resize. Runtime attribution: the excluded base already has the same host quote and blank-seed rationale at launch_artifacts.rs:52-101. Do not attribute introduction of the runtime route to this documentation relocation. possible_cover: provided interface records g013/f2 and g100/c1 identify the same source route; parent should reconcile as one cause. No prohibited coverage source searched. No open source premise remains for the conditional route; full-range wording attribution will be refined separately under this ID."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Restart resize invalidates the launch-excerpt provenance contract",
+            "location": "SPEC_impl.md:2752",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered whether a failed restart could misdiagnose the new launch by quoting the previous run's final screen. The source excludes that route. Details: SPEC_impl.md:2752-2765 promises an excerpt of at most five nonblank final-screen lines and 500 escaped UTF-8 bytes, from the current host only. service/launch_artifacts.rs:59-80 gates quoting on HostEvidence::Owned { dead: true }; :89-132 implements the line and byte bounds. service/core/host_restart.rs:418-488 obtains the old host's history seed. terminal-emulator/src/snapshot/mod.rs:541-570 selects v1::encode_history; snapshot/v1/mod.rs:246-268 delegates to paint_history. snapshot/v1/paint.rs:404-436 truncates the source rows to primary history, adds blank rows for the entire new screen, and restores fresh cursor state. Thus old history survives only above a blank screen, as the contract says. Suggested bucket: other for the originally suspected misdiagnosis, but no defect established. Could-be-highest: no; no established security or loss-of-work route, and retained same-session history is already accessible. Confidence: confirmed source refutation. proposed_drop: refuted by the history-only encoder, not an exception accepted only by specification. possible_cover: none. This closes lead l1. No execution or reproduction performed. Synthesis turn 3: git diff 1ed482dde220452e424973faf38a5e1318986333 f560058da19e02716e6f943883a9508b447aff4e over terminal-emulator/src/snapshot, service/launch_artifacts.rs and service/core/host_restart.rs is empty. The next assigned commit therefore does not change the seed, blank-screen or final-screen-excerpt premises. Original consequence and source-refuted disposition are unchanged. Discovery input from g013/f2:11 challenges the earlier refutation: primary-grid growth can promote inherited scrollback to the visible screen before a still-unconsumed launch spec fails. Reopened under original ID before source investigation. The original misdiagnosis consequence remains; the initial blank-seed proof alone does not settle later resize behavior. Need to verify resize admission, grid promotion, final-screen quoting and introduction within the full pinned range. No new runtime observation, bucket change or accepted drop. Source result supersedes the earlier candidate refutation: at reviewed commit 1ed482dde220452e424973faf38a5e1318986333, vendor/alacritty_terminal/src/grid/resize.rs:25-28 calls grow_lines; :46-71 pulls inherited history into visible rows on height increase. term/mod.rs:756-758 enables this on the primary grid. host_launch.rs:508-518 supplies the Restart snapshot; :579-645 awaits host start/adoption, then tracks the still-pending spec and returns. host_restart.rs:294-305 confirms the socket and :363-388 publishes the terminal without awaiting shim consumption. handlers.rs:2050-2083 resolves the attached terminal and admits a valid viewer resize; hosts/terminal.rs:2344-2353 queues it with no launch-readiness condition, :3358-3362 routes its resize record to on_resized, and :3872-3885/:4063-4070 apply it to the emulator. status.rs:630-652 calls append_launch_excerpt for a dead host with an unconsumed spec and no sentinel. screen.rs:50-96 includes all visible rows; launch_artifacts.rs:97-105 discards blank rows before selecting the last five nonblank rows. Consequently a height increase during ordinary login-shell initialization can expose inherited prior-run history, and a subsequent shell failure can quote those old messages as this failed launch output. Processed final-exit evidence establishes ordering, not cell provenance. Current TLDR: a failed restarted session can durably quote an unrelated previous-run message as its last terminal output. Suggested bucket remains other (misleading diagnostic); could-be-highest: no established security or work-loss route. Confidence: confirmed conditional source/control-flow route, not runtime observed. Preconditions: inherited history, growth after new-host publication and before classification, shell failure before shim consumes its spec, and at least one promoted row not overwritten. proposed_drop: false; withdraw the earlier source-refuted proposal, retaining its exact historical rationale above. Contract defect in assigned patch: SPEC_impl.md:2759-2763 says everything on the screen is this launch output and a blank initial screen means no quote reaches the previous run. This unqualified provenance statement is false after resize. Runtime attribution: the excluded base already has the same host quote and blank-seed rationale at launch_artifacts.rs:52-101. Do not attribute introduction of the runtime route to this documentation relocation. possible_cover: provided interface records g013/f2 and g100/c1 identify the same source route; parent should reconcile as one cause. No prohibited coverage source searched. No open source premise remains for the conditional route; full-range wording attribution will be refined separately under this ID. Whole-range attribution refinement: excluded-base SPEC_impl.md:3260-3289 documents the tmux capture fence and its acknowledged contamination residual, but does not state this new host-only no-previous-run guarantee. The assigned 1ed482d patch adds that host-only paragraph at :2756-2765 while removing the old capture description. Thus the assigned documentation newly presents an invalid unconditional proof even though the runtime contamination route and the equivalent helper-doc rationale were already present at the range base. The base-to-reviewed diff for grid/resize.rs is empty; snapshot paint changes remove only sgr_setting and its re-export, leaving paint_history unchanged. This record reports the incorrect authoritative host-attribution contract, not a claim that this commit first introduced runtime misattribution. emulator.rs:224-226 independently confirms resize calls the vendor term resize. Scope and bucket remain other; no new effect or highest route is alleged. Full-range wording attribution is now settled."
+          }
+        }
+      ],
+      "latest": {
+        "line": 8,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l1",
+          "state": "open",
+          "summary": "Restart resize invalidates the launch-excerpt provenance contract",
+          "location": "SPEC_impl.md:2752",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered whether a failed restart could misdiagnose the new launch by quoting the previous run's final screen. The source excludes that route. Details: SPEC_impl.md:2752-2765 promises an excerpt of at most five nonblank final-screen lines and 500 escaped UTF-8 bytes, from the current host only. service/launch_artifacts.rs:59-80 gates quoting on HostEvidence::Owned { dead: true }; :89-132 implements the line and byte bounds. service/core/host_restart.rs:418-488 obtains the old host's history seed. terminal-emulator/src/snapshot/mod.rs:541-570 selects v1::encode_history; snapshot/v1/mod.rs:246-268 delegates to paint_history. snapshot/v1/paint.rs:404-436 truncates the source rows to primary history, adds blank rows for the entire new screen, and restores fresh cursor state. Thus old history survives only above a blank screen, as the contract says. Suggested bucket: other for the originally suspected misdiagnosis, but no defect established. Could-be-highest: no; no established security or loss-of-work route, and retained same-session history is already accessible. Confidence: confirmed source refutation. proposed_drop: refuted by the history-only encoder, not an exception accepted only by specification. possible_cover: none. This closes lead l1. No execution or reproduction performed. Synthesis turn 3: git diff 1ed482dde220452e424973faf38a5e1318986333 f560058da19e02716e6f943883a9508b447aff4e over terminal-emulator/src/snapshot, service/launch_artifacts.rs and service/core/host_restart.rs is empty. The next assigned commit therefore does not change the seed, blank-screen or final-screen-excerpt premises. Original consequence and source-refuted disposition are unchanged. Discovery input from g013/f2:11 challenges the earlier refutation: primary-grid growth can promote inherited scrollback to the visible screen before a still-unconsumed launch spec fails. Reopened under original ID before source investigation. The original misdiagnosis consequence remains; the initial blank-seed proof alone does not settle later resize behavior. Need to verify resize admission, grid promotion, final-screen quoting and introduction within the full pinned range. No new runtime observation, bucket change or accepted drop. Source result supersedes the earlier candidate refutation: at reviewed commit 1ed482dde220452e424973faf38a5e1318986333, vendor/alacritty_terminal/src/grid/resize.rs:25-28 calls grow_lines; :46-71 pulls inherited history into visible rows on height increase. term/mod.rs:756-758 enables this on the primary grid. host_launch.rs:508-518 supplies the Restart snapshot; :579-645 awaits host start/adoption, then tracks the still-pending spec and returns. host_restart.rs:294-305 confirms the socket and :363-388 publishes the terminal without awaiting shim consumption. handlers.rs:2050-2083 resolves the attached terminal and admits a valid viewer resize; hosts/terminal.rs:2344-2353 queues it with no launch-readiness condition, :3358-3362 routes its resize record to on_resized, and :3872-3885/:4063-4070 apply it to the emulator. status.rs:630-652 calls append_launch_excerpt for a dead host with an unconsumed spec and no sentinel. screen.rs:50-96 includes all visible rows; launch_artifacts.rs:97-105 discards blank rows before selecting the last five nonblank rows. Consequently a height increase during ordinary login-shell initialization can expose inherited prior-run history, and a subsequent shell failure can quote those old messages as this failed launch output. Processed final-exit evidence establishes ordering, not cell provenance. Current TLDR: a failed restarted session can durably quote an unrelated previous-run message as its last terminal output. Suggested bucket remains other (misleading diagnostic); could-be-highest: no established security or work-loss route. Confidence: confirmed conditional source/control-flow route, not runtime observed. Preconditions: inherited history, growth after new-host publication and before classification, shell failure before shim consumes its spec, and at least one promoted row not overwritten. proposed_drop: false; withdraw the earlier source-refuted proposal, retaining its exact historical rationale above. Contract defect in assigned patch: SPEC_impl.md:2759-2763 says everything on the screen is this launch output and a blank initial screen means no quote reaches the previous run. This unqualified provenance statement is false after resize. Runtime attribution: the excluded base already has the same host quote and blank-seed rationale at launch_artifacts.rs:52-101. Do not attribute introduction of the runtime route to this documentation relocation. possible_cover: provided interface records g013/f2 and g100/c1 identify the same source route; parent should reconcile as one cause. No prohibited coverage source searched. No open source premise remains for the conditional route; full-range wording attribution will be refined separately under this ID. Whole-range attribution refinement: excluded-base SPEC_impl.md:3260-3289 documents the tmux capture fence and its acknowledged contamination residual, but does not state this new host-only no-previous-run guarantee. The assigned 1ed482d patch adds that host-only paragraph at :2756-2765 while removing the old capture description. Thus the assigned documentation newly presents an invalid unconditional proof even though the runtime contamination route and the equivalent helper-doc rationale were already present at the range base. The base-to-reviewed diff for grid/resize.rs is empty; snapshot paint changes remove only sgr_setting and its re-export, leaving paint_history unchanged. This record reports the incorrect authoritative host-attribution contract, not a claim that this commit first introduced runtime misattribution. emulator.rs:224-226 independently confirms resize calls the vendor term resize. Scope and bucket remain other; no new effect or highest route is alleged. Full-range wording attribution is now settled."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g009/findings.jsonl",
+        "id": "l1",
+        "line": 8,
+        "disposition": "duplicate",
+        "group": "launch-excerpt-inherited-history-provenance",
+        "reason": "Parent inspected both complete histories during primary synthesis and read focused004 and006 exact source/current-cover checks. Both latest claims retain the newly authored1ed482 SPEC_impl blank-screen provenance argument, refuted by ordinary height growth promoting inherited history before failure classification. Runtime mechanism and SPEC.md promise predate the exclusive base; the new false implementation proof does not. Same underlying documentation defect/location and concrete counterexample, so one retained queue item preserves both original IDs and all earlier proposals. This dedup does not exclude either concern, reinstate the superseded blank-screen refutation, infer a new runtime regression or lower an established higher consequence. Existing013/f2 verified member anchors the same canonical group; diagnostic-filter ambiguity requires retaining the documentation remainder."
+      },
+      "accepted_parent_decision": {
+        "key": "g009/l1",
+        "line": 8,
+        "disposition": "duplicate",
+        "group": "launch-excerpt-inherited-history-provenance",
+        "bucket": "other",
+        "recording": "same retained in-range SPEC_impl false proof as013/f2",
+        "needs_independent_drop_check": false,
+        "reason": "Parent inspected both complete histories during primary synthesis and read focused004 and006 exact source/current-cover checks. Both latest claims retain the newly authored1ed482 SPEC_impl blank-screen provenance argument, refuted by ordinary height growth promoting inherited history before failure classification. Runtime mechanism and SPEC.md promise predate the exclusive base; the new false implementation proof does not. Same underlying documentation defect/location and concrete counterexample, so one retained queue item preserves both original IDs and all earlier proposals. This dedup does not exclude either concern, reinstate the superseded blank-screen refutation, infer a new runtime regression or lower an established higher consequence. Existing013/f2 verified member anchors the same canonical group; diagnostic-filter ambiguity requires retaining the documentation remainder."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-004",
+          "key": "g009/l1",
+          "latest_line": 8,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "restart-history-promoted-by-growth-invalidates-excerpt-provenance",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The initial blank screen does not prove all later visible cells came from the new child. Height growth can promote inherited history before failure classification. Retain the newly authoritative unconditional provenance explanation as an in-range documentation defect; the runtime mechanism predates the range.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333:SPEC_impl.md:2756-2765 asserts that one child plus a blank initial screen prevents quotes reaching the previous run. Base-to-reviewed diff adds this host-only proof while removing the older tmux capture discussion.",
+            "At that hash snapshot/v1/paint.rs:404-436 really paints primary history above blank screen rows; this supports the initial-state claim only. vendor/alacritty_terminal/src/grid/resize.rs:25-28,46-76 pulls history into visible rows on height growth; term/mod.rs:756-758 and emulator.rs:224-226 use that resize path.",
+            "host_launch.rs:508-518 passes the restart snapshot, :579-645 adopts the host and tracks its pending spec without awaiting consumption. host_restart.rs:294-305,363-388 confirms and publishes the replacement before shim-consumption proof.",
+            "handlers.rs:2050-2083 and hosts/terminal.rs:2344-2353 admit an owned viewer resize without launch-readiness gating; terminal.rs:3872-3885,4063-4070 applies the resize to the emulator.",
+            "status.rs:630-652 can append the excerpt for dead/unconsumed-spec/no-sentinel shape; launch_artifacts.rs:59-80 checks processed dead evidence and quotes screen_tail, :97-105 removes blanks then keeps nonblank lines. screen.rs:50-96 includes every visible row, including promoted rows.",
+            "The earlier blank-seed refutation in lines 2/4 was explicitly reopened and superseded at lines 6-8. No runtime occurrence or frequency was observed."
+          ],
+          "coverage_checked": [
+            "Current SPEC_impl.md:2658-2668 retains the unconditional provenance proof. SPEC.md/SPEC_impl.md restart/history/excerpt sections do not accept attributing inherited history to new launch output; retained history itself is accepted.",
+            "TODO Planned empty; BUGS.md unrelated; active TRIAGE_OUTCOMES.md and full INDEX.md have no matching excerpt-provenance item. Searches for excerpt, previous run and provenance found no exact existing coverage.",
+            "Matching tmux cleanup plans already landed; empty-scrollback-messages concerns deferred browser history numbering and wrong URL lookup, not emulator history growth or launch-error attribution. No unlanded matching repair found.",
+            "FILTER.md rare diagnostic filter could cover a separately reported rare runtime misdiagnosis, but does not clearly cover a newly incorrect authoritative implementation proof. Retain this documentation remainder rather than infer whole-finding coverage."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "For an observed misdiagnosis: inherited history, growth after replacement publication but before classification, shell failure before shim consumption, and at least one promoted nonblank row surviving overwrite. Source admits these conditions; no reproduction establishes their actual occurrence.",
+          "original_stronger_consequence": "A failed restarted session can durably quote a previous-run message as its last terminal output. This is misleading diagnosis only, with no established security or work-loss route. Initial source-refuted proposal is withdrawn, not accepted.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain other for the in-range documentation contradiction. Do not present the pre-range runtime route as newly introduced, or claim the whole terminal feature is broken.",
+          "new_interface_evidence": "The supplied history names g013/f2 and g100/c1 as related to this route. The inspected resize/admission/excerpt chain confirms the common mechanism, but those unassigned records were not read, so exact aliasing remains the parent's reconciliation."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "launch-excerpt-inherited-history-provenance",
+        "destination": "trailing-launch-excerpt-inherited-history-provenance.md"
+      }
+    },
+    {
+      "key": "g009/c2",
+      "owner": "g009",
+      "id": "c2",
+      "domain": "product-contracts",
+      "purpose": "product-contracts: SPEC_impl.md, SPEC.md; phases @@ -2597,23 +2461,22 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Removing the unreadable-link-tag exception does not weaken grid link disclosure",
+            "location": "SPEC.md:3097",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: Considered whether dropping the old terminal library's fallback wording could hide a misleading address split over several terminal rows. The grid supplies the hyperlink identities the full comparison needs. Details: SPEC.md:3094-3114 removes the xterm-specific tag-unavailable exception while preserving complete-link comparison and mandatory visible destination disclosure. At this revision assets/grid-buffer.js:612-680 constructs link-line cells itself: linkLines assigns positive integer tags from the link identity map; lineView supplies that tag on every linked run and 0 on blank cells. assets/terminal.js:1037 calls linkHoverText using these grid lines. terminal-links.js:413-489 joins by the tags; its legacy undefined-tag fallback remains defensive shared code rather than an expected grid path. SPEC_impl.md:1835-1887 confirms the grid is the only renderer. Suggested bucket: other; no user-visible defect established. Could-be-highest: a weakened deceptive-link safeguard could be security-impacting in principle, but no missing-tag route is established here, and the authoritative target display remains required. Confidence: confirmed source refutation for the removed fallback. proposed_drop: source refutation, not a specification-only acceptance. possible_cover: none. No execution or reproduction performed."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Removing the unreadable-link-tag exception does not weaken grid link disclosure",
+            "location": "SPEC.md:3097",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: Considered whether dropping the old terminal library's fallback wording could hide a misleading address split over several terminal rows. The grid supplies the hyperlink identities the full comparison needs. Details: SPEC.md:3094-3114 removes the xterm-specific tag-unavailable exception while preserving complete-link comparison and mandatory visible destination disclosure. At this revision assets/grid-buffer.js:612-680 constructs link-line cells itself: linkLines assigns positive integer tags from the link identity map; lineView supplies that tag on every linked run and 0 on blank cells. assets/terminal.js:1037 calls linkHoverText using these grid lines. terminal-links.js:413-489 joins by the tags; its legacy undefined-tag fallback remains defensive shared code rather than an expected grid path. SPEC_impl.md:1835-1887 confirms the grid is the only renderer. Suggested bucket: other; no user-visible defect established. Could-be-highest: a weakened deceptive-link safeguard could be security-impacting in principle, but no missing-tag route is established here, and the authoritative target display remains required. Confidence: confirmed source refutation for the removed fallback. proposed_drop: source refutation, not a specification-only acceptance. possible_cover: none. No execution or reproduction performed. Synthesis turn 3: resolved the caller adapter explicitly. At f560058da19e02716e6f943883a9508b447aff4e, assets/terminal.js:940-950 creates the grid link view with lines: () => getGrid().linkLines(); :1036-1037 passes that view to linkHoverText. assets/grid-terminal.js:2048-2049 returns gridBuffer.linkLines(source()). Thus the hover caller uses the exact integer-tag adapter inspected in the initial pass, rather than another row-only implementation. Original consequence and source-refuted disposition are unchanged."
+          }
+        }
+      ],
+      "latest": {
+        "line": 5,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Removing the unreadable-link-tag exception does not weaken grid link disclosure",
+          "location": "SPEC.md:3097",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: Considered whether dropping the old terminal library's fallback wording could hide a misleading address split over several terminal rows. The grid supplies the hyperlink identities the full comparison needs. Details: SPEC.md:3094-3114 removes the xterm-specific tag-unavailable exception while preserving complete-link comparison and mandatory visible destination disclosure. At this revision assets/grid-buffer.js:612-680 constructs link-line cells itself: linkLines assigns positive integer tags from the link identity map; lineView supplies that tag on every linked run and 0 on blank cells. assets/terminal.js:1037 calls linkHoverText using these grid lines. terminal-links.js:413-489 joins by the tags; its legacy undefined-tag fallback remains defensive shared code rather than an expected grid path. SPEC_impl.md:1835-1887 confirms the grid is the only renderer. Suggested bucket: other; no user-visible defect established. Could-be-highest: a weakened deceptive-link safeguard could be security-impacting in principle, but no missing-tag route is established here, and the authoritative target display remains required. Confidence: confirmed source refutation for the removed fallback. proposed_drop: source refutation, not a specification-only acceptance. possible_cover: none. No execution or reproduction performed. Synthesis turn 3: resolved the caller adapter explicitly. At f560058da19e02716e6f943883a9508b447aff4e, assets/terminal.js:940-950 creates the grid link view with lines: () => getGrid().linkLines(); :1036-1037 passes that view to linkHoverText. assets/grid-terminal.js:2048-2049 returns gridBuffer.linkLines(source()). Thus the hover caller uses the exact integer-tag adapter inspected in the initial pass, rather than another row-only implementation. Original consequence and source-refuted disposition are unchanged."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g009/findings.jsonl",
+        "id": "c2",
+        "line": 5,
+        "disposition": "under-investigation",
+        "group": "g009-c2",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-004",
+          "key": "g009/c2",
+          "latest_line": 5,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "removed-xterm-missing-link-tag-fallback",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The grid caller supplies integer hyperlink identity tags, so removing the old library's tag-unavailable exception does not establish a weakened deceptive-link safeguard.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e:assets/grid-buffer.js:612-680 creates per-hover integer identity tags, positive for links and zero for blanks, and exposes the tag on every cell.",
+            "Same hash terminal.js:940-950 builds view.lines from getGrid().linkLines; :1036-1037 passes it to linkHoverText. grid-terminal.js:2048-2049 returns gridBuffer.linkLines(source()). This checks the actual caller adapter.",
+            "terminal-links.js:413-489 uses those tags for joined comparison; its defensive undefined-tag fallback does not show that the grid ever lacks tags. Current SPEC.md:3091-3111 still requires authoritative full target disclosure and refuses clicks without fully visible disclosure."
+          ],
+          "coverage_checked": [
+            "Both current specs searched for hyperlink tags, fallback, joined-link comparison and destination disclosure; complete applicable link bullet read. They preserve comparison and disclosure rather than authorize hiding targets.",
+            "TODO Planned empty; BUGS.md unrelated; active TRIAGE_OUTCOMES.md and INDEX.md contain no exact missing-tag item. Read joined-link-spec-omits-cursor-tail-exception.md: that concerns accepted generated-id tail selection and extra warnings, a different cause and consequence.",
+            "Empty-scrollback-messages plan concerns zero-row queue numbering and wrong plain-URL lookup, not missing hyperlink tags. Landed tmux-doc cleanup is not pending coverage. FILTER.md is not the proposed basis."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "A shipped grid caller producing unavailable link tags was not found; the inspected caller supplies them.",
+          "original_stronger_consequence": "A removed fallback could in principle hide a misleading destination split over several rows and weaken a security safeguard. No missing-tag route or undisclosed target was established; target display remains required.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Propose source refutation narrowly for removed tag-unavailable wording; independent security drop check required. This does not certify all hyperlink warning or disclosure mechanisms."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-004.json",
+          "key": "g009/c2",
+          "proposal": "claim-checks/claims-004/result.json",
+          "parent_proposal": "source-refuted-caller-supplied-link-tags",
+          "final_independent_gate": "required-before-security-drop",
+          "reason": "Full004actualgridadapterlinkLinesprovidesperhoverintegeridentityonEVERYcell, positivehyperlink/zeroblank; linkHoverTextgetsviewbuiltfromactualgetGrid. Removedoldtagunavailableexceptiondoesnotremovejoinedcomparisonwhenitsprerequisiteabsent; defensiveundefinedfallbackdoesnotprovemissingtagsproducer. Fulltargetdisclosurestillmandatory, preserveoriginaldeceptivelinksecurityhypothesiswithoutcertifyingalllinkpolicies. Freshcheckprecisecaller/tagroute; unrelatedcursor-tailacceptedexceptionnotcover."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "removed-xterm-missing-link-tag-fallback",
+        "destination": null
+      }
+    },
+    {
+      "key": "g009/l3",
+      "owner": "g009",
+      "id": "l3",
+      "domain": "product-contracts",
+      "purpose": "product-contracts: SPEC_impl.md, SPEC.md; phases @@ -2597,23 +2461,22 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:",
+      "history": [
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l3",
+            "state": "open",
+            "summary": "Check relocated launch contract against the retired shim container branch",
+            "location": "SPEC_impl.md:2753",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: The rewritten implementation contract directs future maintainers to a shim container branch, but the reviewed source appears to refuse that old branch instead. Details: SPEC_impl.md:2753-2754 says the shim and its container branch receive the same Bash vector. Targeted source search in launch.rs finds LaunchSpec.container at :225 retained as a compatibility marker and :1168-1170 refusing it with the retired-model sentinel. Need read that branch and surrounding execution path, establish whether a different live container dispatch exists, and attribute the retirement across the complete pinned range before concluding a documentation defect. Suggested bucket: other if confirmed (incorrect implementation guidance); could-be-highest: no established or suspected security/work-loss route from the pointer. Confidence: unresolved lead based on source search, not execution. proposed_drop: false. possible_cover: none in the supplied neighbour summaries or relevant detailed records; prohibited coverage sources were not searched. No runtime test or reproduction."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l3",
+            "state": "open",
+            "summary": "Launch contract still describes the retired shim container branch",
+            "location": "SPEC_impl.md:2753",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Maintainers following the rewritten launch contract are told that the shim has a container execution branch. The old branch has been retired, so the contract describes the wrong execution boundary for container sessions. Details: assigned SPEC_impl.md:2753-2754 says 'The shim and its container branch receive the same Bash vector, so expansion happens on the session's host or inside its container.' At this revision launch.rs:220-225 retains LaunchSpec.container only to decode and refuse old queued specs; :1165-1172 writes the retired-model failure sentinel and returns whenever that marker is present. The remaining shim then executes the ordinary agent_command at :1232, after normal checkout/cwd preparation. service/core.rs:14500 creates only container: None. Source search for spec.container/container_exec/exec_container finds no alternative live shim branch. The ordinary supervisor runs inside a first-class container environment; that fact does not make a container branch exist in the launch shim. Suggested correction: describe one ordinary shim execution path on the session host, with container sessions reaching that path through the supervisor installed inside their environment. Suggested bucket: other, inaccurate authoritative implementation guidance. Could-be-highest: no established or suspected security or loss-of-work route from the wording; no runtime misexecution is alleged. Confidence: confirmed source and contract mismatch, not execution. proposed_drop: false. possible_cover: none in the supplied neighbour owner/summary inventory and pertinent full records; no prohibited coverage sources searched. Attribution so far: git path history identifies in-range 04d85f0c98a9b635709d00b056719a0baa7fd3fc as the legacy-container retirement, before the assigned 1ed482d relocation retains this sentence. Exact parent/base comparison and pinned-tip persistence will be checked next. This closes lead l3 on the documentation contradiction, preserving its original consequence. No runtime tests or reproductions."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l3",
+            "state": "open",
+            "summary": "Launch contract still describes the retired shim container branch",
+            "location": "SPEC_impl.md:2753",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Maintainers following the rewritten launch contract are told that the shim has a container execution branch. The old branch has been retired, so the contract describes the wrong execution boundary for container sessions. Details: assigned SPEC_impl.md:2753-2754 says 'The shim and its container branch receive the same Bash vector, so expansion happens on the session's host or inside its container.' At this revision launch.rs:220-225 retains LaunchSpec.container only to decode and refuse old queued specs; :1165-1172 writes the retired-model failure sentinel and returns whenever that marker is present. The remaining shim then executes the ordinary agent_command at :1232, after normal checkout/cwd preparation. service/core.rs:14500 creates only container: None. Source search for spec.container/container_exec/exec_container finds no alternative live shim branch. The ordinary supervisor runs inside a first-class container environment; that fact does not make a container branch exist in the launch shim. Suggested correction: describe one ordinary shim execution path on the session host, with container sessions reaching that path through the supervisor installed inside their environment. Suggested bucket: other, inaccurate authoritative implementation guidance. Could-be-highest: no established or suspected security or loss-of-work route from the wording; no runtime misexecution is alleged. Confidence: confirmed source and contract mismatch, not execution. proposed_drop: false. possible_cover: none in the supplied neighbour owner/summary inventory and pertinent full records; no prohibited coverage sources searched. Attribution so far: git path history identifies in-range 04d85f0c98a9b635709d00b056719a0baa7fd3fc as the legacy-container retirement, before the assigned 1ed482d relocation retains this sentence. Exact parent/base comparison and pinned-tip persistence will be checked next. This closes lead l3 on the documentation contradiction, preserving its original consequence. No runtime tests or reproductions. Attribution and governing contract settled: in-range 04d85f0c98a9b635709d00b056719a0baa7fd3fc changes LaunchSpec.container from ContainerLaunch to a decode-only JSON marker, adds the sentinel refusal, and deletes the former container.prepare()/runtime.exec_command(&spec.argv) branch. Thus the claim was true at the excluded base and became stale within this pinned range; predating the assigned 1ed482d rewrite does not make it pre-range. The assigned patch relocates the unchanged stale sentence into its new Launch failure classification section. At the reviewed revision SPEC_impl.md:8440-8453 expressly states that the new container supervisor runs inside its container and every terminal/session uses ordinary host paths, while the supervisor-outside model is retired and only removal/ticket handling remains. The sentence at :2753 contradicts that complete governing subsection. At pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db the stale sentence remains at SPEC_impl.md:2655-2656, so no in-range repair removes this documentation defect. This is source-confirmed implementation-guidance drift, not a claim of production launch failure. No readily checkable premise remains unresolved; suggested bucket other and proposed_drop false are unchanged."
+          }
+        }
+      ],
+      "latest": {
+        "line": 11,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l3",
+          "state": "open",
+          "summary": "Launch contract still describes the retired shim container branch",
+          "location": "SPEC_impl.md:2753",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Maintainers following the rewritten launch contract are told that the shim has a container execution branch. The old branch has been retired, so the contract describes the wrong execution boundary for container sessions. Details: assigned SPEC_impl.md:2753-2754 says 'The shim and its container branch receive the same Bash vector, so expansion happens on the session's host or inside its container.' At this revision launch.rs:220-225 retains LaunchSpec.container only to decode and refuse old queued specs; :1165-1172 writes the retired-model failure sentinel and returns whenever that marker is present. The remaining shim then executes the ordinary agent_command at :1232, after normal checkout/cwd preparation. service/core.rs:14500 creates only container: None. Source search for spec.container/container_exec/exec_container finds no alternative live shim branch. The ordinary supervisor runs inside a first-class container environment; that fact does not make a container branch exist in the launch shim. Suggested correction: describe one ordinary shim execution path on the session host, with container sessions reaching that path through the supervisor installed inside their environment. Suggested bucket: other, inaccurate authoritative implementation guidance. Could-be-highest: no established or suspected security or loss-of-work route from the wording; no runtime misexecution is alleged. Confidence: confirmed source and contract mismatch, not execution. proposed_drop: false. possible_cover: none in the supplied neighbour owner/summary inventory and pertinent full records; no prohibited coverage sources searched. Attribution so far: git path history identifies in-range 04d85f0c98a9b635709d00b056719a0baa7fd3fc as the legacy-container retirement, before the assigned 1ed482d relocation retains this sentence. Exact parent/base comparison and pinned-tip persistence will be checked next. This closes lead l3 on the documentation contradiction, preserving its original consequence. No runtime tests or reproductions. Attribution and governing contract settled: in-range 04d85f0c98a9b635709d00b056719a0baa7fd3fc changes LaunchSpec.container from ContainerLaunch to a decode-only JSON marker, adds the sentinel refusal, and deletes the former container.prepare()/runtime.exec_command(&spec.argv) branch. Thus the claim was true at the excluded base and became stale within this pinned range; predating the assigned 1ed482d rewrite does not make it pre-range. The assigned patch relocates the unchanged stale sentence into its new Launch failure classification section. At the reviewed revision SPEC_impl.md:8440-8453 expressly states that the new container supervisor runs inside its container and every terminal/session uses ordinary host paths, while the supervisor-outside model is retired and only removal/ticket handling remains. The sentence at :2753 contradicts that complete governing subsection. At pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db the stale sentence remains at SPEC_impl.md:2655-2656, so no in-range repair removes this documentation defect. This is source-confirmed implementation-guidance drift, not a claim of production launch failure. No readily checkable premise remains unresolved; suggested bucket other and proposed_drop false are unchanged."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g009/findings.jsonl",
+        "id": "l3",
+        "line": 11,
+        "disposition": "verified",
+        "group": "spec-shim-container-execution-branch-retired",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-004 after inspecting it. The authoritative launch explanation still names an execution branch retired within this range. The actual container supervisor now uses the ordinary launch path inside its environment. Retain other, with retirement attributed to 04d85f0c rather than the later documentation relocation. Source-only conclusion. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333:SPEC_impl.md:2753-2754 describes the shim and its container branch receiving the same Bash vector. Current SPEC_impl.md:2655-2656 retains this sentence.\",\"At the reviewed hash launch.rs:220-225 preserves container only as a decode/refuse compatibility marker; :1165-1172 returns the retired-model sentinel before preparation or exec; :1232 executes ordinary agent_command.\",\"In-range 04d85f0c98a9b635709d00b056719a0baa7fd3fc retires legacy containerized sessions and changes launch.rs. Reviewed SPEC_impl.md:8440-8453 explicitly says the current supervisor runs inside its container and uses ordinary host paths, with the supervisor-outside model retired.\",\"This is stale execution-boundary guidance, not evidence of a production launch failure or an isolation bypass.\"] Current coverage/results: [\"Current SPEC.md/SPEC_impl.md searched for shim/container branch and rootless container execution. The correct current-container subsection supplies contradictory context, not acceptance of a nonexistent shim branch.\",\"TODO Planned empty; BUGS.md unrelated; active TRIAGE_OUTCOMES.md and INDEX.md have no matching shim-branch item. Existing launch-input-database-duplication-rationale-overstated concerns missing database prompt content, not the execution boundary.\",\"No unlanded matching plan found; broad tmux-doc cleanup is already landed per plans/REPORTS.md:32. FILTER.md has no matching boundary for persistent incorrect architecture guidance.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Maintainers are directed to a retired container execution branch. No runtime misexecution, security effect or loss of work was alleged.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g009/l3",
+        "line": 11,
+        "disposition": "verified",
+        "group": "spec-shim-container-execution-branch-retired",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-004 after inspecting it. The authoritative launch explanation still names an execution branch retired within this range. The actual container supervisor now uses the ordinary launch path inside its environment. Retain other, with retirement attributed to 04d85f0c rather than the later documentation relocation. Source-only conclusion. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333:SPEC_impl.md:2753-2754 describes the shim and its container branch receiving the same Bash vector. Current SPEC_impl.md:2655-2656 retains this sentence.\",\"At the reviewed hash launch.rs:220-225 preserves container only as a decode/refuse compatibility marker; :1165-1172 returns the retired-model sentinel before preparation or exec; :1232 executes ordinary agent_command.\",\"In-range 04d85f0c98a9b635709d00b056719a0baa7fd3fc retires legacy containerized sessions and changes launch.rs. Reviewed SPEC_impl.md:8440-8453 explicitly says the current supervisor runs inside its container and uses ordinary host paths, with the supervisor-outside model retired.\",\"This is stale execution-boundary guidance, not evidence of a production launch failure or an isolation bypass.\"] Current coverage/results: [\"Current SPEC.md/SPEC_impl.md searched for shim/container branch and rootless container execution. The correct current-container subsection supplies contradictory context, not acceptance of a nonexistent shim branch.\",\"TODO Planned empty; BUGS.md unrelated; active TRIAGE_OUTCOMES.md and INDEX.md have no matching shim-branch item. Existing launch-input-database-duplication-rationale-overstated concerns missing database prompt content, not the execution boundary.\",\"No unlanded matching plan found; broad tmux-doc cleanup is already landed per plans/REPORTS.md:32. FILTER.md has no matching boundary for persistent incorrect architecture guidance.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Maintainers are directed to a retired container execution branch. No runtime misexecution, security effect or loss of work was alleged.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-004",
+          "key": "g009/l3",
+          "latest_line": 11,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "spec-shim-container-execution-branch-retired",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The authoritative launch explanation still names an execution branch retired within this range. The actual container supervisor now uses the ordinary launch path inside its environment.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333:SPEC_impl.md:2753-2754 describes the shim and its container branch receiving the same Bash vector. Current SPEC_impl.md:2655-2656 retains this sentence.",
+            "At the reviewed hash launch.rs:220-225 preserves container only as a decode/refuse compatibility marker; :1165-1172 returns the retired-model sentinel before preparation or exec; :1232 executes ordinary agent_command.",
+            "In-range 04d85f0c98a9b635709d00b056719a0baa7fd3fc retires legacy containerized sessions and changes launch.rs. Reviewed SPEC_impl.md:8440-8453 explicitly says the current supervisor runs inside its container and uses ordinary host paths, with the supervisor-outside model retired.",
+            "This is stale execution-boundary guidance, not evidence of a production launch failure or an isolation bypass."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md/SPEC_impl.md searched for shim/container branch and rootless container execution. The correct current-container subsection supplies contradictory context, not acceptance of a nonexistent shim branch.",
+            "TODO Planned empty; BUGS.md unrelated; active TRIAGE_OUTCOMES.md and INDEX.md have no matching shim-branch item. Existing launch-input-database-duplication-rationale-overstated concerns missing database prompt content, not the execution boundary.",
+            "No unlanded matching plan found; broad tmux-doc cleanup is already landed per plans/REPORTS.md:32. FILTER.md has no matching boundary for persistent incorrect architecture guidance."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Maintainers are directed to a retired container execution branch. No runtime misexecution, security effect or loss of work was alleged.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain other, with retirement attributed to 04d85f0c rather than the later documentation relocation. Source-only conclusion."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "spec-shim-container-execution-branch-retired",
+        "destination": "trailing-spec-shim-container-execution-branch-retired.md"
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review is blocked by invalid manifest ranges: the patches contain 374 and 174 lines, but the manifest requires 375 and 175. The evidence helper rejects all reads.\n\nFull brief and commit list read. Blocker recorded in `g009/progress.md`; findings log remains empty. All assigned patches remain unread.\n\nPlease correct the manifest or authorize manual inspection."
+    },
+    {
+      "turn": 2,
+      "reply": "Initial source-review pass complete: all 548 mandatory lines read through the corrected manifest; no unread scope.\n\nNo defects established. Recorded `l1`, then closed it as source-refuted; added source-refuted candidate `c2`. No open leads.\n\nProgress and findings logs updated. No tests, reproductions, or checkout changes."
+    },
+    {
+      "turn": 3,
+      "reply": "Revised `l1` and `c2` with cross-commit and caller-chain checks; both remain source-refuted. Confirmed protocol gating and cleanup ordering.\n\nNo new findings. Unresolved lead IDs: none."
+    },
+    {
+      "turn": 4,
+      "reply": "Checked resize attribution, launch dispatch, setup policy, and grid flow-control contracts.\n\n- Revised `l1` to a confirmed finding from the supplied counterexample.\n- New verified finding `l3`: the launch contract describes a retired container branch.\n- New unverified IDs: none.\n- Open leads: none.\n\nNew material found: **yes, `l3`**. Source analysis only; logs updated."
+    },
+    {
+      "turn": 5,
+      "reply": "Checked Stop-precedence races, waypoint compatibility, Delete-notice ordering, and child-environment filtering. No new issue found.\n\n- New verified IDs: none.\n- New unverified IDs: none.\n- Open leads: none.\n\nDiscovery pass 2 recorded in progress. No runtime execution."
+    }
+  ],
+  "progress": "# g009 product-contracts\n\nInitial review, turn 1. Read full brief, the complete inventory commits field only, root instructions with End sentinel, requested priority and recording sections, and machine instructions. Findings log exists and is empty. No source findings, candidates, or leads have been considered because mandatory source delivery is blocked.\n\nBoth evidence-read attempts failed with PERSISTENT_REVIEW_TOOL_FAILED: Invalid source range (00900-001.patch 1..150, then 1..60). Read tooling.md and inspected the helper's range validator. The manifest requires 00900-001.patch lines 1..375 and 01017-000.patch lines 1..175, but the exact same line-matching expression used by evidence.ts counts only 374 and 174 lines respectively. wc -l agrees. The helper validates every manifest range before delivering any requested range, so smaller packets cannot work. No manifest or retained source was modified. No coverage credited.\n\nNext action: caller must correct/reissue the pinned manifest/ranges (or explicitly approve the documented manual-inspection path) before mandatory patch review can proceed. Unread scope: all 550 assigned lines as described by the brief, represented by 548 actual retained lines. Interface assumptions remain unestablished. Turn type/count: initial/1. Discovery passes: 0. New verified/unverified IDs: none. Open leads: none. No runtime tests or reproductions run; no checkout files changed.\n\nCoverage repair / initial review continuation, turn 2. Reread corrected brief in full. Caller repaired manifest endpoints only; hashes unchanged. Findings log preserved. Next: mandatory patch packets, pinned governing sections, and source/contract checks. All 548 actual assigned lines remain unread at start. No IDs yet; discovery passes 0.\n\n## Initial review completed (turn 2)\n\nCoverage repair succeeded. All mandatory packets delivered through the corrected evidence manifest: 00900-001.patch 1..100, 101..200, 201..300, 301..374; 01017-000.patch 1..100, 101..174. No unread or omitted assigned material. Each packet was delivered separately, below the line and byte bounds. Parent owns the delivery audit.\n\nReviewed the patches at their recorded revisions, with pinned product Terminal experience and Lifecycle operations, implementation restart/delete/reload/grid/launch-classification/tmux-policy sections, the Answers bind to what was drawn contract, and cleanup ownership. Source checks covered the history seed and its encoder, bounded final-screen excerpts, native command/wrapper Bash composition, host-only wire kinds, the removed supervisor --tmux option, legacy server identity checks, grid hyperlink identities and hover callers, and protocol 77's stated incompatible-peer boundary. A guessed helm connection.rs path did not exist; no result or coverage was inferred from that failed lookup. Protocol 77 was confirmed in farhelm-proto/src/lib.rs:255.\n\nInterface assumptions: 1ed482d retains kind fields for host-only terminals and the startup legacy-server cleanup, while f560058 removes stream/kind negotiation with a protocol bump. Restart retains primary history above a blank screen; launch excerpts read only the current host's final visible screen. Grid link comparison receives positive integer identities from the grid adapter. These are source-supported checks, not runtime observations. No separate component-wide review or coverage claim is made for interface groups.\n\nDurable events: l1 opened as a lead, then revised to a source-refuted candidate after inspecting paint_history; c2 records the source-refuted missing-link-tag concern. No reported findings, no open leads, no unverified findings. Both candidates retain impact, exact source references, confidence, proposed-drop basis, and could-be-highest assessment. Findings helper reports active 0, candidates 2, leads 0.\n\nTurn type/count: coverage repair and initial review continuation / 2 total turns (first was blocked before source review). Initial source-review pass complete. Discovery-pass count: 0. New verified findings: none. New unverified findings: none. No runtime tests or reproductions were requested or run. No checkout files changed and no live-install actions taken. Next action: return to parent for its later synthesis prompt; no later-turn synthesis or discovery protocol performed in this turn.\n\n## Synthesis started (turn 3)\n\nDelivery audit accepted by caller. Revisiting batch boundaries, caller assumptions and retained candidates l1/c2. No open leads at entry. Next checks: whether f560058 changes the seed/excerpt premise; actual callers of grid link lines; protocol handshake gate; old-terminal cleanup versus retained row kind. No mandatory scope unread. Discovery-pass count remains 0.\n\n## Synthesis completed (turn 3)\n\nRevised l1 under its original ID: the diff from 1ed482dde220452e424973faf38a5e1318986333 to f560058da19e02716e6f943883a9508b447aff4e is empty for the snapshot encoder, launch excerpt, and host restart implementation. The later assigned batch does not invalidate the seed/excerpt refutation.\n\nRevised c2 under its original ID with the complete caller chain: terminal.js:940-950 uses getGrid().linkLines(), :1036-1037 passes those rows to linkHoverText, and grid-terminal.js:2048-2049 delegates to gridBuffer.linkLines. Inspected grid-buffer.js:308-352 as well: identities retain each run's id/target or the joined generated-link predecessor, and the tag adapter assigns integers for those identities. The fallback removal remains source-refuted.\n\nResolved the protocol caller premise through source: at f560058, farhelm-proto/src/io.rs:600-658 accepts only protocol_version == PROTOCOL_VERSION and returns a typed VersionSkew error otherwise; farhelm-helm/src/client.rs:1739-1779 awaits that handshake before establishing its request/writer machinery. This supports the protocol-77 boundary described in the implementation contract; a guessed connection.rs path from the initial pass was not relied on.\n\nResolved startup ordering and retired-row assumptions at 1ed482d: service/core.rs:6117 opens the database before :6148 ends the old server under ownership; :6675-6679 never looks up an old row's pane address, while :6808-6823 converts live old rows to TerminalEnded and preserves ended outcomes. The retained stored kind and removed runtime driver therefore serve different purposes as the patch says. These were contract/caller checks; no independent legacy implementation defect was pursued.\n\nNo new findings or unresolved premises. No reported finding changed disposition. Active findings 0, retained candidates 2, open leads 0. All assigned material remains read; delivery audit accepted by caller. Source-only conclusions, no runtime observations. Turn type/count: synthesis / 3 total turns. Discovery-pass count: 0. New verified/unverified finding IDs: none. Revised IDs: l1, c2. No omitted scope, checkout mutations, tests, reproductions or live-install actions. Next action: return the synthesis delta; await the caller's next-turn instruction.\n\n## Interface reconciliation and discovery started (turn 4)\n\nRead the supplied neighbour inventory as a complete owner/ID/kind/summary/location projection, then complete pertinent records g013/f2, g100/c1 and l1, g008/f2, g186/c2. An initial raw 1..160-line neighbour read clipped; no full-detail read of that packet is claimed. The file is about 500 KiB and includes remote-environment and test groups outside this source assignment; unrelated records were used only through the complete novelty projection, not as source evidence. No mandatory source credit is claimed for neighbour context.\n\nReopened l1 before checking the provided counterexample. Source confirms ordinary resize can promote history to the visible screen before a pending launch spec fails; revised l1 from candidate to finding, withdrawing the earlier blank-seed refutation. Confirmed publication, resize admission and application, nonblank final-screen quoting, and full-range attribution. This is the same cause as supplied g013/f2 and g100/c1, retained under original l1 for parent deduplication. The assigned SPEC_impl rewrite newly states the false unconditional host-screen attribution proof; the runtime behavior predates the range. Suggested bucket remains other. No runtime test or reproduction. No open l1 premise remains. This reconciles named cross-group input before the separate discovery search.\n\nNext: fresh discovery over the remaining assigned contract edits beyond l1/c2 and supplied neighbour findings. Discovery pass count at entry: 1 (in progress). No assigned source omitted; all mandatory ranges were previously delivered and audited.\n\n## Discovery pass 1 completed (turn 4)\n\nNamed cross-group input was synthesized before new search. l1 is now a source-confirmed finding under its original ID: the earlier refutation proved only the initial blank seed and missed later grid growth. The same cause is in supplied g013/f2 and g100/c1. Runtime contamination predates the range, but the assigned 1ed482d paragraph newly replaces the tmux capture explanation with an unconditional host-provenance guarantee. The base helper already made the same incorrect rationale. Original consequence (misleading durable launch diagnosis), other bucket, and earlier proposed-drop history remain in the log; the source-refuted proposal is expressly withdrawn, not silently erased.\n\nSeparate discovery searched the remaining assigned contract changes beyond l1/c2 and supplied findings. Checked: the shim's actual exec/waypoint paths versus the relocated launch-classification text; container compatibility marker and refusal versus claimed container dispatch; full-range retirement attribution and pinned-tip persistence; setup/desktop tmux-selection policy; protocol-77 grid queue bounds and helm-owned pause/resume against the rewritten slow-viewer statements. The waypoint and grid flow-control checks matched the contract and yielded no concrete new defect. A guessed helm setup.rs path was absent; the real crates/farhelm/src/setup.rs was then inspected. No unsupported source conclusion was taken from failed lookups.\n\nNew discovery l3 was logged as a lead immediately on the mismatch, then revised to a confirmed documentation finding. SPEC_impl.md:2753 retains a live shim container-branch description although in-range 04d85f0c98a9b635709d00b056719a0baa7fd3fc deletes that execution branch and adds a decode-only retirement refusal. The reviewed rootless-Podman subsection explicitly directs new containers through an in-container ordinary supervisor. The stale sentence remains at the pinned tip. This is incorrect architecture guidance, bucket other, no runtime malfunction alleged. Original lead consequence preserved; no readily checkable premise remains.\n\nTurn type/count: interface reconciliation followed by separate discovery / 4 total turns. Discovery-pass count: 1 completed. New verified discovery IDs: l3. Existing ID revised to verified finding from cross-group input: l1. New unverified-after-investigation IDs: none. Open leads: none. New material found: yes (l3); l1 correction is the supplied known interface issue, not an independent novel discovery. Active reported findings 2, candidates 1. No mandatory scope unread or omitted; delivery previously audited. Neighbour-context scope remains the projection and pertinent complete records stated above. No tests, runtime reproductions, checkout edits, live-install actions or prohibited coverage-source searches. Next: return this delta; the charter requires a later pass after substantive new discovery, to be scheduled by the caller rather than simulated inside this turn.\n\n## Discovery pass 2 started (turn 5)\n\nNo named pending cross-group questions. Refreshed the neighbour owner/ID/kind/summary/location inventory in three bounded slices (0..45, 45..90, 90..end); the first combined projection clipped and was superseded by these complete slices. Using this for novelty only. Existing full-history records and prior pertinent neighbour details remain in context. No open leads at entry.\n\nNew search focus beyond retained findings: pending-Stop precedence in the relocated launch-failure contract, sentinel/waypoint compatibility, and the reload/attachment verdict constraints changed by removal of the tmux driver. Discovery count 2 in progress. Mandatory source scope already delivered and audited; no new mandatory credit claimed.\n\n## Discovery pass 2 completed (turn 5)\n\nSearched beyond the retained issues without revising or duplicating them. Useful source checks at 1ed482dde220452e424973faf38a5e1318986333:\n\n- store.rs:498 refuses inferred SentinelError while StopRequested; :507-530 still allows direct shim evidence and preserves a committed exit annotation. status.rs:636-676 excludes pending Stop from wrapper/preparation inference; :396-409 rechecks cached LaunchError against the current outcome through launch_artifacts.rs:35-39. This matches the relocated contract's asynchronous Stop-precedence claim.\n- handlers.rs:954-1048 reads a direct sentinel first, handles prior StopRequested as exit annotation, and waits for the host's final-state record before an ended-agent wrapper inference. No additional stale-classification lead emerged.\n- launch_artifacts.rs:160-213 uses a local optional scope_waypoint_expected compatibility bit, preserves the two-suspect message for older scoped specs without it, checks waypoint existence only when expected, and refuses an unreadable spec. This matches the stated old/new waypoint distinction.\n- grid_stream.rs:934-958 reports natural output endings through the common attachment machinery. connection.rs:1487-1518 calls delete_over before claiming a natural verdict and verifies task/channel/connection identity; core.rs:898-908 waits on the Delete marker's sender lifetime. This matches the changed contract's Delete-notice ordering, without reopening the supplied separate input-lifetime finding.\n- host_launch.rs:108-115,135-160 strips TMUX, TMUX_PANE and FARHELM_TMUX after merging the child environment; host_tabs.rs:595 uses the same child-environment helper. This matches the terminal-host-only inherited-environment contract.\n\nThese are source checks, not runtime observations or claims of component-wide correctness. No substantive new finding, rejected candidate or unresolved lead arose, so no finding events were appended merely to show activity. Existing records and proposed-drop history remain unchanged. No production-correctness observation was used to dismiss a distinct documentation/test defect.\n\nTurn type/count: separate discovery / 5 total turns. Discovery-pass count: 2 completed. New verified IDs: none. New unverified-after-investigation IDs: none. Revised IDs: none. Open leads: none. Anything new found: no. Mandatory assigned scope remains fully delivered/audited; no unread assigned source. Neighbour context was refreshed as the three complete bounded novelty projections; no full-detail read beyond the already recorded pertinent records is claimed. No tests, reproductions, checkout edits, live-install actions, or prohibited coverage searches. Next: return the empty discovery delta to caller.\n"
+}

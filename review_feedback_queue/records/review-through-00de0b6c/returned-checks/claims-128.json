@@ -1,0 +1,113 @@
+[
+  {
+    "key": "g020/l8",
+    "latest_line": 30,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "environment-create-result-drops-operation-claim-remints-current",
+    "aliases": ["g027/l6", "g045/l4", "g052/l9", "g024/c3 (reply-freshness corroboration only)"],
+    "target_queue_file": null,
+    "why": "The conditional source defect is established: a successful environment create loses its actual creating connection claim, then the new agent caller samples a replacement connection and can report the earlier session result with host present and stale:false. Keep one canonical finding under g020/l8. Same-entry identity and successful creation remain valid. No wrong-machine operation, duplicate create, reference misrouting, security harm or user-work loss is established.",
+    "checks": [
+      "Read all g020/l8 events at physical lines 26-30. Latest event retains its initial lead, later verification, citation corrections, persistence check and g052 corroboration; no withdrawal or highest consequence appears in this history.",
+      "At 190d844e58c96cf197aa838d0b0eea8062f48435, sessions.rs:1844-1866,1894-1923 captures claim/client before dispatch and returns the original claim. create_in_session_sandbox:1793-1794 keeps only entry-qualified SessionInfo. host_client:1534-1562 correctly captures a coherent current claim/client, but a later invocation cannot recover the original incarnation.",
+      "At 190d844e, provisioning/tensorlake_add.rs:353-355 carries only Result<SessionInfo>; :1018-1026 awaits progress/memory bookkeeping before :1057 sends it. agent_requests.rs:4555-4588 receives the result and obtains a new claim. :4694-4707 tests that new claim against current snapshots, yielding host Some and stale false after replacement.",
+      "At 190d844e, tensorlake_add.rs:613 releases the connection hold before attach. manager.rs:2525-2540 distinguishes the provisioning mutex from refresh/write-back work; :3637-3745 independently reconnects after serve; :4720 observes client.closed; :5190-5207 assigns a fresh incarnation whenever the client changes, including withdrawal. The sender and receiver have separate scheduling boundaries. This establishes a permitted interleaving, not measured occurrence or frequency.",
+      "At 190d844e, proto/lib.rs:2640-2658 distinguishes stable entry identity from the actual-mutation-connection freshness contract, explicitly including creating replies. agent_requests.rs:4599-4631 requires the routed original incarnation. :4278-4291 correctly verifies entry UUID only; stable entry checks do not prove connection freshness.",
+      "The 190d844e parent diff adds the post-result host_client lookup; launch_environment_for_agent is absent at exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a (git grep exit 1/no match). Inclusive endpoint 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db retains the lookup at agent_requests.rs:4576-4597, claim discard at sessions.rs:1802-1803, and session-only completion at tensorlake_add.rs:1030-1038,1069.",
+      "At 190d844e, sessions/sandbox.rs:81-105 streams admitted headers then the qualified SessionInfo as ordinary GUI JSON. Preserve that outward result and successful-create semantics if retaining the original claim internally. A stale successful reply must not become failed creation and rollback. The disconnected-at-sample sentinel already works; this defect requires a replacement connection before sampling. No runtime test, build or reproduction was run."
+    ],
+    "coverage_checked": [
+      "SPEC.md:3775-3895,4253-4306,5109-5163: successful creation/full-reference and logical-host authorization rules do not accept false reply freshness. The explicit GUI-choice history rule concerns a separate root.",
+      "SPEC_impl.md:3270-3425 (agent transport, current origin, created/mutated host-null encoding and shared create),5058-5142,6004-6048: no environment exception to reply provenance. Stable identity and independent accepted-work lifetime do not make a later connection the mutation connection.",
+      "TODO.md Planned at lines 25-26 is empty. Targeted searches for actual environment-result, agent freshness, claim and history mechanisms found no Planned coverage.",
+      "Searched plans/queue for environment replies/results, agent freshness, SessionClaim and original creating connection. environment-agent-operations.md:1-175 defines the feature/approval flow, not a fix retaining the actual create claim; no matching corrective requirement was found. Do not treat the feature plan as acceptance of its implementation defect.",
+      "BUGS.md read in full: only the local-SSH-helper install/update hang is accepted; no match.",
+      "INDEX.md read in full, then exact mechanism searches across queue files: no existing item for this claim-loss/reminting route or the historical environment-history provenance route. reconnect-replay-keeps-obsolete-event-count-fence.md was checked and is a different supervisor replay/readiness defect. No existing queue extension identified.",
+      "Searched active TRIAGE_OUTCOMES.md for environment, freshness, incarnation, stale replies and agent history: no matching decision. Archive not read.",
+      "FILTER.md read in full. Rare, self-correcting glitches and imprecise diagnostics is a plausible candidate: reconnect must fall between successful create and result projection; only inaccurate one-shot metadata is established. Its whole-consequence boundary is ambiguous because this is structured mutation-result freshness, rather than an error/log diagnostic or an automatically refreshed display. Retain under the rule that unclear matches do not match. No stronger exclusionary harm is invented. Other filters do not match this trigger."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No missing source premise for the conditional data-flow defect. Runtime incidence is unmeasured. Parent should explicitly settle whether structured success-reply freshness counts as the rare-diagnostic filter's 'other diagnostic'; this consultation recommends retention while that boundary is unclear.",
+    "original_stronger_consequence": "None in this record: the original lead was other-priority reply accuracy and expressly excluded a different physical destination or work-loss route. Preserve that limit. Success of creation is not success of a failed operation.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Proposal only: retain one other-priority canonical conditional source finding and attach the named corroboration. Candidate filter text: 'a narrow timing window' plus 'an error message, log line or other diagnostic that is imprecise, misleading, missing detail, or lost'. Whether structured mutation freshness falls wholly within the latter phrase remains unclear; rarity alone does not justify omission. No final drop gate performed."
+  },
+  {
+    "key": "g024/c3",
+    "latest_line": 26,
+    "recommendation": "needs-parent",
+    "bucket": "other",
+    "underlying_key": "environment-create-result-drops-operation-claim-remints-current",
+    "aliases": ["g020/l8 (latest reply-freshness component only)"],
+    "target_queue_file": null,
+    "why": "This ID carries three distinct historical components. Consolidate only its latest reply-freshness corroboration with g020/l8. Preserve its original forged/obsolete-history authority source refutation separately, and preserve its agent-origin GUI-history corroboration under the separately named g050/l1 owner. A whole-record duplicate/drop would erase those distinctions. Approval authorizes an operation; it does not make an Agent-origin request a GUI selection.",
+    "checks": [
+      "Read every c3 event: physical lines 3,6,7,10,13,24,25,26, including the source correction that manager.rs:5207 withdraws the old client while :5199-5202 mints the new incarnation.",
+      "Original revision 56659839785691f76da3af5d8f51b511cff4ba8b sessions.rs:1064-1067 makes environment_target serde-skipped; :2038-2045 documents old-claim convenience-history omission; :2065-2105 checks entry, incarnation, live client and identity with a retained registry guard. store.rs:8863-8884 invokes the guard under SQLite ownership and checks durable identity. This supports only the original stale/forged placement authority refutation.",
+      "At 190d844e sessions.rs:2051-2060 excludes Agent origin from explicit_selection, but :2199-2233 passes environment_target independently under current authority. tensorlake_add.rs:357-361 attaches the target. store/environment_history.rs:49-99 accepts a target with NULL selection, changes last_container_host and ages the shared window; :113 excludes NULL selection only when listing. Thus current authority does not establish GUI-choice provenance. This historical corroboration is distinct from reply freshness and is not rejected here.",
+      "Independently checked the g020/l8 actual-claim capture/discard, session-only channel, replacement publication, late lookup, stable-entry check and protocol contract cited in the canonical entry. Those checks support the latest c3 corroboration. No source-only evidence establishes changed execution authority, security harm or work loss."
+    ],
+    "coverage_checked": [
+      "Same exact freshness coverage search and filter analysis as g020/l8: both specifications, empty TODO Planned, plans/queue, full BUGS, full INDEX plus mechanism-matching queue files, active ledger. No matching acceptance or corrective coverage; rare-diagnostic boundary remains ambiguous.",
+      "Historical history component additionally checked against SPEC.md:5122-5127 (only explicit GUI choices; anything an agent creates does not qualify), SPEC_impl.md:5081-5086,5132-5138,6020-6023, and targeted agent/history/default/recent searches of TODO, plans, BUGS, INDEX and active ledger. No exact current queue coverage found. Existing shared-recipes intent language does not waive GUI-origin requirements. Supplied g050/l1 is provenance to reconcile with its owner, not an existing queued item verified here.",
+      "FILTER.md races requiring a human sub-second action does not cover normal approved agent launches changing convenience history; no such action window is required. Do not transfer the possible rare-diagnostic filter for reply metadata onto the durable history/default component."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No unresolved premise for the latest same-entry reply-freshness component. Parent must split this composite record's dispositions when reconciling its original authority refutation, g050/l1 history corroboration and g020/l8 reply corroboration; do not interpret one component as a drop of another.",
+    "original_stronger_consequence": "Original c3 considered forged or obsolete replies manufacturing reusable placement/defaults; it explicitly stayed other and alleged no automatic execution, credential exposure or user-work loss. Later approved-agent history effects are default-place changes and aging/eviction, not agent selections appearing as reusable setups. The later reply concern also explicitly excludes wrong-machine action and work loss.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Proposal only: attach reply evidence to g020/l8, preserve the narrow source-refuted original authority route in the disposition register, and hand historical GUI-origin corroboration to the existing g050/l1 recording owner. This is not a new discovery, a whole-record duplicate judgment, or an independent drop decision."
+  },
+  {
+    "key": "g027/l6",
+    "latest_line": 17,
+    "recommendation": "duplicate",
+    "bucket": "other",
+    "underlying_key": "environment-create-result-drops-operation-claim-remints-current",
+    "aliases": ["g020/l8"],
+    "target_queue_file": null,
+    "why": "Exact corroboration of the canonical claim-loss/reminted-connection route, not an additional defect. Stable resource/reference identity cannot prove connection freshness. Preserve this API/manager-boundary evidence with g020/l8.",
+    "checks": ["Read both events, physical lines 16-17. Independently verified 190d844e sessions.rs:1793-1794,1844-1866,1894-1923; provisioning/tensorlake_add.rs:353-355,613,1018-1026,1057; manager.rs:3637-3745,4720,5190-5207; agent_requests.rs:4278-4291,4578-4588,4694-4707; proto/lib.rs:2640-2658. Conditional source defect confirmed, no runtime observation.", "190d844e adds the new agent caller; inclusive 00de0b6c retains late claim lookup and claim-discarding result API. Earlier GUI-qualified result API alone is not attributed as an earlier agent freshness defect."],
+    "coverage_checked": ["The same actual-trigger/consequence search and matching sections recorded under g020/l8 cover this exact alias: both specifications; empty TODO Planned; plans/queue; full BUGS; full INDEX and matching queue files; active TRIAGE_OUTCOMES. No existing acceptance, planned correction or queued equivalent found. FILTER rare-diagnostic boundary remains ambiguous; recommend retaining canonical, rather than using duplicate consolidation to silently filter it."],
+    "exact_cover_quotes": [],
+    "missing_premise": "No missing source premise. Runtime occurrence/frequency unmeasured; possible rare-diagnostic classification remains for parent.",
+    "original_stronger_consequence": "None: both lead and final candidate explicitly exclude physical retarget, credential exposure, duplicate creation and work loss. The duplicate-only proposal was never correctness rejection or specification acceptance.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Proposal only: consolidate source-confirmed other-priority evidence with g020/l8, retaining the canonical issue and all caveats. A still-disconnected host uses the correct stale fallback; the defect needs intervening reconnection."
+  },
+  {
+    "key": "g045/l4",
+    "latest_line": 25,
+    "recommendation": "duplicate",
+    "bucket": "other",
+    "underlying_key": "environment-create-result-drops-operation-claim-remints-current",
+    "aliases": ["g020/l8"],
+    "target_queue_file": null,
+    "why": "The owned-result payload/lifetime analysis establishes the same original-claim loss as g020/l8. Retain its GUI outward-JSON and successful-create caveats with the canonical record; do not split this into another implementation or documentation finding.",
+    "checks": ["Read all l4 events at physical lines 22-25, preserving the pending-to-resolved reconnect premise and original extraction/caller attribution. Source checked at 190d844e: sessions.rs:1793-1794,1844-1923; tensorlake_add.rs:353-355,613,1018-1057; manager.rs:2525-2540,3637-3745,4720,5190-5207; agent_requests.rs:4578-4588,4694-4707; proto/lib.rs:2640-2658.", "sessions/sandbox.rs:81-105 still consumes qualified SessionInfo in ordinary JSON after progress headers. Retaining an internal operation claim must preserve this GUI contract, and later staleness must not convert a completed create into rollback. A provisioning mutex is not a connection lease. Inclusive 00de0b6c endpoint retains caller remint and session-only completion. No runtime observation."],
+    "coverage_checked": ["Same exact coverage results as g020/l8 across both specifications, empty TODO Planned, plans/queue, full BUGS and INDEX plus matching queue files, and active ledger. Accepted cleanup after an ambiguous initial-create failure is a different failure contract; here creation succeeded. Rare-diagnostic filtering remains ambiguous for structured freshness metadata, so retain canonical pending that classification."],
+    "exact_cover_quotes": [],
+    "missing_premise": "No missing source premise; actual timing incidence unmeasured. Preserve GUI-qualified success and avoid stale-triggered destructive cleanup in any later fix.",
+    "original_stronger_consequence": "None: all l4 events exclude different-machine launch, duplicate create and lost work; final record also explicitly excludes reference misrouting/security. Its separate local f1 ambiguous-create cleanup acceptance does not accept or refute this successful-create freshness route.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Proposal only: consolidate with caller-owned g020/l8 and retain payload, lifetime and GUI evidence. This proposes no correctness drop or severity lowering."
+  },
+  {
+    "key": "g052/l9",
+    "latest_line": 21,
+    "recommendation": "duplicate",
+    "bucket": "other",
+    "underlying_key": "environment-create-result-drops-operation-claim-remints-current",
+    "aliases": ["g020/l8"],
+    "target_queue_file": null,
+    "why": "Exact protocol-interface corroboration of g020/l8. Stable host entry and a valid created reference coexist with stale connection provenance. The mandatory Allow/logical-host approval question in this reviewer's distinct c3 is not part of l9 and cannot refute it.",
+    "checks": ["Read both l9 events at physical lines 20-21. Checked 190d844e proto/lib.rs:2640-2658 actual-routed-connection contract, agent_requests.rs:4662-4680 shared Created projection, :4578-4588 late host_client lookup, :4694-4707 current-incarnation comparison; sessions.rs:1793-1794 original-claim loss; tensorlake_add.rs:1018-1026,1057 separate session-only completion; manager.rs:5190-5207 replacement incarnation. No encoded environment freshness exception was found.", "Checked the reconnect/result boundaries and range introduction/persistence described under canonical g020/l8. Same-entry reconnect suffices. Current-disconnected fallback remains correct. No runtime schedule, timing frequency, changed physical destination or destructive consequence observed."],
+    "coverage_checked": ["Same exact freshness searches and matching sections as g020/l8 across both specifications, TODO Planned, plans/queue, BUGS, INDEX and matching queue files, active ledger. SPEC.md Agents and environments authorizes logical operations behind Allow and does not waive completed-reply connection provenance. No current queued equivalent found. FILTER rare-diagnostic candidate is considered explicitly; retain canonical while classification of structured success freshness as diagnostic remains unclear."],
+    "exact_cover_quotes": [],
+    "missing_premise": "None for l9's conditional source defect; runtime incidence unmeasured. The separate c3 approval-authority uncertainty and any highest consequence there remain untouched and are not independently assessed by this assigned l9 check.",
+    "original_stronger_consequence": "None in l9: it consistently excludes physical retargeting, reference misrouting, security and user-work loss. References to c3's original highest approval-authority concern explicitly preserve that separate record, not a stronger l9 consequence or lowering.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Proposal only: consolidate protocol-contract evidence under g020/l8, preserving its other-priority conditional result and all limits. No parent decision or independent drop verdict inferred."
+  }
+]

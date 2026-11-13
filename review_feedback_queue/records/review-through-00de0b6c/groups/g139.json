@@ -1,0 +1,824 @@
+{
+  "group": {
+    "id": "g139",
+    "domain": "rust-session-agent-regressions",
+    "purpose": "rust-session-agent-regressions: crates/farhelm/tests/e2e/attachment_uploads.rs, crates/farhelm/tests/e2e/hook_identity.rs, crates/farhelm/tests/e2e/marker_model.rs, crates/farhelm/tests/e2e/restart_under_concurrency.rs, crates/farhelm/tests/e2e/restart_with_resume.rs, crates/farhelm/tests/e2e/session_lifecycle.rs, crates/farhelm/tests/e2e/wrapper_launch.rs, crates/farhelm/tests/e2e/boot_id_durable_outcome.rs, crates/farhelm/tests/e2e/codex_identity.rs, crates/farhelm/tests/e2e/launch_sentinel_error_status.rs, crates/farhelm/tests/e2e/real_agent_capture.rs; phases -async fn the_pane_probe_reports_a_spaced_owner_name_whole() {",
+    "interfaces": [
+      "g001",
+      "g005",
+      "g006",
+      "g007",
+      "g008",
+      "g009",
+      "g137",
+      "g138",
+      "g140",
+      "g141",
+      "g142",
+      "g143",
+      "g144",
+      "g145",
+      "g146"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00781-000.patch",
+        "ranges": [
+          [
+            1,
+            429
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/attachment_uploads.rs",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,19941)",
+        "lines": 429,
+        "bytes": 19969,
+        "start": 0,
+        "end": 19941,
+        "original": "[private-run]/prep/originals/00781.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00786-000.patch",
+        "ranges": [
+          [
+            1,
+            184
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/hook_identity.rs",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,7789)",
+        "lines": 184,
+        "bytes": 7793,
+        "start": 0,
+        "end": 7789,
+        "original": "[private-run]/prep/originals/00786.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00793-000.patch",
+        "ranges": [
+          [
+            1,
+            58
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/marker_model.rs",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,2491)",
+        "lines": 58,
+        "bytes": 2493,
+        "start": 0,
+        "end": 2491,
+        "original": "[private-run]/prep/originals/00793.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00795-000.patch",
+        "ranges": [
+          [
+            1,
+            84
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/restart_under_concurrency.rs",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,3705)",
+        "lines": 84,
+        "bytes": 3709,
+        "start": 0,
+        "end": 3705,
+        "original": "[private-run]/prep/originals/00795.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00796-000.patch",
+        "ranges": [
+          [
+            1,
+            373
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/restart_with_resume.rs",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,16181)",
+        "lines": 373,
+        "bytes": 16203,
+        "start": 0,
+        "end": 16181,
+        "original": "[private-run]/prep/originals/00796.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00797-001.patch",
+        "ranges": [
+          [
+            1,
+            181
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/session_lifecycle.rs",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "-async fn the_pane_probe_reports_a_spaced_owner_name_whole() {; patch character offsets [58763,66725)",
+        "lines": 181,
+        "bytes": 7980,
+        "start": 58763,
+        "end": 66725,
+        "original": "[private-run]/prep/originals/00797.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00803-000.patch",
+        "ranges": [
+          [
+            1,
+            22
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/wrapper_launch.rs",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,1402)",
+        "lines": 22,
+        "bytes": 1406,
+        "start": 0,
+        "end": 1402,
+        "original": "[private-run]/prep/originals/00803.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00878-000.patch",
+        "ranges": [
+          [
+            1,
+            25
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/boot_id_durable_outcome.rs",
+        "commit": "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4",
+        "notes": "patch header; patch character offsets [0,1553)",
+        "lines": 25,
+        "bytes": 1555,
+        "start": 0,
+        "end": 1553,
+        "original": "[private-run]/prep/originals/00878.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00970-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/codex_identity.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,554)",
+        "lines": 13,
+        "bytes": 554,
+        "start": 0,
+        "end": 554,
+        "original": "[private-run]/prep/originals/00970.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00979-000.patch",
+        "ranges": [
+          [
+            1,
+            21
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/launch_sentinel_error_status.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,1071)",
+        "lines": 21,
+        "bytes": 1075,
+        "start": 0,
+        "end": 1071,
+        "original": "[private-run]/prep/originals/00979.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00981-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/real_agent_capture.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,509)",
+        "lines": 13,
+        "bytes": 509,
+        "start": 0,
+        "end": 509,
+        "original": "[private-run]/prep/originals/00981.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00982-000.patch",
+        "ranges": [
+          [
+            1,
+            46
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/restart_with_resume.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,1938)",
+        "lines": 46,
+        "bytes": 1938,
+        "start": 0,
+        "end": 1938,
+        "original": "[private-run]/prep/originals/00982.patch"
+      }
+    ],
+    "lines": 1449,
+    "bytes": 65184
+  },
+  "records": [
+    {
+      "key": "g139/g139-l1",
+      "owner": "g139",
+      "id": "g139-l1",
+      "domain": "rust-session-agent-regressions",
+      "purpose": "rust-session-agent-regressions: crates/farhelm/tests/e2e/attachment_uploads.rs, crates/farhelm/tests/e2e/hook_identity.rs, crates/farhelm/tests/e2e/marker_model.rs, crates/farhelm/tests/e2e/restart_under_concurrency.rs, crates/farhelm/tests/e2e/restart_with_resume.rs, crates/farhelm/tests/e2e/session_lifecycle.rs, crates/farhelm/tests/e2e/wrapper_launch.rs, crates/farhelm/tests/e2e/boot_id_durable_outcome.rs, crates/farhelm/tests/e2e/codex_identity.rs, crates/farhelm/tests/e2e/launch_sentinel_error_status.rs, crates/farhelm/tests/e2e/real_agent_capture.rs; phases -async fn the_pane_probe_reports_a_spaced_owner_name_whole() {",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "g139-l1",
+            "state": "open",
+            "summary": "Deletion of upload-ack priority regression may leave a retained transport contract untested",
+            "location": "crates/farhelm/tests/e2e/attachment_uploads.rs:1448",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: upload progress must remain usable while terminal output is busy; this patch removes the backlog-ordering regression. Source: assigned 00781 patch lines 118-320 deletes an_ack_arrives_ahead_of_a_backlog_of_terminal_output; its documentation says porting the grid measurement is a follow-up. Contract and replacement coverage remain to inspect before deciding whether this is reportable. Suggested bucket: other (test coverage only so far); confidence: unresolved lead. proposed_drop: false. possible_cover: none known, no coverage sources searched. Could-be-highest: no established user-data or security route; this lead concerns deleted regression coverage only. Checks so far: read deleted test rationale and setup; no execution. Next: finish patch, inspect pinned transport prioritization contract and remaining grid/upload tests."
+          }
+        },
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "g139-l1",
+            "state": "open",
+            "summary": "Upload credit priority loses its end-to-end regression check",
+            "location": "crates/farhelm/tests/e2e/attachment_uploads.rs:1448",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: the test suite no longer detects upload acknowledgements being routed behind a busy terminal, a regression that could stall uploads even while the host remains healthy. Details: deletion hunk @@ -1547,315 +1445,6 removes an_ack_arrives_ahead_of_a_backlog_of_terminal_output without a grid replacement. Its exact deletion rationale says: 'on a grid stream the flood never reached the peer in this shape, and porting the measurement is a follow-up.' This is a surviving contract, not tmux-specific behavior: SPEC_impl.md:3600-3619 requires supervisor-to-helm priority (upload and relay acknowledgements) before ordinary terminal output, stating 'their returning credit has priority over it.' connection.rs:257-268 still creates a separate priority queue; :994-1016 still selects priority before ordinary/bulk; uploads.rs:620-621 still sends UploadAck through its priority sender. Source checks: remaining attachment_uploads.rs test names and bodies around acks_are_cumulative_and_never_precede_the_write_they_claim only cover cumulative/write ordering; service/uploads.rs tests cover cancellation/full priority queues, not routing and queue selection versus terminal output; connection.rs writer test a_signaled_writer_drains_queued_frames_without_the_drain_window uses only ordinary traffic. Commit message explicitly lists upload acknowledgements overtaking terminal output as lost coverage. Suggested fix: restore a grid-capable end-to-end check or independently exercise the real upload routing plus strict writer selection using bounded queues; retain a premise proving there is terminal backlog. Suggested bucket: other, a confirmed regression-coverage loss in maintainer tooling; no present product ordering bug is claimed. Confidence: confirmed by source only, no execution. proposed_drop: false. possible_cover: none known; no queue/coverage metadata searched. Could-be-highest: no, the established consequence is test coverage; no shipped security or loss-of-work route is alleged. Caveat: current production writer implementation appears to preserve priority; this finding is about removing its regression protection, not proof uploads currently stall."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "g139-l1",
+            "state": "open",
+            "summary": "Upload credit priority loses its end-to-end regression check",
+            "location": "crates/farhelm/tests/e2e/attachment_uploads.rs:1448",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513; later-turn synthesis also checks through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: removing the backlog test leaves the suite without its end-to-end witness that an upload's credit acknowledgement overtakes queued terminal traffic. That gap could let a future routing/scheduling regression stall uploads on an otherwise healthy host. This is a test-only defect; no present upload failure or production priority violation has been observed or established. Details: the reviewed deletion hunk @@ -1547,315 +1445,6 removes an_ack_arrives_ahead_of_a_backlog_of_terminal_output, whose measured ordering and backlog floor distinguished priority selection from shared FIFO routing; its deletion rationale says porting the grid measurement is a follow-up. SPEC_impl.md at the reviewed revision:3600-3619 retains priority upload/relay acknowledgements before ordinary terminal/control output and bulk traffic. Initial source analysis found the proper UploadAck producer (uploads.rs:620-621) and biased writer selection (connection.rs:994-1016), so this finding must not be represented as a proven current upload stall. Synthesis checks so far: git log over uploads.rs, connection.rs, handlers.rs and attachment_uploads.rs from the removal through pinned tip finds only tmux-driver removal, protocol/rendering removal and two documentation cleanups; the full later diff of uploads.rs changes only a comment and attachment_uploads.rs only removes Attach.grid. At pinned tip, connection.rs:260 retains priority queue creation, :963 is the priority receive before ordinary/bulk, :712 supplies the named priority sender to handler context, handlers.rs:3104 passes ctx.priority to handle_begin_upload and :2521 passes its clone to run_upload. Repository source search across supervisor, helm, protocol, Rust e2e and browser tests finds no new backlog/ack-priority oracle; connection.rs's sole direct writer close test uses only ordinary traffic, while uploads.rs cancellation tests use an isolated priority queue. The unchanged channel-reuse test exercises upload completion and attach/replay on a reused channel, which is not an oracle for relative acknowledgement/terminal scheduling (caller supplied g141/c3 corroboration). Remaining synthesis work: inspect the exact routing and candidate writer/cancellation/terminal-backlog test bodies at tip before finalizing the absence conclusion. Suggested bucket: other, loss of regression protection in maintainer tooling. Confidence: confirmed deletion and retained contract by source; equivalent-oracle search ongoing. proposed_drop: false. possible_cover: none known; no queue or excluded coverage metadata searched. Could-be-highest: no; only test coverage loss established, no shipped security or loss-of-work route alleged. Suggested fix: a grid-capable end-to-end backlog ordering test, or tests that independently discriminate actual upload routing and priority writer selection with a proven competing backlog. No runtime execution or reproductions."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "g139-l1",
+            "state": "open",
+            "summary": "Upload credit priority loses its end-to-end regression check",
+            "location": "crates/farhelm/tests/e2e/attachment_uploads.rs:1448",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513; synthesis checked later patches through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: removing the backlog test leaves no equivalent discriminating oracle found for upload acknowledgements overtaking queued terminal output. A future routing or scheduling regression could stall uploads on an otherwise healthy host without this regression check detecting it. Established defect is test-only loss of protection; no present upload failure or production priority violation is observed or alleged. Details: the reviewed hunk @@ -1547,315 +1445,6 removes an_ack_arrives_ahead_of_a_backlog_of_terminal_output; its witness proved live flood output, built and froze a competing terminal backlog, asserted a 32 KiB backlog floor and checked ack position inside the first quarter. That could distinguish priority from an ack sharing the ordinary FIFO; successful upload completion alone cannot. Its deletion rationale says porting the grid measurement is a follow-up. SPEC_impl.md at the reviewed revision:3600-3619 retains priority upload/relay acknowledgements ahead of ordinary terminal/control and bulk traffic. Source route at pinned tip was checked end to end: connection.rs:260 creates priority_tx/priority_rx, :313-316 gives that receiver and separate ordinary/bulk receivers to the writer, :709-716 builds ConnectionCtx with priority: &priority_tx; handlers.rs:3093-3112 dispatches BeginUpload with ctx.priority and :2519-2522 passes its clone to run_upload; uploads.rs:376-387 passes the sender to upload_transfer, :619-627 generates UploadAck after disk write through send_upload_unless_cancelled, whose :307-324 uses that sender. connection.rs:949-966 uses biased select with priority_rx before ordinary_rx before bulk_rx. This source remains correct; it is not replacement validation evidence. Later-patch audit: git log over the four relevant files finds only driver removal, protocol/rendering removal and two comment cleanups; full later diff of uploads.rs is only a comment, attachment_uploads.rs only removes Attach.grid. At tip, searches of supervisor/helm/protocol/Rust-e2e/browser source for ack priority, overtaking and backlog, and every spawn_writer_task/WriterTaskChannels/priority_rx use, find no equivalent ordering test. Exact candidate bodies were checked: connection.rs:1954-2010 writer-close test queues only an ordinary frame with empty priority/bulk queues; uploads.rs:1995-2074 cancellation test has one isolated priority queue, no writer and no competing terminal traffic; session_lifecycle.rs:2192-2254 nonreading-peer test fills ordinary ListSessions replies and checks shutdown, with no UploadAck or ordering measurement. Remaining cumulative-ack test checks safe-write/cumulative counts, not priority. The upload-channel-reuse test preserves upload/attach/replay semantics after grid flag deletion (caller reports g141/c3 corroboration), a different invariant that cannot discriminate acknowledgement priority. Suggested fix: a grid-capable end-to-end backlog ordering check, or independent tests covering actual upload routing and strict writer selection with competing bounded queues and a proven backlog premise. Suggested bucket: other, regression-coverage loss in maintainer tooling. Confidence: confirmed by source, including through-tip replacement-oracle checks; no runtime execution or reproduction. proposed_drop: false. possible_cover: none known; no prohibited queue or excluded coverage metadata searched. Could-be-highest: no, only test protection is established, with no shipped security or work-loss route alleged. Caveats: current producer and writer honor the contract; source search cannot establish behavior observed at runtime, and no claim is made that ordinary upload tests currently fail. Readily checkable premises resolved; no remaining open lead for this ID."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "g139-l1",
+            "state": "open",
+            "summary": "Upload credit priority loses its end-to-end regression check",
+            "location": "crates/farhelm/tests/e2e/attachment_uploads.rs:1448",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513; synthesis checked later patches through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: removing the backlog test leaves no equivalent discriminating oracle found for upload acknowledgements overtaking queued terminal output. A future routing or scheduling regression could stall uploads on an otherwise healthy host without this regression check detecting it. Established defect is test-only loss of protection; no present upload failure or production priority violation is observed or alleged. Details: the reviewed hunk @@ -1547,315 +1445,6 removes an_ack_arrives_ahead_of_a_backlog_of_terminal_output; its witness proved live flood output, built and froze a competing terminal backlog, asserted a 32 KiB backlog floor and checked ack position inside the first quarter. That could distinguish priority from an ack sharing the ordinary FIFO; successful upload completion alone cannot. Its deletion rationale says porting the grid measurement is a follow-up. SPEC_impl.md at the reviewed revision:3600-3619 retains priority upload/relay acknowledgements ahead of ordinary terminal/control and bulk traffic. Source route at pinned tip was checked end to end: connection.rs:260 creates priority_tx/priority_rx, :313-316 gives that receiver and separate ordinary/bulk receivers to the writer, :709-716 builds ConnectionCtx with priority: &priority_tx; handlers.rs:3093-3112 dispatches BeginUpload with ctx.priority and :2519-2522 passes its clone to run_upload; uploads.rs:376-387 passes the sender to upload_transfer, :619-627 generates UploadAck after disk write through send_upload_unless_cancelled, whose :307-324 uses that sender. connection.rs:949-966 uses biased select with priority_rx before ordinary_rx before bulk_rx. This source remains correct; it is not replacement validation evidence. Later-patch audit: git log over the four relevant files finds only driver removal, protocol/rendering removal and two comment cleanups; full later diff of uploads.rs is only a comment, attachment_uploads.rs only removes Attach.grid. At tip, searches of supervisor/helm/protocol/Rust-e2e/browser source for ack priority, overtaking and backlog, and every spawn_writer_task/WriterTaskChannels/priority_rx use, find no equivalent ordering test. Exact candidate bodies were checked: connection.rs:1954-2010 writer-close test queues only an ordinary frame with empty priority/bulk queues; uploads.rs:1995-2074 cancellation test has one isolated priority queue, no writer and no competing terminal traffic; session_lifecycle.rs:2192-2254 nonreading-peer test fills ordinary ListSessions replies and checks shutdown, with no UploadAck or ordering measurement. Remaining cumulative-ack test checks safe-write/cumulative counts, not priority. The upload-channel-reuse test preserves upload/attach/replay semantics after grid flag deletion (caller reports g141/c3 corroboration), a different invariant that cannot discriminate acknowledgement priority. Suggested fix: a grid-capable end-to-end backlog ordering check, or independent tests covering actual upload routing and strict writer selection with competing bounded queues and a proven backlog premise. Suggested bucket: other, regression-coverage loss in maintainer tooling. Confidence: confirmed by source, including through-tip replacement-oracle checks; no runtime execution or reproduction. proposed_drop: false. possible_cover: none known; no prohibited queue or excluded coverage metadata searched. Could-be-highest: no, only test protection is established, with no shipped security or work-loss route alleged. Caveats: current producer and writer honor the contract; source search cannot establish behavior observed at runtime, and no claim is made that ordinary upload tests currently fail. Readily checkable premises resolved; no remaining open lead for this ID. Final synthesis checks: pinned-tip SPEC_impl.md:3101-3143 (complete Multiplexing, chunks and writer priority section) explicitly preserves the same strict priority table and returning-credit guarantee. Direct read of attachment_uploads.rs:1098-1191 confirms channel reuse waits for upload completion, verifies published bytes and waits for real Attached plus ReplayComplete, but does so after completion rather than with a competing terminal backlog; :1407-1444 confirms the remaining ack test has no terminal attach. All UploadAck occurrences in Rust e2e, supervisor, helm and browser tests were searched: other producer-like occurrences in helm tests write synthetic peer acknowledgements, so they cannot exercise the supervisor sender/writer choice. Logs for grid-stream tests and tcp_relays.rs show only driver removal and comment cleanup after the original deletion. No new finding IDs or open leads arose from these checks; the test-only conclusion and proposed_drop:false remain unchanged."
+          }
+        }
+      ],
+      "latest": {
+        "line": 8,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "g139-l1",
+          "state": "open",
+          "summary": "Upload credit priority loses its end-to-end regression check",
+          "location": "crates/farhelm/tests/e2e/attachment_uploads.rs:1448",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513; synthesis checked later patches through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: removing the backlog test leaves no equivalent discriminating oracle found for upload acknowledgements overtaking queued terminal output. A future routing or scheduling regression could stall uploads on an otherwise healthy host without this regression check detecting it. Established defect is test-only loss of protection; no present upload failure or production priority violation is observed or alleged. Details: the reviewed hunk @@ -1547,315 +1445,6 removes an_ack_arrives_ahead_of_a_backlog_of_terminal_output; its witness proved live flood output, built and froze a competing terminal backlog, asserted a 32 KiB backlog floor and checked ack position inside the first quarter. That could distinguish priority from an ack sharing the ordinary FIFO; successful upload completion alone cannot. Its deletion rationale says porting the grid measurement is a follow-up. SPEC_impl.md at the reviewed revision:3600-3619 retains priority upload/relay acknowledgements ahead of ordinary terminal/control and bulk traffic. Source route at pinned tip was checked end to end: connection.rs:260 creates priority_tx/priority_rx, :313-316 gives that receiver and separate ordinary/bulk receivers to the writer, :709-716 builds ConnectionCtx with priority: &priority_tx; handlers.rs:3093-3112 dispatches BeginUpload with ctx.priority and :2519-2522 passes its clone to run_upload; uploads.rs:376-387 passes the sender to upload_transfer, :619-627 generates UploadAck after disk write through send_upload_unless_cancelled, whose :307-324 uses that sender. connection.rs:949-966 uses biased select with priority_rx before ordinary_rx before bulk_rx. This source remains correct; it is not replacement validation evidence. Later-patch audit: git log over the four relevant files finds only driver removal, protocol/rendering removal and two comment cleanups; full later diff of uploads.rs is only a comment, attachment_uploads.rs only removes Attach.grid. At tip, searches of supervisor/helm/protocol/Rust-e2e/browser source for ack priority, overtaking and backlog, and every spawn_writer_task/WriterTaskChannels/priority_rx use, find no equivalent ordering test. Exact candidate bodies were checked: connection.rs:1954-2010 writer-close test queues only an ordinary frame with empty priority/bulk queues; uploads.rs:1995-2074 cancellation test has one isolated priority queue, no writer and no competing terminal traffic; session_lifecycle.rs:2192-2254 nonreading-peer test fills ordinary ListSessions replies and checks shutdown, with no UploadAck or ordering measurement. Remaining cumulative-ack test checks safe-write/cumulative counts, not priority. The upload-channel-reuse test preserves upload/attach/replay semantics after grid flag deletion (caller reports g141/c3 corroboration), a different invariant that cannot discriminate acknowledgement priority. Suggested fix: a grid-capable end-to-end backlog ordering check, or independent tests covering actual upload routing and strict writer selection with competing bounded queues and a proven backlog premise. Suggested bucket: other, regression-coverage loss in maintainer tooling. Confidence: confirmed by source, including through-tip replacement-oracle checks; no runtime execution or reproduction. proposed_drop: false. possible_cover: none known; no prohibited queue or excluded coverage metadata searched. Could-be-highest: no, only test protection is established, with no shipped security or work-loss route alleged. Caveats: current producer and writer honor the contract; source search cannot establish behavior observed at runtime, and no claim is made that ordinary upload tests currently fail. Readily checkable premises resolved; no remaining open lead for this ID. Final synthesis checks: pinned-tip SPEC_impl.md:3101-3143 (complete Multiplexing, chunks and writer priority section) explicitly preserves the same strict priority table and returning-credit guarantee. Direct read of attachment_uploads.rs:1098-1191 confirms channel reuse waits for upload completion, verifies published bytes and waits for real Attached plus ReplayComplete, but does so after completion rather than with a competing terminal backlog; :1407-1444 confirms the remaining ack test has no terminal attach. All UploadAck occurrences in Rust e2e, supervisor, helm and browser tests were searched: other producer-like occurrences in helm tests write synthetic peer acknowledgements, so they cannot exercise the supervisor sender/writer choice. Logs for grid-stream tests and tcp_relays.rs show only driver removal and comment cleanup after the original deletion. No new finding IDs or open leads arose from these checks; the test-only conclusion and proposed_drop:false remain unchanged."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g139/findings.jsonl",
+        "id": "g139-l1",
+        "line": 8,
+        "disposition": "verified",
+        "group": "upload-ack-priority-regression-oracle-removed",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-088 after inspecting it. The patch removes a discriminating test for a retained upload-credit priority contract. Current production priority is correct, which does not replace the lost regression oracle. No equivalent backlog ordering assertion was found in the focused through-tip source check. Record a separate test-only finding, other priority, preserving correct current production behavior and source-only confidence. A grid-capable competing-backlog test or independently discriminating routing and writer tests would restore the missing protection. Checked source/results: [\"647f0227:crates/farhelm/tests/e2e/attachment_uploads.rs deletion @@ -1547,315 +1445,6 removes an_ack_arrives_ahead_of_a_backlog_of_terminal_output; its stated grid measurement follow-up is not a replacement. The commit itself explicitly identifies lost acknowledgement-overtaking coverage.\",\"00de0b6c:crates/farhelm-supervisor/src/service/connection.rs:949-966 has biased priority, ordinary, bulk selection; uploads.rs:619-627 sends UploadAck on the priority sender. This confirms the retained behavior, not a present product violation.\",\"00de0b6c:connection.rs:1954-2010 writer-close test queues ordinary traffic only. uploads.rs:1995-2028 cancellation setup has one isolated priority queue, no competing terminal writer. attachment_uploads.rs:1407-1444 cumulative ack test has no terminal attachment or backlog.\",\"Focused pinned-tip grep across crates and e2e for ack/backlog/priority and refused-upload terms found no equivalent acknowledgement-versus-terminal ordering assertion. The supplied full histories additionally record exact upload-routing, channel-reuse and every UploadAck replacement checks. No runtime validation or current upload-stall claim.\"] Current coverage/results: {\"SPEC.md\":\"Attachments, 3171-3207, retains transfer usability and visible failures; no accepted loss of this regression check.\",\"SPEC_impl.md\":\"Multiplexing, chunks and writer priority, 3101-3143, explicitly retains strict acknowledgement priority over terminal traffic. This is the contract whose regression protection was removed, not coverage accepting its removal.\",\"TODO.md Planned\":\"25-27 is empty; transfer-window scaling elsewhere does not restore this oracle.\",\"plans/queue\":\"No unlanded matching priority-oracle work found. tmux-end-old-terminals.md:130-134 says surviving subjects run on hosts; 275-286 permits optional memory-test porting, not omission of these upload checks. The implementation plan has already landed through the reviewed range.\",\"BUGS.md\":\"The only recorded provisioning ssh-pipe hang is unrelated.\",\"INDEX.md and matching queue files\":\"Read upload-failure-test-lacks-pipe-holder-witness.md and cancelled-upload-commit-retains-reply-entry.md. They concern provisioning fixture premises and cancelled final-save bookkeeping, respectively; neither covers terminal-backlog credit ordering. No same-root alias found.\",\"TRIAGE_OUTCOMES.md\":\"1608-1621 discards commit-reply bookkeeping unless measured; it does not accept removal of upload-credit scheduling tests.\",\"FILTER.md\":\"No full-boundary match. Persistent absence of a regression oracle is not a rare self-correcting display, safe retry or diagnostic.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The initial wording said the suite might miss a future regression that stalls uploads on a healthy host. Later records expressly confine the established defect to regression-protection loss and preserve that hypothetical consequence; no actual stall or work loss was observed.\"; \"A current shipped upload stall would require an actual producer/routing/scheduling violation; none is established or alleged. The retained finding is the source-confirmed test deletion and missing equivalent oracle.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g139/g139-l1",
+        "line": 8,
+        "disposition": "verified",
+        "group": "upload-ack-priority-regression-oracle-removed",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": "review_feedback_queue/upload-ack-priority-oracle-removed.md",
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-088 after inspecting it. The patch removes a discriminating test for a retained upload-credit priority contract. Current production priority is correct, which does not replace the lost regression oracle. No equivalent backlog ordering assertion was found in the focused through-tip source check. Record a separate test-only finding, other priority, preserving correct current production behavior and source-only confidence. A grid-capable competing-backlog test or independently discriminating routing and writer tests would restore the missing protection. Checked source/results: [\"647f0227:crates/farhelm/tests/e2e/attachment_uploads.rs deletion @@ -1547,315 +1445,6 removes an_ack_arrives_ahead_of_a_backlog_of_terminal_output; its stated grid measurement follow-up is not a replacement. The commit itself explicitly identifies lost acknowledgement-overtaking coverage.\",\"00de0b6c:crates/farhelm-supervisor/src/service/connection.rs:949-966 has biased priority, ordinary, bulk selection; uploads.rs:619-627 sends UploadAck on the priority sender. This confirms the retained behavior, not a present product violation.\",\"00de0b6c:connection.rs:1954-2010 writer-close test queues ordinary traffic only. uploads.rs:1995-2028 cancellation setup has one isolated priority queue, no competing terminal writer. attachment_uploads.rs:1407-1444 cumulative ack test has no terminal attachment or backlog.\",\"Focused pinned-tip grep across crates and e2e for ack/backlog/priority and refused-upload terms found no equivalent acknowledgement-versus-terminal ordering assertion. The supplied full histories additionally record exact upload-routing, channel-reuse and every UploadAck replacement checks. No runtime validation or current upload-stall claim.\"] Current coverage/results: {\"SPEC.md\":\"Attachments, 3171-3207, retains transfer usability and visible failures; no accepted loss of this regression check.\",\"SPEC_impl.md\":\"Multiplexing, chunks and writer priority, 3101-3143, explicitly retains strict acknowledgement priority over terminal traffic. This is the contract whose regression protection was removed, not coverage accepting its removal.\",\"TODO.md Planned\":\"25-27 is empty; transfer-window scaling elsewhere does not restore this oracle.\",\"plans/queue\":\"No unlanded matching priority-oracle work found. tmux-end-old-terminals.md:130-134 says surviving subjects run on hosts; 275-286 permits optional memory-test porting, not omission of these upload checks. The implementation plan has already landed through the reviewed range.\",\"BUGS.md\":\"The only recorded provisioning ssh-pipe hang is unrelated.\",\"INDEX.md and matching queue files\":\"Read upload-failure-test-lacks-pipe-holder-witness.md and cancelled-upload-commit-retains-reply-entry.md. They concern provisioning fixture premises and cancelled final-save bookkeeping, respectively; neither covers terminal-backlog credit ordering. No same-root alias found.\",\"TRIAGE_OUTCOMES.md\":\"1608-1621 discards commit-reply bookkeeping unless measured; it does not accept removal of upload-credit scheduling tests.\",\"FILTER.md\":\"No full-boundary match. Persistent absence of a regression oracle is not a rare self-correcting display, safe retry or diagnostic.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The initial wording said the suite might miss a future regression that stalls uploads on a healthy host. Later records expressly confine the established defect to regression-protection loss and preserve that hypothetical consequence; no actual stall or work loss was observed.\"; \"A current shipped upload stall would require an actual producer/routing/scheduling violation; none is established or alleged. The retained finding is the source-confirmed test deletion and missing equivalent oracle.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-088",
+          "key": "g139/g139-l1",
+          "latest_line": 8,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "upload-ack-priority-regression-oracle-removed",
+          "aliases": [],
+          "target_queue_file": "review_feedback_queue/upload-ack-priority-oracle-removed.md",
+          "why": "The patch removes a discriminating test for a retained upload-credit priority contract. Current production priority is correct, which does not replace the lost regression oracle. No equivalent backlog ordering assertion was found in the focused through-tip source check.",
+          "checks": [
+            "647f0227:crates/farhelm/tests/e2e/attachment_uploads.rs deletion @@ -1547,315 +1445,6 removes an_ack_arrives_ahead_of_a_backlog_of_terminal_output; its stated grid measurement follow-up is not a replacement. The commit itself explicitly identifies lost acknowledgement-overtaking coverage.",
+            "00de0b6c:crates/farhelm-supervisor/src/service/connection.rs:949-966 has biased priority, ordinary, bulk selection; uploads.rs:619-627 sends UploadAck on the priority sender. This confirms the retained behavior, not a present product violation.",
+            "00de0b6c:connection.rs:1954-2010 writer-close test queues ordinary traffic only. uploads.rs:1995-2028 cancellation setup has one isolated priority queue, no competing terminal writer. attachment_uploads.rs:1407-1444 cumulative ack test has no terminal attachment or backlog.",
+            "Focused pinned-tip grep across crates and e2e for ack/backlog/priority and refused-upload terms found no equivalent acknowledgement-versus-terminal ordering assertion. The supplied full histories additionally record exact upload-routing, channel-reuse and every UploadAck replacement checks. No runtime validation or current upload-stall claim."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "Attachments, 3171-3207, retains transfer usability and visible failures; no accepted loss of this regression check.",
+            "SPEC_impl.md": "Multiplexing, chunks and writer priority, 3101-3143, explicitly retains strict acknowledgement priority over terminal traffic. This is the contract whose regression protection was removed, not coverage accepting its removal.",
+            "TODO.md Planned": "25-27 is empty; transfer-window scaling elsewhere does not restore this oracle.",
+            "plans/queue": "No unlanded matching priority-oracle work found. tmux-end-old-terminals.md:130-134 says surviving subjects run on hosts; 275-286 permits optional memory-test porting, not omission of these upload checks. The implementation plan has already landed through the reviewed range.",
+            "BUGS.md": "The only recorded provisioning ssh-pipe hang is unrelated.",
+            "INDEX.md and matching queue files": "Read upload-failure-test-lacks-pipe-holder-witness.md and cancelled-upload-commit-retains-reply-entry.md. They concern provisioning fixture premises and cancelled final-save bookkeeping, respectively; neither covers terminal-backlog credit ordering. No same-root alias found.",
+            "TRIAGE_OUTCOMES.md": "1608-1621 discards commit-reply bookkeeping unless measured; it does not accept removal of upload-credit scheduling tests.",
+            "FILTER.md": "No full-boundary match. Persistent absence of a regression oracle is not a rare self-correcting display, safe retry or diagnostic."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "A current shipped upload stall would require an actual producer/routing/scheduling violation; none is established or alleged. The retained finding is the source-confirmed test deletion and missing equivalent oracle.",
+          "original_stronger_consequence": "The initial wording said the suite might miss a future regression that stalls uploads on a healthy host. Later records expressly confine the established defect to regression-protection loss and preserve that hypothetical consequence; no actual stall or work loss was observed.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Record a separate test-only finding, other priority, preserving correct current production behavior and source-only confidence. A grid-capable competing-backlog test or independently discriminating routing and writer tests would restore the missing protection."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "upload-ack-priority-regression-oracle-removed",
+        "destination": "trailing-upload-ack-priority-regression-oracle-removed.md"
+      }
+    },
+    {
+      "key": "g139/g139-c1",
+      "owner": "g139",
+      "id": "g139-c1",
+      "domain": "rust-session-agent-regressions",
+      "purpose": "rust-session-agent-regressions: crates/farhelm/tests/e2e/attachment_uploads.rs, crates/farhelm/tests/e2e/hook_identity.rs, crates/farhelm/tests/e2e/marker_model.rs, crates/farhelm/tests/e2e/restart_under_concurrency.rs, crates/farhelm/tests/e2e/restart_with_resume.rs, crates/farhelm/tests/e2e/session_lifecycle.rs, crates/farhelm/tests/e2e/wrapper_launch.rs, crates/farhelm/tests/e2e/boot_id_durable_outcome.rs, crates/farhelm/tests/e2e/codex_identity.rs, crates/farhelm/tests/e2e/launch_sentinel_error_status.rs, crates/farhelm/tests/e2e/real_agent_capture.rs; phases -async fn the_pane_probe_reports_a_spaced_owner_name_whole() {",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "g139-c1",
+            "state": "open",
+            "summary": "Default timeout substitutions do not shorten terminal-host test budgets",
+            "location": "crates/farhelm/tests/e2e/restart_with_resume.rs:1003",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether replacing suite_timeouts() with SupervisorTimeouts::default() reintroduces loaded-machine failures in resume, identity capture and error-session attachment tests. Source refutation: the deleted suite_timeouts/floor_suite_timeouts implementation in crates/farhelm/tests/e2e/harness.rs changed exactly tmux_exchange, tmux_pane_list and sink_ready via Duration::max; all three are tmux-driver paths removed by this commit. The caller changes in codex_identity.rs:1652, launch_sentinel_error_status.rs:312, real_agent_capture.rs:230 and restart_with_resume.rs:1003,1141,1342,1412 preserve every remaining timeout value. Suggested bucket: other if real, but no actionable defect found. Confidence: confirmed source refutation, no execution. proposed_drop: drop because the only differing timeout fields disappear with the tmux driver, not because failure rarity is accepted. possible_cover: none known; no excluded coverage sources read. Could-be-highest: no, considered impact is maintainer test timing only. Caveat: this conclusion does not claim these tests are immune to unrelated shared-machine load."
+          }
+        }
+      ],
+      "latest": {
+        "line": 3,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "g139-c1",
+          "state": "open",
+          "summary": "Default timeout substitutions do not shorten terminal-host test budgets",
+          "location": "crates/farhelm/tests/e2e/restart_with_resume.rs:1003",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether replacing suite_timeouts() with SupervisorTimeouts::default() reintroduces loaded-machine failures in resume, identity capture and error-session attachment tests. Source refutation: the deleted suite_timeouts/floor_suite_timeouts implementation in crates/farhelm/tests/e2e/harness.rs changed exactly tmux_exchange, tmux_pane_list and sink_ready via Duration::max; all three are tmux-driver paths removed by this commit. The caller changes in codex_identity.rs:1652, launch_sentinel_error_status.rs:312, real_agent_capture.rs:230 and restart_with_resume.rs:1003,1141,1342,1412 preserve every remaining timeout value. Suggested bucket: other if real, but no actionable defect found. Confidence: confirmed source refutation, no execution. proposed_drop: drop because the only differing timeout fields disappear with the tmux driver, not because failure rarity is accepted. possible_cover: none known; no excluded coverage sources read. Could-be-highest: no, considered impact is maintainer test timing only. Caveat: this conclusion does not claim these tests are immune to unrelated shared-machine load."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g139/findings.jsonl",
+        "id": "g139-c1",
+        "line": 3,
+        "disposition": "excluded",
+        "group": "suite-timeouts-removal-preserves-host-budgets",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-088 after inspecting it. The old helper only increased three tmux/sink timeout fields that disappear with the driver. Default substitution preserves every surviving host timeout. Refute the specific changed-budget claim because every field that differed was removed. Checked source/results: [\"1ed482dd diff of crates/farhelm/tests/e2e/harness.rs removes suite_timeouts and floor_suite_timeouts; the complete helper body changes exactly tmux_exchange, tmux_pane_list and sink_ready via max, then returns the structure.\",\"The same deletion and tmux-driver removal discard those fields and call-site substitutions use SupervisorTimeouts::default(). The proposed shortening of a retained host budget has no source mechanism. This does not establish immunity to unrelated machine load; no timing run was performed.\"] Current coverage/results: {\"SPEC.md and SPEC_impl.md\":\"Searched timeout, terminal-host, real-agent and testing terms; no rule accepts shortening host test budgets. Refutation is value preservation, not specification coverage.\",\"TODO.md Planned\":\"25-27 is empty.\",\"plans/queue\":\"tmux-end-old-terminals.md:291-295 explicitly retires tmux/sink fields. No unlanded work is needed to resolve the proposed shortening.\",\"BUGS.md\":\"No timeout-substitution item.\",\"INDEX.md and queue\":\"No suite_timeouts/defaults-equivalence item found; nearby Stop annotation race concerns runtime exit observation, not a timeout floor.\",\"TRIAGE_OUTCOMES.md\":\"No matching timeout-substitution decision.\",\"FILTER.md\":\"Not applied.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing loaded-machine timeout floors might shorten resume, capture and error-attachment test budgets and cause failures. The source refutes that particular shortening; unrelated load failures remain possible. Maintainer test timing only.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g139/g139-c1",
+        "line": 3,
+        "disposition": "excluded",
+        "group": "suite-timeouts-removal-preserves-host-budgets",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-088 after inspecting it. The old helper only increased three tmux/sink timeout fields that disappear with the driver. Default substitution preserves every surviving host timeout. Refute the specific changed-budget claim because every field that differed was removed. Checked source/results: [\"1ed482dd diff of crates/farhelm/tests/e2e/harness.rs removes suite_timeouts and floor_suite_timeouts; the complete helper body changes exactly tmux_exchange, tmux_pane_list and sink_ready via max, then returns the structure.\",\"The same deletion and tmux-driver removal discard those fields and call-site substitutions use SupervisorTimeouts::default(). The proposed shortening of a retained host budget has no source mechanism. This does not establish immunity to unrelated machine load; no timing run was performed.\"] Current coverage/results: {\"SPEC.md and SPEC_impl.md\":\"Searched timeout, terminal-host, real-agent and testing terms; no rule accepts shortening host test budgets. Refutation is value preservation, not specification coverage.\",\"TODO.md Planned\":\"25-27 is empty.\",\"plans/queue\":\"tmux-end-old-terminals.md:291-295 explicitly retires tmux/sink fields. No unlanded work is needed to resolve the proposed shortening.\",\"BUGS.md\":\"No timeout-substitution item.\",\"INDEX.md and queue\":\"No suite_timeouts/defaults-equivalence item found; nearby Stop annotation race concerns runtime exit observation, not a timeout floor.\",\"TRIAGE_OUTCOMES.md\":\"No matching timeout-substitution decision.\",\"FILTER.md\":\"Not applied.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing loaded-machine timeout floors might shorten resume, capture and error-attachment test budgets and cause failures. The source refutes that particular shortening; unrelated load failures remain possible. Maintainer test timing only.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-088",
+          "key": "g139/g139-c1",
+          "latest_line": 3,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "suite-timeouts-removal-preserves-host-budgets",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The old helper only increased three tmux/sink timeout fields that disappear with the driver. Default substitution preserves every surviving host timeout.",
+          "checks": [
+            "1ed482dd diff of crates/farhelm/tests/e2e/harness.rs removes suite_timeouts and floor_suite_timeouts; the complete helper body changes exactly tmux_exchange, tmux_pane_list and sink_ready via max, then returns the structure.",
+            "The same deletion and tmux-driver removal discard those fields and call-site substitutions use SupervisorTimeouts::default(). The proposed shortening of a retained host budget has no source mechanism. This does not establish immunity to unrelated machine load; no timing run was performed."
+          ],
+          "coverage_checked": {
+            "SPEC.md and SPEC_impl.md": "Searched timeout, terminal-host, real-agent and testing terms; no rule accepts shortening host test budgets. Refutation is value preservation, not specification coverage.",
+            "TODO.md Planned": "25-27 is empty.",
+            "plans/queue": "tmux-end-old-terminals.md:291-295 explicitly retires tmux/sink fields. No unlanded work is needed to resolve the proposed shortening.",
+            "BUGS.md": "No timeout-substitution item.",
+            "INDEX.md and queue": "No suite_timeouts/defaults-equivalence item found; nearby Stop annotation race concerns runtime exit observation, not a timeout floor.",
+            "TRIAGE_OUTCOMES.md": "No matching timeout-substitution decision.",
+            "FILTER.md": "Not applied."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Removing loaded-machine timeout floors might shorten resume, capture and error-attachment test budgets and cause failures. The source refutes that particular shortening; unrelated load failures remain possible. Maintainer test timing only.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Refute the specific changed-budget claim because every field that differed was removed."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "suite-timeouts-removal-preserves-host-budgets",
+        "destination": null
+      }
+    },
+    {
+      "key": "g139/g139-c2",
+      "owner": "g139",
+      "id": "g139-c2",
+      "domain": "rust-session-agent-regressions",
+      "purpose": "rust-session-agent-regressions: crates/farhelm/tests/e2e/attachment_uploads.rs, crates/farhelm/tests/e2e/hook_identity.rs, crates/farhelm/tests/e2e/marker_model.rs, crates/farhelm/tests/e2e/restart_under_concurrency.rs, crates/farhelm/tests/e2e/restart_with_resume.rs, crates/farhelm/tests/e2e/session_lifecycle.rs, crates/farhelm/tests/e2e/wrapper_launch.rs, crates/farhelm/tests/e2e/boot_id_durable_outcome.rs, crates/farhelm/tests/e2e/codex_identity.rs, crates/farhelm/tests/e2e/launch_sentinel_error_status.rs, crates/farhelm/tests/e2e/real_agent_capture.rs; phases -async fn the_pane_probe_reports_a_spaced_owner_name_whole() {",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "g139-c2",
+            "state": "open",
+            "summary": "Tmux pane-identity and reuse test deletions do not establish a terminal-host regression",
+            "location": "crates/farhelm/tests/e2e/restart_with_resume.rs:697",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: considered whether deleting pane-marker, bystander-pane, renamed-owner, brace-directory and same-pane history tests removes essential protection for the shipped terminal-host implementation. Details: assigned deletions in marker_model.rs (-171...), restart_under_concurrency.rs (-320...), restart_with_resume.rs (-699... and -996...), session_lifecycle.rs (spaced owner and renamed-session Delete), and the refused-Delete upload test all construct tmux through the removed test-only creation path. SPEC_impl.md:2015ff and :2288ff require every new terminal to be a host, a host restart to allocate a fresh host, and old tmux sessions to migrate rather than respawn. The same-pane marker/reuse invariants and nested tmux brace parser therefore have no host equivalent. Existing host_relaunches.rs:491-575 directly checks retained history, absence of old visible screen, default modes, fresh socket, generation and old-host cleanup; restart_with_resume.rs:763-829 retains restart reaping of a reparented daemon. The old tmux adoption path still exists at this intermediate revision, so its test loss is real as temporary coverage loss; this record does not assert adoption itself has stopped. Direct mutations used by renamed-pane tests are outside the supported contract: SPEC_impl.md:3009ff says 'Direct interaction with it, by the user or by a program running in a session, is unsupported' and 'does not track, reap, or restore windows, panes, or configuration created or changed that way.' Suggested bucket: other if reported as coverage, not a runtime defect. Confidence: confirmed source analysis. proposed_drop: no distinct host defect or retained same-pane contract shown; tmux-specific checks retire with the test-only creation surface, and history/process cleanup have host coverage. The separate retained upload-priority contract is recorded as g139-l1, rather than dropped with these tests. possible_cover: none searched. Could-be-highest: no established product security or work-loss route; this consideration concerns removal of tests, not evidence of unsafe production ownership. Caveat: a fresh source finding in retained old-session adoption would require separate evaluation; no claim that unsupported tampering permits unsafe kills is made here."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "g139-c2",
+            "state": "open",
+            "summary": "Tmux pane-identity and reuse test deletions do not establish a terminal-host regression",
+            "location": "crates/farhelm/tests/e2e/restart_with_resume.rs:697",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: considered whether deleting pane-marker, bystander-pane, renamed-owner, brace-directory and same-pane history tests removes essential protection for the shipped terminal-host implementation. Details: assigned deletions in marker_model.rs (-171...), restart_under_concurrency.rs (-320...), restart_with_resume.rs (-699... and -996...), session_lifecycle.rs (spaced owner and renamed-session Delete), and the refused-Delete upload test all construct tmux through the removed test-only creation path. SPEC_impl.md:2015ff and :2288ff require every new terminal to be a host, a host restart to allocate a fresh host, and old tmux sessions to migrate rather than respawn. The same-pane marker/reuse invariants and nested tmux brace parser therefore have no host equivalent. Existing host_relaunches.rs:491-575 directly checks retained history, absence of old visible screen, default modes, fresh socket, generation and old-host cleanup; restart_with_resume.rs:763-829 retains restart reaping of a reparented daemon. The old tmux adoption path still exists at this intermediate revision, so its test loss is real as temporary coverage loss; this record does not assert adoption itself has stopped. Direct mutations used by renamed-pane tests are outside the supported contract: SPEC_impl.md:3009ff says 'Direct interaction with it, by the user or by a program running in a session, is unsupported' and 'does not track, reap, or restore windows, panes, or configuration created or changed that way.' Suggested bucket: other if reported as coverage, not a runtime defect. Confidence: confirmed source analysis. proposed_drop: no distinct host defect or retained same-pane contract shown; tmux-specific checks retire with the test-only creation surface, and history/process cleanup have host coverage. The separate retained upload-priority contract is recorded as g139-l1, rather than dropped with these tests. possible_cover: none searched. Could-be-highest: no established product security or work-loss route; this consideration concerns removal of tests, not evidence of unsafe production ownership. Caveat: a fresh source finding in retained old-session adoption would require separate evaluation; no claim that unsupported tampering permits unsafe kills is made here. Discovery-pass check of an additional deletion consequence: investigated whether removing restarting_a_live_session_stops_its_tree_and_reuses_the_terminal also loses the independent live-descendant reap or successful annotation-clear oracle. At the SAME reviewed revision, host_terminals.rs:333-422 already contains restart_of_a_host_agent_stops_its_tree_before_a_new_host_starts: it installs a real host child plus unmarked hangup-immune grandchild, observes both alive, and a wrapper at the actual replacement host start records both gone; it then asserts a distinct host, resumed-ready marker, old host death and Running outcome. This discriminates the live-rooted-tree ordering beyond the retained self-exited-daemon test cited earlier. restart_under_concurrency.rs:482-545 separately stops a ready generation, requires its annotation, restarts and asserts the new generation has none, then releases its next natural exit and asserts no annotation. This source evidence refutes a separate loss of these oracles; the same-pane identity remains intentionally obsolete. Through-tip search located the same live-tree test, not a late replacement. Original candidate consequence, bucket other, no product/highest route, proposed-drop bases and no-execution caveat remain unchanged. No new issue or open lead from this check."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "g139-c2",
+            "state": "open",
+            "summary": "Recheck retained upload-survival oracle separately from retired tmux fixture",
+            "location": "crates/farhelm/tests/e2e/restart_with_resume.rs:697",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: considered whether deleting pane-marker, bystander-pane, renamed-owner, brace-directory and same-pane history tests removes essential protection for the shipped terminal-host implementation. Details: assigned deletions in marker_model.rs (-171...), restart_under_concurrency.rs (-320...), restart_with_resume.rs (-699... and -996...), session_lifecycle.rs (spaced owner and renamed-session Delete), and the refused-Delete upload test all construct tmux through the removed test-only creation path. SPEC_impl.md:2015ff and :2288ff require every new terminal to be a host, a host restart to allocate a fresh host, and old tmux sessions to migrate rather than respawn. The same-pane marker/reuse invariants and nested tmux brace parser therefore have no host equivalent. Existing host_relaunches.rs:491-575 directly checks retained history, absence of old visible screen, default modes, fresh socket, generation and old-host cleanup; restart_with_resume.rs:763-829 retains restart reaping of a reparented daemon. The old tmux adoption path still exists at this intermediate revision, so its test loss is real as temporary coverage loss; this record does not assert adoption itself has stopped. Direct mutations used by renamed-pane tests are outside the supported contract: SPEC_impl.md:3009ff says 'Direct interaction with it, by the user or by a program running in a session, is unsupported' and 'does not track, reap, or restore windows, panes, or configuration created or changed that way.' Suggested bucket: other if reported as coverage, not a runtime defect. Confidence: confirmed source analysis. proposed_drop: no distinct host defect or retained same-pane contract shown; tmux-specific checks retire with the test-only creation surface, and history/process cleanup have host coverage. The separate retained upload-priority contract is recorded as g139-l1, rather than dropped with these tests. possible_cover: none searched. Could-be-highest: no established product security or work-loss route; this consideration concerns removal of tests, not evidence of unsafe production ownership. Caveat: a fresh source finding in retained old-session adoption would require separate evaluation; no claim that unsupported tampering permits unsafe kills is made here. Discovery-pass check of an additional deletion consequence: investigated whether removing restarting_a_live_session_stops_its_tree_and_reuses_the_terminal also loses the independent live-descendant reap or successful annotation-clear oracle. At the SAME reviewed revision, host_terminals.rs:333-422 already contains restart_of_a_host_agent_stops_its_tree_before_a_new_host_starts: it installs a real host child plus unmarked hangup-immune grandchild, observes both alive, and a wrapper at the actual replacement host start records both gone; it then asserts a distinct host, resumed-ready marker, old host death and Running outcome. This discriminates the live-rooted-tree ordering beyond the retained self-exited-daemon test cited earlier. restart_under_concurrency.rs:482-545 separately stops a ready generation, requires its annotation, restarts and asserts the new generation has none, then releases its next natural exit and asserts no annotation. This source evidence refutes a separate loss of these oracles; the same-pane identity remains intentionally obsolete. Through-tip search located the same live-tree test, not a late replacement. Original candidate consequence, bucket other, no product/highest route, proposed-drop bases and no-execution caveat remain unchanged. No new issue or open lead from this check. Discovery reopens ONLY the refused-Delete upload part of this grouped candidate: the removed a_refused_delete_preserves_an_in_flight_upload used a renamed tmux pane to trigger a read-only preflight, but its upload-survival assertion may remain applicable to a terminal-host Delete preflight refusal. Original disposition grouped that assertion with obsolete pane mechanics; production correctness or unsupported direct tmux mutation alone cannot refute a retained, fixture-independent oracle. Need inspect host preflight ordering, current upload cancellation sites and all remaining refused-Delete/upload tests at the reviewed revision and through tip. Source basis already delivered: assigned 00781 patch lines 9-115 deletes a test that begins/acks a partial upload, provokes preflight refusal, then finishes and publishes the same transfer. Missing premise: whether a supported host refusal still promises no transfer cancellation and has an equivalent distinguishing test. This is an investigated-source lead to pursue now, not an allegation of current cancellation or data loss. All other candidate subcases and their original proposed-drop bases remain preserved above. Provisional bucket other for coverage only; could-be-highest no established shipped route; no execution or reproduction."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "g139-c2",
+            "state": "open",
+            "summary": "Refused Delete loses its in-flight upload preservation oracle",
+            "location": "crates/farhelm/tests/e2e/attachment_uploads.rs:842",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: considered whether deleting pane-marker, bystander-pane, renamed-owner, brace-directory and same-pane history tests removes essential protection for the shipped terminal-host implementation. Details: assigned deletions in marker_model.rs (-171...), restart_under_concurrency.rs (-320...), restart_with_resume.rs (-699... and -996...), session_lifecycle.rs (spaced owner and renamed-session Delete), and the refused-Delete upload test all construct tmux through the removed test-only creation path. SPEC_impl.md:2015ff and :2288ff require every new terminal to be a host, a host restart to allocate a fresh host, and old tmux sessions to migrate rather than respawn. The same-pane marker/reuse invariants and nested tmux brace parser therefore have no host equivalent. Existing host_relaunches.rs:491-575 directly checks retained history, absence of old visible screen, default modes, fresh socket, generation and old-host cleanup; restart_with_resume.rs:763-829 retains restart reaping of a reparented daemon. The old tmux adoption path still exists at this intermediate revision, so its test loss is real as temporary coverage loss; this record does not assert adoption itself has stopped. Direct mutations used by renamed-pane tests are outside the supported contract: SPEC_impl.md:3009ff says 'Direct interaction with it, by the user or by a program running in a session, is unsupported' and 'does not track, reap, or restore windows, panes, or configuration created or changed that way.' Suggested bucket: other if reported as coverage, not a runtime defect. Confidence: confirmed source analysis. proposed_drop: no distinct host defect or retained same-pane contract shown; tmux-specific checks retire with the test-only creation surface, and history/process cleanup have host coverage. The separate retained upload-priority contract is recorded as g139-l1, rather than dropped with these tests. possible_cover: none searched. Could-be-highest: no established product security or work-loss route; this consideration concerns removal of tests, not evidence of unsafe production ownership. Caveat: a fresh source finding in retained old-session adoption would require separate evaluation; no claim that unsupported tampering permits unsafe kills is made here. Discovery-pass check of an additional deletion consequence: investigated whether removing restarting_a_live_session_stops_its_tree_and_reuses_the_terminal also loses the independent live-descendant reap or successful annotation-clear oracle. At the SAME reviewed revision, host_terminals.rs:333-422 already contains restart_of_a_host_agent_stops_its_tree_before_a_new_host_starts: it installs a real host child plus unmarked hangup-immune grandchild, observes both alive, and a wrapper at the actual replacement host start records both gone; it then asserts a distinct host, resumed-ready marker, old host death and Running outcome. This discriminates the live-rooted-tree ordering beyond the retained self-exited-daemon test cited earlier. restart_under_concurrency.rs:482-545 separately stops a ready generation, requires its annotation, restarts and asserts the new generation has none, then releases its next natural exit and asserts no annotation. This source evidence refutes a separate loss of these oracles; the same-pane identity remains intentionally obsolete. Through-tip search located the same live-tree test, not a late replacement. Original candidate consequence, bucket other, no product/highest route, proposed-drop bases and no-execution caveat remain unchanged. No new issue or open lead from this check. Discovery reopens ONLY the refused-Delete upload part of this grouped candidate: the removed a_refused_delete_preserves_an_in_flight_upload used a renamed tmux pane to trigger a read-only preflight, but its upload-survival assertion may remain applicable to a terminal-host Delete preflight refusal. Original disposition grouped that assertion with obsolete pane mechanics; production correctness or unsupported direct tmux mutation alone cannot refute a retained, fixture-independent oracle. Need inspect host preflight ordering, current upload cancellation sites and all remaining refused-Delete/upload tests at the reviewed revision and through tip. Source basis already delivered: assigned 00781 patch lines 9-115 deletes a test that begins/acks a partial upload, provokes preflight refusal, then finishes and publishes the same transfer. Missing premise: whether a supported host refusal still promises no transfer cancellation and has an equivalent distinguishing test. This is an investigated-source lead to pursue now, not an allegation of current cancellation or data loss. All other candidate subcases and their original proposed-drop bases remain preserved above. Provisional bucket other for coverage only; could-be-highest no established shipped route; no execution or reproduction. Discovery source result: the upload-survival concern is valid independently of tmux and is retained as a distinct test-only finding under this original ID. Reviewed teardown.rs:655-668 explicitly promises that a refused read-only preflight leaves the transfer and staged bytes available, cancelling only in finish_teardown after prepare_teardown succeeds. At pinned tip this remains teardown.rs:277-285 and :505-518, with host roots/record discovery and scope enumeration named as preflights. The remaining a_successful_delete_cancels_an_in_flight_upload_before_removal at attachment_uploads.rs:845-897 starts and acknowledges a transfer, then only exercises successful Delete and requires UploadAborted; it cannot catch cancellation moved ahead of a refusal. The host refusal fixture a_stopped_recorded_host_is_guarded_and_then_signalled (tip host_terminals.rs:788-824) checks the host remains stopped, then performs unconditional Delete, but contains no in-flight transfer or subsequent successful publication. The removed test uniquely combined an actual refusal with continuation/commit of the SAME acknowledged partial upload. This confirms a retained contract and a removed discriminating witness, not a current cancellation bug. Earlier c2 proposed drop for this upload-survival subcase is superseded; other pane-specific subcase drops and all their original bases remain above. Suggested bucket other; confidence confirmed by source for deletion and retained host contract, with final through-tip equivalent-test checks continuing next. proposed_drop:false for upload-survival finding. possible_cover:none known in supplied neighbours (their replay, raw-input, migration and cleanup findings are distinct). Could-be-highest:no; only regression protection loss is established, with no current work-loss or security route alleged. No runtime tests, reproductions or live actions."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "g139-c2",
+            "state": "open",
+            "summary": "Refused Delete loses its in-flight upload preservation oracle",
+            "location": "crates/farhelm/tests/e2e/attachment_uploads.rs:842",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: considered whether deleting pane-marker, bystander-pane, renamed-owner, brace-directory and same-pane history tests removes essential protection for the shipped terminal-host implementation. Details: assigned deletions in marker_model.rs (-171...), restart_under_concurrency.rs (-320...), restart_with_resume.rs (-699... and -996...), session_lifecycle.rs (spaced owner and renamed-session Delete), and the refused-Delete upload test all construct tmux through the removed test-only creation path. SPEC_impl.md:2015ff and :2288ff require every new terminal to be a host, a host restart to allocate a fresh host, and old tmux sessions to migrate rather than respawn. The same-pane marker/reuse invariants and nested tmux brace parser therefore have no host equivalent. Existing host_relaunches.rs:491-575 directly checks retained history, absence of old visible screen, default modes, fresh socket, generation and old-host cleanup; restart_with_resume.rs:763-829 retains restart reaping of a reparented daemon. The old tmux adoption path still exists at this intermediate revision, so its test loss is real as temporary coverage loss; this record does not assert adoption itself has stopped. Direct mutations used by renamed-pane tests are outside the supported contract: SPEC_impl.md:3009ff says 'Direct interaction with it, by the user or by a program running in a session, is unsupported' and 'does not track, reap, or restore windows, panes, or configuration created or changed that way.' Suggested bucket: other if reported as coverage, not a runtime defect. Confidence: confirmed source analysis. proposed_drop: no distinct host defect or retained same-pane contract shown; tmux-specific checks retire with the test-only creation surface, and history/process cleanup have host coverage. The separate retained upload-priority contract is recorded as g139-l1, rather than dropped with these tests. possible_cover: none searched. Could-be-highest: no established product security or work-loss route; this consideration concerns removal of tests, not evidence of unsafe production ownership. Caveat: a fresh source finding in retained old-session adoption would require separate evaluation; no claim that unsupported tampering permits unsafe kills is made here. Discovery-pass check of an additional deletion consequence: investigated whether removing restarting_a_live_session_stops_its_tree_and_reuses_the_terminal also loses the independent live-descendant reap or successful annotation-clear oracle. At the SAME reviewed revision, host_terminals.rs:333-422 already contains restart_of_a_host_agent_stops_its_tree_before_a_new_host_starts: it installs a real host child plus unmarked hangup-immune grandchild, observes both alive, and a wrapper at the actual replacement host start records both gone; it then asserts a distinct host, resumed-ready marker, old host death and Running outcome. This discriminates the live-rooted-tree ordering beyond the retained self-exited-daemon test cited earlier. restart_under_concurrency.rs:482-545 separately stops a ready generation, requires its annotation, restarts and asserts the new generation has none, then releases its next natural exit and asserts no annotation. This source evidence refutes a separate loss of these oracles; the same-pane identity remains intentionally obsolete. Through-tip search located the same live-tree test, not a late replacement. Original candidate consequence, bucket other, no product/highest route, proposed-drop bases and no-execution caveat remain unchanged. No new issue or open lead from this check. Discovery reopens ONLY the refused-Delete upload part of this grouped candidate: the removed a_refused_delete_preserves_an_in_flight_upload used a renamed tmux pane to trigger a read-only preflight, but its upload-survival assertion may remain applicable to a terminal-host Delete preflight refusal. Original disposition grouped that assertion with obsolete pane mechanics; production correctness or unsupported direct tmux mutation alone cannot refute a retained, fixture-independent oracle. Need inspect host preflight ordering, current upload cancellation sites and all remaining refused-Delete/upload tests at the reviewed revision and through tip. Source basis already delivered: assigned 00781 patch lines 9-115 deletes a test that begins/acks a partial upload, provokes preflight refusal, then finishes and publishes the same transfer. Missing premise: whether a supported host refusal still promises no transfer cancellation and has an equivalent distinguishing test. This is an investigated-source lead to pursue now, not an allegation of current cancellation or data loss. All other candidate subcases and their original proposed-drop bases remain preserved above. Provisional bucket other for coverage only; could-be-highest no established shipped route; no execution or reproduction. Discovery source result: the upload-survival concern is valid independently of tmux and is retained as a distinct test-only finding under this original ID. Reviewed teardown.rs:655-668 explicitly promises that a refused read-only preflight leaves the transfer and staged bytes available, cancelling only in finish_teardown after prepare_teardown succeeds. At pinned tip this remains teardown.rs:277-285 and :505-518, with host roots/record discovery and scope enumeration named as preflights. The remaining a_successful_delete_cancels_an_in_flight_upload_before_removal at attachment_uploads.rs:845-897 starts and acknowledges a transfer, then only exercises successful Delete and requires UploadAborted; it cannot catch cancellation moved ahead of a refusal. The host refusal fixture a_stopped_recorded_host_is_guarded_and_then_signalled (tip host_terminals.rs:788-824) checks the host remains stopped, then performs unconditional Delete, but contains no in-flight transfer or subsequent successful publication. The removed test uniquely combined an actual refusal with continuation/commit of the SAME acknowledged partial upload. This confirms a retained contract and a removed discriminating witness, not a current cancellation bug. Earlier c2 proposed drop for this upload-survival subcase is superseded; other pane-specific subcase drops and all their original bases remain above. Suggested bucket other; confidence confirmed by source for deletion and retained host contract, with final through-tip equivalent-test checks continuing next. proposed_drop:false for upload-survival finding. possible_cover:none known in supplied neighbours (their replay, raw-input, migration and cleanup findings are distinct). Could-be-highest:no; only regression protection loss is established, with no current work-loss or security route alleged. No runtime tests, reproductions or live actions. Final replacement and attribution checks: git log over the WHOLE exclusive-base-to-inclusive-tip range for attachment_uploads.rs reports only the reviewed deletion and f560058da19e02716e6f943883a9508b447aff4e, whose file diff removes only Attach.grid. No later replacement was added in this file. Pinned searches for BeginUpload/run_upload/UploadHandle/UploadSignal/abort_session_uploads across core tests, host refusal tests, teardown and browser tests found no Delete-preflight-plus-live-transfer continuation assertion. handlers.rs:10999-11041 and :11125-11178 were checked because they do exercise real BeginUpload: their conformance cases deliberately hold lifecycle gates, test unrelated request responsiveness, and abort transfers as fixture cleanup; DeleteSession is a separate table case, not a refusal while the same acknowledged upload is completed. attachment_uploads.rs:2130-2170 covers a failed attachment-directory detach only after peer.upload has already committed the attachment; it cannot detect cancellation of an unfinished transfer by an earlier preflight. Other upload cancellation unit tests inject UploadSignal directly and do not dispatch a failing Delete preflight. Thus no equivalent discriminating oracle was found through pinned tip. Suggested fix: retain the partial-upload/ack, refused read-only preflight, then same-transfer completion/publication test sequence using a host-supported preflight refusal (for example a conflicting/malformed recorded-host fixture), rather than retaining tmux rename mechanics. Final confidence confirmed source-only coverage loss; proposed_drop:false for this upload-survival defect, bucket other. Current prepare/finish ordering is correct and is not a test substitute. All readily checkable premises settled; no remaining open lead for g139-c2. This discovery changes an earlier candidate to one retained finding under the same ID; it does not revive the refuted same-pane/tree/annotation subcases, whose original consequences and proposed-drop bases remain in this detail/history."
+          }
+        }
+      ],
+      "latest": {
+        "line": 12,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "g139-c2",
+          "state": "open",
+          "summary": "Refused Delete loses its in-flight upload preservation oracle",
+          "location": "crates/farhelm/tests/e2e/attachment_uploads.rs:842",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: considered whether deleting pane-marker, bystander-pane, renamed-owner, brace-directory and same-pane history tests removes essential protection for the shipped terminal-host implementation. Details: assigned deletions in marker_model.rs (-171...), restart_under_concurrency.rs (-320...), restart_with_resume.rs (-699... and -996...), session_lifecycle.rs (spaced owner and renamed-session Delete), and the refused-Delete upload test all construct tmux through the removed test-only creation path. SPEC_impl.md:2015ff and :2288ff require every new terminal to be a host, a host restart to allocate a fresh host, and old tmux sessions to migrate rather than respawn. The same-pane marker/reuse invariants and nested tmux brace parser therefore have no host equivalent. Existing host_relaunches.rs:491-575 directly checks retained history, absence of old visible screen, default modes, fresh socket, generation and old-host cleanup; restart_with_resume.rs:763-829 retains restart reaping of a reparented daemon. The old tmux adoption path still exists at this intermediate revision, so its test loss is real as temporary coverage loss; this record does not assert adoption itself has stopped. Direct mutations used by renamed-pane tests are outside the supported contract: SPEC_impl.md:3009ff says 'Direct interaction with it, by the user or by a program running in a session, is unsupported' and 'does not track, reap, or restore windows, panes, or configuration created or changed that way.' Suggested bucket: other if reported as coverage, not a runtime defect. Confidence: confirmed source analysis. proposed_drop: no distinct host defect or retained same-pane contract shown; tmux-specific checks retire with the test-only creation surface, and history/process cleanup have host coverage. The separate retained upload-priority contract is recorded as g139-l1, rather than dropped with these tests. possible_cover: none searched. Could-be-highest: no established product security or work-loss route; this consideration concerns removal of tests, not evidence of unsafe production ownership. Caveat: a fresh source finding in retained old-session adoption would require separate evaluation; no claim that unsupported tampering permits unsafe kills is made here. Discovery-pass check of an additional deletion consequence: investigated whether removing restarting_a_live_session_stops_its_tree_and_reuses_the_terminal also loses the independent live-descendant reap or successful annotation-clear oracle. At the SAME reviewed revision, host_terminals.rs:333-422 already contains restart_of_a_host_agent_stops_its_tree_before_a_new_host_starts: it installs a real host child plus unmarked hangup-immune grandchild, observes both alive, and a wrapper at the actual replacement host start records both gone; it then asserts a distinct host, resumed-ready marker, old host death and Running outcome. This discriminates the live-rooted-tree ordering beyond the retained self-exited-daemon test cited earlier. restart_under_concurrency.rs:482-545 separately stops a ready generation, requires its annotation, restarts and asserts the new generation has none, then releases its next natural exit and asserts no annotation. This source evidence refutes a separate loss of these oracles; the same-pane identity remains intentionally obsolete. Through-tip search located the same live-tree test, not a late replacement. Original candidate consequence, bucket other, no product/highest route, proposed-drop bases and no-execution caveat remain unchanged. No new issue or open lead from this check. Discovery reopens ONLY the refused-Delete upload part of this grouped candidate: the removed a_refused_delete_preserves_an_in_flight_upload used a renamed tmux pane to trigger a read-only preflight, but its upload-survival assertion may remain applicable to a terminal-host Delete preflight refusal. Original disposition grouped that assertion with obsolete pane mechanics; production correctness or unsupported direct tmux mutation alone cannot refute a retained, fixture-independent oracle. Need inspect host preflight ordering, current upload cancellation sites and all remaining refused-Delete/upload tests at the reviewed revision and through tip. Source basis already delivered: assigned 00781 patch lines 9-115 deletes a test that begins/acks a partial upload, provokes preflight refusal, then finishes and publishes the same transfer. Missing premise: whether a supported host refusal still promises no transfer cancellation and has an equivalent distinguishing test. This is an investigated-source lead to pursue now, not an allegation of current cancellation or data loss. All other candidate subcases and their original proposed-drop bases remain preserved above. Provisional bucket other for coverage only; could-be-highest no established shipped route; no execution or reproduction. Discovery source result: the upload-survival concern is valid independently of tmux and is retained as a distinct test-only finding under this original ID. Reviewed teardown.rs:655-668 explicitly promises that a refused read-only preflight leaves the transfer and staged bytes available, cancelling only in finish_teardown after prepare_teardown succeeds. At pinned tip this remains teardown.rs:277-285 and :505-518, with host roots/record discovery and scope enumeration named as preflights. The remaining a_successful_delete_cancels_an_in_flight_upload_before_removal at attachment_uploads.rs:845-897 starts and acknowledges a transfer, then only exercises successful Delete and requires UploadAborted; it cannot catch cancellation moved ahead of a refusal. The host refusal fixture a_stopped_recorded_host_is_guarded_and_then_signalled (tip host_terminals.rs:788-824) checks the host remains stopped, then performs unconditional Delete, but contains no in-flight transfer or subsequent successful publication. The removed test uniquely combined an actual refusal with continuation/commit of the SAME acknowledged partial upload. This confirms a retained contract and a removed discriminating witness, not a current cancellation bug. Earlier c2 proposed drop for this upload-survival subcase is superseded; other pane-specific subcase drops and all their original bases remain above. Suggested bucket other; confidence confirmed by source for deletion and retained host contract, with final through-tip equivalent-test checks continuing next. proposed_drop:false for upload-survival finding. possible_cover:none known in supplied neighbours (their replay, raw-input, migration and cleanup findings are distinct). Could-be-highest:no; only regression protection loss is established, with no current work-loss or security route alleged. No runtime tests, reproductions or live actions. Final replacement and attribution checks: git log over the WHOLE exclusive-base-to-inclusive-tip range for attachment_uploads.rs reports only the reviewed deletion and f560058da19e02716e6f943883a9508b447aff4e, whose file diff removes only Attach.grid. No later replacement was added in this file. Pinned searches for BeginUpload/run_upload/UploadHandle/UploadSignal/abort_session_uploads across core tests, host refusal tests, teardown and browser tests found no Delete-preflight-plus-live-transfer continuation assertion. handlers.rs:10999-11041 and :11125-11178 were checked because they do exercise real BeginUpload: their conformance cases deliberately hold lifecycle gates, test unrelated request responsiveness, and abort transfers as fixture cleanup; DeleteSession is a separate table case, not a refusal while the same acknowledged upload is completed. attachment_uploads.rs:2130-2170 covers a failed attachment-directory detach only after peer.upload has already committed the attachment; it cannot detect cancellation of an unfinished transfer by an earlier preflight. Other upload cancellation unit tests inject UploadSignal directly and do not dispatch a failing Delete preflight. Thus no equivalent discriminating oracle was found through pinned tip. Suggested fix: retain the partial-upload/ack, refused read-only preflight, then same-transfer completion/publication test sequence using a host-supported preflight refusal (for example a conflicting/malformed recorded-host fixture), rather than retaining tmux rename mechanics. Final confidence confirmed source-only coverage loss; proposed_drop:false for this upload-survival defect, bucket other. Current prepare/finish ordering is correct and is not a test substitute. All readily checkable premises settled; no remaining open lead for g139-c2. This discovery changes an earlier candidate to one retained finding under the same ID; it does not revive the refuted same-pane/tree/annotation subcases, whose original consequences and proposed-drop bases remain in this detail/history."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g139/findings.jsonl",
+        "id": "g139-c2",
+        "line": 12,
+        "disposition": "under-investigation",
+        "group": "g139-g139-c2",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-088",
+          "key": "g139/g139-c2",
+          "latest_line": 12,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "refused-delete-live-upload-continuation-oracle-removed",
+          "aliases": [],
+          "target_queue_file": "review_feedback_queue/refused-delete-upload-oracle-removed.md",
+          "why": "Retain the upload-survival test deletion separately from the retired pane fixtures. A refused read-only preflight still promises to leave an acknowledged partial upload usable. The successful-Delete test cannot detect cancellation moved before a refusal. Preserve the history of the earlier grouped drop and its supersession for this subcase.",
+          "checks": [
+            "647f0227 attachment_uploads.rs deletion @@ -839,108 +839,6 removes the sequence: begin upload, acknowledge partial bytes, refuse Delete, finish and commit the SAME transfer. The commit explicitly calls out lost refused-Delete upload coverage.",
+            "647f0227:crates/farhelm-supervisor/src/service/teardown.rs:655-668 states that refused read-only preflights preserve transfer/staged bytes; 00de0b6c:teardown.rs:277-285,505-518 retains that contract for host/process/scope preflights and cancels only in finish_teardown.",
+            "00de0b6c:attachment_uploads.rs:845-897 tests successful Delete and UploadAborted, with no refusal or same-transfer continuation. 647f0227:e2e/host_terminals.rs:787-824 refuses a guarded Delete then performs unconditional Delete, without an upload. These do not replace the deleted oracle.",
+            "The focused pinned-tip upload/refusal grep found no equivalent live-transfer continuation test. Supplied histories also identify and exclude handlers.rs responsiveness cases, direct cancellation unit tests and attachment-detach failure after already-completed publication.",
+            "Partial drop checks: 647f0227:e2e/host_terminals.rs:333-422 already witnesses both live child and hangup-immune grandchild gone at replacement-host start. restart_under_concurrency.rs:482-545 already checks Stop annotation then fresh-generation/natural-exit absence. Therefore the alleged independent loss of those exact oracles is refuted. Same-pane identity/reuse belongs to retired tmux mechanics; the intermediate old-adoption coverage caveat remains."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "Attachments 3185-3196 permits partial deletion after an explicitly requested Delete enters destructive work; it does not accept touching a transfer during a refused read-only preflight. No blanket coverage for this test deletion.",
+            "SPEC_impl.md": "Host/restart and testing rules retain host lifecycle coverage; no specification provision accepts removal of the same-transfer-after-refusal check. Source comments state the precise preflight invariant.",
+            "TODO.md Planned": "25-27 is empty.",
+            "plans/queue": "No unlanded same-transfer continuation work found. tmux-end-old-terminals.md:130-134 requires surviving test subjects on hosts; 275-286's optional memory-port exception does not cover refused-Delete uploads. Same-pane mechanics retire with landed terminal removal.",
+            "BUGS.md": "No refused-Delete upload item.",
+            "INDEX.md and matching queue files": "Cancelled final-save reply bookkeeping and provisioning upload-fixture coverage are different. stop-annotation-exit-witness.md is a different immediate-listing race, not absence of fresh-generation annotation assertions. No exact alias among supplied claims; g139-l1 concerns priority scheduling, not teardown preservation.",
+            "TRIAGE_OUTCOMES.md": "1608-1621 concerns cancelled commit waiter bookkeeping and does not cover transfer survival after refused Delete. No matching test-deletion decision found.",
+            "FILTER.md": "No full-boundary match for a removed regression oracle. Unsupported tmux mutation explains retirement of its fixture, not retirement of the retained upload contract."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "A current shipped cancellation or data-loss bug would need cancellation before a refused preflight. Current source ordering is correct; that stronger product route is not alleged. An equivalent unlocated test would narrow the coverage conclusion.",
+          "original_stronger_consequence": "The grouped candidate considered loss of pane ownership, bystander protection, same-pane history/reuse, tree reaping, annotations and refused-Delete upload protection. It originally proposed dropping all as retired tmux mechanics or replacement coverage. Reopening established the independent upload-survival oracle loss and superseded that subcase's drop; tree/annotation refutations and obsolete same-pane limitations remain separate, with no observed unsafe production kill or upload loss.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Retain the upload-survival test-only finding as other. The flag conservatively preserves parent assessment of the grouped ownership/process-protection subcase drops; this consultation does not authorize them. Use a supported host preflight refusal and prove the same acknowledged transfer can still publish."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "refused-delete-live-upload-continuation-oracle-removed",
+        "destination": "trailing-refused-delete-live-upload-continuation-oracle-removed.md"
+      }
+    },
+    {
+      "key": "g139/g139-c3",
+      "owner": "g139",
+      "id": "g139-c3",
+      "domain": "rust-session-agent-regressions",
+      "purpose": "rust-session-agent-regressions: crates/farhelm/tests/e2e/attachment_uploads.rs, crates/farhelm/tests/e2e/hook_identity.rs, crates/farhelm/tests/e2e/marker_model.rs, crates/farhelm/tests/e2e/restart_under_concurrency.rs, crates/farhelm/tests/e2e/restart_with_resume.rs, crates/farhelm/tests/e2e/session_lifecycle.rs, crates/farhelm/tests/e2e/wrapper_launch.rs, crates/farhelm/tests/e2e/boot_id_durable_outcome.rs, crates/farhelm/tests/e2e/codex_identity.rs, crates/farhelm/tests/e2e/launch_sentinel_error_status.rs, crates/farhelm/tests/e2e/real_agent_capture.rs; phases -async fn the_pane_probe_reports_a_spaced_owner_name_whole() {",
+      "history": [
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "g139-c3",
+            "state": "open",
+            "summary": "Shortened reboot-message assertion preserves its specified diagnostic check",
+            "location": "crates/farhelm/tests/e2e/boot_id_durable_outcome.rs:395",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR: considered whether changing the expected substring from 'host rebooted' to 'host reboot' hides a wrong interruption diagnosis. Source refutation: service/terminals.rs:849-875 now explains Interrupted as 'it ended while no supervisor was watching (a host reboot, or an update that ended an old terminal)' and still selects the way forward from RestartOffer; the changed assertion still requires both the reboot cause and 'replace starts it over'. The surrounding test at boot_id_durable_outcome.rs:335-415 independently checks the simulated boot change yields Interrupted, ended sessions retain outcomes and annotations, an attach does not relaunch/change classification, and a nonresumable session is not promised Restart. The commit's SPEC.md changes under Durability and resume explicitly broaden the card wording to a host reboot or an update ending an old terminal. The two updated cross-references resolve to existing tests at core.rs:36839 and core/tests/host_terminals.rs:1832. Suggested bucket: other if real, no established defect. Confidence: confirmed source refutation, no execution. proposed_drop: the assertion adapts to specified shared diagnostic wording while preserving the substantive status and remedy checks; no missing failure route established. possible_cover: none searched. Could-be-highest: no, the suspected issue was diagnostic test specificity only, with no established security or work-loss consequence. Caveat: this does not review startup termination itself, which belongs to the caller's other functional groups."
+          }
+        }
+      ],
+      "latest": {
+        "line": 5,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "g139-c3",
+          "state": "open",
+          "summary": "Shortened reboot-message assertion preserves its specified diagnostic check",
+          "location": "crates/farhelm/tests/e2e/boot_id_durable_outcome.rs:395",
+          "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR: considered whether changing the expected substring from 'host rebooted' to 'host reboot' hides a wrong interruption diagnosis. Source refutation: service/terminals.rs:849-875 now explains Interrupted as 'it ended while no supervisor was watching (a host reboot, or an update that ended an old terminal)' and still selects the way forward from RestartOffer; the changed assertion still requires both the reboot cause and 'replace starts it over'. The surrounding test at boot_id_durable_outcome.rs:335-415 independently checks the simulated boot change yields Interrupted, ended sessions retain outcomes and annotations, an attach does not relaunch/change classification, and a nonresumable session is not promised Restart. The commit's SPEC.md changes under Durability and resume explicitly broaden the card wording to a host reboot or an update ending an old terminal. The two updated cross-references resolve to existing tests at core.rs:36839 and core/tests/host_terminals.rs:1832. Suggested bucket: other if real, no established defect. Confidence: confirmed source refutation, no execution. proposed_drop: the assertion adapts to specified shared diagnostic wording while preserving the substantive status and remedy checks; no missing failure route established. possible_cover: none searched. Could-be-highest: no, the suspected issue was diagnostic test specificity only, with no established security or work-loss consequence. Caveat: this does not review startup termination itself, which belongs to the caller's other functional groups."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g139/findings.jsonl",
+        "id": "g139-c3",
+        "line": 5,
+        "disposition": "excluded",
+        "group": "reboot-diagnostic-substring-shared-interruption-wording",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-088 after inspecting it. The shortened substring matches the specified shared interruption message while preserving reboot cause, remedy and substantive status assertions. No missing diagnostic failure route was established. Refute the claimed oracle weakening for this wording adaptation. Preserve the scope limitation: it does not independently assess startup shutdown correctness. Checked source/results: [\"dbfc6975:crates/farhelm/tests/e2e/boot_id_durable_outcome.rs:335-415 requires Interrupted after simulated boot change, preserves known exits/annotations, checks attach refusal cannot relaunch or change classification, requires host reboot and replace starts it over, and forbids a nonexistent Resume promise.\",\"dbfc6975:crates/farhelm-supervisor/src/service/terminals.rs:849-875 deliberately says a host reboot or an update ended an old terminal and selects remedy from RestartOffer. The old literal host rebooted no longer matches this intended phrasing. No runtime check performed.\"] Current coverage/results: {\"SPEC.md\":\"Durability and resume, current 3504-3519, explicitly requires the interruption card to explain a host reboot or a Farhelm update, and offers only Replace when no conversation can resume.\",\"SPEC_impl.md\":\"Searched boot/interruption and testing sections; no requirement for the old exact grammatical substring or evidence the broader wording abandons diagnosis.\",\"TODO.md Planned\":\"25-27 is empty.\",\"plans/queue\":\"session-action-leftovers.md:20-73 concerns retaining Restart outcomes across a later reboot, not this test diagnostic. No matching unlanded work.\",\"BUGS.md\":\"No reboot-message assertion item.\",\"INDEX.md and queue\":\"Reboot concurrency, retained restart card and Stop annotation matches concern different oracles or product state. No exact rebooted-to-reboot assertion item found.\",\"TRIAGE_OUTCOMES.md\":\"No matching diagnostic-assertion decision found.\",\"FILTER.md\":\"Not applied; this is source refutation, not dismissal of a rare diagnostic defect.\"} Exact cited cover: [\"SPEC.md:3514-3515: explaining that a host reboot or a Farhelm update ended the agent and that it needs an intentional restart.\"] Original stronger consequence and missing premise remain preserved: \"Changing host rebooted to host reboot might hide an incorrect interruption diagnosis. The actual test still checks the diagnosis and remedy under the specified shared wording. Scope is diagnostic test specificity; startup termination and product work loss are not reviewed by this record.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g139/g139-c3",
+        "line": 5,
+        "disposition": "excluded",
+        "group": "reboot-diagnostic-substring-shared-interruption-wording",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-088 after inspecting it. The shortened substring matches the specified shared interruption message while preserving reboot cause, remedy and substantive status assertions. No missing diagnostic failure route was established. Refute the claimed oracle weakening for this wording adaptation. Preserve the scope limitation: it does not independently assess startup shutdown correctness. Checked source/results: [\"dbfc6975:crates/farhelm/tests/e2e/boot_id_durable_outcome.rs:335-415 requires Interrupted after simulated boot change, preserves known exits/annotations, checks attach refusal cannot relaunch or change classification, requires host reboot and replace starts it over, and forbids a nonexistent Resume promise.\",\"dbfc6975:crates/farhelm-supervisor/src/service/terminals.rs:849-875 deliberately says a host reboot or an update ended an old terminal and selects remedy from RestartOffer. The old literal host rebooted no longer matches this intended phrasing. No runtime check performed.\"] Current coverage/results: {\"SPEC.md\":\"Durability and resume, current 3504-3519, explicitly requires the interruption card to explain a host reboot or a Farhelm update, and offers only Replace when no conversation can resume.\",\"SPEC_impl.md\":\"Searched boot/interruption and testing sections; no requirement for the old exact grammatical substring or evidence the broader wording abandons diagnosis.\",\"TODO.md Planned\":\"25-27 is empty.\",\"plans/queue\":\"session-action-leftovers.md:20-73 concerns retaining Restart outcomes across a later reboot, not this test diagnostic. No matching unlanded work.\",\"BUGS.md\":\"No reboot-message assertion item.\",\"INDEX.md and queue\":\"Reboot concurrency, retained restart card and Stop annotation matches concern different oracles or product state. No exact rebooted-to-reboot assertion item found.\",\"TRIAGE_OUTCOMES.md\":\"No matching diagnostic-assertion decision found.\",\"FILTER.md\":\"Not applied; this is source refutation, not dismissal of a rare diagnostic defect.\"} Exact cited cover: [\"SPEC.md:3514-3515: explaining that a host reboot or a Farhelm update ended the agent and that it needs an intentional restart.\"] Original stronger consequence and missing premise remain preserved: \"Changing host rebooted to host reboot might hide an incorrect interruption diagnosis. The actual test still checks the diagnosis and remedy under the specified shared wording. Scope is diagnostic test specificity; startup termination and product work loss are not reviewed by this record.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-088",
+          "key": "g139/g139-c3",
+          "latest_line": 5,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "reboot-diagnostic-substring-shared-interruption-wording",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The shortened substring matches the specified shared interruption message while preserving reboot cause, remedy and substantive status assertions. No missing diagnostic failure route was established.",
+          "checks": [
+            "dbfc6975:crates/farhelm/tests/e2e/boot_id_durable_outcome.rs:335-415 requires Interrupted after simulated boot change, preserves known exits/annotations, checks attach refusal cannot relaunch or change classification, requires host reboot and replace starts it over, and forbids a nonexistent Resume promise.",
+            "dbfc6975:crates/farhelm-supervisor/src/service/terminals.rs:849-875 deliberately says a host reboot or an update ended an old terminal and selects remedy from RestartOffer. The old literal host rebooted no longer matches this intended phrasing. No runtime check performed."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "Durability and resume, current 3504-3519, explicitly requires the interruption card to explain a host reboot or a Farhelm update, and offers only Replace when no conversation can resume.",
+            "SPEC_impl.md": "Searched boot/interruption and testing sections; no requirement for the old exact grammatical substring or evidence the broader wording abandons diagnosis.",
+            "TODO.md Planned": "25-27 is empty.",
+            "plans/queue": "session-action-leftovers.md:20-73 concerns retaining Restart outcomes across a later reboot, not this test diagnostic. No matching unlanded work.",
+            "BUGS.md": "No reboot-message assertion item.",
+            "INDEX.md and queue": "Reboot concurrency, retained restart card and Stop annotation matches concern different oracles or product state. No exact rebooted-to-reboot assertion item found.",
+            "TRIAGE_OUTCOMES.md": "No matching diagnostic-assertion decision found.",
+            "FILTER.md": "Not applied; this is source refutation, not dismissal of a rare diagnostic defect."
+          },
+          "exact_cover_quotes": [
+            "SPEC.md:3514-3515: explaining that a host reboot or a Farhelm update ended the agent and that it needs an intentional restart."
+          ],
+          "missing_premise": null,
+          "original_stronger_consequence": "Changing host rebooted to host reboot might hide an incorrect interruption diagnosis. The actual test still checks the diagnosis and remedy under the specified shared wording. Scope is diagnostic test specificity; startup termination and product work loss are not reviewed by this record.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Refute the claimed oracle weakening for this wording adaptation. Preserve the scope limitation: it does not independently assess startup shutdown correctness."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "reboot-diagnostic-substring-shared-interruption-wording",
+        "destination": null
+      }
+    },
+    {
+      "key": "g139/g139-c4",
+      "owner": "g139",
+      "id": "g139-c4",
+      "domain": "rust-session-agent-regressions",
+      "purpose": "rust-session-agent-regressions: crates/farhelm/tests/e2e/attachment_uploads.rs, crates/farhelm/tests/e2e/hook_identity.rs, crates/farhelm/tests/e2e/marker_model.rs, crates/farhelm/tests/e2e/restart_under_concurrency.rs, crates/farhelm/tests/e2e/restart_with_resume.rs, crates/farhelm/tests/e2e/session_lifecycle.rs, crates/farhelm/tests/e2e/wrapper_launch.rs, crates/farhelm/tests/e2e/boot_id_durable_outcome.rs, crates/farhelm/tests/e2e/codex_identity.rs, crates/farhelm/tests/e2e/launch_sentinel_error_status.rs, crates/farhelm/tests/e2e/real_agent_capture.rs; phases -async fn the_pane_probe_reports_a_spaced_owner_name_whole() {",
+      "history": [
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "g139-c4",
+            "state": "open",
+            "summary": "Wrapper test's obsolete Resume-arm phrase predates the whole range",
+            "location": "crates/farhelm/tests/e2e/wrapper_launch.rs:474",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513; full-range attribution checked against exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a and inclusive tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: considered a misleading explanation directing maintainers to relaunch_argv's Resume arm, even though that helper already has only the resume path. Source checks: reviewed wrapper_launch.rs:471-481 changes only the shared fill owner's name from spawn_agent to prepare_launch and retains the older arm wording. The actual prepare_launch exists and performs cwd filling, so the changed owner pointer is accurate. relaunch_argv at reviewed core.rs:3816-3852 reads the filled durable resume argv and checks availability/executable shape, with no Resume arm. Crucially the exclusive base wrapper_launch.rs:471-481 already has the identical obsolete arm phrase, and base core.rs:3906-3942 has the identical single-path helper. Both the description discrepancy and its source premise therefore predate the entire review range, not merely this assigned patch. Suggested bucket: other if independently addressed as documentation cleanup; no new in-range defect established. Confidence: confirmed source attribution/refutation, no execution. proposed_drop: out-of-range attribution of this exact unchanged phrase; do not treat correct production behavior as refuting documentation drift, and do not broaden this review to repair it. possible_cover: none known or searched. Could-be-highest: no; suspected consequence is maintainer-navigation confusion, with no security/work-loss route. Caveats: the stale phrase persists at tip but the assigned function-name update is correct; no runtime failure or lost test oracle alleged. No open lead remains."
+          }
+        }
+      ],
+      "latest": {
+        "line": 13,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "g139-c4",
+          "state": "open",
+          "summary": "Wrapper test's obsolete Resume-arm phrase predates the whole range",
+          "location": "crates/farhelm/tests/e2e/wrapper_launch.rs:474",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513; full-range attribution checked against exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a and inclusive tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: considered a misleading explanation directing maintainers to relaunch_argv's Resume arm, even though that helper already has only the resume path. Source checks: reviewed wrapper_launch.rs:471-481 changes only the shared fill owner's name from spawn_agent to prepare_launch and retains the older arm wording. The actual prepare_launch exists and performs cwd filling, so the changed owner pointer is accurate. relaunch_argv at reviewed core.rs:3816-3852 reads the filled durable resume argv and checks availability/executable shape, with no Resume arm. Crucially the exclusive base wrapper_launch.rs:471-481 already has the identical obsolete arm phrase, and base core.rs:3906-3942 has the identical single-path helper. Both the description discrepancy and its source premise therefore predate the entire review range, not merely this assigned patch. Suggested bucket: other if independently addressed as documentation cleanup; no new in-range defect established. Confidence: confirmed source attribution/refutation, no execution. proposed_drop: out-of-range attribution of this exact unchanged phrase; do not treat correct production behavior as refuting documentation drift, and do not broaden this review to repair it. possible_cover: none known or searched. Could-be-highest: no; suspected consequence is maintainer-navigation confusion, with no security/work-loss route. Caveats: the stale phrase persists at tip but the assigned function-name update is correct; no runtime failure or lost test oracle alleged. No open lead remains."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g139/findings.jsonl",
+        "id": "g139-c4",
+        "line": 13,
+        "disposition": "excluded",
+        "group": "wrapper-resume-doc-obsolete-arm",
+        "reason": "Parent explicitly accepted named out-of-range proposal from claims-089 after inspecting it. The obsolete Resume-arm explanation is real documentation drift, but both the phrase and the single-path helper already exist at the exclusive base. The in-range owner-name edit is accurate. Exclude this exact unchanged documentation defect from the specified exclusive-base review range. Checked source/results: [\"6e423e30068b62c6cfa276c6d720ee35bb70387a:crates/farhelm/tests/e2e/wrapper_launch.rs:471-481 already says relaunch_argv's Resume arm; 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 at the same lines preserves it and changes spawn_agent to prepare_launch.\",\"Base:crates/farhelm-supervisor/src/service/core.rs:3906-3942 and reviewed 647f0227:3816-3852 both contain the same single resume-argv path, with no Resume arm. This is attribution, not a claim that correct production behavior refutes a comment defect.\"] Current coverage/results: {\"SPEC.md/SPEC_impl.md\":\"Searched resume/relaunch/wrapper and terminal sections; no accepted obsolete navigation explanation.\",\"TODO.md Planned\":\"Empty bucket at lines 25-26.\",\"plans/queue\":\"Searched actual phrase, helper and wrapper-test terms; no unlanded exact fix found.\",\"BUGS.md\":\"Only retained SSH-transfer hang; unrelated.\",\"INDEX.md and matching queue files\":\"Read index; searched Resume arm/relaunch_argv/wrapper test. No exact item.\",\"TRIAGE_OUTCOMES.md\":\"Searched resume/wrapper and exact helper terms; no same finding.\",\"FILTER.md\":\"No filter needed: exact defect predates range.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Misleading maintainer navigation to a nonexistent Resume arm. No runtime, oracle-loss, security or user-work-loss consequence was alleged; stale wording persists but predates the entire range.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g139/g139-c4",
+        "line": 13,
+        "disposition": "excluded",
+        "group": "wrapper-resume-doc-obsolete-arm",
+        "bucket": "other",
+        "recording": "out-of-range",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named out-of-range proposal from claims-089 after inspecting it. The obsolete Resume-arm explanation is real documentation drift, but both the phrase and the single-path helper already exist at the exclusive base. The in-range owner-name edit is accurate. Exclude this exact unchanged documentation defect from the specified exclusive-base review range. Checked source/results: [\"6e423e30068b62c6cfa276c6d720ee35bb70387a:crates/farhelm/tests/e2e/wrapper_launch.rs:471-481 already says relaunch_argv's Resume arm; 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 at the same lines preserves it and changes spawn_agent to prepare_launch.\",\"Base:crates/farhelm-supervisor/src/service/core.rs:3906-3942 and reviewed 647f0227:3816-3852 both contain the same single resume-argv path, with no Resume arm. This is attribution, not a claim that correct production behavior refutes a comment defect.\"] Current coverage/results: {\"SPEC.md/SPEC_impl.md\":\"Searched resume/relaunch/wrapper and terminal sections; no accepted obsolete navigation explanation.\",\"TODO.md Planned\":\"Empty bucket at lines 25-26.\",\"plans/queue\":\"Searched actual phrase, helper and wrapper-test terms; no unlanded exact fix found.\",\"BUGS.md\":\"Only retained SSH-transfer hang; unrelated.\",\"INDEX.md and matching queue files\":\"Read index; searched Resume arm/relaunch_argv/wrapper test. No exact item.\",\"TRIAGE_OUTCOMES.md\":\"Searched resume/wrapper and exact helper terms; no same finding.\",\"FILTER.md\":\"No filter needed: exact defect predates range.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Misleading maintainer navigation to a nonexistent Resume arm. No runtime, oracle-loss, security or user-work-loss consequence was alleged; stale wording persists but predates the entire range.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-089",
+          "key": "g139/g139-c4",
+          "latest_line": 13,
+          "recommendation": "out-of-range",
+          "bucket": "other",
+          "underlying_key": "wrapper-resume-doc-obsolete-arm",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The obsolete Resume-arm explanation is real documentation drift, but both the phrase and the single-path helper already exist at the exclusive base. The in-range owner-name edit is accurate.",
+          "checks": [
+            "6e423e30068b62c6cfa276c6d720ee35bb70387a:crates/farhelm/tests/e2e/wrapper_launch.rs:471-481 already says relaunch_argv's Resume arm; 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 at the same lines preserves it and changes spawn_agent to prepare_launch.",
+            "Base:crates/farhelm-supervisor/src/service/core.rs:3906-3942 and reviewed 647f0227:3816-3852 both contain the same single resume-argv path, with no Resume arm. This is attribution, not a claim that correct production behavior refutes a comment defect."
+          ],
+          "coverage_checked": {
+            "SPEC.md/SPEC_impl.md": "Searched resume/relaunch/wrapper and terminal sections; no accepted obsolete navigation explanation.",
+            "TODO.md Planned": "Empty bucket at lines 25-26.",
+            "plans/queue": "Searched actual phrase, helper and wrapper-test terms; no unlanded exact fix found.",
+            "BUGS.md": "Only retained SSH-transfer hang; unrelated.",
+            "INDEX.md and matching queue files": "Read index; searched Resume arm/relaunch_argv/wrapper test. No exact item.",
+            "TRIAGE_OUTCOMES.md": "Searched resume/wrapper and exact helper terms; no same finding.",
+            "FILTER.md": "No filter needed: exact defect predates range."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Misleading maintainer navigation to a nonexistent Resume arm. No runtime, oracle-loss, security or user-work-loss consequence was alleged; stale wording persists but predates the entire range.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Exclude this exact unchanged documentation defect from the specified exclusive-base review range."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "wrapper-resume-doc-obsolete-arm",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete: all 1,449 assigned patch lines reviewed; no unread scope.\n\nRecorded one `other` finding, `g139-l1`: upload-priority regression coverage was removed despite the retained contract. Three rejected candidates are documented. No open leads.\n\nFindings and progress logs are updated. Source analysis only; no tests or reproductions run."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised `g139-l1`: traced acknowledgement routing and writer selection, and found no equivalent ordering test through the pinned tip. It remains an `other` test-coverage finding; no current upload failure is established.\n\nNo new findings. Unresolved lead IDs: none."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery found one additional verified defect: `g139-c2` now records lost coverage for preserving an in-flight upload after a refused Delete preflight.\n\nChecked replacement tests and full-range history through the pinned tip; no equivalent oracle found. Current implementation preserves the upload.\n\nNew unverified IDs: none. Open leads: none. Logs and discovery count updated. No runtime execution."
+    },
+    {
+      "turn": 4,
+      "reply": "Nothing new reportable found.\n\nChecked helper teardown, input acknowledgements, timeout substitutions, reboot-test references and wrapper documentation. Recorded `g139-c4` as an out-of-range wording candidate.\n\nNew verified findings: none. New unverified findings: none. Open leads: none. Discovery count updated to 2; no runtime execution."
+    }
+  ],
+  "progress": "Group: g139 / rust-session-agent-regressions\nTurn: 1, initial review completed; discovery-pass count: 0 (no later synthesis/discovery protocol run).\n\nCoverage: read brief fully and complete inventory commits field only. All 12 assigned patch sources, all 1,449 assigned lines, delivered using absolute evidence read commands in separate bounded packets. Unread assigned scope: none. Reviewed patches at 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513, dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 and 1ed482dde220452e424973faf38a5e1318986333, including intermediate deletions.\n\nNew verified record: g139-l1, revised from lead to finding, bucket other: loss of upload-acknowledgement priority regression coverage. This establishes a test gap, not an observed/current production ordering failure. Production priority sender/selection still appear correct from source.\nNew unverified findings: none. Open leads: none.\nCandidates recorded immediately when settled: g139-c1 (removed suite floors affect only deleted tmux timeout fields); g139-c2 (pane-specific deletions versus terminal-host invariants and existing host history/cleanup tests); g139-c3 (reboot diagnostic substring follows broadened specified wording). Each durable detail carries impact, source refutation, bucket, confidence, drop basis, caveats and highest-route assessment.\n\nSource checks: pinned SPEC.md lifecycle, attachments and durability sections; pinned SPEC_impl.md terminal-host and private-tmux sections, transport writer priority, identity-hook/report-file contracts, Restart-only-resumes and GUI answer-binding rule. Inspected actual queue selection/upload routing, remaining upload tests, host history/relaunch and daemon cleanup tests, helper teardown and direct host input acknowledgement, removed timeout-floor implementation and remaining timeout struct, prepare_launch cwd fill, reboot-message producer and referenced reload tests. No GUI handlers changed in assigned patches.\n\nInterfaces/assumptions: g001/g005-g009 and g137-g146 own the surrounding terminal migration/runtime changes; no conclusions about unrelated startup termination, live install behavior or the whole repository. Newly created sessions use hosts at first assigned revision while old tmux adoption still exists there; the subsequent two commits end old terminals and remove the driver. Tests depending on retained transport ordering still matter after retirement. Process containment and hook attribution contracts remain unchanged by the assigned helper simplification.\n\nNo runtime tests, builds, bug reproductions or reproducer scripts run, per source-only brief. No checkout files changed. No excluded coverage metadata or prohibited queue/planning files read. Findings log is authoritative; no separate final report file created.\n\nNext action: return to caller for the later synthesis turn; inspect any requested challenge to g139-l1 without repeating the initial pass.\n\nTurn 2: later-turn synthesis completed. Discovery-pass count remains 0; no separate discovery prompt/pass performed.\nChanges this turn: three append-only revisions under g139-l1, culminating in a confirmed through-tip source assessment. No new IDs. New verified findings: none; previously verified g139-l1 strengthened. New unverified findings: none. Open/unresolved lead IDs: none. No changes to g139-c1/c2/c3 after checking their interface assumptions against the retirement sequence.\nChecks/results: traced real UploadAck generation through run_upload, handler dispatch, ConnectionCtx, priority channel wiring and biased writer selection at pinned tip; current source obeys priority. Searched later changes through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db for equivalent discriminating tests, including direct writer use, acknowledgement references, terminal backlog tests, grid-stream tests and relay source. No equivalent ack-versus-terminal ordering oracle found. Read tip's complete writer-priority specification section; it retains the same guarantee. Inspected candidate writer-close, full-queue cancellation, nonreading-peer shutdown, cumulative-ack and channel-reuse tests: none measures acknowledgement position versus competing terminal traffic. Later relevant patches only remove the grid flag/driver or clean comments. g141/c3's channel-reuse result is consistent: it proves actual completed upload and subsequent Attach/ReplayComplete, independently of credit priority.\nInterface conclusion: retain g139-l1 in other as loss of test protection, explicitly separate from observed upload failure. Current correct producer/writer is source evidence about implementation, not an equivalent runtime test oracle. No new product failure, security consequence or loss-of-work route alleged. No runtime tests/builds/reproductions executed. No checkout changes; no prohibited metadata read. Assigned scope unread: none.\nNext action: return synthesis delta to caller; await any later discovery/challenge prompt.\n\nTurn 3: separate discovery pass 1 completed. Read discovery-neighbours.json completely in bounded follow-up chunks (1-55, 56-105, 106-170, 171-225), replacing the initial clipped 1-160 read; no neighbour scope omitted. No named pending questions. Supplied migration/replay/raw-input/container/cleanup findings were used for novelty only; no other findings logs or excluded coverage metadata read.\n\nDiscovery result: NEW verified defect found under original ID g139-c2, promoted candidate -> lead -> finding in immediate append-only events. The retained finding is specifically loss of the refused-read-only-Delete plus same-live-upload continuation/publication oracle. The first pass had grouped it with obsolete tmux pane fixtures; discovery separated the retained upload-survival contract from that fixture. Suggested bucket other, proposed_drop:false for this distinct test defect. Current prepare/finish teardown order appears correct; no observed upload failure alleged. Existing c2 subcase drop bases remain preserved for obsolete pane-marker/reuse/brace mechanics and for already-covered history/tree/annotation invariants. No new IDs were minted; new unverified-after-investigation IDs: none. Remaining open lead IDs: none.\n\nUseful checks/results beyond known ack-priority finding: exact host_terminals.rs live-child/grandchild restart test at the original revision observes both dead before actual replacement-host start, and restart_under_concurrency.rs retains successful stop-annotation clearing and natural-exit behavior; added that stronger refutation to c2 immediately. Checked hook teardown/direct-host-input callers, host runtime termination/lifetime and report-file witnesses without finding a new helper regression. Read relevant current prepare_teardown/finish_teardown contracts and actual cancellation location; the read-only preflight promise remains at both removal and tip. Examined actual successful Delete cancellation, failed attachment-directory detach (already committed upload), host guarded/refused Delete, and handler contention-conformance fixtures. None combines a refused preflight with continuation of the same acknowledged partial upload. Searched BeginUpload/run_upload/UploadHandle/UploadSignal/abort_session_uploads references and compared full-range attachment_uploads.rs history; only the original deletion plus later grid-flag removal affect it. No equivalent replacement found through pinned tip. No new defect beyond the c2 upload-survival finding.\n\nAll assigned patches remain read; no broadened review, runtime tests/builds, reproductions, live actions or checkout changes. Coverage-only findings remain distinct from neighbour production ownership/retirement findings. No parent drop/lowering was accepted or applied. Next: return this discovery delta; further substantive discovery requires another later pass.\n\nTurn 4: separate discovery pass 2 completed. Read refreshed discovery-neighbours.json (290 lines, timestamp 2026-11-13T17:03:10.422Z) completely in bounded packets 1-55, 56-100, 101-140, 141-185, 186-230, 231-270 and 271-290 before source search. No named pending questions. New neighbour source/wording, cleanup-authority and test-oracle findings remain owned by those groups; no duplicate finding claimed here.\n\nResult: nothing new reportable found. New verified finding IDs: none. New unverified-after-investigation IDs: none. Remaining lead IDs: none. New considered candidate g139-c4 was recorded immediately with source-refuted in-range attribution: wrapper_launch's Resume-arm phrase is stale, but its identical wording and identical single-path relaunch_argv helper both exist at exclusive base. Its original potential consequence (misleading maintainer navigation), exact proposed-drop attribution basis and other/no-highest assessment are durable. This is a proposed disposition for an out-of-range concern, not a parent-accepted drop of any existing finding. g139-l1 and g139-c2 findings unchanged this turn.\n\nChecks/results beyond previous findings: rechecked actual stop_supervisor ownership/drain and direct-host input caller; HostConnection's input ticket, sent/written/discarded acknowledgement semantics and takeover path match the helper's checks, and hook-log waits supply the post-input report witness. Read changed marker-ordering test comment and its surrounding stop/takeover assertions; this comment edit changes no oracle. Read wrapper resume test's caller and assertions plus actual shared fill/relaunch helpers; the renamed prepare_launch pointer is correct. Compared removed suite fields against production struct/default deletion and examined the reboot annotation cross-reference's concrete live-host reload test. No independent lifecycle/timeout regression established. Full-range source comparison was used for the only concrete new wording suspicion, not merely the immediate parent. Source-only review: no runtime tests, builds, reproductions, live actions or checkout edits; no prohibited coverage sources read. Assigned source scope unread: none.\n\nNext: return discovery delta to caller; later work can challenge durable records without repeating catalogued issues.\n"
+}

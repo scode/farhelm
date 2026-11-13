@@ -1,0 +1,283 @@
+[
+  {
+    "key": "g025/f6",
+    "latest_line": 22,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "test-premises-captured-history-retired-admission-recipe-remount",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The named weak-oracle suspicions are contradicted by the changed tests' own fixture assertions and observation lifetimes. This conclusion concerns those suspicions, not all possible defects in these tests.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/sessions_tests.rs:209-259 asserts actual global eviction, surviving ordinary admission, a real cutoff, adoption purge, same identity/entry and different incarnation; :284-293 compares the full bookkeeping snapshot after stale completion. :53-82 includes all listed history/preference columns.",
+      "56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/store.rs:2927-2982,3650-3684 creates ordinary STRICT tables, not WITHOUT ROWID tables; ORDER BY rowid does not have the suspected missing-column problem.",
+      "350a4b33b6d4476f4a78e43cea124bc2b828f462:e2e/tests/tensorlake-hosts.spec.ts:519-526 requires an alternative recipe and a competing first enabled option before choosing the tested recipe; :702-708 rechecks selection after Back. tensorlake/add_host.rs:333-338 makes the empty placeholder disabled and saved recipes enabled. :751-775 independently cleans both recipes.",
+      "04d85f0c98a9b635709d00b056719a0baa7fd3fc:crates/farhelm-helm/src/sessions_tests.rs:12235-12246 decodes a historical selection; :12271-12300 and :12308-12362 require BAD_REQUEST plus Delete only and join the silent peer while the harness remains alive. rest_harness.rs:1595-1630 handshakes, refuses early EOF/frames, then observes a bounded post-request interval.",
+      "The queued-writer alternate-owner suspicion was separately checked under g025/f9. No runtime pass, mutation experiment or reproduction is claimed."
+    ],
+    "coverage_checked": {
+      "SPEC.md and SPEC_impl.md": "Searched create history/adoption/authority, retired selection, recipe selection and lifecycle guards. These establish intended behavior, not acceptance of weak test premises; no exact cover for the suspected test defects.",
+      "TODO.md Planned": "Empty at recording-time main.",
+      "plans/queue": "Searched history cancellation, remount/recipe selection and retired/admission terms. podman-environments mentions the original recipe-selection failure, not permission for a vacuous oracle or an unlanded repair of these assertions.",
+      "BUGS.md": "Only the SSH transfer-output hang is recorded; unrelated.",
+      "INDEX.md and queue files": "Searched named source paths, helper names and actual mechanisms. Related suspended-plan-test-erases-its-suspension-premise.md concerns a different provisioning fixture and state-erasing reconfiguration, not these tests.",
+      "TRIAGE_OUTCOMES.md": "No matching active decision found. Archive not read.",
+      "FILTER.md": "No filter supplies this disposition; it rests on source refutation."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "No surviving premise for the named vacuity, rowid or disconnected-peer suspicions; runtime test success was not checked.",
+    "original_stronger_consequence": "Changed tests could pass without stale-create authority, remounted recipe selection or refusal-before-dispatch being exercised. History checks could miss hidden bookkeeping changes. The record never established a catastrophic tooling or shipped work-loss consequence.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutes the specific test-evidence suspicions; production correctness alone was not used as the basis."
+  },
+  {
+    "key": "g025/f7",
+    "latest_line": 18,
+    "recommendation": "out-of-range",
+    "bucket": "highest",
+    "underlying_key": "sandbox-stop-refreshed-destructive-preconditions",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Both guard-drift windows exist at the exclusive base. The in-range provider expansion preserves the same captures/dispatch, and 086d4ff narrows the defect by freezing values before the activity await. It does not bind the initial callback to the physically activated older render.",
+    "checks": [
+      "6e423e30068b62c6cfa276c6d720ee35bb70387a:crates/farhelm-ui/src/sandbox_sessions.rs:197-207 reads refreshed execute-session guards; :220-247 has the refreshed start callback and awaited activity read; :300-303 carries only stop=true from the button.",
+      "git merge-base --is-ancestor separately returned 0 for 952183b99721b44fd6fef27b5ca3b38499165b7f and bd2fdb7ff1afd711fa4384a8c1d14c5d67f38fc7 against the exclusive base.",
+      "350a4b33b6d4476f4a78e43cea124bc2b828f462 sandbox_sessions.rs diff generalizes provider projection/wording and Stopped handling, without changing the guard capture or Stop dispatch mechanism.",
+      "086d4ff96efb13bdb51accaa1ce0a0a6f7d5ca5b sandbox_sessions.rs diff adds stop_guards, captures clicked_guards in refreshed start, and sends the stored values in execute. This closes drift during the await only. The original process-loss consequence is not source-refuted or lowered.",
+      "The full-range path log has four changes to this file; the later 1d24c6af adds launch exclusion and 2ef10815 adds environment Delete behavior, without an opening-token or render-pinned-start repair. This is source attribution, not a runtime observation."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Lifecycle operations:2051-2068 explicitly requires refusing a newly live agent or newly open tab beyond the click's consent. This rejects the behavior, not covers it as accepted.",
+      "SPEC_impl.md": "Answers bind to what was drawn:1068 onward and Stop guard paragraph:4813-4822 require displayed-snapshot guards.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "sandbox-stop-click-guards.md:18-40 describes the activity-await drift and start capture; its implementation already landed as 086d4ff, so the retained plan file is not an unlanded cover. It explicitly excludes the separate opening-token item at :58. No unlanded plan for the pre-handler window found.",
+      "BUGS.md": "Unrelated SSH transfer-output hang only.",
+      "INDEX.md and queue files": "sandbox-lifecycle-questions-lack-opening-guards.md concerns a different cross-opening mechanism and explicitly says not to borrow the separate no-question guard violation. No exact queue cover established for this guard window.",
+      "TRIAGE_OUTCOMES.md": "No matching active Stop-guard outcome found. Archive not read.",
+      "FILTER.md": "No filter invoked. The destructive-precondition violation is not excused as a sub-second delivery race."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "No premise missing for pre-range source attribution. Parent must independently decide the scope exclusion, including whether expanding the existing mechanism to Podman warrants separate introduced-scope treatment; this consultation does not authorize a drop.",
+    "original_stronger_consequence": "A Stop and suspend begun from an ended/no-tabs view can stop a restarted agent or newly opened tabs without the refusal guards limiting the user's consent. The latest record preserves this potential loss of user-owned processes. Earlier wording suggesting a complete later repair was withdrawn: only the activity-await window was repaired.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Underlying guard drift is present before the exclusive base; the in-range repair narrows it. Exclude only after independent scope/drop agreement, without declaring the remaining pre-handler route safe."
+  },
+  {
+    "key": "g025/f8",
+    "latest_line": 23,
+    "recommendation": "refuted",
+    "bucket": "high",
+    "underlying_key": "host-details-provider-ui-unknown-kind-precondition",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The direct detail caller can panic for fabricated inconsistent metadata, but the pinned shipped projection supplies environment metadata only for the two kinds this UI recognizes. No supported producer for the required mismatch was established.",
+    "checks": [
+      "350a4b33b6d4476f4a78e43cea124bc2b828f462:crates/farhelm-ui/src/hosts.rs:5276-5285 calls provider_ui directly when environment is Some and details are open. sandbox_sessions.rs:82-89 expects a known environment kind. This is a real precondition, not a caller gate through owned_host.",
+      "At that revision lib.rs:924-951 recognizes Tensorlake and Podman; Local/Ssh/Unrecognized have no provider. hosts.rs in farhelm-helm:530-558 emits exactly local/ssh/tensorlake/podman and derives metadata from HostKind::environment_view.",
+      "Corrected exact producer reference: 350a4b33b6d4476f4a78e43cea124bc2b828f462:crates/farhelm-helm/src/hosts.rs:4258-4288 (not manager.rs) exhaustively returns None for Local/Ssh and environment views only for Tensorlake/Podman bindings.",
+      "The proposed refutation does not rely on build skew preventing rendering. Fabricated JSON or an imagined future environment kind remains outside the established shipped input route. Source-only; no rendering experiment."
+    ],
+    "coverage_checked": {
+      "SPEC.md and SPEC_impl.md": "Searched unknown/unrecognized kinds, skew, provider and environment metadata. No rule accepts panicking on an unknown kind; no exact cover found.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "Provider/Podman plans describe the implemented two-provider model; no pending repair of this exact unknown-kind detail caller found.",
+      "BUGS.md": "Unrelated SSH transfer-output hang only.",
+      "INDEX.md and queue files": "Searched provider_ui, unknown kind, provider panic and source paths; no exact item found.",
+      "TRIAGE_OUTCOMES.md": "No matching active decision found. Archive not read.",
+      "FILTER.md": "No filter invoked."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "A supported shipped host projection with environment metadata plus an unrecognized/non-environment kind. The future-caller assumption can reopen when such a producer exists.",
+    "original_stronger_consequence": "Opening Hosts details could panic and remove ordinary host diagnostics for an unknown/non-environment host carrying environment metadata. High would fit a reachable Hosts-surface failure; no security/work-loss route was claimed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Absent shipped mismatch producer, with the caller's unchecked assumption preserved explicitly."
+  },
+  {
+    "key": "g025/f9",
+    "latest_line": 25,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "queued-history-cancellation-test-competing-registry-owner",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The quiet scripted fixture's completed refresh releases its registry writer before publishing readiness. There is no fixture-admitted competing owner between readiness and the synchronous Pending checks.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b:rest_harness.rs:61-76 makes the refresh/reprobe intervals one hour; :911-925 awaits Connected.last_refresh=Ok.",
+      "At the same hash manager.rs:4941 takes cache_lock inside refresh_once, returns RefreshStep at :4973-4983, and the caller only subsequently publishes that health at :4667-4678 after receiving the return at :4621. The scoped guard is gone before readiness.",
+      "sessions_tests.rs:303-337 uses the default empty script, awaits that refresh, snapshots, holds SQLite and synchronously polls history then the next writer. It starts no intervening refresh, seed or fleet mutation. Withdrawal happens only after those checks (:338-354). :355-368 tests that cancellation retains the transferred guard until the stale write drains.",
+      "sessions.rs:2065-2068 obtains the writer and :2091-2104 moves it into the database-owned authority closure. This supports which owner the test exercises; production correctness is not substituted for the fixture argument. No test executed."
+    ],
+    "coverage_checked": {
+      "SPEC.md and SPEC_impl.md": "Searched history authority/adoption/incarnation and cancellation. No accepted weak-oracle limitation found.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "No matching queued-history cancellation/competing-owner repair found.",
+      "BUGS.md": "Unrelated SSH transfer-output hang only.",
+      "INDEX.md and queue files": "Exact queued_history_rechecks/captured_create_history searches found no queue record. g025/f6 overlaps this tested premise but is an umbrella assessment, not a separate defect to deduplicate.",
+      "TRIAGE_OUTCOMES.md": "No matching active decision found. Archive not read.",
+      "FILTER.md": "No filter invoked."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "No accessible competing writer was found for this fixture interval. This does not claim a runtime pass.",
+    "original_stronger_consequence": "The regression might see Pending futures from another guard owner and pass without exercising a queued SQLite write or transferred-guard lifetime. Maintainer test evidence only.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Fixture cadence and actor guard/drop order refute the specific alternate-owner theory."
+  },
+  {
+    "key": "g026/f1",
+    "latest_line": 10,
+    "recommendation": "out-of-range",
+    "bucket": "other",
+    "underlying_key": "sandbox-lifecycle-question-opening-and-claim-ownership",
+    "aliases": ["review_feedback_queue/sandbox-lifecycle-questions-lack-opening-guards.md"],
+    "target_queue_file": "review_feedback_queue/sandbox-lifecycle-questions-lack-opening-guards.md",
+    "why": "The missing opening token and live held-claim consumption are already present at the exclusive base, and the existing queue item preserves the same contract omission plus the unresolved stronger cross-opening consequence. The assigned launch-exclusion change does not introduce this mechanism.",
+    "checks": [
+      "6e423e30068b62c6cfa276c6d720ee35bb70387a:sandbox_sessions.rs:190-200 stores unversioned question/held signals and consumes the current held guard; :268-286 clears those signals or calls execute(operation) without an opening identity.",
+      "Separate ancestry commands returned 0 for 952183b99721b44fd6fef27b5ca3b38499165b7f and bd2fdb7ff1afd711fa4384a8c1d14c5d67f38fc7 against the exclusive base.",
+      "1d24c6af0b6fdbbec854623ff53f90281b8271ab sandbox_sessions.rs diff changes host-scoped launch exclusion, markup disabling and page-lock ownership; question/held/answer ownership remains unchanged. 086d4ff only adds stored Stop guards, not opening identity.",
+      "Existing queue file independently preserves the unresolved obsolete-opening route and distinguishes it from the accepted same-dialog burst and the separate no-question Stop guard violation. A keyed session view refutes only cross-selected-session substitution, not same-session opening substitution. No source result here establishes a harmful cross-opening event sequence or a runtime occurrence."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Lifecycle operations limits destructive consent. Existing queued record cites the separately accepted same-dialog Cancel/Submit burst; that narrow acceptance does not accept obsolete-opening substitution.",
+      "SPEC_impl.md": "Answers bind to what was drawn requires ConfirmSlot and rendered opening identity; omission violates that implementation contract.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "hosts-suspend-confirm-slot.md:34-35 explicitly leaves this separate session-toolbar item alone; sandbox-stop-click-guards.md:58 likewise excludes it. Neither is exact pending coverage for opening ownership.",
+      "BUGS.md": "Unrelated SSH transfer-output hang only.",
+      "INDEX.md and queue files": "INDEX.md:2087-2090 lists sandbox-lifecycle-questions-lack-opening-guards.md. Read file in full; exact same root, same distinction and missing stronger premise are already retained. No new extension is needed from this record's source checks.",
+      "TRIAGE_OUTCOMES.md": "No matching active outcome found. Archive not read.",
+      "FILTER.md": "No filter used; no destructive cross-opening route dismissed as a timing glitch."
+    },
+    "exact_cover_quotes": [
+      {"source": "review_feedback_queue/sandbox-lifecycle-questions-lack-opening-guards.md, TLDR", "quote": "Sandbox lifecycle questions lack the required opening-token and operation-claim ownership. Same-dialog Cancel and Submit before redraw is product-accepted when its destructive guards hold; a stronger obsolete-opening loss route remains unverified."},
+      {"source": "review_feedback_queue/sandbox-lifecycle-questions-lack-opening-guards.md, Details", "quote": "Stronger obsolete-opening substitution remains unverified after investigation: matching Dioxus source resolves current mounted listeners, and no complete shipped cross-opening/element-ID sequence was established."}
+    ],
+    "missing_premise": "The full shipped event/element-identity ordering that makes an old affirmative answer consume a later opening and terminate user-owned work remains unestablished. This is retained uncertainty, not a global refutation.",
+    "original_stronger_consequence": "An old Stop and suspend answer could consume a later lifecycle question's live claim and stop processes under cancelled consent. Initial cross-selected-session termination was narrowed by the keyed-view check. The corrected mandatory-patch-packet caveat is superseded, while this possible process-loss route remains unresolved.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Pre-range mechanism and exact existing queue retention. Bucket other applies only to the established contract omission; independent agreement is still required for scope exclusion or treating the stronger possible process-loss claim outside highest."
+  },
+  {
+    "key": "g026/f2",
+    "latest_line": 12,
+    "recommendation": "refuted",
+    "bucket": "highest",
+    "underlying_key": "confined-agent-session-delete-scope-approval-and-no-seal",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The only scoped helper caller keeps same-environment scope, self-delete refusal, approval and connection binding; the helper remains ordinary session-only teardown after seal integration.",
+    "checks": [
+      "12c79f61a627a4241707dad0cf3b55b859d2d4fc:agent_requests.rs:399-403 and :1436-1446 admit only the origin's host for confined lifecycle targets; :659-685 resolves through that gate, refuses fleet deletion of environment targets and refuses deleting the asking session.",
+      "At that hash agent_requests.rs:2704-2731 reads the live target, derives the guard, awaits approved, captures connection_id and selects delete_session_within_environment only for Environment. sessions.rs:3469-3497 delegates to shared teardown, checks connection equality, denies pending approvals and sends guarded delete_session_fenced.",
+      "00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:agent_requests.rs:2811-2833 preserves that approval/guard/connection dispatch. sessions.rs:3699-3727 still sends ordinary fenced deletion, not DeleteSessionOrSeal or the resource finisher.",
+      "No agent-policy audit beyond this named route, runtime reproduction or parent drop acceptance is claimed."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Agents and environments:4254-4270 requires same-environment actions, no self-delete and session-only deletion. Source meets this contract; the spec does not authorize a bypass.",
+      "SPEC_impl.md": "Agent requests and environments:6167-6184 specifies same-host scope and a confined Delete that never seals. This matches the checked caller/teardown.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "environment-agent-operations describes this confinement and later sealing design; it does not cover a bypass as accepted or supply an unlanded fix for this exact suspicion.",
+      "BUGS.md": "Unrelated SSH transfer-output hang only.",
+      "INDEX.md and queue files": "No exact same-environment deletion/approval bypass item found by mechanism and helper searches.",
+      "TRIAGE_OUTCOMES.md": "No matching active decision found. Archive not read.",
+      "FILTER.md": "No filter invoked."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "No source-supported caller bypass, cross-environment target, approval bypass or seal dispatch was established.",
+    "original_stronger_consequence": "An agent could delete user-owned work outside its environment or bypass approval, or later integration could turn its session-only delete into destruction of the whole environment. Those would be security/work-loss consequences; the narrow checked route refutes them.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Source refutation by caller scope, approval, connection and ordinary-teardown fences, including endpoint integration. Independent drop agreement still required."
+  },
+  {
+    "key": "g026/f3",
+    "latest_line": 11,
+    "recommendation": "refuted",
+    "bucket": "high",
+    "underlying_key": "environment-seal-listing-consumption-phase-integration",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The intermediate listing-plumbing revision has no helm seal sender. At the inclusive endpoint, the sender is paired with both synchronous finishing and listing-driven recovery, so the exact ignored-seal theory is not established.",
+    "checks": [
+      "47f33bbdbd5ff4a6e437e97a800f9083be43096e:manager.rs:4833-4839 deliberately ignores sealed before sender integration. Pinned git grep DeleteSessionOrSeal across farhelm-helm returns only client.rs:665 documentation, no request sender.",
+      "00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:sessions/sandbox.rs:167-195 admits only session-owned machine-deleting hosts under lifecycle/provisioning exclusion; :223 sends delete_session_or_seal; :257-262 synchronously finishes a Sealed reply.",
+      "At the endpoint manager.rs:2699-2707 defines actionable seals and :5117-5132 consumes the listing flag, noting an actionable seal or retaining an ordinary-host problem. sessions/sandbox.rs:281-304 records finish outcomes and invokes destruction; :339-361 drives pending seals. lib.rs:2521 starts that finisher in production.",
+      "This is not a claim about all finisher failures, mixed-version operation or provider deletion correctness. No runtime incident was reproduced."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Sandbox sessions:1514-1538 requires sealing plus eventual environment destruction/retry, rather than accepting ignored seals.",
+      "SPEC_impl.md": "Environment Delete and the seal:6106-6159 describes the same sender/consumer/finisher. The checked integration implements the relevant flag consumption.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "environment-agent-operations.md:509-531 describes the intended seal and recovery integration; source now implements it, so no unlanded-plan cover is asserted.",
+      "BUGS.md": "Unrelated SSH transfer-output hang only.",
+      "INDEX.md and queue files": "Searched seal/stranded environment and named source mechanisms; no exact ignored-flag item found.",
+      "TRIAGE_OUTCOMES.md": "No matching active decision found. Archive not read.",
+      "FILTER.md": "No filter invoked; billing/resource stranding was not discarded as merely rare."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "No shipped self-produced seal ignored by this helm was shown at the intermediate revision; endpoint consumption is explicit. Failure routes beyond flag consumption were not assigned here.",
+    "original_stronger_consequence": "A deleted environment could remain stranded and continue billing if the helm ignores its supervisor's seal. High fits that material UX/billing consequence; no user-work loss or security route was established.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Intermediate protocol plumbing has no own producer, and the checked completed integration supplies the consumer and finisher."
+  },
+  {
+    "key": "g026/f4",
+    "latest_line": 13,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "wake-browser-stale-suspension-oracle-unattributed-host-read-count",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The test's global response count cannot identify a wake-owned stale snapshot. Independent display reads can satisfy its threshold before the helper's response is constructed. This is an established source-level test-oracle gap; its adverse ordering was not run.",
+    "checks": [
+      "ba7cc0264028eebb39647deb1d25b055e6886935:e2e/tests/tensorlake-lifecycle.spec.ts:61-86 prepares the response after route.fetch, counts every hosts response, then fulfills fixed JSON. :555-557 publishes a feed notice before answering Resume; :581-585 waits for two unowned reads; :595 changes to Connected.",
+      "At that hash list/view.rs:2150-2155 independently fetches hosts, :2311-2314 starts a mount read, and :2328-2333 requests reads on feed notices. reader.rs:444-456 retains a demand during a running read and :517-535 immediately follows it after completion. helpers/fleet.ts:695-697 sends the armed greeting. These permit a pending display read and its follow-up to supply both counted responses.",
+      "api.rs:5718-5719 captures the initial phase independently, :5736 fetches its post-Resume snapshot and :5740-5741 immediately accepts Connected. The independently spawned helper at create_form.rs:6211-6212 shares no display-reader fence. terminal-readiness.ts:364-380 observes terminal readiness only, not display-reader idleness.",
+      "api.rs:8918-8927 directly tests WakeWatch with an initial suspension but does not establish the browser helper's state wiring. A helper initialized/reset from the wrong phase could pass the browser case when it first receives Connected; no claim is made that current product code has that regression.",
+      "Preserved correction: count-before-fulfill is not independently defective. A counted wake response already contains the stale snapshot, so later publication cannot rewrite it. The remaining defect is consumer attribution."
+    ],
+    "coverage_checked": {
+      "SPEC.md and SPEC_impl.md": "SPEC_impl.md:6731-6742 explicitly requires tolerating the starting suspension. This does not accept a browser test that fails to establish delivery of it. No exact test-oracle acceptance found.",
+      "TODO.md Planned": "Empty. Plan-decisions-to-revisit discusses size of already accepted wake tests, not an accepted oracle limitation.",
+      "plans/queue": "sandbox-suspend-overlap.md requires busy/new/stale suspension tests and already landed their implementation; wake-launch-stuck.md addresses hidden-launcher and displayed-connection deadlines. Neither unlanded stated work removes this response-consumer ambiguity.",
+      "BUGS.md": "Unrelated SSH transfer-output hang only.",
+      "INDEX.md and queue files": "No exact global-read-count wake oracle item found. Read resume-preview-readiness-witness.md: its independent-boundary defect concerns fresh checkout preview versus displayed Connecting and a different test. It does not cover stale-suspension consumption. Other matching lifecycle test cleanup records concern different failure mechanisms.",
+      "TRIAGE_OUTCOMES.md": "No matching active decision found. Archive not read.",
+      "FILTER.md": "No entire boundary matches. This is durable missing test discrimination, not a rare self-correcting product display or safe retry failure."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "No runtime schedule, frequency or mutation result. Those limits do not remove the source-established absence of consumer attribution. The original parent helper already tolerated ordinary suspension; no claim that this test misses a specific pre-existing product bug.",
+    "original_stronger_consequence": "The browser regression can pass without delivering the stale suspension to the wake helper, allowing an integration regression to escape. Earlier count-before-fulfill processing rationale was explicitly corrected and must not be resurrected as a separate defect.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Record the conditional test-oracle gap as other, preserving its source-only confidence and the corrected response boundary."
+  },
+  {
+    "key": "g026/f5",
+    "latest_line": 17,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "browser-test-unbounded-arrival-promise-bypasses-owned-finally",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "A missing/failed Resume callback leaves the body suspended on a native promise that the Playwright deadline does not cancel. Its entered finally therefore cannot release the gate or clean API-owned fixtures. Source establishes the conditional cleanup failure, not an observed leak.",
+    "checks": [
+      "ba7cc0264028eebb39647deb1d25b055e6886935:tensorlake-lifecycle.spec.ts:536-543 owns a real source session, saved template and changed preferences. :557 releases answered only after Resume publication/fulfillment; :581 awaits it without a rejection deadline. :601-618 contains its own release and owned cleanup. :153-159 afterEach only retires routes.",
+      "At that hash e2e/tests/helpers/route-gate.ts:10-16 constructs a native Promise with an external resolver and no rejection or cancellation input. Closing a browser cannot reject that independent promise. The busy-then-accepted branch uses bounded expect.poll instead; the concern applies to the two non-busy scenarios.",
+      "Pinned package-lock declares @playwright/test and playwright 1.64.0. Checked official https://raw.githubusercontent.com/microsoft/playwright/v1.64.0/packages/playwright/src/worker/timeoutManager.ts:83-114,128-132: it races callback execution against a separate timeout promise and rejects only the latter.",
+      "Checked official https://raw.githubusercontent.com/microsoft/playwright/v1.64.0/packages/playwright/src/worker/workerMain.ts:384-409: test function runs under that wrapper and after hooks follow the wrapper's completion. Runner timeout does not inject an exception into the suspended body. This conclusion uses source inspection, not a Playwright reproduction.",
+      "Suggested repair: bound arrival with a callback-set witness polled by an assertion, while keeping route-response release separate, so absence throws within the try and reaches owned cleanup. Eventual stack teardown may reclaim fixtures; no indefinite runner hang or live-install damage claimed."
+    ],
+    "coverage_checked": {
+      "SPEC.md and SPEC_impl.md": "Searched wake, timeout and lifecycle cleanup. Product wake budgets do not authorize this test's uncancellable arrival await; no exact accepted limitation found.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "sandbox-suspend-overlap and wake-launch-stuck address product wake behavior and deadlines, not this local raw-promise cleanup boundary. No pending plan stating its repair found.",
+      "BUGS.md": "Unrelated SSH transfer-output hang only.",
+      "INDEX.md and queue files": "No exact raw arrival-wait item found. route-retirement-failure-skips-owned-session-cleanup.md is a fallible teardown prerequisite after entering finally, not a body that never reaches finally. resume-launch-test-records-session-after-assertion.md loses a created ID before cleanup, also distinct. No extension to either is needed for this mechanism.",
+      "TRIAGE_OUTCOMES.md": "No matching active decision found. Archive not read.",
+      "FILTER.md": "No entire boundary matches conditional maintainer fixture contamination. It is not just a diagnostic or self-correcting display."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "No runtime callback failure or measured contamination. The source conditional is complete. g069/c3 is a supplied possible same-root caller elsewhere; its record is outside this batch and was not inspected, so parent must reconcile the shared underlying key before aliasing.",
+    "original_stronger_consequence": "If Resume never completes its arrival signal, real source session/template/preferences cleanup is bypassed and later tests on the shared private stack can inherit fixtures. This is maintainer test isolation, not permanent user-work loss, catastrophic tooling damage or an indefinitely hung runner.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain the verified conditional failure path as other. Reconcile g069/c3 with the underlying key, preserving this new caller scope rather than silently dropping it."
+  }
+]

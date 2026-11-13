@@ -1,0 +1,794 @@
+{
+  "group": {
+    "id": "g122",
+    "domain": "supervisor-request-admission",
+    "purpose": "supervisor-request-admission: crates/farhelm-supervisor/src/service/handlers.rs, crates/farhelm-supervisor/src/service/connection.rs, crates/farhelm-supervisor/src/service/request_modes.rs; phases +        async fn a_sealed_listing_too_large_for_a_frame_still_reports_the_seal() { | -    async fn pane_death_recovers_missing_final_output_after_client_resume() {",
+    "interfaces": [
+      "g001",
+      "g003",
+      "g006",
+      "g007",
+      "g008",
+      "g009",
+      "g010",
+      "g011",
+      "g018",
+      "g019",
+      "g020",
+      "g021",
+      "g052",
+      "g053",
+      "g054",
+      "g102",
+      "g103",
+      "g104",
+      "g105",
+      "g106",
+      "g107",
+      "g108",
+      "g109",
+      "g110",
+      "g111",
+      "g112",
+      "g113",
+      "g114",
+      "g115",
+      "g116",
+      "g123",
+      "g124",
+      "g125",
+      "g126",
+      "g090"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00299-000.patch",
+        "ranges": [
+          [
+            1,
+            133
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/handlers.rs",
+        "commit": "04d85f0c98a9b635709d00b056719a0baa7fd3fc",
+        "notes": "patch header; patch character offsets [0,6063)",
+        "lines": 133,
+        "bytes": 6065,
+        "start": 0,
+        "end": 6063,
+        "original": "[private-run]/prep/originals/00299.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00660-000.patch",
+        "ranges": [
+          [
+            1,
+            197
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/handlers.rs",
+        "commit": "190d844e58c96cf197aa838d0b0eea8062f48435",
+        "notes": "patch header; patch character offsets [0,8976)",
+        "lines": 197,
+        "bytes": 8976,
+        "start": 0,
+        "end": 8976,
+        "original": "[private-run]/prep/originals/00660.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00681-000.patch",
+        "ranges": [
+          [
+            1,
+            12
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/connection.rs",
+        "commit": "47f33bbdbd5ff4a6e437e97a800f9083be43096e",
+        "notes": "patch header; patch character offsets [0,551)",
+        "lines": 12,
+        "bytes": 551,
+        "start": 0,
+        "end": 551,
+        "original": "[private-run]/prep/originals/00681.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00683-001.patch",
+        "ranges": [
+          [
+            1,
+            52
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/handlers.rs",
+        "commit": "47f33bbdbd5ff4a6e437e97a800f9083be43096e",
+        "notes": "+        async fn a_sealed_listing_too_large_for_a_frame_still_reports_the_seal() {; patch character offsets [59665,61802)",
+        "lines": 52,
+        "bytes": 2137,
+        "start": 59665,
+        "end": 61802,
+        "original": "[private-run]/prep/originals/00683.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00684-000.patch",
+        "ranges": [
+          [
+            1,
+            23
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/request_modes.rs",
+        "commit": "47f33bbdbd5ff4a6e437e97a800f9083be43096e",
+        "notes": "patch header; patch character offsets [0,1120)",
+        "lines": 23,
+        "bytes": 1120,
+        "start": 0,
+        "end": 1120,
+        "original": "[private-run]/prep/originals/00684.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00741-000.patch",
+        "ranges": [
+          [
+            1,
+            34
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/connection.rs",
+        "commit": "70bc66a9f285cc2a9984924f389834d118b7cfdc",
+        "notes": "patch header; patch character offsets [0,1782)",
+        "lines": 34,
+        "bytes": 1782,
+        "start": 0,
+        "end": 1782,
+        "original": "[private-run]/prep/originals/00741.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00745-000.patch",
+        "ranges": [
+          [
+            1,
+            56
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/handlers.rs",
+        "commit": "70bc66a9f285cc2a9984924f389834d118b7cfdc",
+        "notes": "patch header; patch character offsets [0,2670)",
+        "lines": 56,
+        "bytes": 2670,
+        "start": 0,
+        "end": 2670,
+        "original": "[private-run]/prep/originals/00745.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00922-001.patch",
+        "ranges": [
+          [
+            1,
+            291
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/connection.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "-    async fn pane_death_recovers_missing_final_output_after_client_resume() {; patch character offsets [54634,68333)",
+        "lines": 291,
+        "bytes": 13705,
+        "start": 54634,
+        "end": 68333,
+        "original": "[private-run]/prep/originals/00922.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01047-000.patch",
+        "ranges": [
+          [
+            1,
+            117
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/connection.rs",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,6934)",
+        "lines": 117,
+        "bytes": 6958,
+        "start": 0,
+        "end": 6934,
+        "original": "[private-run]/prep/originals/01047.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01051-000.patch",
+        "ranges": [
+          [
+            1,
+            139
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/handlers.rs",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,6289)",
+        "lines": 139,
+        "bytes": 6289,
+        "start": 0,
+        "end": 6289,
+        "original": "[private-run]/prep/originals/01051.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01053-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/request_modes.rs",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,711)",
+        "lines": 13,
+        "bytes": 711,
+        "start": 0,
+        "end": 711,
+        "original": "[private-run]/prep/originals/01053.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01541-000.patch",
+        "ranges": [
+          [
+            1,
+            14
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/connection.rs",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,847)",
+        "lines": 14,
+        "bytes": 847,
+        "start": 0,
+        "end": 847,
+        "original": "[private-run]/prep/originals/01541.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01600-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/connection.rs",
+        "commit": "4b489b4f2eeade14f119b186ecb16eeaaf027021",
+        "notes": "patch header; patch character offsets [0,795)",
+        "lines": 13,
+        "bytes": 795,
+        "start": 0,
+        "end": 795,
+        "original": "[private-run]/prep/originals/01600.patch"
+      }
+    ],
+    "lines": 1094,
+    "bytes": 52606
+  },
+  "records": [
+    {
+      "key": "g122/c1",
+      "owner": "g122",
+      "id": "c1",
+      "domain": "supervisor-request-admission",
+      "purpose": "supervisor-request-admission: crates/farhelm-supervisor/src/service/handlers.rs, crates/farhelm-supervisor/src/service/connection.rs, crates/farhelm-supervisor/src/service/request_modes.rs; phases +        async fn a_sealed_listing_too_large_for_a_frame_still_reports_the_seal() { | -    async fn pane_death_recovers_missing_final_output_after_client_resume() {",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Allowing clone without a host is required for environment clones",
+            "location": "crates/farhelm-supervisor/src/service/handlers.rs:3924",
+            "detail": "Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435. TLDR: considered whether removal of the supervisor's required --host check lets a clone choose an unintended destination. Details: validate_create_fields now accepts Option<&str> (4056-4076), and Clone passes the optional host (3901-3930); explicit empty, oversized and control-containing hosts still fail. SPEC.md, Agents and environments, 4323-4328 explicitly says: `farhelm agent clone` of a sandbox or container session takes no `--host` or `--cwd`; it targets the source's recipe at the source's place, with the source's launch and repository intent, never a copy of its disk. SPEC_impl.md, Agent requests and environments, 6677-6690 assigns source/recipe/place resolution and the direct-Allow approval to the helm. This validates removing the blanket doorway requirement; destination authorization remains the helm's contract. Suggested bucket: other; confidence: confirmed source/contract analysis, no execution; proposed_drop: explicit specification acceptance quoted above; possible_cover: none searched. Could-be-highest: false for this candidate, which concerns creating an unwanted copy rather than deleting or replacing work. Caveat: this conclusion covers the supervisor check removal, not the independent implementation of helm environment-clone authorization."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Allowing clone without a host is required for environment clones",
+            "location": "crates/farhelm-supervisor/src/service/handlers.rs:3924",
+            "detail": "Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435. TLDR: considered whether removal of the supervisor's required --host check lets a clone choose an unintended destination. Details: validate_create_fields now accepts Option<&str> (4056-4076), and Clone passes the optional host (3901-3930); explicit empty, oversized and control-containing hosts still fail. SPEC.md, Agents and environments, 4323-4328 explicitly says: `farhelm agent clone` of a sandbox or container session takes no `--host` or `--cwd`; it targets the source's recipe at the source's place, with the source's launch and repository intent, never a copy of its disk. SPEC_impl.md, Agent requests and environments, 6677-6690 assigns source/recipe/place resolution and the direct-Allow approval to the helm. This validates removing the blanket doorway requirement; destination authorization remains the helm's contract. Additional source check: the old test's doc at handlers.rs:7352 still says Clone needs a host, but its assertion at 7388-7397 omits both source and host, so validate_target rejects the missing source before host validation (3909-3913). The changed implementation therefore does not make that assertion fail; no runtime failure was observed or claimed. The stale comment alone is not retained as a substantive finding. Suggested bucket: other; confidence: confirmed source/contract analysis, no execution; proposed_drop: explicit specification acceptance quoted above, and source refutation of a potential existing-test failure; possible_cover: none searched. Could-be-highest: false for this candidate, which concerns creating an unwanted copy rather than deleting or replacing work. Caveat: this conclusion covers the supervisor check removal, not the independent implementation of helm environment-clone authorization. Revision reason: checked the adjacent old test and distinguished its missing-source rejection from the stale host-requirement wording."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Helm source resolution preserves ordinary clone host requirements",
+            "location": "crates/farhelm-supervisor/src/service/handlers.rs:3924",
+            "detail": "Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435. TLDR: removing the supervisor's blanket --host requirement does not let an ordinary clone silently choose a destination. Original considered consequence: an unintended clone destination after an agent omits --host. Source checks this synthesis: farhelm-helm/src/agent_requests.rs:926-945 passes the optional host unchanged into clone_for_agent. That function first resolves the explicit source (3863-3870), then checks its registered host's is_session_owned status (3874-3879). Only a session-owned source enters clone_environment_for_agent. Every other source still encounters the explicit missing-host InvalidRequest at 3881-3885 before source draining, target routing, approval or creation. The environment path refuses host, cwd and idempotency-key overrides (4313-4329), obtains recipe/place from that source's host row (4330-4335), reads its current launch from its owning supervisor (4336-4359), retains that source owner in the plan (4383-4387), and revalidates the same claim/client after approval (4519-4528). ApprovalAction::LaunchEnvironment carries that fixed place/launch/source (4493-4515) and the same recipe/place reaches provisioning (4541-4548). Existing test source at 15246-15260 explicitly checks an ordinary source with host None is refused before a card; these tests were read, not executed. This agrees with the parent's cross-group confirmation from g090/c3, but the conclusion here rests on the pinned source reads. Contract: SPEC.md, Agents and environments, 4323-4328 says `farhelm agent clone` of a sandbox or container session takes no `--host` or `--cwd`; it targets the source's recipe at the source's place, with the source's launch and repository intent, never a copy of its disk. SPEC_impl.md, Agent requests and environments, 6677-6690 assigns the resolution and direct-Allow approval to the helm. The old supervisor test's combined missing-source/missing-host assertion (handlers.rs:7388-7397) still fails on the missing source; its stale doc at 7352 is not a substantive report. Suggested bucket: other for the original considered consequence; confidence: confirmed source/contract analysis, no execution; proposed_drop: refuted for ordinary clones by the helm's explicit rejection, and explicit specification acceptance for environment clones as quoted; possible_cover: none searched. Could-be-highest: false for this bounded destination-selection concern, with no established deletion, replacement or security route. Caveat: the source-owned environment route depends on normal registry/session claim integrity; this record does not certify every provider implementation. Revision reason: replaced the earlier unverified helm-routing assumption with exact caller, host-branch, approval and creation source evidence. No parent drop accepted."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c1",
+            "state": "open",
+            "summary": "Creating-verb test documentation still requires a host for every clone",
+            "location": "crates/farhelm-supervisor/src/service/handlers.rs:7352",
+            "detail": "Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435; checked through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: the supervisor's request-validation test documentation tells maintainers that every clone must name a host even though the same change deliberately allows environment clones to omit it. This can misdirect maintenance of the request boundary and its tests. This is a documentation finding, not a claim that an ordinary clone silently selects a destination. Exact scope: handlers.rs:7350-7365 describes the two creating verbs' supervisor-doorway contract universally, explicitly says at 7352 '`Clone` needs a host', and explains at 7358-7360 that 'this doorway bounds what an agent can push through the two byte-unbounded queues'. It has no ordinary-source-only qualification. That cannot describe the helm's later source-dependent decision, since this supervisor validator has no source-host knowledge. The assigned patch changes Clone from HostSelector::Required to host.as_deref at 3924-3929 and removes the blanket Required(None) rejection from validate_create_fields at 4056-4076. Consequently a shaped clone with source Some and host None now passes this doorway, as required for environment clones. The adjacent test at 7388-7397 rejects both source None and host None; missing-source validation explains that assertion and does not prove the universal host statement. Source/contract refutation of the original runtime concern remains: helm agent_requests.rs:3863-3885 resolves the source, branches session-owned sources into environment cloning, and rejects every other missing-host clone before dispatch. Its environment branch at 4313-4335 refuses explicit host/cwd/key overrides and derives recipe/place from the source host row. SPEC.md, Agents and environments, 4327-4328 says '`farhelm agent clone` of a sandbox or container session takes no `--host` or `--cwd`; it targets the source's recipe at the source's place, with the source's launch and repository intent, never a copy of its disk.' That accepted production behavior exposes the distinct false documentation; it does not refute it. Attribution: the range base 6e423e30068b62c6cfa276c6d720ee35bb70387a retains the same comment at handlers.rs:7321-7336 while the required-host selector still exists; this in-range commit removes that prerequisite without updating the comment. The pinned tip still contains the universal statement at 7191, with the same doorway scope at 7197-7204. Suggested fix: document optional host admission at the supervisor and the helm's ordinary-source host requirement, or limit the statement explicitly to ordinary-source resolution. Suggested bucket: other (documentation correctness). Confidence: confirmed pinned-source/contract comparison, no execution. proposed_drop: false for this documentation defect; the earlier low-substance dismissal is superseded. Original considered unintended-destination consequence remains source-refuted as above, and is not asserted as a production defect. Could-be-highest: false for the established documentation discrepancy; no security or loss-of-work route established. possible_cover: parent mentions clone wire comments g090/052 as potentially the same cause; exact supplied neighbour g052 has no retained records and g090 is not in this interface file, so no duplicate disposition is asserted. No forbidden coverage source searched. Revision reason: separate the universal testdoc contract from the correct runtime behavior, retain its exact location and in-range attribution, and replace the prior dismissal with an other-bucket finding. No parent drop or lowering accepted."
+          }
+        }
+      ],
+      "latest": {
+        "line": 7,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "c1",
+          "state": "open",
+          "summary": "Creating-verb test documentation still requires a host for every clone",
+          "location": "crates/farhelm-supervisor/src/service/handlers.rs:7352",
+          "detail": "Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435; checked through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: the supervisor's request-validation test documentation tells maintainers that every clone must name a host even though the same change deliberately allows environment clones to omit it. This can misdirect maintenance of the request boundary and its tests. This is a documentation finding, not a claim that an ordinary clone silently selects a destination. Exact scope: handlers.rs:7350-7365 describes the two creating verbs' supervisor-doorway contract universally, explicitly says at 7352 '`Clone` needs a host', and explains at 7358-7360 that 'this doorway bounds what an agent can push through the two byte-unbounded queues'. It has no ordinary-source-only qualification. That cannot describe the helm's later source-dependent decision, since this supervisor validator has no source-host knowledge. The assigned patch changes Clone from HostSelector::Required to host.as_deref at 3924-3929 and removes the blanket Required(None) rejection from validate_create_fields at 4056-4076. Consequently a shaped clone with source Some and host None now passes this doorway, as required for environment clones. The adjacent test at 7388-7397 rejects both source None and host None; missing-source validation explains that assertion and does not prove the universal host statement. Source/contract refutation of the original runtime concern remains: helm agent_requests.rs:3863-3885 resolves the source, branches session-owned sources into environment cloning, and rejects every other missing-host clone before dispatch. Its environment branch at 4313-4335 refuses explicit host/cwd/key overrides and derives recipe/place from the source host row. SPEC.md, Agents and environments, 4327-4328 says '`farhelm agent clone` of a sandbox or container session takes no `--host` or `--cwd`; it targets the source's recipe at the source's place, with the source's launch and repository intent, never a copy of its disk.' That accepted production behavior exposes the distinct false documentation; it does not refute it. Attribution: the range base 6e423e30068b62c6cfa276c6d720ee35bb70387a retains the same comment at handlers.rs:7321-7336 while the required-host selector still exists; this in-range commit removes that prerequisite without updating the comment. The pinned tip still contains the universal statement at 7191, with the same doorway scope at 7197-7204. Suggested fix: document optional host admission at the supervisor and the helm's ordinary-source host requirement, or limit the statement explicitly to ordinary-source resolution. Suggested bucket: other (documentation correctness). Confidence: confirmed pinned-source/contract comparison, no execution. proposed_drop: false for this documentation defect; the earlier low-substance dismissal is superseded. Original considered unintended-destination consequence remains source-refuted as above, and is not asserted as a production defect. Could-be-highest: false for the established documentation discrepancy; no security or loss-of-work route established. possible_cover: parent mentions clone wire comments g090/052 as potentially the same cause; exact supplied neighbour g052 has no retained records and g090 is not in this interface file, so no duplicate disposition is asserted. No forbidden coverage source searched. Revision reason: separate the universal testdoc contract from the correct runtime behavior, retain its exact location and in-range attribution, and replace the prior dismissal with an other-bucket finding. No parent drop or lowering accepted."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g122/findings.jsonl",
+        "id": "c1",
+        "line": 7,
+        "disposition": "under-investigation",
+        "group": "g122-c1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-078",
+          "key": "g122/c1",
+          "latest_line": 7,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "supervisor-clone-doorway-testdoc-universal-host-requirement",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The test documentation still declares that Clone needs a host at the supervisor boundary, although this change admits a source-bearing clone without one. Correct helm routing refutes the original unintended-destination suspicion, not the documentation defect. The earlier dismissal of the stale comment is superseded by the latest record.",
+          "checks": [
+            "190d844e58c96cf197aa838d0b0eea8062f48435:crates/farhelm-supervisor/src/service/handlers.rs:3901-3930 validates the source then passes optional host; 4056-4076 checks only a supplied host; 7350-7365 states the universal host requirement and identifies its scope as this doorway.",
+            "The same revision's handlers.rs:7388-7397 omits both source and host, so its rejection cannot establish a host requirement independently of missing-source validation.",
+            "190d844e:crates/farhelm-helm/src/agent_requests.rs:3863-3885 resolves the source, branches session-owned sources, and rejects missing host for ordinary sources. 4313-4359 refuses host/cwd/key overrides and derives environment target and launch from the source; 4493-4548 approves those facts and rechecks source ownership before creation.",
+            "6e423e30068b62c6cfa276c6d720ee35bb70387a:handlers.rs:7321-7336 already has the comment while the old requirement exists. 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:handlers.rs:7189-7204 retains it after that requirement was removed. Source comparison only; no test executed."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:4270-4306 and SPEC_impl.md:6186-6208 explicitly describe hostless environment clones; they establish the contradiction rather than cover false test documentation.",
+            "Current SPEC_impl.md:7128-7158 also uses an unqualified clone host requirement. That parallel stale wording is not acceptance of the supervisor doorway claim.",
+            "TODO.md Planned is empty. Searches of plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no exact correction/decision covering this testdoc. environment-agent-operations and the tmux plans are landed per plans/REPORTS.md:28-32, so they are not unlanded-plan coverage.",
+            "FILTER.md has no matching boundary for an ordinary authored contract error. No existing queue alias was established; the supplied g090/g052 references cannot establish identity without their records."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Omitting --host might silently select an unintended clone destination. The ordinary-source branch explicitly refuses that shape; environment clones intentionally derive the target from their source. No deletion, replacement or security consequence was established.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Retain the in-range documentation defect. Independently check the earlier destination-authorization refutation conservatively; this consultation does not approve that withdrawal.",
+          "new_interface_evidence": "Current SPEC_impl.md:7129 and 7154 retain the same unqualified clone host requirement alongside its explicit environment exception at 6189-6192. This may help the parent reconcile the separately owned clone-documentation records."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "supervisor-clone-doorway-testdoc-universal-host-requirement",
+        "destination": "trailing-supervisor-clone-doorway-testdoc-universal-host-requirement.md"
+      }
+    },
+    {
+      "key": "g122/c2",
+      "owner": "g122",
+      "id": "c2",
+      "domain": "supervisor-request-admission",
+      "purpose": "supervisor-request-admission: crates/farhelm-supervisor/src/service/handlers.rs, crates/farhelm-supervisor/src/service/connection.rs, crates/farhelm-supervisor/src/service/request_modes.rs; phases +        async fn a_sealed_listing_too_large_for_a_frame_still_reports_the_seal() { | -    async fn pane_death_recovers_missing_final_output_after_client_resume() {",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Removing grid capability negotiation follows the protocol-77 contract",
+            "location": "crates/farhelm-supervisor/src/service/handlers.rs:1682",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether removing Attach.grid, Attached.stream and the needs-grid refusal allows old clients to attach and misinterpret terminal output. Details: handlers.rs removes the capability check at 1682 and emits the kindless Attached reply at 1903; all served terminals are now hosts. farhelm-proto/src/lib.rs:255 sets PROTOCOL_VERSION to 77; connection.rs:182-188 completes the protocol handshake before authentication or dispatch. SPEC_impl.md, Grid streams, 3015-3020 states: `Protocol 77 removed the byte streams with the old terminals and xterm.js: every attachment's data channel carries a grid stream, so Attach, Attached and the browser's socket say nothing about it` and says different protocols refuse each other at hello. The same section explicitly accepts the remaining browser case (3021-3028): `A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.` It explains the old page may misdraw grid output and malformed input ends its attachment, ending with `Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy.` Suggested bucket: high for the considered broken-terminal experience; confidence: confirmed source/contract analysis, no execution; proposed_drop: explicit Grid streams specification acceptance quoted above; possible_cover: none searched. Could-be-highest: false: the established case concerns unavailable/misdrawn terminal interaction, with no established route to loss of work or security impact. This does not judge unrelated browser input code."
+          }
+        }
+      ],
+      "latest": {
+        "line": 2,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Removing grid capability negotiation follows the protocol-77 contract",
+          "location": "crates/farhelm-supervisor/src/service/handlers.rs:1682",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether removing Attach.grid, Attached.stream and the needs-grid refusal allows old clients to attach and misinterpret terminal output. Details: handlers.rs removes the capability check at 1682 and emits the kindless Attached reply at 1903; all served terminals are now hosts. farhelm-proto/src/lib.rs:255 sets PROTOCOL_VERSION to 77; connection.rs:182-188 completes the protocol handshake before authentication or dispatch. SPEC_impl.md, Grid streams, 3015-3020 states: `Protocol 77 removed the byte streams with the old terminals and xterm.js: every attachment's data channel carries a grid stream, so Attach, Attached and the browser's socket say nothing about it` and says different protocols refuse each other at hello. The same section explicitly accepts the remaining browser case (3021-3028): `A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.` It explains the old page may misdraw grid output and malformed input ends its attachment, ending with `Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy.` Suggested bucket: high for the considered broken-terminal experience; confidence: confirmed source/contract analysis, no execution; proposed_drop: explicit Grid streams specification acceptance quoted above; possible_cover: none searched. Could-be-highest: false: the established case concerns unavailable/misdrawn terminal interaction, with no established route to loss of work or security impact. This does not judge unrelated browser input code."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g122/findings.jsonl",
+        "id": "c2",
+        "line": 2,
+        "disposition": "excluded",
+        "group": "protocol77-old-browser-grid-negotiation-removal",
+        "reason": "Parent explicitly accepted named covered proposal from claims-078 after inspecting it. The exact old-page misdrawing and reload remedy are explicitly accepted. Native protocol peers negotiate before dispatch; the accepted old-browser case is separate from that handshake. Explicit specification acceptance, narrowly limited to protocol mismatch and an already-open page from the preceding helm. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-proto/src/lib.rs:255 sets protocol 77. service/connection.rs:182-188 awaits the handshake before authentication/dispatch.\",\"Current SPEC_impl.md, Grid streams, 2939-2955 explicitly describes removed Attach/Attached/browser stream negotiation, different-version hello refusal, and the old browser rendering grid data incorrectly and ending an attachment on malformed input. No runtime observation is claimed.\"] Current coverage/results: [\"SPEC_impl.md Grid streams is exact accepted-behavior coverage for trigger, consequence and old-page scope. SPEC.md:3013-3034 supplies the ordinary flow-control contract, with no conflicting old-page compatibility promise found.\",\"TODO.md Planned is empty. plans/queue searches found tmux-end-old-terminals and related removal plans, all landed per REPORTS.md:29-32. BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md searches found no additional exact item.\",\"No filter is needed; the basis is explicit specification acceptance.\"] Exact cited cover: [\"SPEC_impl.md:2949-2950: A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.\",\"SPEC_impl.md:2955: Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy.\"] Original stronger consequence and missing premise remain preserved: \"An older client might attach and misinterpret grid output, making terminal interaction unavailable or misleading. The record suggested high for that experience, without a highest-impact route.\"; \"No security or work-loss route was established from the accepted misdrawing/malformed-input case; unrelated browser input behavior is outside this claim.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g122/c2",
+        "line": 2,
+        "disposition": "excluded",
+        "group": "protocol77-old-browser-grid-negotiation-removal",
+        "bucket": "high",
+        "recording": "covered",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named covered proposal from claims-078 after inspecting it. The exact old-page misdrawing and reload remedy are explicitly accepted. Native protocol peers negotiate before dispatch; the accepted old-browser case is separate from that handshake. Explicit specification acceptance, narrowly limited to protocol mismatch and an already-open page from the preceding helm. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-proto/src/lib.rs:255 sets protocol 77. service/connection.rs:182-188 awaits the handshake before authentication/dispatch.\",\"Current SPEC_impl.md, Grid streams, 2939-2955 explicitly describes removed Attach/Attached/browser stream negotiation, different-version hello refusal, and the old browser rendering grid data incorrectly and ending an attachment on malformed input. No runtime observation is claimed.\"] Current coverage/results: [\"SPEC_impl.md Grid streams is exact accepted-behavior coverage for trigger, consequence and old-page scope. SPEC.md:3013-3034 supplies the ordinary flow-control contract, with no conflicting old-page compatibility promise found.\",\"TODO.md Planned is empty. plans/queue searches found tmux-end-old-terminals and related removal plans, all landed per REPORTS.md:29-32. BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md searches found no additional exact item.\",\"No filter is needed; the basis is explicit specification acceptance.\"] Exact cited cover: [\"SPEC_impl.md:2949-2950: A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.\",\"SPEC_impl.md:2955: Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy.\"] Original stronger consequence and missing premise remain preserved: \"An older client might attach and misinterpret grid output, making terminal interaction unavailable or misleading. The record suggested high for that experience, without a highest-impact route.\"; \"No security or work-loss route was established from the accepted misdrawing/malformed-input case; unrelated browser input behavior is outside this claim.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-078",
+          "key": "g122/c2",
+          "latest_line": 2,
+          "recommendation": "covered",
+          "bucket": "high",
+          "underlying_key": "protocol77-old-browser-grid-negotiation-removal",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The exact old-page misdrawing and reload remedy are explicitly accepted. Native protocol peers negotiate before dispatch; the accepted old-browser case is separate from that handshake.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-proto/src/lib.rs:255 sets protocol 77. service/connection.rs:182-188 awaits the handshake before authentication/dispatch.",
+            "Current SPEC_impl.md, Grid streams, 2939-2955 explicitly describes removed Attach/Attached/browser stream negotiation, different-version hello refusal, and the old browser rendering grid data incorrectly and ending an attachment on malformed input. No runtime observation is claimed."
+          ],
+          "coverage_checked": [
+            "SPEC_impl.md Grid streams is exact accepted-behavior coverage for trigger, consequence and old-page scope. SPEC.md:3013-3034 supplies the ordinary flow-control contract, with no conflicting old-page compatibility promise found.",
+            "TODO.md Planned is empty. plans/queue searches found tmux-end-old-terminals and related removal plans, all landed per REPORTS.md:29-32. BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md searches found no additional exact item.",
+            "No filter is needed; the basis is explicit specification acceptance."
+          ],
+          "exact_cover_quotes": [
+            "SPEC_impl.md:2949-2950: A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.",
+            "SPEC_impl.md:2955: Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy."
+          ],
+          "missing_premise": "No security or work-loss route was established from the accepted misdrawing/malformed-input case; unrelated browser input behavior is outside this claim.",
+          "original_stronger_consequence": "An older client might attach and misinterpret grid output, making terminal interaction unavailable or misleading. The record suggested high for that experience, without a highest-impact route.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Explicit specification acceptance, narrowly limited to protocol mismatch and an already-open page from the preceding helm."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "protocol77-old-browser-grid-negotiation-removal",
+        "destination": null
+      }
+    },
+    {
+      "key": "g122/c3",
+      "owner": "g122",
+      "id": "c3",
+      "domain": "supervisor-request-admission",
+      "purpose": "supervisor-request-admission: crates/farhelm-supervisor/src/service/handlers.rs, crates/farhelm-supervisor/src/service/connection.rs, crates/farhelm-supervisor/src/service/request_modes.rs; phases +        async fn a_sealed_listing_too_large_for_a_frame_still_reports_the_seal() { | -    async fn pane_death_recovers_missing_final_output_after_client_resume() {",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Deleted pane-death recovery test covers the removed tmux stream",
+            "location": "crates/farhelm-supervisor/src/service/connection.rs (deleted pane_death_recovers_missing_final_output_after_client_resume test)",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether deleting the paused pane-death recovery test leaves the new terminal path unable to show a program's final output after Resume. Original suspected consequence: losing final terminal output while the viewer is paused. Details: the deleted test constructs TmuxOutput, PaneDeath and a raw byte forwarder and asserts a reset replay for missing tmux notifications; these mechanisms are removed with the tmux driver. The replacement grid stream reads the retained emulator after resuming: grid_stream.rs:680-720 parks before its read, 748-792 emits state/history/screen and returns liveness; 603-624 continues on Liveness::Exited rather than ending the stream. Its status read is marked seen before reading the emulator (524-559), retaining changes published afterward. Existing source tests at grid_stream/tests.rs:382-408 cover output and exit during catch-up, 472-506 cover a paused flood retaining every history line after resume, and 906-925 cover the final screen surviving exit. These tests were read, not executed. SPEC_impl.md, Terminal host, 1971-1976 says every terminal the supervisor serves is a host and old tmux terminals are ended at startup; the removed test's tmux-specific lost-notification recovery no longer participates in that path. Suggested bucket: highest for the original potential lost-output consequence, if established; confidence: confirmed source refutation of this deletion concern, no execution. proposed_drop: refuted by the replacement path retaining emulator state across pause and continuing after program exit, with the source references above; possible_cover: none searched. Could-be-highest: true conservatively because the original concern was loss of final terminal output. Caveat: the three existing tests cover the relevant boundaries separately, not the exact combined exit-during-pause sequence; this record does not claim an executed combined-boundary test or certify the host journal implementation."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Removed tmux recovery has a distinct retained-grid pause/exit path",
+            "location": "crates/farhelm-supervisor/src/service/connection.rs (deleted pane_death_recovers_missing_final_output_after_client_resume test)",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether deleting the paused pane-death recovery test loses a program's final terminal output when its viewer resumes. Preserve original suspected consequence: final terminal output could be lost while the viewer is paused, potentially loss of user-owned work. This remains a required behavior for host terminals; retiring tmux does not waive final-output delivery. Source checks this synthesis: git grep for PaneDeath, TmuxOutput, publish_pane_deaths and AttachOutput::Tmux across crates/farhelm-supervisor/src at this revision returned no matches. Thus the removed test's suppressed tmux notification plus pane-death-triggered reset recovery has no surviving implementation to exercise. The replacement has a different mechanism: hosts/terminal.rs:3114-3123 reads host events independently of a viewer's pause, 3357 and 3369 dispatch output and exit, 3929-3941 flushes an open synchronized update, publishes and transitions to Exited, and 4008-4041 publishes revision/liveness through watch status. A pause belongs to the grid sender, not this event-reading runtime. In service/grid_stream.rs:680-685 a live cycle waits for Resume before reading retained emulator state; 524-559 marks status seen before the successful emulator read. If output or exit arrives after that read, its watch change remains unseen for another cycle (631-674); if it arrived before/during pause, the read after Resume sees the retained state. A pause that begins while a cycle already holds messages defers their send (795-831), then the next cycle handles any newer unseen state. An exit does not terminate the sender: live():603-624 continues on Liveness::Exited, and cycle():748-792 sends state/history/screen. Catch-up also marks status changed for an immediate first live cycle (492-497), covering output/exit seen during history-only reads. connection.rs:1334-1356 returns from the pause gate on Resume; 1571-1583 changes the watch from Some to None. Bounded source refutation: the removed test's tmux-notification loss route is absent, and the retained-grid implementation contains explicit pause, wake and child-exit handling that refutes an omission of final-output handling caused by this deletion. It is not a proof of every possible combined-boundary failure. Actual replacement test oracles, all source-read only: service/grid_stream/tests.rs:485-506 waits for post-attach convergence, prints a flood, waits until all its bytes are processed and the sender is actually parked, asserts no queued frames, resumes and checks emulator/client convergence plus every expected history line once and zero resets; it never exits the child. The exit test at 914-925 supplies output and exit, then asserts both exit state and final bye screen and that the stream stays live; it never pauses. The catch-up test at 390-408 holds a long catch-up, supplies output and exit and requires processed-offset plus screen/history convergence and exit state; it does not exercise PauseOutput. The read-race test at 718-767 holds after a live read, publishes final output then silence, asserts the last line, then separately holds another read and asserts an exit delivered during it. Viewer::converged at 215-221 requires ReplayComplete, processed offset and client equality with the current emulator; Viewer::parked_after at 234-238 requires an observed park count increase. These separate oracles do not automatically certify the exact exit-during-pause sequence, and none was executed. SPEC_impl.md, Terminal host, 1971-1976 says every served terminal is a host and old tmux terminals are ended at startup; this explains removal of the mechanism-specific fixture, not acceptance of output loss. Suggested bucket: highest for the original potential loss consequence, if established; confidence: confirmed bounded source refutation of the deletion concern, no runtime observation; proposed_drop: the removed recovery route no longer exists and replacement source explicitly retains/resends state across pause and child exit, as bounded above; possible_cover: none searched. Could-be-highest: true conservatively; retain for independent drop check. Caveats: no direct combined exit-during-pause test was found among these inspected tests; no host-journal or arbitrary transport-failure certification is claimed. No highest-impact loss route is established by the reviewed deletion. Revision reason: distinguished retired notification recovery from the still-required combined behavior, checked runtime publication and sender interleavings, and replaced broad test-coverage language with each test's actual oracle. No parent drop accepted."
+          }
+        }
+      ],
+      "latest": {
+        "line": 6,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Removed tmux recovery has a distinct retained-grid pause/exit path",
+          "location": "crates/farhelm-supervisor/src/service/connection.rs (deleted pane_death_recovers_missing_final_output_after_client_resume test)",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: considered whether deleting the paused pane-death recovery test loses a program's final terminal output when its viewer resumes. Preserve original suspected consequence: final terminal output could be lost while the viewer is paused, potentially loss of user-owned work. This remains a required behavior for host terminals; retiring tmux does not waive final-output delivery. Source checks this synthesis: git grep for PaneDeath, TmuxOutput, publish_pane_deaths and AttachOutput::Tmux across crates/farhelm-supervisor/src at this revision returned no matches. Thus the removed test's suppressed tmux notification plus pane-death-triggered reset recovery has no surviving implementation to exercise. The replacement has a different mechanism: hosts/terminal.rs:3114-3123 reads host events independently of a viewer's pause, 3357 and 3369 dispatch output and exit, 3929-3941 flushes an open synchronized update, publishes and transitions to Exited, and 4008-4041 publishes revision/liveness through watch status. A pause belongs to the grid sender, not this event-reading runtime. In service/grid_stream.rs:680-685 a live cycle waits for Resume before reading retained emulator state; 524-559 marks status seen before the successful emulator read. If output or exit arrives after that read, its watch change remains unseen for another cycle (631-674); if it arrived before/during pause, the read after Resume sees the retained state. A pause that begins while a cycle already holds messages defers their send (795-831), then the next cycle handles any newer unseen state. An exit does not terminate the sender: live():603-624 continues on Liveness::Exited, and cycle():748-792 sends state/history/screen. Catch-up also marks status changed for an immediate first live cycle (492-497), covering output/exit seen during history-only reads. connection.rs:1334-1356 returns from the pause gate on Resume; 1571-1583 changes the watch from Some to None. Bounded source refutation: the removed test's tmux-notification loss route is absent, and the retained-grid implementation contains explicit pause, wake and child-exit handling that refutes an omission of final-output handling caused by this deletion. It is not a proof of every possible combined-boundary failure. Actual replacement test oracles, all source-read only: service/grid_stream/tests.rs:485-506 waits for post-attach convergence, prints a flood, waits until all its bytes are processed and the sender is actually parked, asserts no queued frames, resumes and checks emulator/client convergence plus every expected history line once and zero resets; it never exits the child. The exit test at 914-925 supplies output and exit, then asserts both exit state and final bye screen and that the stream stays live; it never pauses. The catch-up test at 390-408 holds a long catch-up, supplies output and exit and requires processed-offset plus screen/history convergence and exit state; it does not exercise PauseOutput. The read-race test at 718-767 holds after a live read, publishes final output then silence, asserts the last line, then separately holds another read and asserts an exit delivered during it. Viewer::converged at 215-221 requires ReplayComplete, processed offset and client equality with the current emulator; Viewer::parked_after at 234-238 requires an observed park count increase. These separate oracles do not automatically certify the exact exit-during-pause sequence, and none was executed. SPEC_impl.md, Terminal host, 1971-1976 says every served terminal is a host and old tmux terminals are ended at startup; this explains removal of the mechanism-specific fixture, not acceptance of output loss. Suggested bucket: highest for the original potential loss consequence, if established; confidence: confirmed bounded source refutation of the deletion concern, no runtime observation; proposed_drop: the removed recovery route no longer exists and replacement source explicitly retains/resends state across pause and child exit, as bounded above; possible_cover: none searched. Could-be-highest: true conservatively; retain for independent drop check. Caveats: no direct combined exit-during-pause test was found among these inspected tests; no host-journal or arbitrary transport-failure certification is claimed. No highest-impact loss route is established by the reviewed deletion. Revision reason: distinguished retired notification recovery from the still-required combined behavior, checked runtime publication and sender interleavings, and replaced broad test-coverage language with each test's actual oracle. No parent drop accepted."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g122/findings.jsonl",
+        "id": "c3",
+        "line": 6,
+        "disposition": "under-investigation",
+        "group": "g122-c3",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-078",
+          "key": "g122/c3",
+          "latest_line": 6,
+          "recommendation": "refuted",
+          "bucket": "highest",
+          "underlying_key": "removed-tmux-pane-death-test-versus-grid-pause-exit-delivery",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Source refutes the bounded claim that deleting tmux-specific notification recovery leaves final-output handling absent. Host event processing retains output independently of viewer pause, and the sender reads retained state after resume and continues after child exit. This is not certification of every combined-boundary execution.",
+          "checks": [
+            "At 1ed482dde220452e424973faf38a5e1318986333, git grep of supervisor source found no PaneDeath, TmuxOutput, publish_pane_deaths or AttachOutput::Tmux implementation.",
+            "That revision's hosts/terminal.rs:3114-3123 reads host events independently of viewer pause; 3357-3369 dispatches output/exit; 3929-3941 flushes synchronized output, publishes, then records Exited; 4008-4041 publishes watch status and liveness.",
+            "service/grid_stream.rs:524-559 marks status seen before reading the emulator, 631-674 wakes for later changes, 680-685 parks before the next retained read, and 748-831 sends state/history/screen through the pause gate. live at 603-624 continues on Exited rather than ending.",
+            "Source-read tests at service/grid_stream/tests.rs:382-408 cover exit during catch-up, 472-506 cover paused output without child exit, and 906-925 cover final screen and exit with a live stream. These are separate oracles, not an executed combined exit-during-PauseOutput test."
+          ],
+          "coverage_checked": [
+            "SPEC.md:3013-3034 and SPEC_impl.md Grid streams require retained output across viewer flow control. They do not accept final-output loss. SPEC.md Old terminals explains retiring the old mechanism, without waiving the host guarantee.",
+            "TODO.md Planned is empty. plans/queue searches found landed terminal-removal plans only for this mechanism; no unlanded plan explicitly settles a combined pause/exit defect. BUGS.md has no matching entry.",
+            "Full INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact final-output-loss-on-pause item. Nearby stopped-reader and Stop-wait test entries concern different oracles. No filter matches this possible loss consequence."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No remaining loss route caused by this deletion was shown. The inspected tests do not directly combine child exit with PauseOutput; no runtime test or journal certification was performed.",
+          "original_stronger_consequence": "Final terminal output could be lost while the viewer is paused, potentially losing user-owned work. Retiring tmux does not make such loss acceptable.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Propose source refutation of the named deletion/omitted-handling route, retaining highest conservatively for the required independent drop check and preserving the combined-test caveat."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "removed-tmux-pane-death-test-versus-grid-pause-exit-delivery",
+        "destination": null
+      }
+    },
+    {
+      "key": "g122/c4",
+      "owner": "g122",
+      "id": "c4",
+      "domain": "supervisor-request-admission",
+      "purpose": "supervisor-request-admission: crates/farhelm-supervisor/src/service/handlers.rs, crates/farhelm-supervisor/src/service/connection.rs, crates/farhelm-supervisor/src/service/request_modes.rs; phases +        async fn a_sealed_listing_too_large_for_a_frame_still_reports_the_seal() { | -    async fn pane_death_recovers_missing_final_output_after_client_resume() {",
+      "history": [
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Environment recipe doorway cap does not reject valid recipe names",
+            "location": "crates/farhelm-supervisor/src/service/handlers.rs:3888",
+            "detail": "Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435. TLDR: checked whether using the template-name cap for agent environment recipes makes a valid recipe impossible to launch through this request boundary. Details: handlers.rs:3888-3899 rejects empty/control-containing recipe names or names above launcher::TEMPLATE_NAME_CAP, then bounds the encoded edit payload through validate_create_fields. launcher.rs:404 defines that cap as 128 bytes, while recipes.rs:35-40 defines the actual stored RECIPE_NAME_CAP as 32 bytes. Therefore the new doorway is not narrower than valid stored recipe names; an ordinary valid name fits. The function's contract at handlers.rs:3732-3739 expressly distinguishes doorway bounds from helm admission and 3885-3887 leaves recipe existence/placement to the helm. A larger doorway bound admits some nonexistent/invalid names for later rejection but does not prove a launch bypass. Suggested bucket: other for the considered naming/availability consequence; confidence: confirmed source bound comparison, no execution; proposed_drop: source refutation of valid-name rejection by the 128 versus 32 byte limits, with validation ownership as cited; possible_cover: none searched. Could-be-highest: false; no security or user-work loss route considered or established. No finding of a required equal-cap invariant is asserted."
+          }
+        }
+      ],
+      "latest": {
+        "line": 8,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c4",
+          "state": "open",
+          "summary": "Environment recipe doorway cap does not reject valid recipe names",
+          "location": "crates/farhelm-supervisor/src/service/handlers.rs:3888",
+          "detail": "Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435. TLDR: checked whether using the template-name cap for agent environment recipes makes a valid recipe impossible to launch through this request boundary. Details: handlers.rs:3888-3899 rejects empty/control-containing recipe names or names above launcher::TEMPLATE_NAME_CAP, then bounds the encoded edit payload through validate_create_fields. launcher.rs:404 defines that cap as 128 bytes, while recipes.rs:35-40 defines the actual stored RECIPE_NAME_CAP as 32 bytes. Therefore the new doorway is not narrower than valid stored recipe names; an ordinary valid name fits. The function's contract at handlers.rs:3732-3739 expressly distinguishes doorway bounds from helm admission and 3885-3887 leaves recipe existence/placement to the helm. A larger doorway bound admits some nonexistent/invalid names for later rejection but does not prove a launch bypass. Suggested bucket: other for the considered naming/availability consequence; confidence: confirmed source bound comparison, no execution; proposed_drop: source refutation of valid-name rejection by the 128 versus 32 byte limits, with validation ownership as cited; possible_cover: none searched. Could-be-highest: false; no security or user-work loss route considered or established. No finding of a required equal-cap invariant is asserted."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g122/findings.jsonl",
+        "id": "c4",
+        "line": 8,
+        "disposition": "excluded",
+        "group": "agent-environment-recipe-doorway-cap-valid-name-rejection",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-078 after inspecting it. The doorway's 128-byte cap is wider than the valid recipe grammar's 32-byte cap, so it cannot reject a valid recipe on the suspected length mismatch. Source-refuted inequality: all valid ASCII recipe names fit within the wider doorway bound. Checked source/results: [\"190d844e58c96cf197aa838d0b0eea8062f48435:service/handlers.rs:3885-3899 rejects empty/control-bearing names and applies TEMPLATE_NAME_CAP, explicitly leaving existence/placement to the helm.\",\"That revision's farhelm-proto/src/launcher.rs:404 defines TEMPLATE_NAME_CAP as 128; recipes.rs:40 defines RECIPE_NAME_CAP as 32. SPEC.md:459-462 describes the ASCII lowercase/digit/hyphen grammar and maximum 32 characters; SPEC_impl.md:6424-6427 explains its narrower grammar. Source comparison only.\"] Current coverage/results: [\"Both specifications' recipe grammar/agent-environment sections were searched/read; neither requires equality between doorway and stored-name caps. This is source refutation, not permission to bypass recipe validation.\",\"TODO.md Planned is empty. plans/queue recipe/environment searches found no unlanded cap correction. BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md contain no matching valid-name rejection item.\",\"FILTER.md is not needed and no filter boundary is asserted.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A valid stored recipe might become impossible to launch through agent requests. No security or work-loss consequence was considered or established.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g122/c4",
+        "line": 8,
+        "disposition": "excluded",
+        "group": "agent-environment-recipe-doorway-cap-valid-name-rejection",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-078 after inspecting it. The doorway's 128-byte cap is wider than the valid recipe grammar's 32-byte cap, so it cannot reject a valid recipe on the suspected length mismatch. Source-refuted inequality: all valid ASCII recipe names fit within the wider doorway bound. Checked source/results: [\"190d844e58c96cf197aa838d0b0eea8062f48435:service/handlers.rs:3885-3899 rejects empty/control-bearing names and applies TEMPLATE_NAME_CAP, explicitly leaving existence/placement to the helm.\",\"That revision's farhelm-proto/src/launcher.rs:404 defines TEMPLATE_NAME_CAP as 128; recipes.rs:40 defines RECIPE_NAME_CAP as 32. SPEC.md:459-462 describes the ASCII lowercase/digit/hyphen grammar and maximum 32 characters; SPEC_impl.md:6424-6427 explains its narrower grammar. Source comparison only.\"] Current coverage/results: [\"Both specifications' recipe grammar/agent-environment sections were searched/read; neither requires equality between doorway and stored-name caps. This is source refutation, not permission to bypass recipe validation.\",\"TODO.md Planned is empty. plans/queue recipe/environment searches found no unlanded cap correction. BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md contain no matching valid-name rejection item.\",\"FILTER.md is not needed and no filter boundary is asserted.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A valid stored recipe might become impossible to launch through agent requests. No security or work-loss consequence was considered or established.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-078",
+          "key": "g122/c4",
+          "latest_line": 8,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "agent-environment-recipe-doorway-cap-valid-name-rejection",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The doorway's 128-byte cap is wider than the valid recipe grammar's 32-byte cap, so it cannot reject a valid recipe on the suspected length mismatch.",
+          "checks": [
+            "190d844e58c96cf197aa838d0b0eea8062f48435:service/handlers.rs:3885-3899 rejects empty/control-bearing names and applies TEMPLATE_NAME_CAP, explicitly leaving existence/placement to the helm.",
+            "That revision's farhelm-proto/src/launcher.rs:404 defines TEMPLATE_NAME_CAP as 128; recipes.rs:40 defines RECIPE_NAME_CAP as 32. SPEC.md:459-462 describes the ASCII lowercase/digit/hyphen grammar and maximum 32 characters; SPEC_impl.md:6424-6427 explains its narrower grammar. Source comparison only."
+          ],
+          "coverage_checked": [
+            "Both specifications' recipe grammar/agent-environment sections were searched/read; neither requires equality between doorway and stored-name caps. This is source refutation, not permission to bypass recipe validation.",
+            "TODO.md Planned is empty. plans/queue recipe/environment searches found no unlanded cap correction. BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md contain no matching valid-name rejection item.",
+            "FILTER.md is not needed and no filter boundary is asserted."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "A valid stored recipe might become impossible to launch through agent requests. No security or work-loss consequence was considered or established.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source-refuted inequality: all valid ASCII recipe names fit within the wider doorway bound."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "agent-environment-recipe-doorway-cap-valid-name-rejection",
+        "destination": null
+      }
+    },
+    {
+      "key": "g122/l1",
+      "owner": "g122",
+      "id": "l1",
+      "domain": "supervisor-request-admission",
+      "purpose": "supervisor-request-admission: crates/farhelm-supervisor/src/service/handlers.rs, crates/farhelm-supervisor/src/service/connection.rs, crates/farhelm-supervisor/src/service/request_modes.rs; phases +        async fn a_sealed_listing_too_large_for_a_frame_still_reports_the_seal() { | -    async fn pane_death_recovers_missing_final_output_after_client_resume() {",
+      "history": [
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Check whether oversized sealed-list test can pass through a listing-error fallback",
+            "location": "crates/farhelm-supervisor/src/service/handlers.rs:12971",
+            "detail": "Reviewed commit: 47f33bbdbd5ff4a6e437e97a800f9083be43096e. TLDR: the new regression test expects a minimal sealed listing, which can also be produced by a listing failure; check whether its planted fixture actually reaches a successful oversized list rather than the other fallback. Source basis: handlers.rs:12971-12993 plants only an in-memory terminal-less entry with an over-frame title and sets sealed; handle_list_sessions at 616-626 converts either a list_all error or an oversized successful list to the same minimal response. listing.rs:177-203 may query tmux for terminal-less entries and projects checkout metadata through the store, while this fixture has no stored session row. Checks made: read full list_all and entry_with (core.rs:22504-22560), confirming its id/title/terminal and map/store shape. Exact missing premise: whether may_have_tmux_terminals and project_checkout_metadata produce an error from this fixture's normal supported state. Next source checks: inspect those functions and constructor tmux state. A merely hypothetical disk error would not establish that this test has a deterministic wrong-path premise; that distinction remains to be checked. Suggested bucket: other if a concrete test-oracle defect is confirmed; confidence: substantive source lead, no execution; proposed_drop: false pending investigation; possible_cover: none among supplied interfaces; could-be-highest: false for this test-quality concern, with no established product work-loss route. No reproduction or runtime test requested or run."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Sealed-list fixture has no source-established alternate failure path",
+            "location": "crates/farhelm-supervisor/src/service/handlers.rs:12971",
+            "detail": "Reviewed commit: 47f33bbdbd5ff4a6e437e97a800f9083be43096e. TLDR: investigated whether the new oversized sealed-list test normally passes through the listing-error fallback rather than checking its intended oversized response. Original considered consequence: a test could fail to detect removal of the oversize-specific seal fallback. Checks/results: handlers.rs:12971-12993 creates a fresh StateDir and successful supervisor, plants only one in-memory terminal-less session and an over-frame ASCII title. core.rs:6653-6667 calls adopt_running_server before the fixture is planted; tmux.rs:3075-3082 observes the fresh private socket absent, sets presence absent and returns without a tmux command. No test action starts an old terminal afterward. terminals.rs:443-451 consequently returns false for this terminal-less entry because server_may_run is false (tmux.rs:2619-2624); listing.rs:177-195 skips the tmux query. Metadata projection does not require a stored session row: store.rs:3537-3584 reads working-copy origin/membership for the id, and working_copies.rs:968-981 and 987-1000 return None/empty for the fresh database, rather than treating the missing session row as an error. entry_info's output retains the entry's supplied title, so its encoded ASCII title alone exceeds MAX_FRAME_LEN. Thus neither suspected authored-fixture mismatch supplies an alternate failure path; removing the explicit oversize branch leaves an oversized SessionList for reply_frame to turn into Error, which the test's expected SessionList rejects. This conclusion is source analysis, not an executed mutation or test. The result does not assert that hypothetical disk/SQLite failures could never reach the identical sealed-error response; no concrete such failure is caused by this fixture or the reviewed change. Suggested bucket: other for the original test-oracle concern; confidence: confirmed bounded source refutation of the identified fixture premises, no execution. proposed_drop: source-refuted normal-path masking through tmux lookup or absent session-row projection, with exact refs above; possible_cover: none; could-be-highest: false, test-quality concern only. Revision reason: completed the concrete dependency checks rather than retaining a speculative failure premise. No open source check remains for this lead."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l1",
+          "state": "open",
+          "summary": "Sealed-list fixture has no source-established alternate failure path",
+          "location": "crates/farhelm-supervisor/src/service/handlers.rs:12971",
+          "detail": "Reviewed commit: 47f33bbdbd5ff4a6e437e97a800f9083be43096e. TLDR: investigated whether the new oversized sealed-list test normally passes through the listing-error fallback rather than checking its intended oversized response. Original considered consequence: a test could fail to detect removal of the oversize-specific seal fallback. Checks/results: handlers.rs:12971-12993 creates a fresh StateDir and successful supervisor, plants only one in-memory terminal-less session and an over-frame ASCII title. core.rs:6653-6667 calls adopt_running_server before the fixture is planted; tmux.rs:3075-3082 observes the fresh private socket absent, sets presence absent and returns without a tmux command. No test action starts an old terminal afterward. terminals.rs:443-451 consequently returns false for this terminal-less entry because server_may_run is false (tmux.rs:2619-2624); listing.rs:177-195 skips the tmux query. Metadata projection does not require a stored session row: store.rs:3537-3584 reads working-copy origin/membership for the id, and working_copies.rs:968-981 and 987-1000 return None/empty for the fresh database, rather than treating the missing session row as an error. entry_info's output retains the entry's supplied title, so its encoded ASCII title alone exceeds MAX_FRAME_LEN. Thus neither suspected authored-fixture mismatch supplies an alternate failure path; removing the explicit oversize branch leaves an oversized SessionList for reply_frame to turn into Error, which the test's expected SessionList rejects. This conclusion is source analysis, not an executed mutation or test. The result does not assert that hypothetical disk/SQLite failures could never reach the identical sealed-error response; no concrete such failure is caused by this fixture or the reviewed change. Suggested bucket: other for the original test-oracle concern; confidence: confirmed bounded source refutation of the identified fixture premises, no execution. proposed_drop: source-refuted normal-path masking through tmux lookup or absent session-row projection, with exact refs above; possible_cover: none; could-be-highest: false, test-quality concern only. Revision reason: completed the concrete dependency checks rather than retaining a speculative failure premise. No open source check remains for this lead."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g122/findings.jsonl",
+        "id": "l1",
+        "line": 10,
+        "disposition": "excluded",
+        "group": "sealed-oversized-list-test-fixture-alternate-error-path",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-078 after inspecting it. The two concrete suspected fixture mismatches do not produce the alternate failure path. Fresh construction has no old tmux server, and checkout projection does not require the planted session to have a durable session row. Arbitrary unrelated storage failures remain possible, but were not caused by this fixture or change. Refute the concrete tmux and missing-session-row fixture premises; do not claim all possible listing failures are impossible. Checked source/results: [\"47f33bbdbd5ff4a6e437e97a800f9083be43096e:handlers.rs:12971-12993 creates a fresh supervisor, plants one map entry with an ASCII title MAX_FRAME_LEN bytes long, sets sealed, and expects an empty truncated sealed SessionList.\",\"service/core.rs:6653-6667 adopts the private server during construction; tmux.rs:3075-3082 marks an absent private socket absent. service/terminals.rs:443-451 uses server_may_run for the terminal-less entry, so listing.rs:177-195 skips tmux lookup in this fixture.\",\"listing.rs:124-214 describes map entries and projects metadata; status.rs:478-598 clones entry.info and leaves its title intact. store.rs:3537-3584 mutates only optional checkout metadata and returns the supplied vector. working_copies.rs:968-1000 returns None/empty for absent origin/membership, without checking session-row existence.\",\"handlers.rs:616-628 distinguishes oversize handling before send. With the oversized successful row retained, removing the oversize-specific branch would leave reply framing to replace SessionList with Error, which the test rejects. This is source reasoning; no mutation or test was run.\"] Current coverage/results: [\"SPEC_impl.md:6106-6135 requires durable seal publication in SessionList; SPEC.md Sandbox sessions supplies the last-session behavior. Neither accepts an ineffective oracle, but neither supplies a concrete alternate fixture error.\",\"TODO.md Planned is empty. plans/queue, BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact oversized sealed-list fixture item. The environment plan is landed. No filter applies to this test-oracle suspicion.\",\"g123/c5 is the same missing-session-row subclaim; it adds no independent defect. The tmux premise is additional scope in this record.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The oversize regression test could pass through listing-error fallback and fail to detect removal of the oversize-specific seal fallback. Test-quality concern only.\"; \"No source-established unrelated listing error induced by the normal authored fixture remains. A hypothetical disk/SQLite failure alone is not evidence that this fixture masks its intended branch.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g122/l1",
+        "line": 10,
+        "disposition": "excluded",
+        "group": "sealed-oversized-list-test-fixture-alternate-error-path",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-078 after inspecting it. The two concrete suspected fixture mismatches do not produce the alternate failure path. Fresh construction has no old tmux server, and checkout projection does not require the planted session to have a durable session row. Arbitrary unrelated storage failures remain possible, but were not caused by this fixture or change. Refute the concrete tmux and missing-session-row fixture premises; do not claim all possible listing failures are impossible. Checked source/results: [\"47f33bbdbd5ff4a6e437e97a800f9083be43096e:handlers.rs:12971-12993 creates a fresh supervisor, plants one map entry with an ASCII title MAX_FRAME_LEN bytes long, sets sealed, and expects an empty truncated sealed SessionList.\",\"service/core.rs:6653-6667 adopts the private server during construction; tmux.rs:3075-3082 marks an absent private socket absent. service/terminals.rs:443-451 uses server_may_run for the terminal-less entry, so listing.rs:177-195 skips tmux lookup in this fixture.\",\"listing.rs:124-214 describes map entries and projects metadata; status.rs:478-598 clones entry.info and leaves its title intact. store.rs:3537-3584 mutates only optional checkout metadata and returns the supplied vector. working_copies.rs:968-1000 returns None/empty for absent origin/membership, without checking session-row existence.\",\"handlers.rs:616-628 distinguishes oversize handling before send. With the oversized successful row retained, removing the oversize-specific branch would leave reply framing to replace SessionList with Error, which the test rejects. This is source reasoning; no mutation or test was run.\"] Current coverage/results: [\"SPEC_impl.md:6106-6135 requires durable seal publication in SessionList; SPEC.md Sandbox sessions supplies the last-session behavior. Neither accepts an ineffective oracle, but neither supplies a concrete alternate fixture error.\",\"TODO.md Planned is empty. plans/queue, BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact oversized sealed-list fixture item. The environment plan is landed. No filter applies to this test-oracle suspicion.\",\"g123/c5 is the same missing-session-row subclaim; it adds no independent defect. The tmux premise is additional scope in this record.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The oversize regression test could pass through listing-error fallback and fail to detect removal of the oversize-specific seal fallback. Test-quality concern only.\"; \"No source-established unrelated listing error induced by the normal authored fixture remains. A hypothetical disk/SQLite failure alone is not evidence that this fixture masks its intended branch.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-078",
+          "key": "g122/l1",
+          "latest_line": 10,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "sealed-oversized-list-test-fixture-alternate-error-path",
+          "aliases": [
+            "g123/c5"
+          ],
+          "target_queue_file": null,
+          "why": "The two concrete suspected fixture mismatches do not produce the alternate failure path. Fresh construction has no old tmux server, and checkout projection does not require the planted session to have a durable session row. Arbitrary unrelated storage failures remain possible, but were not caused by this fixture or change.",
+          "checks": [
+            "47f33bbdbd5ff4a6e437e97a800f9083be43096e:handlers.rs:12971-12993 creates a fresh supervisor, plants one map entry with an ASCII title MAX_FRAME_LEN bytes long, sets sealed, and expects an empty truncated sealed SessionList.",
+            "service/core.rs:6653-6667 adopts the private server during construction; tmux.rs:3075-3082 marks an absent private socket absent. service/terminals.rs:443-451 uses server_may_run for the terminal-less entry, so listing.rs:177-195 skips tmux lookup in this fixture.",
+            "listing.rs:124-214 describes map entries and projects metadata; status.rs:478-598 clones entry.info and leaves its title intact. store.rs:3537-3584 mutates only optional checkout metadata and returns the supplied vector. working_copies.rs:968-1000 returns None/empty for absent origin/membership, without checking session-row existence.",
+            "handlers.rs:616-628 distinguishes oversize handling before send. With the oversized successful row retained, removing the oversize-specific branch would leave reply framing to replace SessionList with Error, which the test rejects. This is source reasoning; no mutation or test was run."
+          ],
+          "coverage_checked": [
+            "SPEC_impl.md:6106-6135 requires durable seal publication in SessionList; SPEC.md Sandbox sessions supplies the last-session behavior. Neither accepts an ineffective oracle, but neither supplies a concrete alternate fixture error.",
+            "TODO.md Planned is empty. plans/queue, BUGS.md, full INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact oversized sealed-list fixture item. The environment plan is landed. No filter applies to this test-oracle suspicion.",
+            "g123/c5 is the same missing-session-row subclaim; it adds no independent defect. The tmux premise is additional scope in this record."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No source-established unrelated listing error induced by the normal authored fixture remains. A hypothetical disk/SQLite failure alone is not evidence that this fixture masks its intended branch.",
+          "original_stronger_consequence": "The oversize regression test could pass through listing-error fallback and fail to detect removal of the oversize-specific seal fallback. Test-quality concern only.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Refute the concrete tmux and missing-session-row fixture premises; do not claim all possible listing failures are impossible."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "sealed-oversized-list-test-fixture-alternate-error-path",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial pass complete: all 13 assigned patches read. No reportable findings or open leads.\n\nRecorded candidates c1–c3 in findings.jsonl; c3 flags a potentially highest-impact concern for independent drop review. Updated progress.md. Source-only review; no tests or reproductions run."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised c1 with source-confirmed ordinary-clone host rejection and environment-clone routing checks.\n\nRevised c3 with bounded pause/exit source analysis and precise replacement-test oracles. Preserved the potential output-loss consequence and independent-drop caveat.\n\nNo new findings. Unresolved lead IDs: none."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass complete. Checked request bounds, retirement guard ordering, changed fixtures, and sealed-list construction.\n\n- Verified: c1 revised to a documentation finding.\n- New unverified IDs: none.\n- c4 recorded as refuted; l1 resolved to a candidate.\n- Open leads: none.\n\nSomething new was found: the c1 documentation defect. No additional runtime defect found. No execution performed."
+    }
+  ],
+  "progress": "g122: initialized, awaiting initial source review.\nGroup: g122, supervisor-request-admission.\nTurn: initial review, 1. Discovery passes: 0.\nState: brief and complete commits field read; findings log exists. Reading mandatory patches and pinned contracts next.\nInterfaces: admission modes, connection dispatch, seal responses, terminal stream replacement contracts.\nUnread scope: all assigned patch packets and governing source/contracts.\nNew verified/unverified IDs: none.\n\nInitial turn complete. Turn type/count: initial / 1. Discovery-pass count: 0 (no later discovery or synthesis turn performed).\nAll 13 assigned patch files, 1,094 lines, were delivered through evidence read; 00922-001.patch was split at lines 160/161. No assigned patch material remains unread. The complete inventory commits field was read; excluded metadata and coverage sources were not read.\n\nResults: no retained findings; candidates c1, c2, c3 appended, and c1 revised after checking the old test assertion. No open leads. New verified/unverified finding IDs this pass: none. c3 conservatively marks the original final-output concern could-be-highest for the caller's independent drop check; the record retains its source refutation and combined-test caveat. No runtime tests, reproductions, builds, checkout writes or helper agents.\n\nInterface assumptions checked: the helm owns environment-clone placement and approval; the supervisor bounds the request before relay. A session-only Delete and DeleteSessionOrSeal have distinct authority and finality contracts. Sealed listings preserve the seal even when rows exceed a frame. Old terminal driver removal leaves only host/grid attachments; protocol 77 rejects pre-77 peers at hello, and an old browser's need to reload is explicitly accepted. Grid reads wait out pause, preserve unseen status changes and keep the attachment after child exit. Unit-test host fixtures use test-owned state and host cleanup.\n\nPinned context read (paths relative to checkout; inclusive line ranges):\n- 04d85f0c98a9b635709d00b056719a0baa7fd3fc: SPEC.md 4810-4845; SPEC_impl.md 1060-1100, 8642-8657; service/handlers.rs 180-275, 740-865, 1080-1215, 1460-1565, 2590-2695; service/core.rs 3712-3764; service/uploads.rs 909-960.\n- 190d844e58c96cf197aa838d0b0eea8062f48435: SPEC.md 4289-4348; SPEC_impl.md 6658-6708; service/handlers.rs 3710-4115, 7340-7510; farhelm-helm/src/agent_requests.rs 940-1045.\n- 47f33bbdbd5ff4a6e437e97a800f9083be43096e: SPEC_impl.md 6520-6688; service/request_modes.rs 1-195; service/connection.rs 1110-1230; service/handlers.rs 580-695, 1410-1545, 3330-3455, 12040-12130, 12930-13020.\n- 70bc66a9f285cc2a9984924f389834d118b7cfdc: service/connection.rs 2720-2860, 2910-3020; service/core.rs 20050-20155, 20500-20655; service/handlers.rs 5865-6020.\n- 1ed482dde220452e424973faf38a5e1318986333: SPEC_impl.md 1963-2008, 2815-2865, 2880-2910; service/grid_stream.rs 1-210, 500-575, 600-860; service/grid_stream/tests.rs 382-412, 472-507, 906-942.\n- f560058da19e02716e6f943883a9508b447aff4e: SPEC.md 2855-2975; SPEC_impl.md 2784-2818, 2980-3040; service/connection.rs 165-315; farhelm-proto/src/lib.rs 220-267; farhelm-proto/src/io.rs 420-500, 540-695.\n- 08399d092d20815ced6619c26df2391944ae2b4a: service/connection.rs 2545-2635.\n- 4b489b4f2eeade14f119b186ecb16eeaaf027021: service/connection.rs 440-525.\nSupervisor service paths above are under crates/farhelm-supervisor/src/. Context searches located the contracts and callers; no search snippets substitute for mandatory evidence packets.\n\nNext action: return to caller for a later synthesis/discovery turn. This is completion of the assigned initial pass only.\n\nSynthesis turn started. Turn type/count: synthesis / 2. Discovery-pass count: 0.\nParent audited supported delivery and all four initial events. No parent drop is accepted. Recheck c1 against actual helm source-owned routing and ordinary explicit-host rejection; recheck c3's combined pause/exit behavior without treating separate test oracles as a combined test. No open leads at turn start.\n\nSynthesis turn complete. Turn type/count: synthesis / 2. Discovery-pass count: 0. No new findings or leads. Revised c1 and c3 under their original IDs (events 5 and 6); c2 unchanged. No open lead IDs. No parent drop is accepted; c3 still preserves the original potential output-loss consequence and could-be-highest flag for independent check.\n\nResolved premises: c1 now cites the actual helm source-resolution branch, ordinary missing-host rejection before dispatch, source-owned recipe/place selection, fixed approval plan and after-approval owner check. The environment-origin fleet gate also refuses Clone/CreateEnvironment before routing (agent_requests.rs:505-529). For c3, source search confirms the old pane-death/raw-tmux recovery symbols have no surviving supervisor implementation. Runtime event handling is independent of sender pause, child exit publishes status and does not terminate the grid sender, and Resume releases its sender gate before the retained emulator read. The revised record explains both pause-before-read and pause-after-capture interleavings and bounds the refutation. Test oracles were inspected individually; none of the inspected tests is a direct exit-during-PauseOutput test. Separate test coverage is not treated as certification of their combined boundary. No runtime result is claimed.\n\nAdditional/revisited source context this turn, all pinned:\n- 190d844e58c96cf197aa838d0b0eea8062f48435, crates/farhelm-helm/src/agent_requests.rs:503-542, 876-950, 3835-3955, 4290-4585, 15208-15275.\n- 1ed482dde220452e424973faf38a5e1318986333, crates/farhelm-supervisor/src/service/grid_stream.rs:414-505, 517-559, 602-685; service/grid_stream/tests.rs:90-249, 372-410, 472-506, 704-768, 906-925; service/connection.rs:1323-1378, 1565-1595; hosts/terminal.rs:3085-3200, 3334-3394, 3418-3505, 3635-3788, 3905-4052.\n- 47f33bbdbd5ff4a6e437e97a800f9083be43096e, crates/farhelm-supervisor/src/service/handlers.rs:608-684, 1538-1590. Seal publication precedes teardown and remains recoverable through the minimal sealed listing; no interaction with removal of terminal-kind fields was identified in the assigned patches.\n\nValidation: source and contract analysis only. No tests, builds, reproductions, checkout writes or helper agents. Assigned scope unread: none. Next action: return this turn's delta to caller; await any later discovery request.\n\nDiscovery turn started. Turn type/count: discovery / 3. Discovery-pass count: 1, in progress. All 532 lines of discovery-neighbours.json read in bounded chunks (initial 1-160 output was clipped, then 1-160 reread in smaller ranges). Parent's c1 testdoc question is pending; assess documentation independently of runtime correctness. Interface records are context only; no parent drops/lowerings accepted. Known c2/c3 are not a discovery target. No open leads at turn start.\n\nDiscovery pass 1 complete. Turn type/count: discovery / 3. Discovery-pass count: 1. New reportable result: c1 revised from candidate to a confirmed other-bucket documentation finding, answering the parent question. Its universal supervisor-doorway host requirement becomes false at 190d844e58c96cf197aa838d0b0eea8062f48435 and survives to tip. The original unintended-destination runtime concern remains refuted; correct runtime behavior does not refute the separate wording defect. No additional runtime defect found in the new search. New verified finding IDs: c1 (existing ID reclassified/revised). New unverified-after-investigation IDs: none. New candidate c4 refutes legal-recipe-name rejection; new lead l1 resolved to candidate after fixture/source checks. Remaining lead IDs: none. No parent drops or lowerings accepted.\n\nChecks beyond known findings: new CreateEnvironment recipe/template/edit bounds versus actual recipe grammar/caps; retired create guard ordering before reservations; host-backed changed idempotency/refusal/cancellation fixtures and their test-owned cleanup; sealed-list fixture through constructor presence, list construction, metadata projection and frame-size failure; request/protocol reply field removals in changed tests. Bounds check found template cap 128 versus recipe cap 32, so the doorway does not exclude legal recipe names. The sealed-list fixture's fresh state marks the private tmux server absent, so no later query runs; absent working-copy metadata is None/empty rather than an error, and entry_info retains the over-frame title. This closes the concrete alternative-path premise without claiming all hypothetical storage failures are impossible. Existing refusal tests retain directory-specific error and reservation assertions; the cancellation fixture waits for owned admission settlement before test-state host cleanup.\n\nSource reads this discovery turn (additional context, inclusive ranges):\n- 190d844e58c96cf197aa838d0b0eea8062f48435: crates/farhelm-supervisor/src/service/handlers.rs 7330-7400, 3702-3744, 3770-3803, 3846-3932, 4056-4098; crates/farhelm-proto/src/recipes.rs 35-42, 521-558. Targeted searches found launcher.rs:404's 128-byte cap.\n- Base 6e423e30068b62c6cfa276c6d720ee35bb70387a and tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db: bounded creating-verb doc context at handlers.rs:7321-7342 and 7189-7207 respectively.\n- 04d85f0c98a9b635709d00b056719a0baa7fd3fc: supervisor service/handlers.rs 270-405.\n- 47f33bbdbd5ff4a6e437e97a800f9083be43096e: supervisor service/handlers.rs 12964-13020; service/listing.rs 98-221; service/core.rs 22504-22580, 6647-6692; service/terminals.rs 420-473; store.rs 3520-3620; tmux.rs 2319-2470, 2566-2636, 4850-4915, 3068-3143; working_copies.rs 958-1015; service/status.rs 474-556. Source use of the old driver was limited to the new assigned fixture's listing premise, not independent retired-driver defect review.\n- 70bc66a9f285cc2a9984924f389834d118b7cfdc: supervisor service/handlers.rs 5725-5836, 5950-5989, 9630-9705.\n- f560058da19e02716e6f943883a9508b447aff4e: supervisor service/connection.rs 1588-1650, 1700-1788.\n\nAll assigned scope remains read. Source-only: no runtime tests, reproductions, builds, checkout mutations, helper agents or live-install actions. Next action: return discovery delta to caller; any further pass is a separate turn.\n"
+}

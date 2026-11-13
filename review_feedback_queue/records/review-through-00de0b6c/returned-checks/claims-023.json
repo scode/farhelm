@@ -1,0 +1,142 @@
+[
+  {
+    "key": "g038/c2",
+    "latest_line": 8,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "environment-delete-drawn-scope-preservation",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The checked row, header and bulk paths retain the answered Session/Whole scope through request dispatch. A late Unasked response only opens another warned question. This refutes the named scope-widening mechanism, not every possible server-side deletion defect.",
+    "checks": [
+      "At 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa, list/shared.rs:63-82 always confirms environment Delete and chooses its question lane; :134-149 derives scope from the answered lane. list/row.rs:2512-2539 passes rendered environment facts and token. list/view.rs:3286-3301 consumes that token before dispatch.",
+      "At the same revision, session_view.rs:2789-2799 consumes shown_delete and applies its key to the captured environment; list/view.rs:3403-3412 forwards that value unchanged.",
+      "At the same revision, list/lifecycle.rs:208-237 captures scope; :367-411 preserves it across reconciliation and only filters admission. list/view.rs:4555-4584 builds environment requests from those snapshots. :2923-2997 captures environment in the owned future and uses environment.scope for the API call.",
+      "At the same revision, list/view.rs:3022-3059 handles Unasked by opening a separate warned question or storing an error. api/sandbox_sessions.rs:192-244 maps Session and Whole to distinct opt-in query parameters.",
+      "2ef10815 is inside the supplied review range; the full list/view.rs diff through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db leaves these Delete paths unchanged. Source-only check; no runtime observation."
+    ],
+    "coverage_checked": [
+      "Current SPEC_impl.md:1069 onward, Answers bind to what was drawn, requires captured consent; current SPEC.md:1509-1547 requires both-outcome Session confirmation and separately warned Whole confirmation. These contracts support the refutation rather than accepting unconfirmed widening.",
+      "TODO.md:25-26 Planned is empty. Searches of plans/queue for scope changes, environment Delete, Unasked and count/result handling found the existing environment-agent-operations.md:493-565 design, not future work fixing this alleged route.",
+      "BUGS.md contains only the unrelated local-SSH-helper install/update hang. INDEX.md and matching queue-file searches found no exact alias. Read sandbox-lifecycle-questions-lack-opening-guards.md, frozen-sandbox-retains-header-lifecycle-answers.md and bulk-sandbox-delete-drops-eligible-peer.md: different controls, causes and consequences. Active TRIAGE_OUTCOMES.md searches found no matching decision. Archive not read.",
+      "FILTER.md supplies no basis for dropping hypothetical unconfirmed destruction; its destructive-scope and work-loss exclusions would apply."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No shipped step was found that replaces the answered scope with refreshed availability or automatically answers the new Whole question.",
+    "original_stronger_consequence": "An agreed session-only Delete could widen after a host refresh or missing answer and destroy unconfirmed peer sessions, processes and files; that route would be highest.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Source refutation of the explicitly named GUI scope-widening route. Preserve the hypothetical work-loss consequence in the independent drop register."
+  },
+  {
+    "key": "g038/c3",
+    "latest_line": 9,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "environment-delete-peer-cleanup-requires-whole-scope",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Missing remaining-count data does not authorize local removal of peer sessions. Only an affirmative Whole reply uses captured peers; Session and Gone remove the selected ID alone.",
+    "checks": [
+      "At 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa, list/view.rs:965-978 requires reply.is_some() and scope Whole before taking peers. :2923-2997 captures one environment value for dispatch; :3068 passes that same value to locally_removed.",
+      "At the same revision, api.rs:4175-4193 decodes an unreadable success with environment_remaining: None and a notice. api/sandbox_sessions.rs:239-244 sends Session replies through this decoder rather than turning missing data into Whole scope.",
+      "At the same revision, SPEC_impl.md:6600-6606 permits an unsealed supervisor to return NotFound after an earlier attempt deleted only the selected session; list/view.rs:3120-3132 requests an authoritative listing afterward. Historical source supports conservative delayed peer cleanup, not premature closure.",
+      "The introducing commit is in range and the inspected full view.rs diff to the reviewed tip leaves this rule unchanged. No execution or runtime reproduction."
+    ],
+    "coverage_checked": [
+      "Current SPEC_impl.md:6106-6125 retains the NotFound/session-only distinction; current SPEC.md:1519-1547 specifies the two scopes and refresh-visible truth. Neither accepts premature local peer removal.",
+      "Current Planned bucket is empty. Targeted plans/queue searches found the existing environment Delete design in environment-agent-operations.md:493-565, not a separate pending remedy.",
+      "BUGS.md is unrelated. INDEX.md and queue searches for peer views, locally_removed, missing/unreadable counts and environment-delete scope found no exact same-root item. bulk-sandbox-delete-drops-eligible-peer.md concerns admission coalescing, not successful cleanup. Active TRIAGE_OUTCOMES.md has no matching decision; archive not read.",
+      "No filter needed: the named mechanism is source-refuted."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No path was found that infers Whole cleanup scope from a missing count. No remote state mutation follows from this local peer-removal helper.",
+    "original_stronger_consequence": "A bare or unreadable successful Session Delete might close a surviving peer's open view and never reopen it on later listings. The original record distinguished this presentation/selection loss from destruction of remote user work.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "The exact peer-removal predicate and immutable shared scope refute the suspected local cleanup route. c2 remains a separate destructive-consent question."
+  },
+  {
+    "key": "g038/c4",
+    "latest_line": 12,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "delete-notice-context-hook-preserves-kept-tag",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The production constructor is owned by a context-provider hook. Ordinary list rerenders read that context and do not replace the kept-environment tag.",
+    "checks": [
+      "At 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa, lib.rs:2333 calls use_context_provider(|| DeleteNotice::new(...)); list/view.rs:1363 only reads the shared context. The other constructor at view.rs:7377 is test-only and inside use_hook.",
+      "At the same revision, list/view.rs:577 allocates the tag during construction; :590-615 publishes/reconciles it. git grep of the historical lib.rs and view.rs found only the production hook and test hook constructor calls.",
+      "The introducing commit is in range. The complete view.rs diff from it through the reviewed tip leaves the tag lifetime and reconciliation unchanged. This rules out reconstruction on ordinary rerender only; it does not refute l2's different publication/read ordering."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:1519-1529 and SPEC_impl.md:6106-6159 govern kept results and eventual truth; they do not document a rerender-reset exception.",
+      "Planned is empty; targeted unlanded-plan searches found no pending rerender-tag repair. BUGS.md is unrelated. INDEX.md/queue searches for KeptNotice, kept-environment and count notices found no matching item. Active TRIAGE_OUTCOMES.md has no matching decision; archive not read.",
+      "No filter needed: source refutes the tag-recreation premise."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "The production owner would have to reconstruct DeleteNotice on each list render; it does not.",
+    "original_stronger_consequence": "A rerender might lose the kept-notice association and leave an obsolete stays/count diagnostic forever. No security or user-work consequence was alleged.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Hook-owned production construction refutes this specific lifetime concern. Keep l2 independent because it uses the preserved tag and a later stale publication."
+  },
+  {
+    "key": "g038/l2",
+    "latest_line": 15,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "late-environment-delete-count-republished-after-host-absence",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Source permits a delayed non-final Delete body to publish a kept count after a later Delete destroyed the resource and the accepted hosts read already proved absence. No subsequent hosts read is guaranteed on an idle healthy feed. The consequence is a stale result band, not unauthorized destruction.",
+    "checks": [
+      "At 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa, list/view.rs:479-507 retires only an existing tag; :590-607 publishes a new tag without HostsRead. The only reconcile_hosts call is accepted host-read completion at :2476. :3005-3010 unconditionally publishes a successful old count.",
+      "At the same revision, list/view.rs:1364-1408 uses per-session claims and explicitly permits unrelated sessions. Thus separate A/B Session Deletes can coexist; this is not the same-host paced bulk path.",
+      "At the same revision, helm sessions/sandbox.rs:176-265 serializes each host's Delete with local turn/provisioning guards. A's Deleted { remaining: 1 } return releases those guards before the client consumes HTTP output. sessions.rs:3651-3654 constructs the response after awaiting the callee. UI api/sandbox_sessions.rs:224-244 separately awaits headers and text, permitting B and host reads to finish before A's body is consumed.",
+      "At the same revision, view.rs:2910 and :3120-3132 refresh only request_listing; :2510-2513 has distinct list/hosts readers. :2567-2574 reads both on fleet events, which can all settle before A's body. :2580-2606 gates future host polls on fallback_polls_now; feed.rs:233-234 disables them while healthy. Historical git grep enumerated remaining request_hosts consumers as mount, host mutation and launch completion, not implicit post-Delete refresh.",
+      "At the same revision, hosts.rs:1612-1627 represents a successful missing host as Absent. view.rs:6110-6128 renders the band before the listing match, including an empty list, and exposes Dismiss. The full view.rs diff through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db leaves this code unchanged.",
+      "This establishes a source-permitted ordering only. No runtime reproduction, incidence measurement, real resource destruction or live-install action occurred."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:1519-1529 accepts only a brief concurrent-Delete discrepancy followed by truth; it does not clearly accept republishing a count after already accepted absence. Container sessions at :4831-4848 inherits this rule. SPEC_impl.md:6106-6159 describes the same seal protocol and no stale-band exception.",
+      "TODO.md:25-26 Planned is empty. Searches of plans/queue found environment-agent-operations.md:493-565's implemented design, including a brief stays message followed by truth, but no pending work ordering publication against current host evidence. Other environment plans share the subsystem, not this trigger/remedy.",
+      "BUGS.md is unrelated. INDEX.md and queue searches for kept/stays counts, late environment Delete results, KeptNotice and publish_environment_delete found no same-root alias. bulk-sandbox-delete-drops-eligible-peer.md is admission/coalescing; frozen-sandbox-retains-header-lifecycle-answers.md and sandbox-lifecycle-questions-lack-opening-guards.md concern different answer owners. Active TRIAGE_OUTCOMES.md has no matching result-count decision; archive not read.",
+      "FILTER.md ambiguity: rare response/read timing is established and the result band could count as a misleading diagnostic. Its display branch requires a display that is briefly wrong; here it can remain indefinitely on the idle page and an explicit session refresh does not retire it. Ordinary Dismiss, remount or a later hosts read repairs it, so there is no durable corruption or restart-only repair. Recommend retention unless the parent establishes that the independent diagnostic branch fully covers this success-result band. Rarity alone is not the basis for omission."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No missing source premise for the ordering. Actual runtime occurrence is unmeasured. No route to extra destruction, security impact or loss of user work is shown; B's destruction is separately consented.",
+    "original_stronger_consequence": "Earlier wording called the stale stays/count notice permanent. Latest wording correctly bounds it by dismissal, remount or an unrelated subsequent host read. The original and latest records both classify only a contradictory diagnostic as other, with no work-loss route. Initial lead included B's destruction failure; the established route also permits successful destruction.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain the established publication/read ordering defect as other, preserving source-only confidence and the filter ambiguity. No exact existing cover or same-root alias was found among the named claims or searched queue items."
+  },
+  {
+    "key": "g038/l3",
+    "latest_line": 17,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "environment-unasked-no-definitive-answer-terminology",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The named nothing-decided wording adopts the specifications' terminology for no definitive answer. Neither that terminology nor the checked helper establishes a no-mutation guarantee. The helm's own nearby contract explicitly warns that an unanswered request may already have acted.",
+    "checks": [
+      "At 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa, list/view.rs:890-892 and :2987-2992 use the nothing-decided shorthand. unasked_follow_up at :929-948 opens a fresh warned question or returns an error; it never sends Whole itself.",
+      "At the same revision, helm sessions/sandbox.rs:113-124 expressly says an unanswered request may still have been acted on. :220-242 returns EnvironmentUnasked for timeout or transport failure after send, with user text saying the helm cannot tell whether deletion occurred.",
+      "At the same revision, UI api/sandbox_sessions.rs:143-177 classifies only the explicit helm header as Unasked; :224-236 maps loss of the helm-to-page request to Refused. Thus the helper's ordinary lost-reply case and the helm's missing-supervisor-answer case concern different transport boundaries.",
+      "At the same revision, SPEC.md:1527-1547 and SPEC_impl.md:6626-6640 use the same no-definitive-decision terminology and require seals to be learned through later listings. view.rs:3060-3065 requests a listing after refusal. Source/contract interpretation only, no execution."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:1531-1547 and SPEC_impl.md:6137-6159 retain the same explicit unanswered-request terminology and subsequent seal discovery. These directly answer the named interpretation.",
+      "Planned is empty. plans/queue/environment-agent-operations.md:549-565 also explicitly covers an unanswered request and observing a seal afterward; no separate future wording fix was found. BUGS.md is unrelated.",
+      "INDEX.md and matching queue searches for Unasked, uncertainty comments and environment-delete scope/count handling found no same-root item. Active TRIAGE_OUTCOMES.md has no matching decision. Archive not read. No filter is needed for this source/contract refutation."
+    ],
+    "exact_cover_quotes": [
+      "SPEC.md:1531-1532: When the helm cannot ask the sandbox's Farhelm (the sandbox is suspended or unreachable, or its Farhelm is a version this helm cannot talk to until it is updated), or the request gets no answer, nothing is decided.",
+      "SPEC_impl.md:6143-6145: Not connected, not sent, sent without an answer, or past the deadline: the helm answers with a marker that nothing was decided, and the page offers the warned whole-environment Delete.",
+      "2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa:crates/farhelm-helm/src/sessions/sandbox.rs:121-124: The text says what is known: an unanswered request may still have been acted on, which the next listing shows (a seal included, which the helm then finishes)."
+    ],
+    "missing_premise": "No claim that nothing was mutated follows from the named wording under the explicit governing uncertainty contract; no caller was shown authorizing extra destruction based on that interpretation.",
+    "original_stronger_consequence": "The original lead suspected that future readers would understand Unasked as guaranteed no deletion and misunderstand why refresh is required. It alleged an internal explanation defect, not observed data loss; the latest candidate withdrew that interpretation in favor of no definitive decision.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Refute only the asserted no-mutation guarantee in the named comments, based on exact shared specification wording and the explicit uncertainty contract. Route through independent drop checking conservatively because the misunderstood contract concerns destructive user work.",
+    "new_interface_evidence": "While reading the same completion for this claim, view.rs:3060-3065 was seen to say 'A refusal changed nothing on the host' immediately after handling all Unasked errors. That stronger nearby sentence is unlike the named nothing-decided shorthand and conflicts with sessions/sandbox.rs:121-124's may-have-acted warning. No separate search, attribution check or defect finding was performed; return it to the owning reviewer before generalizing the l3 refutation to every nearby comment."
+  }
+]

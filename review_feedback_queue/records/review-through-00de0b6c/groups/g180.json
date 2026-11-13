@@ -1,0 +1,637 @@
+{
+  "group": {
+    "id": "g180",
+    "domain": "browser-terminal-regressions",
+    "purpose": "browser-terminal-regressions: e2e/tests/terminal-clipboard.spec.ts, e2e/tests/terminal-keys.spec.ts, e2e/tests/terminal-links.spec.ts, e2e/tests/terminal-migration.spec.ts, e2e/tests/terminal-multihost.spec.ts, e2e/grid-client/grid-copy.spec.ts; phases complete small per-commit changes",
+    "interfaces": [
+      "g002",
+      "g006",
+      "g009",
+      "g010",
+      "g011",
+      "g012",
+      "g079",
+      "g080",
+      "g081",
+      "g082",
+      "g083",
+      "g084",
+      "g091",
+      "g092",
+      "g174",
+      "g175",
+      "g176",
+      "g179",
+      "g181"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/01167-000.patch",
+        "ranges": [
+          [
+            1,
+            245
+          ]
+        ],
+        "original_path": "e2e/tests/terminal-clipboard.spec.ts",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,14581)",
+        "lines": 245,
+        "bytes": 14627,
+        "start": 0,
+        "end": 14581,
+        "original": "[private-run]/prep/originals/01167.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01172-000.patch",
+        "ranges": [
+          [
+            1,
+            246
+          ]
+        ],
+        "original_path": "e2e/tests/terminal-keys.spec.ts",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,14318)",
+        "lines": 246,
+        "bytes": 14376,
+        "start": 0,
+        "end": 14318,
+        "original": "[private-run]/prep/originals/01172.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01173-000.patch",
+        "ranges": [
+          [
+            1,
+            321
+          ]
+        ],
+        "original_path": "e2e/tests/terminal-links.spec.ts",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,18276)",
+        "lines": 321,
+        "bytes": 18304,
+        "start": 0,
+        "end": 18276,
+        "original": "[private-run]/prep/originals/01173.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01174-000.patch",
+        "ranges": [
+          [
+            1,
+            258
+          ]
+        ],
+        "original_path": "e2e/tests/terminal-migration.spec.ts",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,13652)",
+        "lines": 258,
+        "bytes": 13655,
+        "start": 0,
+        "end": 13652,
+        "original": "[private-run]/prep/originals/01174.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01288-000.patch",
+        "ranges": [
+          [
+            1,
+            16
+          ]
+        ],
+        "original_path": "e2e/tests/terminal-multihost.spec.ts",
+        "commit": "500548b9253b07a26fd03119679184b69544e31d",
+        "notes": "patch header; patch character offsets [0,958)",
+        "lines": 16,
+        "bytes": 958,
+        "start": 0,
+        "end": 958,
+        "original": "[private-run]/prep/originals/01288.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01505-000.patch",
+        "ranges": [
+          [
+            1,
+            22
+          ]
+        ],
+        "original_path": "e2e/grid-client/grid-copy.spec.ts",
+        "commit": "61e632323dbc6b4a35ed27bf5b9833102ffd5a4e",
+        "notes": "patch header; patch character offsets [0,1338)",
+        "lines": 22,
+        "bytes": 1338,
+        "start": 0,
+        "end": 1338,
+        "original": "[private-run]/prep/originals/01505.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01515-000.patch",
+        "ranges": [
+          [
+            1,
+            23
+          ]
+        ],
+        "original_path": "e2e/tests/terminal-links.spec.ts",
+        "commit": "61e632323dbc6b4a35ed27bf5b9833102ffd5a4e",
+        "notes": "patch header; patch character offsets [0,1367)",
+        "lines": 23,
+        "bytes": 1367,
+        "start": 0,
+        "end": 1367,
+        "original": "[private-run]/prep/originals/01515.patch"
+      }
+    ],
+    "lines": 1131,
+    "bytes": 64625
+  },
+  "records": [
+    {
+      "key": "g180/c1",
+      "owner": "g180",
+      "id": "c1",
+      "domain": "browser-terminal-regressions",
+      "purpose": "browser-terminal-regressions: e2e/tests/terminal-clipboard.spec.ts, e2e/tests/terminal-keys.spec.ts, e2e/tests/terminal-links.spec.ts, e2e/tests/terminal-migration.spec.ts, e2e/tests/terminal-multihost.spec.ts, e2e/grid-client/grid-copy.spec.ts; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removing the old-terminal migration UI tests matches the retired feature contract",
+            "location": "e2e/tests/terminal-migration.spec.ts:1",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\nTLDR: Considered whether deleting all migration-band browser tests leaves users without a required warning or route to move running terminals. The removed tests exercise a compatibility UI the current contract deliberately retires.\n\nDetails: The entire 252-line file is deleted. SPEC.md at this revision, Terminal experience, lines 3011-3028 (line numbers to be checked against the pinned source), explicitly says: ‘Every terminal is new: it runs in a terminal host of its own (above).’ It then says: ‘This release ends them: the first time a host’s supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.’ Thus retaining the old warning/dismissal/kind-label tests would assert retired behavior. No independent defects in the deleted implementation are being reviewed. Suggested bucket: other (test coverage concern only). Confidence: confirmed specification acceptance; replacement startup source still to inspect. proposed_drop: the removed migration UI is expressly retired by SPEC.md, Terminal experience, quoted above. possible_cover: none searched. Could-be-highest: false for this test deletion; the specified termination itself is outside this candidate. Source-only conclusion; no runtime behavior observed."
+          }
+        },
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removing the old-terminal migration UI tests matches the retired feature contract",
+            "location": "e2e/tests/terminal-migration.spec.ts:1",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\nTLDR: Considered whether deleting all migration-band browser tests leaves users without a required warning or route to move running terminals. The removed tests exercise a compatibility UI the current contract deliberately retires.\n\nDetails: The entire 252-line file is deleted. SPEC.md:3002-3017, Terminal experience, explicitly says: \"Every terminal is new: it runs in a terminal host of its own (above).\" It then says: \"This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.\" The corresponding replacement is present: service/core.rs:6142-6151 invokes OldTerminals::end_private_server before reloading sessions, while service/core/old_terminals.rs:1-85 documents startup conversion, cleanup and accepted residual failure behavior. Retaining the old warning/dismissal/kind-label tests would assert retired behavior. No independent defects in the deleted implementation are being reviewed. Suggested bucket: other (test coverage concern only). Confidence: confirmed by source and specification. proposed_drop: the removed migration UI is expressly retired by SPEC.md:3002-3017, quoted above. possible_cover: none searched. Could-be-highest: false for this test deletion; the specified termination itself is outside this candidate. Source-only conclusion; no runtime behavior observed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 3,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Removing the old-terminal migration UI tests matches the retired feature contract",
+          "location": "e2e/tests/terminal-migration.spec.ts:1",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\nTLDR: Considered whether deleting all migration-band browser tests leaves users without a required warning or route to move running terminals. The removed tests exercise a compatibility UI the current contract deliberately retires.\n\nDetails: The entire 252-line file is deleted. SPEC.md:3002-3017, Terminal experience, explicitly says: \"Every terminal is new: it runs in a terminal host of its own (above).\" It then says: \"This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.\" The corresponding replacement is present: service/core.rs:6142-6151 invokes OldTerminals::end_private_server before reloading sessions, while service/core/old_terminals.rs:1-85 documents startup conversion, cleanup and accepted residual failure behavior. Retaining the old warning/dismissal/kind-label tests would assert retired behavior. No independent defects in the deleted implementation are being reviewed. Suggested bucket: other (test coverage concern only). Confidence: confirmed by source and specification. proposed_drop: the removed migration UI is expressly retired by SPEC.md:3002-3017, quoted above. possible_cover: none searched. Could-be-highest: false for this test deletion; the specified termination itself is outside this candidate. Source-only conclusion; no runtime behavior observed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g180/findings.jsonl",
+        "id": "c1",
+        "line": 3,
+        "disposition": "under-investigation",
+        "group": "g180-c1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-111",
+          "key": "g180/c1",
+          "latest_line": 3,
+          "recommendation": "covered",
+          "bucket": "other",
+          "underlying_key": "retired-old-terminal-migration-ui-test-deletion",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The removed migration-band/warning/dismissal/kind-display tests assert a UI for terminals the revised specification deliberately ends at startup. The new startup behavior is present. This is limited acceptance of retirement, not approval of an independently defective termination implementation.",
+          "checks": [
+            "f560058d deletion removes all252 lines of terminal-migration.spec.ts. Its SPEC.md:3002-3017 explicitly ends old terminals, preserves host terminals and describes interrupted sessions and closed old tabs.",
+            "f560058d:service/core.rs:6142-6151 invokes OldTerminals::end_private_server while owning the state directory before reload. core/old_terminals.rs:1-85 states cleanup attribution and accepted failure residuals.",
+            "Current SPEC.md:2998-3011 and SPEC_impl.md Ending the old private tmux server retain this retirement contract. No runtime termination test or reproduction was performed."
+          ],
+          "coverage_checked": [
+            "SPEC.md Terminal experience and SPEC_impl.md Ending the old private tmux server cover this exact missing-old-warning/migration-route concern because their subject is retired.",
+            "TODO Planned empty. BUGS, active TRIAGE_OUTCOMES, INDEX and matching queue searches contain no separate decision preserving this retired UI. Existing migration-test cleanup items concern setup/cleanup failures, not the retired product contract.",
+            "plans/queue/tmux-end-old-terminals.md explicitly removes migration band/kind display and ends old terminals; plans/REPORTS.md:29 records it landed. No unlanded fix needed for the retired UI. FILTER not used."
+          ],
+          "exact_cover_quotes": [
+            {
+              "source": "f560058d:SPEC.md:3002-3006, Terminal experience",
+              "quote": "Every terminal is new: it runs in a terminal host of its own (above)."
+            },
+            {
+              "source": "f560058d:SPEC.md:3005-3006, Terminal experience",
+              "quote": "This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program."
+            },
+            {
+              "source": "SPEC.md:3000-3003, Terminal experience",
+              "quote": "A supervisor that finds that tmux server when it starts ends it, and with it everything that still ran in an old terminal, without needing a tmux program."
+            }
+          ],
+          "missing_premise": null,
+          "original_stronger_consequence": "Deleting migration UI tests could leave users without a required warning or route to move running terminals. The specified ending itself can terminate user processes but was expressly outside this test-deletion candidate; retain that boundary and do not infer approval of another termination defect.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Cover only the retired warning/migration UI tests under the explicit product contract. Independent drop check should verify the user-process boundary rather than treating all old-terminal consequences as accepted."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retired-old-terminal-migration-ui-test-deletion",
+        "destination": "trailing-retired-old-terminal-migration-ui-test-deletion.md"
+      }
+    },
+    {
+      "key": "g180/c2",
+      "owner": "g180",
+      "id": "c2",
+      "domain": "browser-terminal-regressions",
+      "purpose": "browser-terminal-regressions: e2e/tests/terminal-clipboard.spec.ts, e2e/tests/terminal-keys.spec.ts, e2e/tests/terminal-links.spec.ts, e2e/tests/terminal-migration.spec.ts, e2e/tests/terminal-multihost.spec.ts, e2e/grid-client/grid-copy.spec.ts; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Grid-only browser test readers retain a real published terminal surface",
+            "location": "e2e/tests/terminal-clipboard.spec.ts:76",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\nTLDR: Considered whether removing the old terminal fallback makes clipboard and link regression tests inspect a missing or different terminal. The replacement reads the real agent terminal at this revision.\n\nDetails: terminal.js:4658-4667 publishes the primary mounted grid and its actual WebSocket as window.__farhelmGrid and window.__farhelmWs. helpers/term.ts:1-15 documents that same registry, and its terminal text and geometry helpers read the same grid/model. terminal.js:4313-4334 wires the component's selection and program clipboard callbacks to the page's clipboard queue. grid-terminal.js:1044-1054 and 2057-2058 provide the selection API that terminal-clipboard.spec.ts:76 and terminal-links.spec.ts:360 call. The removed __farhelmTerm branch is no longer a supported terminal kind under SPEC.md, Terminal experience (‘Every terminal is new: it runs in a terminal host of its own (above).’). Suggested bucket: other. Confidence: confirmed by source. proposed_drop: source refutes a missing-surface or wrong-terminal regression; old fallback is outside the current supported contract. possible_cover: none searched. Could-be-highest: false; this is a test-reader concern. No runtime execution."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Grid-only browser test readers retain a real published terminal surface",
+            "location": "e2e/tests/terminal-clipboard.spec.ts:76",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\nTLDR: Considered whether removing the old terminal fallback makes clipboard and link regression tests inspect a missing or different terminal. The replacement reads the real agent terminal at this revision.\n\nDetails: terminal.js:4658-4667 publishes the primary mounted grid and its actual WebSocket as window.__farhelmGrid and window.__farhelmWs. helpers/term.ts:1-15 documents that same registry, and its terminal text and geometry helpers read the same grid/model. terminal.js:4313-4334 wires the component's selection and program clipboard callbacks to the page's clipboard queue. grid-terminal.js:1044-1054 and 2057-2058 provide the selection API that terminal-clipboard.spec.ts:76 and terminal-links.spec.ts:360 call. The removed __farhelmTerm branch is no longer a supported terminal kind under SPEC.md, Terminal experience (\"Every terminal is new: it runs in a terminal host of its own (above).\"). Synthesis checked attachment lifecycle: helpers/term.ts:319-336 selects the requested row and awaits waitForSessionReady rather than assuming a published singleton is enough. terminal.js:4820-4849 disposes/freezes and unpublishes the departing island and removes its primary aliases. The changed readers run after attachment readiness; no newly admitted stale-reader route was found. Suggested bucket: other. Confidence: confirmed by source. proposed_drop: source refutes a missing-surface or wrong-terminal regression; old fallback is outside the current supported contract. possible_cover: none searched. Could-be-highest: false; this is a test-reader concern. No runtime execution."
+          }
+        }
+      ],
+      "latest": {
+        "line": 5,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Grid-only browser test readers retain a real published terminal surface",
+          "location": "e2e/tests/terminal-clipboard.spec.ts:76",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\nTLDR: Considered whether removing the old terminal fallback makes clipboard and link regression tests inspect a missing or different terminal. The replacement reads the real agent terminal at this revision.\n\nDetails: terminal.js:4658-4667 publishes the primary mounted grid and its actual WebSocket as window.__farhelmGrid and window.__farhelmWs. helpers/term.ts:1-15 documents that same registry, and its terminal text and geometry helpers read the same grid/model. terminal.js:4313-4334 wires the component's selection and program clipboard callbacks to the page's clipboard queue. grid-terminal.js:1044-1054 and 2057-2058 provide the selection API that terminal-clipboard.spec.ts:76 and terminal-links.spec.ts:360 call. The removed __farhelmTerm branch is no longer a supported terminal kind under SPEC.md, Terminal experience (\"Every terminal is new: it runs in a terminal host of its own (above).\"). Synthesis checked attachment lifecycle: helpers/term.ts:319-336 selects the requested row and awaits waitForSessionReady rather than assuming a published singleton is enough. terminal.js:4820-4849 disposes/freezes and unpublishes the departing island and removes its primary aliases. The changed readers run after attachment readiness; no newly admitted stale-reader route was found. Suggested bucket: other. Confidence: confirmed by source. proposed_drop: source refutes a missing-surface or wrong-terminal regression; old fallback is outside the current supported contract. possible_cover: none searched. Could-be-highest: false; this is a test-reader concern. No runtime execution."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g180/findings.jsonl",
+        "id": "c2",
+        "line": 5,
+        "disposition": "under-investigation",
+        "group": "g180-c2",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-112",
+          "key": "g180/c2",
+          "latest_line": 5,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "grid-test-reader-primary-surface",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The removed fallback does not make these readers inspect a missing or different supported terminal. The primary grid is the mounted agent component, and its selection API remains available. This is a source conclusion, not a runtime observation.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e:e2e/tests/terminal-clipboard.spec.ts:68-89 and terminal-links.spec.ts:355-361 replace the old-renderer fallback with the existing grid selection/mode readers.",
+            "f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/assets/terminal.js:4313-4334 creates that grid and routes its selection copies through the clipboard queue; :4658-4668 publishes it as the primary singleton and island component.",
+            "Same revision grid-terminal.js:2057-2059 exposes hasSelection and selectionText; terminal.js:4810-4849 closes the departing socket, disposes or freezes its component, and removes its published aliases. No missing-surface premise was found."
+          ],
+          "coverage_checked": [
+            "SPEC.md Terminal experience and SPEC_impl.md Terminal widget/The grid client require the host/grid surface; they do not accept incorrect test readers.",
+            "TODO.md Planned is empty. Searches of plans/queue, BUGS.md, INDEX.md/matching queue files and active TRIAGE_OUTCOMES.md found no exact reader-regression cover. The tmux removal plans are already landed (plans/REPORTS.md:29,32).",
+            "FILTER.md: no complete filter boundary applies; proposed disposition is source refutation."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Clipboard/link regression tests might inspect a missing, stale or different terminal after removal of the old fallback. No product disclosure or user-work loss route was established.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Refute only the alleged missing/wrong supported surface. Clipboard/link tests touch security-relevant operations, so send this narrow dismissal through the independent check conservatively. This consultation does not authorize a drop."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "grid-test-reader-primary-surface",
+        "destination": null
+      }
+    },
+    {
+      "key": "g180/c3",
+      "owner": "g180",
+      "id": "c3",
+      "domain": "browser-terminal-regressions",
+      "purpose": "browser-terminal-regressions: e2e/tests/terminal-clipboard.spec.ts, e2e/tests/terminal-keys.spec.ts, e2e/tests/terminal-links.spec.ts, e2e/tests/terminal-migration.spec.ts, e2e/tests/terminal-multihost.spec.ts, e2e/grid-client/grid-copy.spec.ts; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "The Shift+Enter assertion still checks the supported grid path",
+            "location": "e2e/tests/terminal-keys.spec.ts:342",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\nTLDR: Considered whether replacing the two-byte browser-frame assertion weakens the guarantee that Shift+Enter inserts a newline rather than submitting. The patch preserves the pre-existing grid branch and removes only the retired terminal branch.\n\nDetails: terminal-keys.spec.ts:342-376 checks exactly one outbound binary JSON message with t=key, key=Enter and mods=1, then verifies the PTY dump has ESC CR in one observed read and never a read ending in a lone ESC. This is the same grid assertion shown in the removed conditional branch of the patch; a grid browser no longer emits raw terminal bytes. grid_input.rs:266-271 keeps a small input in one Input frame and :299-313 encodes exactly Shift+Enter as ESC CR. The browser-frame assertion establishes only the source message boundary; the PTY observation can coalesce split writes, a limitation its surrounding documentation explicitly preserves. This patch does not introduce that limitation or remove the PTY check. SPEC.md:2868-2875 requires the exact chord and one write. Suggested bucket: other. Confidence: confirmed by source. proposed_drop: no changed supported-path assertion is weakened; only the unsupported raw-byte branch is removed. possible_cover: none searched. Could-be-highest: false for this test-only candidate. No runtime execution; downstream physical write behavior has not been measured."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c3",
+            "state": "open",
+            "summary": "Check Shift+Enter's physical-write caveat against the test contract",
+            "location": "e2e/tests/terminal-keys.spec.ts:342",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\nTLDR: The supported browser assertion is unchanged, but synthesis found a source caveat worth settling: the terminal host offers an entire key in one write and can finish it in later writes if the OS accepts only part. Determine whether the browser test's never-split wording contradicts an accepted boundary or adds a new regression.\n\nDetails: Existing c3 conclusion remains that this patch preserves the old grid branch and PTY assertion. service/grid_stream.rs:1245-1256 sends each input_frames piece through InputSequence::send. terminal-host/src/host.rs:570-625 explicitly offers the remaining segment in one libc::write and retains a partial result, naming nearly-full macOS PTY input as an example. This settles that source does not promise one successful write under every OS condition. Checks still needed: read terminal-host's governing Input contract, connect InputSequence::send to its frame construction, and compare the test's old grid branch and fixture substrate. Suspected consequence is at most a browser test false failure or misleading description, not established user data loss. Suggested bucket: other. Confidence: unresolved contract check after source inspection. proposed_drop: not yet settled for the physical-write caveat; the original candidate's removed raw-byte branch still has no new supported-path weakening. possible_cover: none searched. Could-be-highest: false for this test-only concern. No runtime execution or reproduction."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "The Shift+Enter assertion preserves the grid path and its existing PTY observation",
+            "location": "e2e/tests/terminal-keys.spec.ts:342",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\nTLDR: The patch preserves the supported grid assertion; it does not weaken newline delivery coverage. Synthesis also checked whether the physical-write caveat makes the test newly wrong. The host deliberately permits OS short writes, and this patch neither changes that boundary nor adds the test's read-boundary assertion.\n\nDetails: terminal-keys.spec.ts:342-376 retains the parent's grid branch: one outbound binary JSON message with t=key, key=Enter, mods=1, followed by the same PTY dump assertion for ESC CR in one observed read and no read ending in a lone ESC. Reading the parent file at lines 330-391 confirms those assertions and their coalescing limitation existed before this patch. Its fixture at :166-209 gates stty success with RAWREADY before sending the chord; it does not fill the PTY queue. grid_input.rs:266-271 keeps small input whole and :299-313 encodes exact Shift+Enter as ESC CR. service/grid_stream.rs:1245-1256 passes that piece through InputSequence::send; hosts/terminal.rs:1524-1535 and :2319-2341 queue it as one request, and :3168-3183 sends the pending data unchanged to the host connection. terminal-host/src/host.rs:570-625 offers each input segment whole in libc::write and retains any OS partial result. The exact governing caveat is crates/terminal-host/SPEC.md:399-403: \"An `Input` of at most `ATOMIC_INPUT` bytes is offered to the pty whole, in one `write` call, so the host itself never splits a key that encodes to several bytes (Shift+Enter's ESC CR). The pty may still take only part of it when its input queue is nearly full (macOS's pty takes what fits and returns a short write), and the rest then follows in later writes. How the program's reads divide the bytes is up to the program and its terminal settings; the host promises nothing about it.\" Thus a browser frame proves the source message boundary, not arbitrary OS read/write atomicity; no new contrary assertion is introduced here. Suggested bucket: other. Confidence: confirmed by source and contract. proposed_drop: the supported-path assertions are unchanged, and the identified OS short-write behavior is explicitly accepted by the quoted contract. possible_cover: none searched. Could-be-highest: false for this test-only concern; no product data-loss route was alleged or lowered. Lead c3 is resolved to candidate. No runtime execution; physical writes and read grouping were not measured."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c3",
+            "state": "open",
+            "summary": "Resolve whole-range attribution of the Shift+Enter test claim",
+            "location": "e2e/tests/terminal-keys.spec.ts:187",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e; full pinned range exclusive 6e423e30068b62c6cfa276c6d720ee35bb70387a through inclusive 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: Reopen c3's test-oracle/documentation disposition: unchanged immediate-parent assertions do not establish that the claim predates the review range, and accepted production short writes do not refute an overstrong test claim. Details: c3's prior source results and original consequence remain: the browser's one JSON message proves no unconditional physical write/read atomicity; terminal-host/SPEC.md:399-403 explicitly allows OS short writes and arbitrary program read division; terminal-keys.spec.ts calls the read-boundary observation a deterministic/single-write proof in its new grid explanation. Caller-supplied g010/f1 confirms the related but distinct new implementation-spec explanation is contradictory. Prior proposed_drop bases were unchanged immediate-parent grid branch and accepted production OS behavior. Those bases are retained as history but are not accepted for this distinct test claim. Next checks: compare the exclusive base test text and callers, inspect bounded full-range history for introduction or a newly false explanation, and distinguish existing PTY assertions from newly authored claims. Suggested bucket: other, test-oracle/documentation accuracy. Could-be-highest: false for the test claim; no production loss route was established. Confidence: source-supported reopened attribution lead; investigation ongoing. proposed_drop: unresolved; no parent drop or lowering accepted. possible_cover: caller-supplied g010/f1 covers a distinct SPEC_impl paragraph, not this test claim. No runtime execution or reproductions."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "The overstrong Shift+Enter read-boundary claim predates the full review range",
+            "location": "e2e/tests/terminal-keys.spec.ts:187",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e; attribution compared against exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a and history through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: The test's unconditional read-boundary explanation can overstate what its evidence proves, but that distinct test claim and oracle already exist before the entire pinned range. The assigned patch changes the browser description from a byte frame to the already-tested grid key message; it does not newly introduce or invalidate the read-boundary assertion. Details: Directly read base terminal-keys.spec.ts:178-197: it already states \"a genuinely single write can never read as two\", calls its WebSocket capture the \"DETERMINISTIC half\", and labels the fixture a single-write delivery proof. Base :320-391 already has the same read-boundary test title, one-key-message grid branch, and assertions /1b0d[0-9a-f]*\\|/ and no /1b\\|/. Base :351-360 already says the supervisor encodes ESC CR \"in one write\". The full-range path history reports only f560058da19e02716e6f943883a9508b447aff4e; therefore no earlier in-range test introduction was missed. Base terminal-host/SPEC.md:399-403 already says: \"The pty may still take only part of it when its input queue is nearly full (macOS's pty takes what fits and returns a short write), and the rest then follows in later writes. How the program's reads divide the bytes is up to the program and its terminal settings; the host promises nothing about it.\" Base terminal-host/src/host.rs:570-620 already retains a short-write suffix. Thus the contract/oracle tension was not made newly false by this range's renderer retirement. At f560 the fixture and PTY assertions remain the same, while the new input-message wording accurately describes the existing grid branch. The added header's single-write wording restates the same pre-base test claim; no newly broadened oracle or consequence is established. Original concern preserved: a future maintainer could mistake source-message unity or one observed read for general physical write/read atomicity; a partial write could also fail an overstrong oracle. No such runtime failure was observed. Prior proposed_drop bases of unchanged immediate-parent assertions and accepted production behavior were insufficient alone and are superseded for range attribution by the actual exclusive-base evidence above. Production acceptance is not a refutation of inaccurate test documentation. Suggested bucket: other if reviewed outside this range. Confidence: confirmed pre-range attribution from base source and complete bounded path history. proposed_drop: the distinct test-oracle/documentation concern demonstrably predates the exclusive base, and the assigned patch adds no stronger oracle or guarantee than the existing grid test. This is only a proposal; no parent drop was accepted. possible_cover: caller-supplied g010/f1 is a separate newly added SPEC_impl paragraph and remains independent. Could-be-highest: false for this test-only concern; no product security or user-owned-work loss route established or lowered. Lead c3 resolved to candidate. Source analysis only; no tests, reproductions or live actions."
+          }
+        }
+      ],
+      "latest": {
+        "line": 9,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "The overstrong Shift+Enter read-boundary claim predates the full review range",
+          "location": "e2e/tests/terminal-keys.spec.ts:187",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e; attribution compared against exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a and history through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: The test's unconditional read-boundary explanation can overstate what its evidence proves, but that distinct test claim and oracle already exist before the entire pinned range. The assigned patch changes the browser description from a byte frame to the already-tested grid key message; it does not newly introduce or invalidate the read-boundary assertion. Details: Directly read base terminal-keys.spec.ts:178-197: it already states \"a genuinely single write can never read as two\", calls its WebSocket capture the \"DETERMINISTIC half\", and labels the fixture a single-write delivery proof. Base :320-391 already has the same read-boundary test title, one-key-message grid branch, and assertions /1b0d[0-9a-f]*\\|/ and no /1b\\|/. Base :351-360 already says the supervisor encodes ESC CR \"in one write\". The full-range path history reports only f560058da19e02716e6f943883a9508b447aff4e; therefore no earlier in-range test introduction was missed. Base terminal-host/SPEC.md:399-403 already says: \"The pty may still take only part of it when its input queue is nearly full (macOS's pty takes what fits and returns a short write), and the rest then follows in later writes. How the program's reads divide the bytes is up to the program and its terminal settings; the host promises nothing about it.\" Base terminal-host/src/host.rs:570-620 already retains a short-write suffix. Thus the contract/oracle tension was not made newly false by this range's renderer retirement. At f560 the fixture and PTY assertions remain the same, while the new input-message wording accurately describes the existing grid branch. The added header's single-write wording restates the same pre-base test claim; no newly broadened oracle or consequence is established. Original concern preserved: a future maintainer could mistake source-message unity or one observed read for general physical write/read atomicity; a partial write could also fail an overstrong oracle. No such runtime failure was observed. Prior proposed_drop bases of unchanged immediate-parent assertions and accepted production behavior were insufficient alone and are superseded for range attribution by the actual exclusive-base evidence above. Production acceptance is not a refutation of inaccurate test documentation. Suggested bucket: other if reviewed outside this range. Confidence: confirmed pre-range attribution from base source and complete bounded path history. proposed_drop: the distinct test-oracle/documentation concern demonstrably predates the exclusive base, and the assigned patch adds no stronger oracle or guarantee than the existing grid test. This is only a proposal; no parent drop was accepted. possible_cover: caller-supplied g010/f1 is a separate newly added SPEC_impl paragraph and remains independent. Could-be-highest: false for this test-only concern; no product security or user-owned-work loss route established or lowered. Lead c3 resolved to candidate. Source analysis only; no tests, reproductions or live actions."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g180/findings.jsonl",
+        "id": "c3",
+        "line": 9,
+        "disposition": "excluded",
+        "group": "browser-shift-enter-overstates-read-boundary-proof",
+        "reason": "Parent explicitly accepted named out-of-range proposal from claims-112 after inspecting it. The unconditional read-boundary explanation can mislead a maintainer, but the disputed oracle, wording and contradicting host caveat all predate the exclusive base. The in-range patch keeps the existing grid assertion. Earlier rationales based only on the immediate parent or accepted production behavior were insufficient and are superseded by the base comparison. Exclude only the pre-base browser test claim from this review range. Do not describe the overstrong explanation as correct or merge it with the distinct new implementation-spec claim. Checked source/results: [\"6e423e30068b62c6cfa276c6d720ee35bb70387a:e2e/tests/terminal-keys.spec.ts:178-197 already says a genuinely single write can never read as two and calls the browser capture deterministic. The base fixture already uses RAWREADY and grouped dd reads.\",\"6e423e30068b62c6cfa276c6d720ee35bb70387a:crates/terminal-host/SPEC.md:399-403 already allows OS short writes and arbitrary program read division. This is contract/oracle tension, not a refutation of the documentation defect.\",\"git log over the entire exclusive-base..00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db range for terminal-keys.spec.ts reports only f560058da19e02716e6f943883a9508b447aff4e. Its patch at :178-191,:324-376 preserves the grid one-message assertion and PTY observation, while replacing the retired branch and changing two-byte-frame wording to input-message wording.\"] Current coverage/results: [\"SPEC.md:2869-2875 and SPEC_impl.md:1721-1725 retain the stronger single-write language; neither accepts inaccurate test claims. The separately supplied g010/f1 is outside this batch and concerns SPEC_impl, not this test.\",\"TODO Planned is empty; plans/queue, BUGS, INDEX/matching queue files and active TRIAGE_OUTCOMES searches found no exact browser-oracle cover. shift-enter-test-lacks-reader-readiness.md concerns a different Rust integration test and is not an alias.\",\"FILTER.md does not match the whole test-documentation defect.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A maintainer could mistake one browser message or one observed PTY read for unconditional physical write/read atomicity; an OS partial write could also fail the overstrong oracle. The initial removed-branch weakening suspicion was source-refuted; the distinct documentation concern was reopened and then attributed to pre-base source.\"; \"No runtime false failure or physical write/read grouping was measured. That does not prevent the source attribution conclusion.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g180/c3",
+        "line": 9,
+        "disposition": "excluded",
+        "group": "browser-shift-enter-overstates-read-boundary-proof",
+        "bucket": "other",
+        "recording": "out-of-range",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named out-of-range proposal from claims-112 after inspecting it. The unconditional read-boundary explanation can mislead a maintainer, but the disputed oracle, wording and contradicting host caveat all predate the exclusive base. The in-range patch keeps the existing grid assertion. Earlier rationales based only on the immediate parent or accepted production behavior were insufficient and are superseded by the base comparison. Exclude only the pre-base browser test claim from this review range. Do not describe the overstrong explanation as correct or merge it with the distinct new implementation-spec claim. Checked source/results: [\"6e423e30068b62c6cfa276c6d720ee35bb70387a:e2e/tests/terminal-keys.spec.ts:178-197 already says a genuinely single write can never read as two and calls the browser capture deterministic. The base fixture already uses RAWREADY and grouped dd reads.\",\"6e423e30068b62c6cfa276c6d720ee35bb70387a:crates/terminal-host/SPEC.md:399-403 already allows OS short writes and arbitrary program read division. This is contract/oracle tension, not a refutation of the documentation defect.\",\"git log over the entire exclusive-base..00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db range for terminal-keys.spec.ts reports only f560058da19e02716e6f943883a9508b447aff4e. Its patch at :178-191,:324-376 preserves the grid one-message assertion and PTY observation, while replacing the retired branch and changing two-byte-frame wording to input-message wording.\"] Current coverage/results: [\"SPEC.md:2869-2875 and SPEC_impl.md:1721-1725 retain the stronger single-write language; neither accepts inaccurate test claims. The separately supplied g010/f1 is outside this batch and concerns SPEC_impl, not this test.\",\"TODO Planned is empty; plans/queue, BUGS, INDEX/matching queue files and active TRIAGE_OUTCOMES searches found no exact browser-oracle cover. shift-enter-test-lacks-reader-readiness.md concerns a different Rust integration test and is not an alias.\",\"FILTER.md does not match the whole test-documentation defect.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A maintainer could mistake one browser message or one observed PTY read for unconditional physical write/read atomicity; an OS partial write could also fail the overstrong oracle. The initial removed-branch weakening suspicion was source-refuted; the distinct documentation concern was reopened and then attributed to pre-base source.\"; \"No runtime false failure or physical write/read grouping was measured. That does not prevent the source attribution conclusion.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-112",
+          "key": "g180/c3",
+          "latest_line": 9,
+          "recommendation": "out-of-range",
+          "bucket": "other",
+          "underlying_key": "browser-shift-enter-overstates-read-boundary-proof",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The unconditional read-boundary explanation can mislead a maintainer, but the disputed oracle, wording and contradicting host caveat all predate the exclusive base. The in-range patch keeps the existing grid assertion. Earlier rationales based only on the immediate parent or accepted production behavior were insufficient and are superseded by the base comparison.",
+          "checks": [
+            "6e423e30068b62c6cfa276c6d720ee35bb70387a:e2e/tests/terminal-keys.spec.ts:178-197 already says a genuinely single write can never read as two and calls the browser capture deterministic. The base fixture already uses RAWREADY and grouped dd reads.",
+            "6e423e30068b62c6cfa276c6d720ee35bb70387a:crates/terminal-host/SPEC.md:399-403 already allows OS short writes and arbitrary program read division. This is contract/oracle tension, not a refutation of the documentation defect.",
+            "git log over the entire exclusive-base..00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db range for terminal-keys.spec.ts reports only f560058da19e02716e6f943883a9508b447aff4e. Its patch at :178-191,:324-376 preserves the grid one-message assertion and PTY observation, while replacing the retired branch and changing two-byte-frame wording to input-message wording."
+          ],
+          "coverage_checked": [
+            "SPEC.md:2869-2875 and SPEC_impl.md:1721-1725 retain the stronger single-write language; neither accepts inaccurate test claims. The separately supplied g010/f1 is outside this batch and concerns SPEC_impl, not this test.",
+            "TODO Planned is empty; plans/queue, BUGS, INDEX/matching queue files and active TRIAGE_OUTCOMES searches found no exact browser-oracle cover. shift-enter-test-lacks-reader-readiness.md concerns a different Rust integration test and is not an alias.",
+            "FILTER.md does not match the whole test-documentation defect."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No runtime false failure or physical write/read grouping was measured. That does not prevent the source attribution conclusion.",
+          "original_stronger_consequence": "A maintainer could mistake one browser message or one observed PTY read for unconditional physical write/read atomicity; an OS partial write could also fail the overstrong oracle. The initial removed-branch weakening suspicion was source-refuted; the distinct documentation concern was reopened and then attributed to pre-base source.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Exclude only the pre-base browser test claim from this review range. Do not describe the overstrong explanation as correct or merge it with the distinct new implementation-spec claim."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "browser-shift-enter-overstates-read-boundary-proof",
+        "destination": null
+      }
+    },
+    {
+      "key": "g180/l4",
+      "owner": "g180",
+      "id": "l4",
+      "domain": "browser-terminal-regressions",
+      "purpose": "browser-terminal-regressions: e2e/tests/terminal-clipboard.spec.ts, e2e/tests/terminal-keys.spec.ts, e2e/tests/terminal-links.spec.ts, e2e/tests/terminal-migration.spec.ts, e2e/tests/terminal-multihost.spec.ts, e2e/grid-client/grid-copy.spec.ts; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l4",
+            "state": "open",
+            "summary": "Check outside-drag diagnostic ownership after removing the byte renderer",
+            "location": "e2e/tests/terminal-clipboard.spec.ts:562",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: Discovery noticed the outside-drag test still tells a failing maintainer that terminal.js's document-level mouseup listener exists to copy the selection. Determine whether that remains the copy path after this patch moves supported test readers entirely to the grid. Details: terminal-clipboard.spec.ts's outside-released selection clipboard poll says the gesture is exactly why terminal.js's DOCUMENT-level mouseup listener exists. Previously read grid-terminal.js:1668-1684 performs onCopy from its own document mouseup handling, and terminal.js:4334 passes enqueueClipboardWrite as the callback. Need search current terminal.js's document listeners, compare the exclusive base and the retirement patch, and distinguish its separate mouse-copy guidance listener from the actual selection-copy handler. Suspected impact is a stale test failure explanation, not a production selection bug. Suggested bucket: other if newly stale in range. Confidence: concrete source lead pending ownership/attribution checks. proposed_drop: unresolved. possible_cover: none searched or supplied for this exact diagnostic. Could-be-highest: false; no security or user-owned-work loss consequence claimed. No runtime execution or reproduction."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l4",
+            "state": "open",
+            "summary": "Outside-drag diagnostic already misidentified the grid copy owner before the range",
+            "location": "e2e/tests/terminal-clipboard.spec.ts:559",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e; compared exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a. TLDR: Discovery checked a stale test failure explanation that directs maintainers to terminal.js's document mouseup listener for a grid selection copy. That explanation is inaccurate for the grid, but already inaccurate for this same test before the pinned range. Details: Reviewed terminal-clipboard.spec.ts:559-560 says \"exactly the gesture terminal.js's DOCUMENT-level mouseup listener exists to catch\". Reviewed terminal.js:4373-4375 explicitly says the grid copies its own selections and the page-side driver provides only guidance for program-owned drags. :4443 registers that guidance's document mouseup, while :4334 wires the grid's onCopy into the clipboard writer. The actual copying lives in grid-terminal.js:1668-1684. The exclusive-base file already has the exact diagnostic at :601-602. Base suite-terminals.ts:4-20 says the ordinary suite creates host terminals drawn by the grid, and the old-terminal run runs only named/tagged old cases; this outside-drag test is untagged at base :567. Base start-stack.sh:116-130 confirms host is the default. Base grid-terminal.js:1686-1707 already handles selection copying in its own document mouseup callback, and base terminal.js:6020 already wires onCopy. Consequently this test was already on the grid path while retaining the old listener explanation. The current patch does not newly invalidate its copy-owner statement. Suspected consequence retained: a failure message can send a maintainer to the guidance listener rather than the grid's copy listener; no functional copy failure is alleged. Suggested bucket: other if reviewed outside the range. Confidence: confirmed source/history attribution. proposed_drop: this distinct inaccurate test diagnostic predates the exclusive base; no new copy-path defect or newly false diagnostic is introduced by the assigned patch. possible_cover: none searched or supplied for this exact diagnostic. Could-be-highest: false; test diagnostics only. Lead l4 resolved to candidate. No runtime execution or reproduction."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l4",
+            "state": "open",
+            "summary": "Check the adjacent link-copy wait rationale for the same stale handler attribution",
+            "location": "e2e/tests/terminal-links.spec.ts:936",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: The resolved outside-drag diagnostic has an adjacent same-root statement in the assigned link test: its copy wait rationale describes deferred selection reading in terminal.js handleCopyOnSelectMouseUp, a removed handler. Check whether this is newly stale or likewise pre-base. Details: terminal-links.spec.ts:936-944 says copy-on-select defers read-and-write past mouseup with setTimeout and names terminal.js handleCopyOnSelectMouseUp. The actual supported grid reads selection synchronously in grid-terminal.js:1668-1684, then calls onCopy. Prior l4 evidence and consequence remain: outside-drag terminal-clipboard.spec.ts:559-560 already names the wrong copy owner before the full range; that part is resolved as pre-range. Need exact base text and current clipboard-writer scheduling to settle this additional copy-wait explanation, without confusing a correct asynchronous clipboard wait with an incorrect mechanism description. Suggested bucket: other, test documentation only. Confidence: concrete source lead with attribution check outstanding. proposed_drop: unchanged for the outside-drag portion (pre-base); unresolved for the adjacent link-copy rationale. possible_cover: none. Could-be-highest: false. No runtime execution or reproduction."
+          }
+        },
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l4",
+            "state": "open",
+            "summary": "Copy-test references to the old page-side handler predate the review range",
+            "location": "e2e/tests/terminal-clipboard.spec.ts:559; e2e/tests/terminal-links.spec.ts:936",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e; compared exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a. TLDR: Discovery checked two misleading copy-test explanations: the outside-drag diagnostic points to terminal.js's document mouseup listener, and the URL-drag copy rationale says selection read-and-write is deferred by handleCopyOnSelectMouseUp. Both explain the removed byte-renderer mechanism while their ordinary fixtures already used the grid before the pinned range. Details: Current terminal-clipboard.spec.ts:559-560 says \"exactly the gesture terminal.js's DOCUMENT-level mouseup listener exists to catch\"; the exact diagnostic already exists at base :601-602. Current terminal-links.spec.ts:936-944 says copy-on-select defers read-and-write through setTimeout and names handleCopyOnSelectMouseUp; base :951-957 contains the same explanation verbatim. Base suite-terminals.ts:4-20 and start-stack.sh:116-130 explicitly make ordinary untagged product tests use host terminals drawn by the grid. These drag tests are untagged ordinary cases, so the explanation was already inaccurate for their exercised path. Base grid-terminal.js:1686-1707 already reads selection synchronously on document mouseup and calls onCopy; base terminal.js:6020 wires that callback. Current grid-terminal.js:1668-1684 retains that mechanism, and terminal.js:4334 wires its clipboard queue. Current terminal.js:4373-4375 explicitly limits its page-side driver to guidance, with the document mouseup registered at :4443. clipboard-writer.js:22-59 starts an available write synchronously and retains the pending value while a previous write is in flight; it does not defer reading the selection. Waiting for clipboard completion remains useful, but the stated old-handler rationale is inaccurate. Original suspected consequences preserved: a failure diagnostic sends maintainers to the guidance listener, and the wait comment gives an obsolete scheduling model. No incorrect executable assertion, functional copy failure, or new documentation falsehood attributable to this range was found. Suggested bucket: other if reviewed outside the range. Confidence: confirmed pre-base attribution from exact text and fixture/runtime source. proposed_drop: both distinct copy-owner/scheduling explanations already misdescribe the grid fixtures before the exclusive base; the assigned patch introduces neither claim nor a new copy-boundary error. This proposal does not claim obsolete documentation is correct or production correctness refutes it. possible_cover: none searched or supplied for these exact statements. Could-be-highest: false; test diagnostics/documentation only. Lead l4 resolved to candidate. Source analysis only; no runtime execution or reproduction."
+          }
+        }
+      ],
+      "latest": {
+        "line": 13,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l4",
+          "state": "open",
+          "summary": "Copy-test references to the old page-side handler predate the review range",
+          "location": "e2e/tests/terminal-clipboard.spec.ts:559; e2e/tests/terminal-links.spec.ts:936",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e; compared exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a. TLDR: Discovery checked two misleading copy-test explanations: the outside-drag diagnostic points to terminal.js's document mouseup listener, and the URL-drag copy rationale says selection read-and-write is deferred by handleCopyOnSelectMouseUp. Both explain the removed byte-renderer mechanism while their ordinary fixtures already used the grid before the pinned range. Details: Current terminal-clipboard.spec.ts:559-560 says \"exactly the gesture terminal.js's DOCUMENT-level mouseup listener exists to catch\"; the exact diagnostic already exists at base :601-602. Current terminal-links.spec.ts:936-944 says copy-on-select defers read-and-write through setTimeout and names handleCopyOnSelectMouseUp; base :951-957 contains the same explanation verbatim. Base suite-terminals.ts:4-20 and start-stack.sh:116-130 explicitly make ordinary untagged product tests use host terminals drawn by the grid. These drag tests are untagged ordinary cases, so the explanation was already inaccurate for their exercised path. Base grid-terminal.js:1686-1707 already reads selection synchronously on document mouseup and calls onCopy; base terminal.js:6020 wires that callback. Current grid-terminal.js:1668-1684 retains that mechanism, and terminal.js:4334 wires its clipboard queue. Current terminal.js:4373-4375 explicitly limits its page-side driver to guidance, with the document mouseup registered at :4443. clipboard-writer.js:22-59 starts an available write synchronously and retains the pending value while a previous write is in flight; it does not defer reading the selection. Waiting for clipboard completion remains useful, but the stated old-handler rationale is inaccurate. Original suspected consequences preserved: a failure diagnostic sends maintainers to the guidance listener, and the wait comment gives an obsolete scheduling model. No incorrect executable assertion, functional copy failure, or new documentation falsehood attributable to this range was found. Suggested bucket: other if reviewed outside the range. Confidence: confirmed pre-base attribution from exact text and fixture/runtime source. proposed_drop: both distinct copy-owner/scheduling explanations already misdescribe the grid fixtures before the exclusive base; the assigned patch introduces neither claim nor a new copy-boundary error. This proposal does not claim obsolete documentation is correct or production correctness refutes it. possible_cover: none searched or supplied for these exact statements. Could-be-highest: false; test diagnostics/documentation only. Lead l4 resolved to candidate. Source analysis only; no runtime execution or reproduction."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g180/findings.jsonl",
+        "id": "l4",
+        "line": 13,
+        "disposition": "excluded",
+        "group": "grid-copy-tests-describe-retired-page-handler",
+        "reason": "Parent explicitly accepted named out-of-range proposal from claims-112 after inspecting it. Both copy-owner and deferred-selection explanations already misdescribe the ordinary grid fixtures before the range. Their diagnostic/documentation consequences remain real; this range did not introduce them. Pre-base attribution of both named statements; no claim that correct production copying cures inaccurate commentary. Checked source/results: [\"6e423e30068b62c6cfa276c6d720ee35bb70387a:e2e/tests/terminal-clipboard.spec.ts:567-606 already contains the outside-drag case and exact DOCUMENT-level mouseup diagnostic. Base terminal-links.spec.ts:944-961 already names handleCopyOnSelectMouseUp and deferred selection reading.\",\"Base e2e/suite-terminals.ts:4-20 explicitly makes ordinary untagged cases host/grid cases; the outside-drag test is untagged. Thus the contradiction was present before renderer retirement.\",\"Base grid-terminal.js:1686-1707 already reads selection and calls onCopy synchronously on document mouseup. At f560058da19e02716e6f943883a9508b447aff4e grid-terminal.js:1668-1684 retains that mechanism; terminal.js:4334 wires onCopy and :4373-4375 limits the separate page driver to program-drag guidance.\"] Current coverage/results: [\"SPEC.md Terminal experience and SPEC_impl.md:1727-1745 describe the clipboard contract and shared queue, not acceptance of stale test explanations.\",\"TODO Planned empty; searches of plans/queue, BUGS, INDEX/matching files and active TRIAGE_OUTCOMES found no exact diagnostic/scheduling cover. The broad tmux documentation plan is landed, not future coverage.\",\"FILTER.md does not fully match the scheduling-documentation consequence; no filter disposition proposed.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A failing maintainer can be directed to the page guidance listener rather than the grid's copy handler, and the link-copy comment teaches an obsolete deferred-selection scheduling model. Waiting for clipboard completion is still useful; no functional copy failure was alleged or reproduced.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g180/l4",
+        "line": 13,
+        "disposition": "excluded",
+        "group": "grid-copy-tests-describe-retired-page-handler",
+        "bucket": "other",
+        "recording": "out-of-range",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named out-of-range proposal from claims-112 after inspecting it. Both copy-owner and deferred-selection explanations already misdescribe the ordinary grid fixtures before the range. Their diagnostic/documentation consequences remain real; this range did not introduce them. Pre-base attribution of both named statements; no claim that correct production copying cures inaccurate commentary. Checked source/results: [\"6e423e30068b62c6cfa276c6d720ee35bb70387a:e2e/tests/terminal-clipboard.spec.ts:567-606 already contains the outside-drag case and exact DOCUMENT-level mouseup diagnostic. Base terminal-links.spec.ts:944-961 already names handleCopyOnSelectMouseUp and deferred selection reading.\",\"Base e2e/suite-terminals.ts:4-20 explicitly makes ordinary untagged cases host/grid cases; the outside-drag test is untagged. Thus the contradiction was present before renderer retirement.\",\"Base grid-terminal.js:1686-1707 already reads selection and calls onCopy synchronously on document mouseup. At f560058da19e02716e6f943883a9508b447aff4e grid-terminal.js:1668-1684 retains that mechanism; terminal.js:4334 wires onCopy and :4373-4375 limits the separate page driver to program-drag guidance.\"] Current coverage/results: [\"SPEC.md Terminal experience and SPEC_impl.md:1727-1745 describe the clipboard contract and shared queue, not acceptance of stale test explanations.\",\"TODO Planned empty; searches of plans/queue, BUGS, INDEX/matching files and active TRIAGE_OUTCOMES found no exact diagnostic/scheduling cover. The broad tmux documentation plan is landed, not future coverage.\",\"FILTER.md does not fully match the scheduling-documentation consequence; no filter disposition proposed.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A failing maintainer can be directed to the page guidance listener rather than the grid's copy handler, and the link-copy comment teaches an obsolete deferred-selection scheduling model. Waiting for clipboard completion is still useful; no functional copy failure was alleged or reproduced.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-112",
+          "key": "g180/l4",
+          "latest_line": 13,
+          "recommendation": "out-of-range",
+          "bucket": "other",
+          "underlying_key": "grid-copy-tests-describe-retired-page-handler",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Both copy-owner and deferred-selection explanations already misdescribe the ordinary grid fixtures before the range. Their diagnostic/documentation consequences remain real; this range did not introduce them.",
+          "checks": [
+            "6e423e30068b62c6cfa276c6d720ee35bb70387a:e2e/tests/terminal-clipboard.spec.ts:567-606 already contains the outside-drag case and exact DOCUMENT-level mouseup diagnostic. Base terminal-links.spec.ts:944-961 already names handleCopyOnSelectMouseUp and deferred selection reading.",
+            "Base e2e/suite-terminals.ts:4-20 explicitly makes ordinary untagged cases host/grid cases; the outside-drag test is untagged. Thus the contradiction was present before renderer retirement.",
+            "Base grid-terminal.js:1686-1707 already reads selection and calls onCopy synchronously on document mouseup. At f560058da19e02716e6f943883a9508b447aff4e grid-terminal.js:1668-1684 retains that mechanism; terminal.js:4334 wires onCopy and :4373-4375 limits the separate page driver to program-drag guidance."
+          ],
+          "coverage_checked": [
+            "SPEC.md Terminal experience and SPEC_impl.md:1727-1745 describe the clipboard contract and shared queue, not acceptance of stale test explanations.",
+            "TODO Planned empty; searches of plans/queue, BUGS, INDEX/matching files and active TRIAGE_OUTCOMES found no exact diagnostic/scheduling cover. The broad tmux documentation plan is landed, not future coverage.",
+            "FILTER.md does not fully match the scheduling-documentation consequence; no filter disposition proposed."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "A failing maintainer can be directed to the page guidance listener rather than the grid's copy handler, and the link-copy comment teaches an obsolete deferred-selection scheduling model. Waiting for clipboard completion is still useful; no functional copy failure was alleged or reproduced.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Pre-base attribution of both named statements; no claim that correct production copying cures inaccurate commentary."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "grid-copy-tests-describe-retired-page-handler",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete: all seven assigned patches read at their recorded revisions. No substantive findings or unresolved leads.\n\nRecorded candidates c1–c3 and coverage details in `findings.jsonl` and `progress.md`. No tests or reproductions ran; conclusions are source-based."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised c2 with attachment-readiness checks. Resolved c3’s physical-write lead: OS partial writes are explicitly accepted, and the patch preserves the existing test assertions.\n\nNo new findings. Unresolved lead IDs: none. Synthesis progress recorded; no runtime execution."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 complete.\n\n- Checked full-range attribution, clipboard/link gesture assertions, mouse-mode initialization and copy scheduling.\n- Revised c3 with exclusive-base evidence; added and resolved l4 as pre-range stale test prose.\n- New verified findings: none.\n- New unverified findings: none.\n- Open leads: none.\n\nNothing new found within scope. Source analysis only; no runtime execution."
+    }
+  ],
+  "progress": "# g180 browser-terminal-regressions\n\nTurn 1 complete: assigned initial review. Discovery passes: 0. Await the caller's later synthesis/discovery prompt; no later-turn protocol performed in this turn.\n\nRead the complete brief and inventory commits field only. All seven mandatory patches (1,131 lines) were delivered through the evidence reader, each packet at most 200 lines. No assigned patch material remains unread. No checkout files were changed. No tests, builds or reproductions ran; conclusions are from source and contracts.\n\nResults: no substantive findings; no open leads. Candidates appended: c1, c2, c3. c1 was revised after checking the exact specification lines and replacement startup source. New verified findings: none. New unverified findings: none. The append-only findings.jsonl is the complete decision record.\n\nInterface assumptions checked: the primary agent terminal publishes the actual grid and socket; the text, geometry and selection readers address that same model. Program mouse reporting uses off as its inactive state. Completed local selection and program clipboard writes remain separate callbacks into the common clipboard queue. Shift+Enter is one binary JSON key message, encoded as ESC CR; the browser test retains its existing grid assertion and PTY read observation. The old-terminal migration band is retired by the pinned specification and startup replacement. Later patches change comments only; their wide-wrap, reflow and uninstall descriptions agree with the relevant source/contracts. No cross-group questions remain.\n\nMandatory evidence coverage:\n\n- 01167-000.patch: 1-180, 181-245 (terminal-clipboard at f560058da19e02716e6f943883a9508b447aff4e).\n- 01172-000.patch: 1-180, 181-246 (terminal-keys at that revision).\n- 01173-000.patch: 1-170, 171-321 (terminal-links at that revision).\n- 01174-000.patch: 1-180, 181-258 (deleted terminal-migration at that revision).\n- 01288-000.patch: 1-16 (terminal-multihost at 500548b9253b07a26fd03119679184b69544e31d).\n- 01505-000.patch: 1-22 (grid-copy at 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e).\n- 01515-000.patch: 1-23 (terminal-links at that revision).\n\nSupporting context read at f560058da19e02716e6f943883a9508b447aff4e:\n\n- SPEC.md:2855-3214, with 2995-3038 reread with line numbers.\n- SPEC_impl.md:177-376; 1069-1109 (Answers bind to what was drawn); 1504-1703; 1704-1887; 8200-8267.\n- e2e/tests/helpers/term.ts:1-260.\n- e2e/tests/terminal-clipboard.spec.ts:70-280, 615-702.\n- e2e/tests/terminal-keys.spec.ts:310-420.\n- e2e/tests/terminal-links.spec.ts:153-170, 193-290.\n- crates/farhelm-ui/assets/terminal.js:3195-3228, 4290-4360, 4480-4530, 4630-4675.\n- crates/farhelm-ui/assets/grid-terminal.js:1034-1060, 1630-1840.\n- crates/farhelm-ui/assets/grid-input.js:326-378, 480-498.\n- crates/farhelm-supervisor/src/grid_input.rs:135-185, 260-315.\n- crates/farhelm-supervisor/src/service/core.rs:6120-6165.\n- crates/farhelm-supervisor/src/service/core/old_terminals.rs:1-105.\n\nSupporting context at 500548b9253b07a26fd03119679184b69544e31d:\n\n- e2e/tests/terminal-multihost.spec.ts:4690-4755.\n- SPEC_impl.md:7840-7920 (uninstall's action ordering and control-group contract).\n\nSupporting context at 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e:\n\n- e2e/grid-client/grid-copy.spec.ts:1-220 requested; full 84-line file returned.\n- e2e/tests/terminal-links.spec.ts:590-705.\n- crates/farhelm-ui/assets/grid-buffer.js:70-175.\n- SPEC_impl.md:1692-1887 (complete terminal-widget section).\n\nTargeted search output was also used to locate contracts and callers. Broad initial keyword searches and a later cross-revision specification keyword diff were clipped; neither was treated as complete coverage. Relevant assigned patches and the governing passages used for decisions were then read without clipping. Unrelated specification sections and unchanged test bodies outside the context above were not independently reviewed.\n\nTurn 2 started: synthesis. Discovery passes remain 0. Revisit c1-c3 and their cross-patch assumptions, particularly removed fallback readers versus attachment lifecycle, and the message-to-PTY single-write boundary. No open leads on entry.\n\nTurn 2 complete: synthesis. Discovery passes: 0. No new findings. Revised c2 with attachment lifecycle checks. Revised c3 to a lead when checking OS partial writes, then resolved it to a candidate under the same ID after reading the exact host Input contract and the parent test. Unresolved lead IDs: none. New verified finding IDs: none. New unverified finding IDs: none.\n\nCross-batch result: later changes to the multi-host, wide-wrap copy and link-reflow files are comments only at their recorded commits; they add no state or assertion interactions with the grid-only readers. c1's accepted removal basis remains unchanged. The message-to-PTY path keeps a two-byte chord in one input segment and initially offers it whole; OS partial writes and program read boundaries remain accepted exceptions. No claim of observed atomicity was made.\n\nAdditional source read at f560058da19e02716e6f943883a9508b447aff4e:\n\n- e2e/tests/terminal-keys.spec.ts:140-215; its parent revision:330-391, to compare the actual pre-change grid branch and PTY assertion.\n- e2e/tests/helpers/term.ts:305-343.\n- e2e/tests/helpers/terminal-readiness.ts:130-180, 330-360. Readiness checks socket identity, open state, replay reveal and actual hidden-input focus.\n- crates/farhelm-ui/assets/terminal.js:4820-4870.\n- crates/farhelm-supervisor/src/service/grid_stream.rs:1210-1272.\n- crates/farhelm-supervisor/src/hosts/terminal.rs:1500-1560, 2280-2345, 3160-3255.\n- crates/farhelm-supervisor/src/hosts/client.rs:829-872. send_input queues exactly one ClientMessage::Input containing the supplied data.\n- crates/terminal-host/src/host.rs:550-640, 785-832. Each received Input becomes one InputSegment, and write_input offers the segment's remaining bytes in one libc::write.\n- crates/terminal-host/SPEC.md:389-429, complete Input subsection including the explicit OS partial-write and arbitrary program-read caveat.\n\nRechecked complete later assigned diffs directly: terminal-multihost at 500548b9253b07a26fd03119679184b69544e31d, grid-copy and terminal-links at 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e. Targeted searches located mode defaults and caller paths; no search output was treated as full implementation evidence. No unread assigned scope. No checkout changes, tests, builds or reproductions. Next: await caller direction for any separate discovery turn.\n\nTurn 3 started: interface synthesis followed by separate discovery pass 1. Read complete discovery-neighbours.json in bounded chunks. Reopened c3 under the original ID to settle full-range attribution and separate the changed test claim from accepted production OS behavior. No other named input requires local source investigation beyond the assigned group.\n\nTurn 3 complete: named interface input synthesized, then separate discovery pass 1 completed. New verified findings: none. New unverified-after-investigation findings: none. Revised c3 after checking the exclusive base and full-range path history; the same overstrong PTY oracle/claim and accepted lower contract both predate the full range. The earlier immediate-parent-only rationale was insufficient and is explicitly superseded in c3. Added l4 for concrete stale copy-owner/scheduling explanations, investigated it, and resolved it to a candidate with exact pre-base proof. Remaining lead IDs: none. No new in-range defect found. No parent drop or lowering assumed accepted.\n\nInterface context: read discovery-neighbours.json:1-160, 160-210, 211-263 without tool clipping. g010/f1's newly authored SPEC_impl single-write explanation is a distinct finding; it is not refuted by c3's pre-base test attribution. The other supplied neighbour findings were used for context/novelty only; none was claimed as independent discovery or mandatory source credit. No prohibited coverage source was searched.\n\nNew checks and source results for this turn:\n\n- Exclusive-base terminal-keys.spec.ts:145-210 and 305-400 already has the read-boundary fixture explanation, one-message grid branch, unconditional one-read assertions and deterministic-proof language. Full-range git log for this assigned path reports only f560058da19e02716e6f943883a9508b447aff4e. The base-to-f560 diff:1-195 was also read to distinguish corrected input-message wording from the pre-existing claim.\n- Exclusive-base terminal-host/SPEC.md:389-405 and src/host.rs:570-620 already contain the same partial-write/read-division caveat and partial-suffix implementation. This establishes attribution, not a claim that production acceptance cures wrong test prose.\n- At f560, terminal-clipboard.spec.ts:450-615 and 700-770: checked actual selection/clipboard observables, repeated identical selection, outside release and no-drag click. terminal-links.spec.ts:1-155 and 870-1020: checked OSC web/file drag non-activation, dialog/opener seams, selection payload and real/stubbed clipboard completion. No changed executable assertion was found to inspect the wrong mechanism.\n- At f560, grid-model.js:592-625 and 728-756: mouse modes are validated and the initial mode is off; the changed off readiness predicate cannot pass from an uninitialized missing mode in an ordinary mounted model.\n- At f560, terminal.js:4350-4465 and targeted mouseup/onCopy search: the page-side document listener drives only mouse-reporting guidance, and onCopy delegates selection copying to the grid. clipboard-writer.js:1-200 requested, full file returned: synchronous start with best-effort async completion, no delayed selection read.\n- Exclusive-base terminal-clipboard.spec.ts:537-567 and 582-616; terminal-links.spec.ts:946-960 via exact-context search: both obsolete copy explanations already exist. Base suite-terminals.ts:1-180 requested, full file returned, and start-stack.sh:112-137 establish ordinary untagged tests use grid host terminals. Base grid-terminal.js:1654-1712 and current :1654-1690 establish selection reads already belonged to the grid. Base terminal.js targeted search locates its existing onCopy wiring at6020 and separate old-handler path.\n- Full-range path history for the remaining assigned files confirms the earlier terminal creation/migration commits and later comment-only commits; their known interface findings were not relabelled as discoveries here. Original seven assigned patch deliveries remain complete.\n\nNo tests, builds, reproductions or live-install actions. No checkout changes. No unread assigned material. Next: await caller direction.\n"
+}

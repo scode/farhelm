@@ -1,0 +1,35 @@
+[
+  {
+    "key": "g065/c6",
+    "latest_line": 24,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "podman-absent-leftover-success-does-not-forget-host",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The named loss route is source-refuted: cleanup success for an absent canonical resource does not delete a host row or its cached sessions. This is a proposed disposition only; the original possible highest consequence still requires an independent drop check.",
+    "checks": [
+      "At 56659839785691f76da3af5d8f51b511cff4ba8b, crates/farhelm-helm/src/environment/podman.rs:224-269 performs existence/inspection and returns None for absence; no registry deletion occurs there.",
+      "At that revision, podman.rs:722-765 returns Ok(()) immediately when the supplied canonical ID is absent. Present resources must pass helm/role ownership and recorded-host, recipe and active-job reference checks before remove_container. This return carries no Destroyed proof and calls no host removal.",
+      "At that revision, podman.rs:876-908 runs only podman.delete_leftover in run_owned; its success tail bumps FleetEvents and returns empty JSON. lib.rs:2721-2728 merely spawns and awaits the supplied future; feed.rs:149-159 advances the watch revision. Neither adds registry-removal behavior.",
+      "At that revision, hosts.rs:1464-1533 is the separate host-removal path: it obtains provider destruction evidence and passes it to provisioning/service.rs:2141-2160, which removes the row, forgets host memory and stops the actor. store.rs:8034-8068 refuses a Podman row deletion without destruction proof naming that host. The leftover endpoint never calls this path.",
+      "git log over the explicit review range includes 56659839785691f76da3af5d8f51b511cff4ba8b. Diffing its podman.rs against reviewed tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db changes only lifecycle lock acquisition at the earlier lifecycle method; the cited cleanup branches remain intact.",
+      "Source/contract check only. No runtime observation, reproduction, test or build supports or is claimed for this assessment. Checkout status was clean."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:4807-4891, Container sessions, read in full. It requires confirmed absence before registered row/cache forgetting and separate confirmed leftover cleanup. It does not accept losing registry ownership through absent-leftover success.",
+      "Current SPEC_impl.md:5931-6056, Disposable environments through shared recipes, read. Environment rows and provider state requires provider-confirmed evidence before forgetting; Containers leftovers explicitly separates rowless cleanup from row-backed whole-host Delete. This agrees with the source boundary, not a coverage-based dismissal.",
+      "TODO.md searched for leftover/container/Podman/orphan/forget. Planned is empty at lines 25-27. Near term's agent-started-container Stop work at lines 68-101 concerns a different supervisor cleanup scope and is not exact coverage.",
+      "plans/queue searched for leftover/rowless/canonical/forget/absence/recorded-row/registered-host and Podman terms. Read podman-environments.md:150-260 and environment-agent-operations.md:450-580. These describe provider destruction evidence, place retention and separately confirmed user Delete, not the alleged rowless-success registry deletion. No exact unlanded-plan coverage identified; no reliance on a plan's landing status is needed for this refutation.",
+      "BUGS.md searched and read in full: its sole local SSH helper hang is unrelated.",
+      "INDEX.md read in full and searched. Read podman-storage-selection-escapes-lifecycle-lookup.md, podman-remote-routing-host-contract-ambiguity.md, orphan-cleanup-promises-unheld-provisioning-lock.md and orphan-cleanup-overlay-forgets-failed-discovery.md in full. Different source roots and consequences; no exact same-root alias, coverage or useful extension established.",
+      "Active TRIAGE_OUTCOMES.md searched for leftover/container/Podman/orphan/forget and registered ownership/rowless/environment. Matches concern installer leftovers, launch-file credential scope and unrelated GUI text. No matching trigger/consequence/scope found. Archive not read.",
+      "FILTER.md read in full. No filter applied: the original alleged loss of ownership/user work is outside ordinary rare-glitch boundaries. Refutation rests on the missing mutation path, not rarity."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "The allegation needs a shipped step that converts this rowless cleanup's Ok(()) into registered host/session deletion. The inspected caller and success tail do not contain that step; the separate proof-bearing removal path is not invoked.",
+    "original_stronger_consequence": "A direct rowless-cleanup request naming an absent resource might bypass whole-host removal and erase registered ownership/session information, losing track of user-owned work. Original record marks that hypothetical route could-be-highest and proposes only a narrow source refutation. No later withdrawal or consequence revision exists in the supplied history.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Source refutation limited to absent canonical-ID leftover success implicitly forgetting a registered host or its sessions. Do not generalize this to actual host removal, image retirement, leftover discovery obstruction (g065/l2), or recursive image pruning (g061/l8). No drop approval is supplied by this consultation."
+  }
+]

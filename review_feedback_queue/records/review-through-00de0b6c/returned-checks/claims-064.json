@@ -1,0 +1,322 @@
+[
+  {
+    "key": "g097/c1",
+    "latest_line": 18,
+    "recommendation": "covered",
+    "bucket": "highest",
+    "underlying_key": "intentional-legacy-tmux-retirement-process-history-loss",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Source establishes the intentional ending of legacy agents, tabs and retained screens. The specifications explicitly accept that exact consequence. This does not cover selecting a wrong process, mistaken pane attribution, inadequate warnings or surviving-agent guidance. The parent-reported aliases are outside this batch and were not independently matched.",
+    "checks": [
+      "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:crates/farhelm-supervisor/src/service/core/old_terminals.rs:176-279 connects to and pins the old server, then terminates it; :300-342 sweeps the attributed agents and tabs.",
+      "Same revision:crates/farhelm-supervisor/src/hosts/process.rs:476-506 sends verified SIGTERM, SIGCONT and, after grace, verified SIGKILL. This is source-implied process/history loss, not a reproduction.",
+      "Same revision:SPEC_impl.md:2954-3003 specifies retirement and the separate nonfatal failure policy; the originally mistaken failure-clause line range was corrected in the history to :2998-3000."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:2998-3013 explicitly accepts ending running old terminals, losing ended agents' last screens, closing old tabs, and proceeding after cleanup failure. Current SPEC_impl.md:2780-2827 states the same startup operation and 15-second budget.",
+      "TODO.md Planned is empty (:25-27). The phase-3 removal entry at :225-232 is Mid term, not Planned. It is not a basis for coverage.",
+      "Searched plans/queue for old/private/legacy terminals and retirement. tmux-end-old-terminals.md:72-109 describes this intentionally destructive behavior; tmux-drop-from-docs.md:32-34 explicitly preserves startup shutdown. No unlanded corrective plan supplies a separate exact fix.",
+      "Searched BUGS.md, queue INDEX and matching retirement terms, and active TRIAGE_OUTCOMES.md; no exact queue/bug/ledger item found. FILTER upgrade-plus-rare does not apply to ordinary retirement without another rare condition."
+    ],
+    "exact_cover_quotes": [
+      "SPEC.md:3000-3002: A supervisor that finds that tmux server when it starts ends it, and with it everything that still ran in an old terminal, without needing a tmux program.",
+      "SPEC.md:3003-3004: one whose agent had already ended keeps its outcome, but its terminal's last screen, which lived in the server, is gone; old tabs are closed.",
+      "SPEC_impl.md:2819-2821: A failure anywhere is logged and never fatal (the maintainer chose to start anyway and treat old sessions as ended, accepting that a Restart could then start a second agent beside one still running)"
+    ],
+    "missing_premise": null,
+    "original_stronger_consequence": "First startup terminates user agents and shell work in legacy terminals and destroys their retained screen/history, including final screens of ended agents. Preserve highest until the independent drop decision.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Exact specification acceptance of intentional retirement only; this consultation does not authorize the drop."
+  },
+  {
+    "key": "g097/l1",
+    "latest_line": 15,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "legacy-tmux-retirement-argv-process-title-hypothesis",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The investigated process-title mechanism preserves argv in the pinned upstream implementation and inspected ordinary platform routes. No supported binary replacing the socket argv was identified. This refutes the named hypothesis within those routes, not every historical package patch.",
+    "checks": [
+      "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:hosts/process.rs:173-183 requires consecutive -S/socket arguments; old_terminals.rs:223-277 leaves a mismatched server unswept.",
+      "Same revision:procs.rs:1123-1146 reads Linux /proc/pid/cmdline; :1721-1755 and :794-839 read Darwin KERN_PROCARGS2's argv region, not comm.",
+      "Same revision:.github/release/source-pins.env pins tmux 3.7c; scripts/build-private-tmux.sh:73-74,94-133,150-168 builds the upstream tarball for musl Linux/Darwin without a title patch or libbsd injection.",
+      "Primary upstream source checked: https://raw.githubusercontent.com/tmux/tmux/3.7c/server.c:187 calls proc_start; https://raw.githubusercontent.com/tmux/tmux/3.7c/proc.c:183 calls setproctitle; compat/setproctitle.c:23-50 in both 3.7c and 3.8 uses PR_SET_NAME or a no-op. configure.ac:160-184 selects the compatibility implementation when native setproctitle is absent.",
+      "Current https://raw.githubusercontent.com/Homebrew/homebrew-core/master/Formula/t/tmux.rb uses upstream 3.8 without a title patch/libbsd dependency. Apple's current Libc include/_stdlib.h has getprogname/setprogname, no setproctitle. This supports the ordinary Darwin inference; it is not a historical-package or running-Mac observation."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:2998-3013 and SPEC_impl.md:2780-2827 specify retirement and nonfatal failure, but do not independently refute argv loss. Historical SPEC.md:5277-5283 bounds supported tmux to pinned/stock real binaries and excludes arbitrary custom builds.",
+      "Searched both current specifications and TODO Planned, plans/queue, BUGS.md, INDEX/matching queue text, active TRIAGE_OUTCOMES.md for socket argv, process titles and retirement refusal. Planned is empty; no exact additional cover found. The tmux removal plans preserve startup retirement.",
+      "FILTER was read in full. No filter is needed for this source refutation; no concrete supported variant losing argv was established."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "To reopen: identify a supported stock/pinned tmux build whose process-title implementation replaces the original -S/socket argv returned by Farhelm's platform reader. Historic distro variants were not exhaustively audited or executed.",
+    "original_stronger_consequence": "Verification could leave old agents behind interrupted rows, potentially a material/high legacy-retirement failure; no additional work-loss or security route was established. Earlier Linux-only reasoning was expanded to the inspected Darwin route.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Narrow source refutation of process-title-induced argv loss, retaining historical-package limitations and the original potential high consequence."
+  },
+  {
+    "key": "g097/c2",
+    "latest_line": 20,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "retired-container-launch-outside-host-isolation-hypothesis",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Old non-null container JSON survives decoding and is refused before preparation or execution. The named regression also requires the exact retirement explanation, so missing directories cannot satisfy its whole oracle by themselves.",
+    "checks": [
+      "04d85f0c98a9b635709d00b056719a0baa7fd3fc:crates/farhelm-supervisor/src/launch.rs:226-230 retains container as Option<Value>; :1158-1175 decodes and refuses it before later launch work.",
+      "Same revision:service/core.rs:3731-3739 refuses retired SessionLaunch values; :10117-10127 retains a retired pending create on retry; :17059-17060 constructs new specs with container: None.",
+      "Same revision:launch.rs:3293-3320 injects non-null legacy JSON, establishes absent markers before acting, requires RETIRED_MESSAGE and a retirement sentinel, and asserts no preparation/exec marker. :2566-2587 requires the exact child helper to exit successfully and leave its report. Source checks only; no test was run."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:4892-4900 Retired containerized sessions requires Delete-only legacy sessions and refusal of execution/lifecycle actions. This is the intended guard contract, not acceptance of outside-host execution.",
+      "Searched both specifications, empty TODO Planned, plans/queue, BUGS.md, INDEX/matching container terms, and active TRIAGE_OUTCOMES.md for retired/queued container specs, outside-host execution and marker loss. No exact queued/planned accepted defect found; podman-environments material concerns retirement/new container architecture rather than a remaining executable queued-spec bypass.",
+      "No FILTER boundary is needed or established. The original hypothetical isolation failure would not be dismissed merely because upgrading is involved."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "An actual production route that drops a non-null old container marker before this executor would be needed to establish the original outside-host execution consequence; none was established in this named claim.",
+    "original_stronger_consequence": "Removing container preparation could execute queued container argv directly on the outside host, with possible highest security/user-work consequences. The separate test-oracle suspicion was test-only and also source-refuted.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Source refutation of the assigned launch-removal route and, separately, of the claimed vacuous regression oracle. Preserve the original isolation consequence for independent drop review."
+  },
+  {
+    "key": "g097/l2",
+    "latest_line": 6,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "converted-consent-fixture-extra-real-host-cleanup-hypothesis",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Replacing the live/database handle leaves the original real host running only until the owned test directory's socket scan ends it. That cleanup does not rely on either replaced reference. A separate queued stand-in-listener teardown issue is not this alleged lost real-host reference.",
+    "checks": [
+      "70bc66a9f285cc2a9984924f389834d118b7cfdc:service/core/tests/host_terminals.rs:4371-4426 creates and replaces the real terminal handle/address; :4454-4459 supplies an owned StateDir and a multithread runtime.",
+      "Same revision:hosts/terminal.rs:1218-1221 explicitly leaves a host running on final-handle drop. service/core.rs:20045-20069 wraps farhelm_teststate::TestDir.",
+      "Same revision:farhelm-teststate/src/lib.rs:794-817 calls socket-based host cleanup before directory removal and retains the directory if cleanup is uncertain. hosts.rs:94-130 scans every host socket independently of session rows. The replacement does not remove the original socket. No runtime cleanup was observed."
+    ],
+    "coverage_checked": [
+      "Current SPEC_impl.md:2590-2601 specifies socket-based TestDir cleanup/retention. Searched SPEC.md too; no separate acceptance of losing owned hosts.",
+      "Searched empty TODO Planned, plans/queue, BUGS.md, INDEX and active TRIAGE_OUTCOMES.md for converted consent fixtures, extra hosts and teardown. Read review_feedback_queue/blocking-test-cleanup-prevents-async-listener-release.md in full: it concerns an aborted stand-in listener on a current-thread executor, not losing the original real host after these replacements. No exact duplicate or extension is established.",
+      "FILTER does not supply this disposition; bounded fixture-lifetime resource retention alone is not the originally alleged leak."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Two converted consent tests might leak an extra terminal host/process after replacing its stored and live references. Maintainer-test cleanup only; no user-owned-work route was claimed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutation of the lost-reference cleanup hypothesis, limited to the retained original socket and TestDir cleanup mechanism; no promise that every possible teardown fault succeeds."
+  },
+  {
+    "key": "g097/c3",
+    "latest_line": 21,
+    "recommendation": "covered",
+    "bucket": "other",
+    "underlying_key": "unit-test-host-launcher-glibc-platform-limitation",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The platform limitation is explicit in the implementation specification. The separately investigated pre-main SIGPIPE hypothesis is source-refuted by signal installation before host readiness reporting.",
+    "checks": [
+      "70bc66a9f285cc2a9984924f389834d118b7cfdc:hosts/test_program.rs:45-50 returns the test executable on all platforms and registers entry only for glibc Linux; :74-93 checks exactly internal terminal-host --socket/path and enters the host before libtest.",
+      "Same revision:hosts/spawn.rs:350-359 supplies exactly that argv with a cleared environment; this is a fresh exec before libtest starts threads, not a fork from a running test worker.",
+      "Same revision:terminal-host/src/spawn.rs:137-182 installs host signal handlers before binding/startup; host.rs:1392-1413 ignores SIGPIPE; spawn.rs:185-203 handles failed readiness writes by abandoning the start. No runtime observation or arbitrary-loader-initializer proof is claimed.",
+      "The history's location correction is valid: unit_test_host_program is :45-47, entry cfg :50, not the initial approximate :47 citation."
+    ],
+    "coverage_checked": [
+      "Historical SPEC_impl.md:2311-2317 and current SPEC_impl.md:2166-2172 explicitly say the initializer is glibc Linux only and host-dependent tests fail by name elsewhere. SPEC.md has no conflicting test-platform promise found.",
+      "Searched empty TODO Planned, plans/queue, BUGS.md, INDEX/matching unit-test-host/glibc terms, and active TRIAGE_OUTCOMES.md; no additional exact cover or alias found.",
+      "No FILTER applied."
+    ],
+    "exact_cover_quotes": [
+      "Current SPEC_impl.md:2168-2170: It is registered on glibc Linux only; elsewhere every host start from a unit test is refused (libtest rejects the arguments), so those tests fail by name rather than run on another kind of terminal."
+    ],
+    "missing_premise": null,
+    "original_stronger_consequence": "Real-host unit tests fail on macOS/musl without the loader initializer. A separate concern about running before Rust's signal setup was investigated, with no distinct host-lifetime defect established. Maintainer-test scope only.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Exact specification acceptance of platform scope; separate source refutation of the named pre-main signal concern."
+  },
+  {
+    "key": "g097/l3",
+    "latest_line": 17,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "legacy-tmux-retirement-relative-socket-spelling-hypothesis",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Ordinary predecessor launches already derive tmux.sock from a canonical absolute state directory and pass that spelling after -S. Making the retirement socket absolute does not introduce the suspected mismatch. Server identity checks constrain server selection but do not settle the separate pane-owner race.",
+    "checks": [
+      "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4^:service/core.rs:6297-6304 canonicalizes state_dir before TmuxDriver construction :6420-6422; tmux.rs:2357-2359 stores state_dir/tmux.sock and :2493-2499 passes it as a separate -S argument.",
+      "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:hosts/process.rs:483 makes the socket absolute. old_terminals.rs:178-201 requires this user's peer and pinned listener; :223-277 accepts subtree attribution only after verified signalling, discarding AlreadyGone/mismatch/timeout.",
+      "Same revision:hosts/process.rs:551-575 rechecks pinned start identity around the argv read; :498 repeats verification before SIGKILL. These facts refute the named path-spelling route, not every last read-to-signal race or child-owner attribution."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:2998-3013 and SPEC_impl.md:2780-2827 govern retirement and explicitly leave host terminals intact. Their nonfatal failure policy is not the basis for refuting relative argv.",
+      "Searched both specifications, empty TODO Planned, plans/queue, BUGS.md, INDEX/matching socket-spelling/canonicalization/retirement terms, and active TRIAGE_OUTCOMES.md. No exact additional cover found. Parent-reported warning findings and g097/l4 have different causes.",
+      "No FILTER applied. Deliberate repointing of reserved paths was never established as an ordinary trigger; historic releases before the checked predecessor were not exhaustively inspected."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A shipped supported predecessor that passes a relative or otherwise different socket spelling despite supervisor canonicalization would reopen this concern.",
+    "original_stronger_consequence": "A relative legacy socket argv could survive retirement and leave old agents behind interrupted rows, potentially a high UX failure. No additional loss/security route was established.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Narrow source refutation of ordinary relative-CLI path mismatch; preserve the original potential high consequence and all separate attribution/signal caveats."
+  },
+  {
+    "key": "g097/c4",
+    "latest_line": 11,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "host-restart-removed-launch-excerpt-field-hypothesis",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The removed restart-publication field carried None in both host constructors. Host diagnostics read the current generation's final host screen directly; the field served the old tmux fence.",
+    "checks": [
+      "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:service/core/host_restart.rs diff removes launch_excerpt: None from both Relaunched constructors (:542 and :572 contexts), rather than removing populated host diagnostic data.",
+      "Same revision:service/core.rs:3473 initializes a fresh empty excerpt cell on relaunch; :4134-4158 and :13689-13695 consistently omit the removed result field.",
+      "Same revision:service/launch_artifacts.rs:78-95 uses host.evidence dead and host.screen_tail directly; :101-115 reads launch_excerpt only for the tmux arm. This preserves the generation/final-output boundary without claiming correctness of unrelated diagnostics."
+    ],
+    "coverage_checked": [
+      "Current SPEC_impl.md:2134-2150 and :2603-2635 require processed-exit evidence before final-screen inference and a blank Restart screen; SPEC.md's terminal/restart rules provide no acceptance of quoting a previous run. No defect established against those contracts.",
+      "Searched empty TODO Planned, plans/queue, BUGS.md, INDEX/matching excerpt/diagnostic/restart terms, and active TRIAGE_OUTCOMES.md. No exact cover or alias found. restart-unwind-omits-tree-sweep-failure is about restoration after cleanup failure, not excerpt field removal.",
+      "No FILTER applied; a specific rare diagnostic trigger was not established."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Removing launch_excerpt could lose a failed agent's diagnostic or reuse the previous run's output. No security or work-loss route was established.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutation limited to the removed field and host diagnostic path."
+  },
+  {
+    "key": "g097/l4",
+    "latest_line": 19,
+    "recommendation": "retain-verified",
+    "bucket": "highest",
+    "underlying_key": "legacy-tmux-pane-owner-pid-reuse-marker-sweep",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The conditional wrong-tab termination route is established in source. Whether the general short-PID-reuse acceptance covers this attribution-and-later-sweep route remains ambiguous. Retain unless the required independent check agrees to the narrowly stated spec-based drop. This is distinct from server PID verification and back-to-back signal races.",
+    "checks": [
+      "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:old_terminals.rs:456-476 snapshots pid/parent/start, then reads each direct child's environment by bare pid without checking that child's start token; old identities are grouped under the newly read owner.",
+      "Same revision:service/core.rs:14690-14697 supplies real session/tab markers; host_tabs.rs:629-641 puts them in the new tab child's initial environment. Thus a recycled pid can identify an actual new host tab without assuming a nonexistent database row.",
+      "Same revision:old_terminals.rs:321-342 includes direct snapshot tab owners and sweeps their scope/markers; :369-375 admits them without the host-record exclusion applied only to scope discovery at :399-402.",
+      "Same revision:service/sweep.rs:1444-1450 and :1595-1646 discard changed root identities, but :1475-1539 still kills the named scope or runs marker discovery; :252-260 permits the exact session/tab marker. Root revalidation does not undo a wrong owner key.",
+      "Same revision:old_terminals.rs:204-216,223-277 bounds accepted snapshot/server termination by the shared deadline and discards unverified/timed-out server subtrees. SPEC_impl.md:3001 specifies 15 seconds. No PID recycling was reproduced or measured."
+    ],
+    "coverage_checked": [
+      "Historical SPEC_impl.md:5431-5443 and current :4944-4957 accept short bounded PID reuse but exclude bare numbers across unbounded waits or asynchronous work or storage for later. The 15-second outer bound exceeds the few-second polling example; attributing markers then sweeping later is not an unambiguous match.",
+      "Current SPEC.md:2998-3013 and SPEC_impl.md:2780-2827 explicitly preserve existing host terminals. Intentional retirement acceptance does not itself cover this new-host victim.",
+      "TODO Planned is empty. Searched plans/queue, BUGS.md, INDEX/matching pane-owner/PID-reuse/old-terminal terms, and active TRIAGE_OUTCOMES.md; no exact cover found. The tmux plans preserve retirement rather than fixing this attribution.",
+      "FILTER's terminal-host verification-to-signal rule is a different handoff. Upgrade-plus-rare is not a clear full match: the victim can be a new host tab, including under another supervisor, rather than work confined to the legacy sessions carried across upgrade. Do not omit on rarity alone."
+    ],
+    "exact_cover_quotes": [
+      "Candidate cover, SPEC_impl.md:4944: Process-number reuse inside a short window is accepted, for now.",
+      "Candidate cover, SPEC_impl.md:4944-4948: Code that signals or adopts a process by its number may lose the race in which that process exits and the kernel hands the number to an unrelated process within a short, bounded window: between reading a number and checking it, between reaping a child and signalling its group, while a watchdog fires just as its child finishes, or during a polling loop of at most a few seconds.",
+      "Exclusion, SPEC_impl.md:4951-4952: What is not accepted is carrying a bare number across unbounded waits or asynchronous work, or storing it for later."
+    ],
+    "missing_premise": "Runtime occurrence/frequency is unobserved. The source route is conditional on pane-pid recycling before its environment read; that is a trigger, not a missing shipped-control route. The unresolved question is acceptance scope, not whether stale-root rejection alone prevents the sweep.",
+    "original_stronger_consequence": "Old-terminal cleanup can stop a newly started host tab's user processes/work, including under another supervisor of the same user, after a recycled pane pid supplies that new tab's markers. Preserve highest; no parent drop/lowering was accepted in the history.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Retain the conditional source-confirmed finding. Any spec-based dismissal needs an independent judgment on both the 15-second bound and the exclusion for carrying bare numbers across asynchronous work."
+  },
+  {
+    "key": "g098/c1",
+    "latest_line": 7,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "moved-host-lifecycle-probe-pinned-root-final-state-hypothesis",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The helper move preserves pinned child identity and final-output gates in the inspected callers and downstream root admission. It does not establish the original hypothetical recycled-process kill or premature durable launch classification.",
+    "checks": [
+      "1ed482dde220452e424973faf38a5e1318986333^:service/terminals.rs:170-239 carries the pinned host root and processed-exit wait. New hosts/terminal.rs:737-751,818-860,2571-2612 preserves those decisions and never captures a replacement start token from the probe's bare pid.",
+      "1ed482dde220452e424973faf38a5e1318986333:service/handlers.rs:865-909 captures/refuses the root before durable I/O; service/core.rs:12381-12397 and :14128-14142 use the same probe/sweep_root boundary for Restart/tab reap.",
+      "Same revision:service/sweep.rs:1432-1439 revalidates carried tuples; :1574-1623 rejects changed/missing identities and propagates unreadability. This checks root admission, not every later signal or descendant mechanism.",
+      "Same revision:handlers.rs:1009-1053 gates wrapper_failure_detail on final_state && dead and otherwise records plain exit; launch_artifacts.rs:59-76 independently requires processed dead evidence before screen excerpts. No runtime observations."
+    ],
+    "coverage_checked": [
+      "Current SPEC_impl.md:2134-2150 and Launch failure classification :2603-2635 require pinned roots/processed exit evidence; SPEC.md terminal/lifecycle behavior does not accept the hypothetical wrong-process kill.",
+      "Searched both specifications, empty TODO Planned, plans/queue, BUGS.md, INDEX/matching pinned-root/probe/final-state terms, and active TRIAGE_OUTCOMES.md. No exact remaining defect/coverage item found. g101/c2 is only parent-reported overlap and was not supplied for exact alias checking.",
+      "No FILTER applied; this is a bounded source refutation, not a general PID-race acceptance."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A shipped route from this move that discards the adoption-pinned start token or bypasses processed-exit evidence would reopen the original concern. No such route was established.",
+    "original_stronger_consequence": "The helper move might signal a reused user process, losing work, or durably classify launch failure before final output. Preserve the potential highest process-loss consequence for independent drop checking; incomplete diagnostics alone would be other.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Narrow source refutation of the helper move, checked lifecycle callers and root-admission/final-screen boundaries; no blanket lifecycle or signal-race proof."
+  },
+  {
+    "key": "g098/c2",
+    "latest_line": 6,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "removed-tmux-seed-stop-notification-hypothesis",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The removed notifier's only waiting consumer belonged to the removed tmux seed path. Host encodes are cancelled through runtime ownership. Keep this conclusion narrow: runtime drop is not a universal proof that every possible outstanding control reply settles, as an existing queue item explains.",
+    "checks": [
+      "1ed482dde220452e424973faf38a5e1318986333^:git grep stop_began found the declaration/initializer, the handover notify, and the sole awaited consumer in host_restart.rs:905-927 selecting against tmux seeding.",
+      "1ed482dde220452e424973faf38a5e1318986333:hosts/terminal.rs:2414-2420 aborts the task and sets encode cancellation; :3020-3025 sets cancellation on Runtime drop; :3733-3766 passes it into the blocking history encoder and counts the encode.",
+      "Same revision:host_restart.rs:400-478 reads from the old runtime still on the map and refuses a missing seed while stopping. core.rs:12486-12498 awaits that seed before destructive relaunch work. host_handover.rs:296-370 sets stopping under the map lock, gathers hosts, aborts short tails and aborts checkpointed runtimes.",
+      "Same revision:terminal.rs:2443-2450 sends Control::Seed then directly awaits its oneshot. Ordinary request ownership supports cancellation; it does not refute the separately queued late-reserved-send lifetime. No latency measurements or tests."
+    ],
+    "coverage_checked": [
+      "Current SPEC_impl.md:2270-2345 Restarting a host agent and :2403-2462 Across supervisor restarts assign cancellation to runtime ownership; SPEC.md has no acceptance of an indefinite accepted-Restart stall found.",
+      "Read review_feedback_queue/retired-runtime-retains-restart-seed-reply.md in full. It establishes a different bounded-mpsc reserved-send race that can strand history_seed after retirement. Its trigger is not removal of stop_began, so it is neither an exact alias nor evidence that this notifier is still needed.",
+      "Searched empty TODO Planned, plans/queue, BUGS.md, INDEX and active TRIAGE_OUTCOMES.md for stop notification, host seed cancellation and shutdown stalls; no exact additional cover. No FILTER applied."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Removing orderly-stop notification might strand a Restart or encoder during shutdown. Original concern was a stall; no process-loss route was established. The latest source-based cancellation claim must not erase the separate queued control-channel lifetime defect.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Refute only the missing-notifier hypothesis; preserve the existing queue item's distinct restart-seed stall and avoid claiming every dropped runtime releases every waiter.",
+    "new_interface_evidence": "The reviewed revision's history_seed at terminal.rs:2443-2450 still directly awaits a bounded-channel Control::Seed reply. The current queue's retained-runtime late-send caveat applies to any broad assertion that runtime drop necessarily releases this waiter; it does not make removed stop_began a surviving consumer."
+  },
+  {
+    "key": "g098/c3",
+    "latest_line": 3,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "test-host-empty-input-marker-wait-hypothesis",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The private helper would not match an empty needle, but its sole caller rejects one before typing or waiting. The caller also establishes unique post-replay input, so preexisting bytes cannot satisfy this named observation.",
+    "checks": [
+      "1ed482dde220452e424973faf38a5e1318986333:hosts/terminal/test_host.rs:159-174 uses windows(needle.len().max(1)) under a timeout and returns the final contains predicate.",
+      "Same revision:git grep received_contains finds only its definition/docs and handlers.rs:10690 as a call. handlers.rs:10669-10694 requires ReplayComplete and peer liveness, asserts prior received text does not contain the marker, writes it, then checks acknowledged bytes. Any string contains the empty string, so the precondition rejects an empty marker before the wait.",
+      "This is source inspection of the test oracle, not inferred test quality from production correctness; no test executed."
+    ],
+    "coverage_checked": [
+      "Searched SPEC.md and SPEC_impl.md for marker/input/replay/test-host contracts; no general empty-needle promise for this private helper found.",
+      "Searched empty TODO Planned, plans/queue, BUGS.md, INDEX/matching empty-marker/received_contains/input-oracle terms, and active TRIAGE_OUTCOMES.md. No exact cover or alias found.",
+      "No FILTER applied."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "The new test helper could time out on empty input or falsely establish input delivery. Maintainer-test observation only, with no user-work/security consequence.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutation by sole-caller preconditions, without inventing a public empty-needle contract."
+  },
+  {
+    "key": "g098/c4",
+    "latest_line": 4,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "removed-wire-terminal-kind-tab-loss-hypothesis",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Terminal-kind helpers disappear together with the protocol fields and consumers that used them. The inspected new tab reply remains populated by id; no same-version lost-tab route was established.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e:hosts/terminal.rs diff removes wire_kind and its id-plus-kind tab_info helper together.",
+      "Same revision:service/core/host_tabs.rs:167-173 constructs TabInfo with the tab's id. farhelm-proto/src/lib.rs:255 declares protocol 77 and :1685-1695 defines id-only TabInfo.",
+      "Same revision:git grep wire_kind over supervisor/ui/proto finds no remaining consumer. This verifies the named helper/protocol coordination, not every transport compatibility path. No runtime observation."
+    ],
+    "coverage_checked": [
+      "Current SPEC_impl.md:2937-2951 explicitly explains protocol 77's removal of byte streams and terminal-kind fields and the hello mismatch refusal. SPEC.md's terminal contract now describes one terminal kind.",
+      "Searched empty TODO Planned, plans/queue, BUGS.md, INDEX/matching wire_kind/TabInfo/terminal-kind/tab-loss terms, and active TRIAGE_OUTCOMES.md. tmux-end-old-terminals.md:119-129 calls for the coordinated protocol change; later tooling/docs plans remove residual descriptions, not a remaining same-version tab-loss cause. No exact bug/queue/ledger cover found.",
+      "No FILTER applied; no defective trigger was established."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A same-version shipped client still requiring kind for admission/display despite the coordinated removal would be needed for the original high tab-loss consequence; none was established.",
+    "original_stronger_consequence": "Removing kind replies might make tabs disappear for same-version clients, potentially high UX degradation. No destructive or highest route was claimed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutation limited to coordinated helper/field/consumer removal and id-only tab replies."
+  }
+]

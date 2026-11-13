@@ -1,0 +1,629 @@
+{
+  "group": {
+    "id": "g110",
+    "domain": "supervisor-core-integration",
+    "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g001",
+      "g007",
+      "g008",
+      "g009",
+      "g097",
+      "g098",
+      "g099",
+      "g100",
+      "g101",
+      "g102",
+      "g103",
+      "g104",
+      "g105",
+      "g106",
+      "g107",
+      "g108",
+      "g109",
+      "g111",
+      "g112",
+      "g113",
+      "g114",
+      "g115",
+      "g116",
+      "g117",
+      "g118",
+      "g119",
+      "g120",
+      "g121",
+      "g122",
+      "g123",
+      "g124",
+      "g125",
+      "g126",
+      "g127",
+      "g128",
+      "g129",
+      "g130",
+      "g131",
+      "g132",
+      "g133",
+      "g134",
+      "g149",
+      "g150",
+      "g159",
+      "g160",
+      "g161",
+      "g162",
+      "g163",
+      "g164",
+      "g165",
+      "g166",
+      "g167",
+      "g168",
+      "g169",
+      "g170",
+      "g171",
+      "g172",
+      "g173"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00923-000.patch",
+        "ranges": [
+          [
+            1,
+            1024
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/core.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,59510)",
+        "lines": 1024,
+        "bytes": 59634,
+        "start": 0,
+        "end": 59510,
+        "original": "[private-run]/prep/originals/00923.patch"
+      }
+    ],
+    "lines": 1024,
+    "bytes": 59634
+  },
+  "records": [
+    {
+      "key": "g110/f1",
+      "owner": "g110",
+      "id": "f1",
+      "domain": "supervisor-core-integration",
+      "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f1",
+            "state": "open",
+            "summary": "Old tmux terminals lose restart history (specified behavior)",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:4012",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Restart of a session whose old tmux terminal was ended starts without its old terminal history. Details: assigned patch removes TmuxSeedFault and the tmux_seed_gate/tmux_seed_fault hooks and narrows RelaunchPlan.seed to host history (core.rs:4003–4017); this retires the path that copied history from an old tmux pane. Suggested bucket: highest if loss of retained terminal output is treated as loss of user-owned work; could-be-highest: yes. Confidence: confirmed from source and explicit specification, not execution. proposed_drop: SPEC.md, Lifecycle operations, lines 1951–1953 explicitly says: \"When the terminal no longer exists (the process that kept it ended, after a reboot, or an old terminal this release ended, see [Terminal experience](#terminal-experience)), Restart starts with an empty one.\" SPEC_impl.md, Terminal substrate: private tmux server, says \"This release ends them at startup (below); every terminal runs in a terminal host\" and \"The running supervisor runs no tmux at all, and its driver of the old terminals is gone\". This candidate concerns the intentional removal of history migration only; it does not claim an independent defect in old terminals or startup killing. possible_cover: none searched. Caveat: requires independent drop check because the consequence could be highest."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f1",
+            "state": "open",
+            "summary": "Old tmux terminals lose restart history (specified behavior)",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:4013",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Restart of a session whose old tmux terminal was ended starts without its old terminal history. Details: assigned patch removes TmuxSeedFault and the tmux_seed_gate/tmux_seed_fault hooks and narrows RelaunchPlan.seed to host history (core.rs:4007–4016); this retires the path that copied history from an old tmux pane. Suggested bucket: highest if loss of retained terminal output is treated as loss of user-owned work; could-be-highest: yes. Confidence: confirmed from source and explicit specification, not execution. proposed_drop: SPEC.md, Lifecycle operations, lines 1945–1947 explicitly says: \"When the terminal no longer exists (the process that kept it ended, after a reboot, or an old terminal this release ended, see [Terminal experience](#terminal-experience)), Restart starts with an empty one.\" SPEC_impl.md, Terminal substrate: private tmux server, says \"This release ends them at startup (below); every terminal runs in a terminal host\" and \"The running supervisor runs no tmux at all, and its driver of the old terminals is gone\". This candidate concerns the intentional removal of history migration only; it does not claim an independent defect in old terminals or startup killing. possible_cover: none searched. Caveat: requires independent drop check because the consequence could be highest."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f1",
+            "state": "open",
+            "summary": "Old tmux terminals lose restart history (specified behavior)",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:4013",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Restart of a session whose old tmux terminal was ended starts without its old terminal history. Details: assigned patch removes TmuxSeedFault and the tmux_seed_gate/tmux_seed_fault hooks and narrows RelaunchPlan.seed to host history (core.rs:4007–4016); this retires the path that copied history from an old tmux pane. Suggested bucket: highest if loss of retained terminal output is treated as loss of user-owned work; could-be-highest: yes. Confidence: confirmed from source and explicit specification, not execution. proposed_drop: SPEC.md, Lifecycle operations, lines 1945–1947 explicitly says: \"When the terminal no longer exists (the process that kept it ended, after a reboot, or an old terminal this release ended, see [Terminal experience](#terminal-experience)), Restart starts with an empty one.\" SPEC_impl.md, Terminal substrate: private tmux server, says \"This release ends them at startup (below); every terminal runs in a terminal host\" and \"The running supervisor runs no tmux at all, and its driver of the old terminals is gone\". This candidate concerns the intentional removal of history migration only; it does not claim an independent defect in old terminals or startup killing. possible_cover: none searched. Caveat: requires independent drop check because the consequence could be highest. Synthesis, turn 2: parent reports independently logged g099/f1 and g053/f1 with the same accepted old-terminal history/termination consequence; these are possible duplicates, not an accepted drop. Preserve the original retained-output loss claim and could-be-highest treatment. The proposed specification basis is limited to intentional retirement/history loss. It does not cover generic survival guidance (parent names g004/g071) or an omitted failure warning (parent names g033); those distinct issues are not resolved by this record. No peer logs or prohibited coverage sources were searched, and no parent or independent drop verdict has been accepted."
+          }
+        }
+      ],
+      "latest": {
+        "line": 6,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "f1",
+          "state": "open",
+          "summary": "Old tmux terminals lose restart history (specified behavior)",
+          "location": "crates/farhelm-supervisor/src/service/core.rs:4013",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Restart of a session whose old tmux terminal was ended starts without its old terminal history. Details: assigned patch removes TmuxSeedFault and the tmux_seed_gate/tmux_seed_fault hooks and narrows RelaunchPlan.seed to host history (core.rs:4007–4016); this retires the path that copied history from an old tmux pane. Suggested bucket: highest if loss of retained terminal output is treated as loss of user-owned work; could-be-highest: yes. Confidence: confirmed from source and explicit specification, not execution. proposed_drop: SPEC.md, Lifecycle operations, lines 1945–1947 explicitly says: \"When the terminal no longer exists (the process that kept it ended, after a reboot, or an old terminal this release ended, see [Terminal experience](#terminal-experience)), Restart starts with an empty one.\" SPEC_impl.md, Terminal substrate: private tmux server, says \"This release ends them at startup (below); every terminal runs in a terminal host\" and \"The running supervisor runs no tmux at all, and its driver of the old terminals is gone\". This candidate concerns the intentional removal of history migration only; it does not claim an independent defect in old terminals or startup killing. possible_cover: none searched. Caveat: requires independent drop check because the consequence could be highest. Synthesis, turn 2: parent reports independently logged g099/f1 and g053/f1 with the same accepted old-terminal history/termination consequence; these are possible duplicates, not an accepted drop. Preserve the original retained-output loss claim and could-be-highest treatment. The proposed specification basis is limited to intentional retirement/history loss. It does not cover generic survival guidance (parent names g004/g071) or an omitted failure warning (parent names g033); those distinct issues are not resolved by this record. No peer logs or prohibited coverage sources were searched, and no parent or independent drop verdict has been accepted."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g110/findings.jsonl",
+        "id": "f1",
+        "line": 6,
+        "disposition": "under-investigation",
+        "group": "g110-f1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-071",
+          "key": "g110/f1",
+          "latest_line": 6,
+          "recommendation": "covered",
+          "bucket": "highest",
+          "underlying_key": "intentional-old-terminal-retirement-history-loss",
+          "aliases": [
+            "g099/f1 (history-supplied possible alias)",
+            "g053/f1 (history-supplied possible alias)"
+          ],
+          "target_queue_file": null,
+          "why": "Loss of old-terminal scrollback on Restart is an explicit product decision. Preserve the potential user-owned-output consequence and require independent agreement before omitting it.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333:core.rs:4007-4016 retains a host-only seed; the old tmux seed machinery is removed. Host restart defaults to an empty seed when no old terminal remains (host_restart.rs:216-220)."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:2998-3010 expressly says Restart/Clone/Replace of retired old terminals starts empty, including already-ended agents whose old final screen disappears. SPEC_impl.md:2780-2823 confirms intentional retirement. Searches of empty TODO Planned, plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no additional exact coverage; the retirement plan is landed. No filter required."
+          ],
+          "exact_cover_quotes": [
+            "SPEC.md:3010: Restart, Clone and Replace start such a session in a new, empty terminal.",
+            "SPEC.md:3003-3004: one whose agent had already ended keeps its outcome, but its terminal's last screen, which lived in the server, is gone"
+          ],
+          "missing_premise": null,
+          "original_stronger_consequence": "Restart loses retained old tmux output, potentially user-owned work. Acceptance concerns intentional retirement/history loss only, not generic survival guidance or an omitted warning.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Propose specification coverage limited to intentional old-terminal/history retirement; parent must independently check it and reconcile the history-supplied aliases rather than assuming their drops."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "intentional-old-terminal-retirement-history-loss",
+        "destination": "trailing-intentional-old-terminal-retirement-history-loss.md"
+      }
+    },
+    {
+      "key": "g110/c1",
+      "owner": "g110",
+      "id": "c1",
+      "domain": "supervisor-core-integration",
+      "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removing fresh-claim flag preserves ownership fencing",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:1343",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered whether dropping the fresh-versus-reused claim flag permits startup to mutate another process's state or terminate healthy terminals. Source analysis: core.rs:1343–1374 still canonicalizes, reuses an in-process Arc, and takes the same exclusive OS lock for a new claim; another process still yields None. core.rs:6084–6184 still gates store migration and old-terminal ending/reconciliation on ownership.is_some(). The removed flag was documented in the parent as solely gating stale tmux control-client reaping; this runtime no longer starts tmux clients. No new cross-process ownership route is introduced by the assigned signature simplification. Suggested bucket: highest if a route existed (termination of user processes or database migration under an incumbent). could-be-highest: yes. Confidence: confirmed source refutation for this narrow concern; no execution. proposed_drop: source refutation above, not a specification exception. possible_cover: none. Caveat: same-process constructors deliberately share ownership; production has one Supervisor per process (core.rs:1276–1291), unchanged by the patch."
+          }
+        }
+      ],
+      "latest": {
+        "line": 2,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Removing fresh-claim flag preserves ownership fencing",
+          "location": "crates/farhelm-supervisor/src/service/core.rs:1343",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered whether dropping the fresh-versus-reused claim flag permits startup to mutate another process's state or terminate healthy terminals. Source analysis: core.rs:1343–1374 still canonicalizes, reuses an in-process Arc, and takes the same exclusive OS lock for a new claim; another process still yields None. core.rs:6084–6184 still gates store migration and old-terminal ending/reconciliation on ownership.is_some(). The removed flag was documented in the parent as solely gating stale tmux control-client reaping; this runtime no longer starts tmux clients. No new cross-process ownership route is introduced by the assigned signature simplification. Suggested bucket: highest if a route existed (termination of user processes or database migration under an incumbent). could-be-highest: yes. Confidence: confirmed source refutation for this narrow concern; no execution. proposed_drop: source refutation above, not a specification exception. possible_cover: none. Caveat: same-process constructors deliberately share ownership; production has one Supervisor per process (core.rs:1276–1291), unchanged by the patch."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g110/findings.jsonl",
+        "id": "c1",
+        "line": 2,
+        "disposition": "under-investigation",
+        "group": "g110-c1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-071",
+          "key": "g110/c1",
+          "latest_line": 2,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "removed-fresh-state-dir-claim-flag",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The flag removal preserves cross-process exclusivity and all startup authority gates. Same-process claim sharing is deliberate and unchanged.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333:core.rs:1343-1374 canonicalizes the path, reuses a process-local Arc and uses exclusive try_lock for a new claim; another process yields None. :6116-6117 gates store migration, :6134-6138 gates identity writes, :6147-6151 gates old-server ending and :6168-6184 passes ownership into reconciliation. :1276-1291 explains intentional in-process sharing and separate serving exclusion."
+          ],
+          "coverage_checked": [
+            "Both specifications were searched for state-directory claims/read-only authority; SPEC_impl.md:2787 requires ownership for old-server cleanup. Empty TODO Planned, plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md have no exact flag-removal defect or accepted violation. Source refutation needs no filter or waiver."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Startup might migrate another process's database or terminate its healthy terminals after the fresh/reused flag is removed, potentially losing processes/work or breaking its incumbent. The specific source route is refuted.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Drop only the alleged authority regression caused by this signature simplification, subject to independent agreement; do not claim the whole ownership subsystem is defect-free."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "removed-fresh-state-dir-claim-flag",
+        "destination": null
+      }
+    },
+    {
+      "key": "g110/c2",
+      "owner": "g110",
+      "id": "c2",
+      "domain": "supervisor-core-integration",
+      "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Host-only launch excerpts do not need the tmux history fence",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:4235",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered whether removing the per-launch excerpt fence can attach an earlier run's output to a new launch failure. Source: the assigned patch removes RunCells.launch_excerpt and its fresh initialization from relaunched_entry. The replacement append_launch_excerpt (service/launch_artifacts.rs:42–76) reads only the held host's visible screen after HostEvidence::Owned { dead: true }, not retained history; status.rs:637–652 invokes it only for the inferred never-started shape. Host terminals run one child and Restart seeds only scrollback above a blank screen, as specified in SPEC_impl.md, Launch failure classification: \"A host runs one child for its whole life, so everything on its screen is this launch's output\" and \"a Restart's new host starts with a blank screen, so no quote reaches back into the previous run.\" Thus the old tmux pane-reuse provenance concern has no new-launch route in this type narrowing. Suggested bucket: other (misleading failure detail if a route existed); could-be-highest: no established security or loss-of-work route. Confidence: confirmed source/contract analysis, no execution. proposed_drop: source refutation and explicit quoted host contract. possible_cover: none. Caveat: this does not audit the entire restart rollback implementation; host-restart implementation belongs to adjacent groups."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Host-only launch excerpts do not need the tmux history fence",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:4235",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered whether removing the per-launch excerpt fence can attach an earlier run's output to a new launch failure. Source: the assigned patch removes RunCells.launch_excerpt and its fresh initialization from relaunched_entry. The replacement append_launch_excerpt (service/launch_artifacts.rs:42–76) reads only the held host's visible screen after HostEvidence::Owned { dead: true }, not retained history; status.rs:637–652 invokes it only for the inferred never-started shape. Host terminals run one child and Restart seeds only scrollback above a blank screen, as specified in SPEC_impl.md, Launch failure classification: \"A host runs one child for its whole life, so everything on its screen is this launch's output\" and \"a Restart's new host starts with a blank screen, so no quote reaches back into the previous run.\" Thus the old tmux pane-reuse provenance concern has no new-launch route in this type narrowing. Suggested bucket: other (misleading failure detail if a route existed); could-be-highest: no established security or loss-of-work route. Confidence: confirmed source/contract analysis, no execution. proposed_drop: source refutation and explicit quoted host contract. possible_cover: none. Caveat: this does not audit the entire restart rollback implementation; host-restart implementation belongs to adjacent groups. Synthesis, turn 2: source recheck follows the seed end to end: core/host_restart.rs:450–456 asks old.history_seed, hosts/terminal.rs:3733–3761 encodes through emulator.history_seed_until, snapshot/mod.rs:541–569 selects the primary history, v1/mod.rs:246–267 calls paint_history, and v1/paint.rs:417–424 truncates rows to history and appends freshly blank screen rows. host_restart.rs:216–255 supplies that blob to the new host spawn; absent seed defaults to None. append_launch_excerpt was reread at launch_artifacts.rs:59–76 and still gates the screen-tail read on Owned/dead evidence. This establishes the blank-new-screen/final-screen basis in source, rather than relying only on comments or the retired tmux fence. Parent reports g100/g106 agree; that corroboration is not substituted for these source checks. Original consequence and narrow scope remain unchanged; no drop verdict accepted."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c2",
+            "state": "open",
+            "summary": "Check inherited-history promotion before dismissing excerpt provenance",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:4235",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered whether removing the per-launch excerpt fence can attach an earlier run's output to a new launch failure. Source: the assigned patch removes RunCells.launch_excerpt and its fresh initialization from relaunched_entry. The replacement append_launch_excerpt (service/launch_artifacts.rs:42–76) reads only the held host's visible screen after HostEvidence::Owned { dead: true }, not retained history; status.rs:637–652 invokes it only for the inferred never-started shape. Host terminals run one child and Restart seeds only scrollback above a blank screen, as specified in SPEC_impl.md, Launch failure classification: \"A host runs one child for its whole life, so everything on its screen is this launch's output\" and \"a Restart's new host starts with a blank screen, so no quote reaches back into the previous run.\" Thus the old tmux pane-reuse provenance concern has no new-launch route in this type narrowing. Suggested bucket: other (misleading failure detail if a route existed); could-be-highest: no established security or loss-of-work route. Confidence: confirmed source/contract analysis, no execution. proposed_drop: source refutation and explicit quoted host contract. possible_cover: none. Caveat: this does not audit the entire restart rollback implementation; host-restart implementation belongs to adjacent groups. Synthesis, turn 2: source recheck follows the seed end to end: core/host_restart.rs:450–456 asks old.history_seed, hosts/terminal.rs:3733–3761 encodes through emulator.history_seed_until, snapshot/mod.rs:541–569 selects the primary history, v1/mod.rs:246–267 calls paint_history, and v1/paint.rs:417–424 truncates rows to history and appends freshly blank screen rows. host_restart.rs:216–255 supplies that blob to the new host spawn; absent seed defaults to None. append_launch_excerpt was reread at launch_artifacts.rs:59–76 and still gates the screen-tail read on Owned/dead evidence. This establishes the blank-new-screen/final-screen basis in source, rather than relying only on comments or the retired tmux fence. Parent reports g100/g106 agree; that corroboration is not substituted for these source checks. Original consequence and narrow scope remain unchanged; no drop verdict accepted. Discovery pass 2 interface update: exact neighbour g100/c1 now establishes a distinct possible history-promotion route: growing the new terminal height can pull inherited old history into its visible screen before a login-shell failure. The prior blank-seed/final-exit checks remain valid for the boundary they checked, but do not alone refute post-seed resize contamination. Preserve all original wording and proposed-drop basis above; the general dismissal is provisional, no parent drop accepted. Received references: vendor grid/resize.rs:46–71 promotes history, term/mod.rs:756–758 enables primary-grid growth; shell startup may remain unsettled after new host publication, and append_launch_excerpt reads the final visible rows. Need independently inspect these useful accessible source premises and scoped attribution before finalizing. Suggested bucket remains other; could-be-highest: no established security/work-loss route. Confidence: unresolved source lead received from g100, no execution; not yet independently validated in this pass. possible_cover: g100/c1 and its named g013/f2 share the contamination cause; no prohibited sources searched."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c2",
+            "state": "open",
+            "summary": "Resize can invalidate the blank-screen excerpt provenance rationale",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:4235",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered whether removing the per-launch excerpt fence can attach an earlier run's output to a new launch failure. Source: the assigned patch removes RunCells.launch_excerpt and its fresh initialization from relaunched_entry. The replacement append_launch_excerpt (service/launch_artifacts.rs:42–76) reads only the held host's visible screen after HostEvidence::Owned { dead: true }, not retained history; status.rs:637–652 invokes it only for the inferred never-started shape. Host terminals run one child and Restart seeds only scrollback above a blank screen, as specified in SPEC_impl.md, Launch failure classification: \"A host runs one child for its whole life, so everything on its screen is this launch's output\" and \"a Restart's new host starts with a blank screen, so no quote reaches back into the previous run.\" Thus the old tmux pane-reuse provenance concern has no new-launch route in this type narrowing. Suggested bucket: other (misleading failure detail if a route existed); could-be-highest: no established security or loss-of-work route. Confidence: confirmed source/contract analysis, no execution. proposed_drop: source refutation and explicit quoted host contract. possible_cover: none. Caveat: this does not audit the entire restart rollback implementation; host-restart implementation belongs to adjacent groups. Synthesis, turn 2: source recheck follows the seed end to end: core/host_restart.rs:450–456 asks old.history_seed, hosts/terminal.rs:3733–3761 encodes through emulator.history_seed_until, snapshot/mod.rs:541–569 selects the primary history, v1/mod.rs:246–267 calls paint_history, and v1/paint.rs:417–424 truncates rows to history and appends freshly blank screen rows. host_restart.rs:216–255 supplies that blob to the new host spawn; absent seed defaults to None. append_launch_excerpt was reread at launch_artifacts.rs:59–76 and still gates the screen-tail read on Owned/dead evidence. This establishes the blank-new-screen/final-screen basis in source, rather than relying only on comments or the retired tmux fence. Parent reports g100/g106 agree; that corroboration is not substituted for these source checks. Original consequence and narrow scope remain unchanged; no drop verdict accepted. Discovery pass 2 interface update: exact neighbour g100/c1 now establishes a distinct possible history-promotion route: growing the new terminal height can pull inherited old history into its visible screen before a login-shell failure. The prior blank-seed/final-exit checks remain valid for the boundary they checked, but do not alone refute post-seed resize contamination. Preserve all original wording and proposed-drop basis above; the general dismissal is provisional, no parent drop accepted. Received references: vendor grid/resize.rs:46–71 promotes history, term/mod.rs:756–758 enables primary-grid growth; shell startup may remain unsettled after new host publication, and append_launch_excerpt reads the final visible rows. Need independently inspect these useful accessible source premises and scoped attribution before finalizing. Suggested bucket remains other; could-be-highest: no established security/work-loss route. Confidence: unresolved source lead received from g100, no execution; not yet independently validated in this pass. possible_cover: g100/c1 and its named g013/f2 share the contamination cause; no prohibited sources searched. Discovery pass 2 resolution: independently checked vendor/alacritty_terminal/src/grid/resize.rs:25–28,46–71: a height increase grows the visible buffer, pulls min(history_size, lines_added) rows from history and decreases the scroll limit. term/mod.rs:756–758 applies this to primary grids. host_restart.rs:294–305,363–388 confirms/publishes the new host without an agent-shim-consumed fence. handlers.rs:2071–2083 forwards an owned viewer resize; hosts/terminal.rs:3872–3884 applies the resize to the emulator. launch_artifacts.rs:63–76 checks only final-screen evidence and reads screen_tail; :97–102 filters blank lines then chooses the last nonblank rows. Therefore a retained old-history row promoted during startup can remain visible and be quoted after the login shell fails without consuming its spec. A processed final exit settles output order, not provenance. Confidence: confirmed conditional source route, no execution. Exact premises: retained history, height increase after replacement publication, login-shell failure before consuming the launch spec, promoted old text not overwritten. Original misleading-error consequence remains other, could-be-highest no. proposed_drop: false for this provenance interaction; the prior broad refutation is withdrawn, preserving its original exact bases above. Attribution refinement: at exclusive range base 6e423e30068b62c6cfa276c6d720ee35bb70387a, launch_artifacts.rs:52–95 already uses the identical host final-screen/blank-seed rationale and reads host.screen_tail without the RunCells fence; that fence was used only by the tmux arm at :98–106. Thus the assigned core field removal does not newly introduce the host route. This record is reconciliation with received g100/c1 (and its supplied g013/f2 same-cause attribution), not a new independent assigned-group discovery or a request to restore the retired tmux fence. The narrow deletion-attribution refutation remains valid; it cannot support the former universal claim that a host quote never reaches old history. No unverified source premise or open lead remains; parent owns consolidation, no drop/lowering accepted."
+          }
+        }
+      ],
+      "latest": {
+        "line": 12,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "c2",
+          "state": "open",
+          "summary": "Resize can invalidate the blank-screen excerpt provenance rationale",
+          "location": "crates/farhelm-supervisor/src/service/core.rs:4235",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered whether removing the per-launch excerpt fence can attach an earlier run's output to a new launch failure. Source: the assigned patch removes RunCells.launch_excerpt and its fresh initialization from relaunched_entry. The replacement append_launch_excerpt (service/launch_artifacts.rs:42–76) reads only the held host's visible screen after HostEvidence::Owned { dead: true }, not retained history; status.rs:637–652 invokes it only for the inferred never-started shape. Host terminals run one child and Restart seeds only scrollback above a blank screen, as specified in SPEC_impl.md, Launch failure classification: \"A host runs one child for its whole life, so everything on its screen is this launch's output\" and \"a Restart's new host starts with a blank screen, so no quote reaches back into the previous run.\" Thus the old tmux pane-reuse provenance concern has no new-launch route in this type narrowing. Suggested bucket: other (misleading failure detail if a route existed); could-be-highest: no established security or loss-of-work route. Confidence: confirmed source/contract analysis, no execution. proposed_drop: source refutation and explicit quoted host contract. possible_cover: none. Caveat: this does not audit the entire restart rollback implementation; host-restart implementation belongs to adjacent groups. Synthesis, turn 2: source recheck follows the seed end to end: core/host_restart.rs:450–456 asks old.history_seed, hosts/terminal.rs:3733–3761 encodes through emulator.history_seed_until, snapshot/mod.rs:541–569 selects the primary history, v1/mod.rs:246–267 calls paint_history, and v1/paint.rs:417–424 truncates rows to history and appends freshly blank screen rows. host_restart.rs:216–255 supplies that blob to the new host spawn; absent seed defaults to None. append_launch_excerpt was reread at launch_artifacts.rs:59–76 and still gates the screen-tail read on Owned/dead evidence. This establishes the blank-new-screen/final-screen basis in source, rather than relying only on comments or the retired tmux fence. Parent reports g100/g106 agree; that corroboration is not substituted for these source checks. Original consequence and narrow scope remain unchanged; no drop verdict accepted. Discovery pass 2 interface update: exact neighbour g100/c1 now establishes a distinct possible history-promotion route: growing the new terminal height can pull inherited old history into its visible screen before a login-shell failure. The prior blank-seed/final-exit checks remain valid for the boundary they checked, but do not alone refute post-seed resize contamination. Preserve all original wording and proposed-drop basis above; the general dismissal is provisional, no parent drop accepted. Received references: vendor grid/resize.rs:46–71 promotes history, term/mod.rs:756–758 enables primary-grid growth; shell startup may remain unsettled after new host publication, and append_launch_excerpt reads the final visible rows. Need independently inspect these useful accessible source premises and scoped attribution before finalizing. Suggested bucket remains other; could-be-highest: no established security/work-loss route. Confidence: unresolved source lead received from g100, no execution; not yet independently validated in this pass. possible_cover: g100/c1 and its named g013/f2 share the contamination cause; no prohibited sources searched. Discovery pass 2 resolution: independently checked vendor/alacritty_terminal/src/grid/resize.rs:25–28,46–71: a height increase grows the visible buffer, pulls min(history_size, lines_added) rows from history and decreases the scroll limit. term/mod.rs:756–758 applies this to primary grids. host_restart.rs:294–305,363–388 confirms/publishes the new host without an agent-shim-consumed fence. handlers.rs:2071–2083 forwards an owned viewer resize; hosts/terminal.rs:3872–3884 applies the resize to the emulator. launch_artifacts.rs:63–76 checks only final-screen evidence and reads screen_tail; :97–102 filters blank lines then chooses the last nonblank rows. Therefore a retained old-history row promoted during startup can remain visible and be quoted after the login shell fails without consuming its spec. A processed final exit settles output order, not provenance. Confidence: confirmed conditional source route, no execution. Exact premises: retained history, height increase after replacement publication, login-shell failure before consuming the launch spec, promoted old text not overwritten. Original misleading-error consequence remains other, could-be-highest no. proposed_drop: false for this provenance interaction; the prior broad refutation is withdrawn, preserving its original exact bases above. Attribution refinement: at exclusive range base 6e423e30068b62c6cfa276c6d720ee35bb70387a, launch_artifacts.rs:52–95 already uses the identical host final-screen/blank-seed rationale and reads host.screen_tail without the RunCells fence; that fence was used only by the tmux arm at :98–106. Thus the assigned core field removal does not newly introduce the host route. This record is reconciliation with received g100/c1 (and its supplied g013/f2 same-cause attribution), not a new independent assigned-group discovery or a request to restore the retired tmux fence. The narrow deletion-attribution refutation remains valid; it cannot support the former universal claim that a host quote never reaches old history. No unverified source premise or open lead remains; parent owns consolidation, no drop/lowering accepted."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g110/findings.jsonl",
+        "id": "c2",
+        "line": 12,
+        "disposition": "duplicate",
+        "group": "launch-excerpt-inherited-history-provenance",
+        "reason": "Parent read complete claims071 and reconciles canonical g013/f2 and g100/c1. This candidate correctly withdraws blank-screen universal runtime refutation and proves host inherited-history promotion predates the exclusive base; fence deletion does not introduce it. The retained group concerns newly authored1ed482 SPEC_impl false provenance proof, supported by that older runtime counterexample. Preserve this candidate's precise old-runtime attribution and separate new authoritative wording; no extra queue item or claim that runtime is correct. No highest consequence/observed execution. Parent's prior verified documentation finding remains; this is corroboration of its limits."
+      },
+      "accepted_parent_decision": {
+        "key": "g110/c2",
+        "line": 12,
+        "disposition": "duplicate",
+        "group": "launch-excerpt-inherited-history-provenance",
+        "bucket": "other",
+        "recording": "retain-new-documentation-old-runtime-context",
+        "needs_independent_drop_check": false,
+        "reason": "Parent read complete claims071 and reconciles canonical g013/f2 and g100/c1. This candidate correctly withdraws blank-screen universal runtime refutation and proves host inherited-history promotion predates the exclusive base; fence deletion does not introduce it. The retained group concerns newly authored1ed482 SPEC_impl false provenance proof, supported by that older runtime counterexample. Preserve this candidate's precise old-runtime attribution and separate new authoritative wording; no extra queue item or claim that runtime is correct. No highest consequence/observed execution. Parent's prior verified documentation finding remains; this is corroboration of its limits."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-071",
+          "key": "g110/c2",
+          "latest_line": 12,
+          "recommendation": "out-of-range",
+          "bucket": "other",
+          "underlying_key": "restart-history-promoted-into-launch-excerpt",
+          "aliases": [
+            "g100/c1 (history-supplied same cause)",
+            "g013/f2 (history-supplied same cause)"
+          ],
+          "target_queue_file": null,
+          "why": "The conditional resize contamination mechanism is real in source, so the broad blank-screen refutation was withdrawn correctly. However, the host excerpt arm already had the same behavior and rationale at the exclusive range base; removing the tmux-only fence does not introduce it.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333:vendor/alacritty_terminal/src/grid/resize.rs:25-28,46-71 promotes history into the visible area on height growth. core/host_restart.rs:216-255 passes the old history seed and :294-305,363-388 publishes without a shim-consumed fence. handlers.rs:2071-2083 forwards owned resizes; hosts/terminal.rs:3872-3884 resizes the emulator.",
+            "launch_artifacts.rs:63-76 only gates on Owned/dead and reads screen_tail; :97-102 discards blank lines before choosing the last nonblank rows. Final exit proves output order, not that promoted history originated in this launch.",
+            "6e423e30068b62c6cfa276c6d720ee35bb70387a:launch_artifacts.rs:52-95 already has the same host rationale and final-screen read without the launch fence; :98-106 uses that fence only after the host arm returns. Base host_restart.rs:445,512,575,687 already spawns, confirms, publishes and reads inherited host history. The complete base-to-tip grid/resize.rs diff is empty. Range log/diff shows no introduction of these host-seeding or height-promotion mechanisms."
+          ],
+          "coverage_checked": [
+            "SPEC.md:2890-2894 forbids excerpts without safe attribution; SPEC_impl.md:2658-2667 makes the contradicted blank-screen rationale, which is not explicit acceptance of contamination. Empty TODO Planned, plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md have no exact item. Landed tmux cleanup plans supply no unlanded coverage. FILTER.md rare-diagnostic coverage is ambiguous because the excerpt is stored durably; no filter applied."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "Parent may hold a separate in-range introduction under the history-supplied aliases; that evidence was not assigned. This result establishes only that the named fence deletion did not introduce the host route and the relevant source existed at the range base.",
+          "original_stronger_consequence": "An earlier run's output can be attached to a new launch's durable failure detail after inherited history is promoted by a resize. No security or user-work-loss consequence was claimed. The earlier universal provenance dismissal is withdrawn; only the narrow deletion-attribution refutation survives.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Treat this named deletion attribution as out of range, and reconcile the conditional mechanism with the supplied same-cause identities. Do not use the withdrawn blank-screen rationale as a general source refutation."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "launch-excerpt-inherited-history-provenance",
+        "destination": "trailing-launch-excerpt-inherited-history-provenance.md"
+      }
+    },
+    {
+      "key": "g110/c3",
+      "owner": "g110",
+      "id": "c3",
+      "domain": "supervisor-core-integration",
+      "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Old tmux config staging files retain a startup cleanup owner",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:4074",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered whether narrowing the root staging-file sweep strands old tmux config files. Source: sweep_running_version_temp_files now handles only .running-version.tmp- (core.rs:4074–4102), while core/old_terminals.rs:423–447 collects and removes .tmux.conf.tmp- as well as tmux.sock and tmux.conf. end_server invokes this cleanup on a missing/refused server (:179–183) or confirmed server end (:240–250), and core.rs:6147–6151 invokes old-terminal ending during owned construction. The specified boundary deliberately leaves files after other connection/end failures so a later startup can still reach the server; SPEC_impl.md, Terminal substrate: private tmux server: \"Any other failure is logged and the files are left, so a later start can still reach the server\". No accidental loss of the cleanup owner was found. Suggested bucket: other; could-be-highest: no (config staging-file residue, no established credential or work-loss route). Confidence: confirmed source analysis, no execution. proposed_drop: source refutation for ordinary cleanup, explicit specification acceptance for failures. possible_cover: none. Caveat: does not establish that every old-terminal cleanup attempt succeeds, only that this removal has a replacement owner and documented failure boundary."
+          }
+        }
+      ],
+      "latest": {
+        "line": 4,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Old tmux config staging files retain a startup cleanup owner",
+          "location": "crates/farhelm-supervisor/src/service/core.rs:4074",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered whether narrowing the root staging-file sweep strands old tmux config files. Source: sweep_running_version_temp_files now handles only .running-version.tmp- (core.rs:4074–4102), while core/old_terminals.rs:423–447 collects and removes .tmux.conf.tmp- as well as tmux.sock and tmux.conf. end_server invokes this cleanup on a missing/refused server (:179–183) or confirmed server end (:240–250), and core.rs:6147–6151 invokes old-terminal ending during owned construction. The specified boundary deliberately leaves files after other connection/end failures so a later startup can still reach the server; SPEC_impl.md, Terminal substrate: private tmux server: \"Any other failure is logged and the files are left, so a later start can still reach the server\". No accidental loss of the cleanup owner was found. Suggested bucket: other; could-be-highest: no (config staging-file residue, no established credential or work-loss route). Confidence: confirmed source analysis, no execution. proposed_drop: source refutation for ordinary cleanup, explicit specification acceptance for failures. possible_cover: none. Caveat: does not establish that every old-terminal cleanup attempt succeeds, only that this removal has a replacement owner and documented failure boundary."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g110/findings.jsonl",
+        "id": "c3",
+        "line": 4,
+        "disposition": "excluded",
+        "group": "old-tmux-config-temp-cleanup-owner",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-071 after inspecting it. The narrower running-version sweep has a replacement owner for old tmux staging files. Failures intentionally keep the files so a later startup can still reach the old server. Source refutes loss of the cleanup owner; the remaining connection/end-failure residue is explicitly accepted. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333:core.rs:4068-4102 narrows that helper and names the new owner; :6147-6151 invokes old-server ending under ownership. dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:old_terminals.rs:179-189,240-251 invokes cleanup on absence or confirmed ending; :423-447 lists and removes config staging files as well as socket/config.\"] Current coverage/results: [\"Current SPEC_impl.md:2786-2792 explicitly specifies both replacement cleanup and the failure residual. Searches of both specs, empty TODO Planned, plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no separate exact finding. The retirement plan has landed; no filter needed.\"] Exact cited cover: [\"SPEC_impl.md:2790-2791: Any other failure is logged and the files are left, so a later start can still reach the server\"] Original stronger consequence and missing premise remain preserved: \"Old tmux configuration staging files might lose their cleanup owner and remain indefinitely. No credential or user-work-loss route was established; this is not proof that every individual cleanup attempt succeeds.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g110/c3",
+        "line": 4,
+        "disposition": "excluded",
+        "group": "old-tmux-config-temp-cleanup-owner",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-071 after inspecting it. The narrower running-version sweep has a replacement owner for old tmux staging files. Failures intentionally keep the files so a later startup can still reach the old server. Source refutes loss of the cleanup owner; the remaining connection/end-failure residue is explicitly accepted. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333:core.rs:4068-4102 narrows that helper and names the new owner; :6147-6151 invokes old-server ending under ownership. dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:old_terminals.rs:179-189,240-251 invokes cleanup on absence or confirmed ending; :423-447 lists and removes config staging files as well as socket/config.\"] Current coverage/results: [\"Current SPEC_impl.md:2786-2792 explicitly specifies both replacement cleanup and the failure residual. Searches of both specs, empty TODO Planned, plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no separate exact finding. The retirement plan has landed; no filter needed.\"] Exact cited cover: [\"SPEC_impl.md:2790-2791: Any other failure is logged and the files are left, so a later start can still reach the server\"] Original stronger consequence and missing premise remain preserved: \"Old tmux configuration staging files might lose their cleanup owner and remain indefinitely. No credential or user-work-loss route was established; this is not proof that every individual cleanup attempt succeeds.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-071",
+          "key": "g110/c3",
+          "latest_line": 4,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "old-tmux-config-temp-cleanup-owner",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The narrower running-version sweep has a replacement owner for old tmux staging files. Failures intentionally keep the files so a later startup can still reach the old server.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333:core.rs:4068-4102 narrows that helper and names the new owner; :6147-6151 invokes old-server ending under ownership. dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:old_terminals.rs:179-189,240-251 invokes cleanup on absence or confirmed ending; :423-447 lists and removes config staging files as well as socket/config."
+          ],
+          "coverage_checked": [
+            "Current SPEC_impl.md:2786-2792 explicitly specifies both replacement cleanup and the failure residual. Searches of both specs, empty TODO Planned, plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no separate exact finding. The retirement plan has landed; no filter needed."
+          ],
+          "exact_cover_quotes": [
+            "SPEC_impl.md:2790-2791: Any other failure is logged and the files are left, so a later start can still reach the server"
+          ],
+          "missing_premise": null,
+          "original_stronger_consequence": "Old tmux configuration staging files might lose their cleanup owner and remain indefinitely. No credential or user-work-loss route was established; this is not proof that every individual cleanup attempt succeeds.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutes loss of the cleanup owner; the remaining connection/end-failure residue is explicitly accepted."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "old-tmux-config-temp-cleanup-owner",
+        "destination": null
+      }
+    },
+    {
+      "key": "g110/l1",
+      "owner": "g110",
+      "id": "l1",
+      "domain": "supervisor-core-integration",
+      "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Host-scan lock documentation may forbid the host operations it protects",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:4583",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: The rewritten lock-order map may tell maintainers to avoid terminal calls under the host-scan fence even though that fence intentionally spans host start and adoption. Details: assigned patch replaces 'a tmux call' with 'a terminal call' in the host_scan rule at core.rs:4581–4583. The same field map at :4560–4576 says the fence spans host start and reload adoption. Need check actual guarded call sites and terminology to decide whether this is a concrete false locking contract or whether 'terminal call' has a narrower defined meaning excluding these operations. Suggested bucket: other/documentation correctness if confirmed; could-be-highest: no established security or work-loss route from this text, and no current runtime locking defect alleged. Confidence: unresolved source lead, not execution. proposed_drop: false pending investigation. possible_cover: no matching neighbour record found in the fully read supplied interface snapshot. Missing premise: actual host calls made while host_scan is held and whether an explicit narrower definition resolves the wording. Next checks: host spawn/adoption guards and the surrounding module/host_scan field docs. No reproduction or runtime tests."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Host-scan lock map forbids the terminal calls its fence must span",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:4583",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: The rewritten lock-order map tells maintainers not to make terminal calls while holding the host-scan fence, although that fence must stay held while terminal hosts start and are adopted. This is an incorrect internal locking contract, not an observed runtime locking failure. Details: assigned patch lines 982–988 (original core.rs:4581–4583) changes the old prohibition on acquiring 'a tmux call' under host_scan to 'a terminal call'. The new blanket prohibition contradicts the intentional host-only synchronization. core/host_launch.rs:536 takes the shared spawning guard, :537–579 starts and finishes the host, and :609 calls HostTerminal::adopt with that same guard still live. core/host_handover.rs:722–728 takes the exclusive guard expressly through adoption, :732 scans host connections and :786–790 invokes HostTerminal::adopt_found under it. core.rs:4794–4817 explains why this is required: scans take over a host's connection and must not race a spawn before its publication. SPEC_impl.md:2302–2306 likewise requires host_scan to span host starts until publication and directory scans/removals to hold it exclusively. The predecessor wording prohibited tmux calls, which are outside the host lifecycle; replacing that with all terminal calls newly makes the documented rule contradict the required operations. A maintainer following the prohibition could release the fence too early; no such current implementation defect or work-loss consequence is asserted. Suggested fix: remove or scope the obsolete external-call restriction, retaining the actual lock acquisition order and explicitly allowing the host operations the fence protects. Suggested bucket: other/documentation correctness. Could-be-highest: no established security or loss-of-work route from the text; the established issue is a false safety/locking explanation. Confidence: confirmed source and contract analysis; no runtime execution. proposed_drop: false. possible_cover: no matching record in the supplied complete interface snapshot; no prohibited coverage sources searched. Caveats: correct current runtime code does not refute this documentation defect. No separate broad lock-order audit is claimed. This revision closes the readily source-checkable lead; later-revision persistence remains to be checked, but the reviewed intermediate discrepancy is established."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Host-scan lock map forbids the terminal calls its fence must span",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:4583",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: The rewritten lock-order map tells maintainers not to make terminal calls while holding the host-scan fence, although that fence must stay held while terminal hosts start and are adopted. This is an incorrect internal locking contract, not an observed runtime locking failure. Details: assigned patch line 982 (original core.rs:4581–4583) changes the old prohibition on acquiring 'a tmux call' under host_scan to 'a terminal call'. The new blanket prohibition contradicts the intentional host-only synchronization. core/host_launch.rs:536 takes the shared spawning guard, :537–579 starts and finishes the host, and :609 calls HostTerminal::adopt with that same guard still live. core/host_handover.rs:722–728 takes the exclusive guard expressly through adoption, :732 scans host connections and :786–790 invokes HostTerminal::adopt_found under it. core.rs:4794–4817 explains why this is required: scans take over a host's connection and must not race a spawn before its publication. SPEC_impl.md:2302–2306 likewise requires host_scan to span host starts until publication and directory scans/removals to hold it exclusively. The predecessor wording prohibited tmux calls, which are outside the host lifecycle; replacing that with all terminal calls newly makes the documented rule contradict the required operations. A maintainer following the prohibition could release the fence too early; no such current implementation defect or work-loss consequence is asserted. Suggested fix: remove or scope the obsolete external-call restriction, retaining the actual lock acquisition order and explicitly allowing the host operations the fence protects. Suggested bucket: other/documentation correctness. Could-be-highest: no established security or loss-of-work route from the text; the established issue is a false safety/locking explanation. Confidence: confirmed source and contract analysis; no runtime execution. proposed_drop: false. possible_cover: no matching record in the supplied complete interface snapshot; no prohibited coverage sources searched. Caveats: correct current runtime code does not refute this documentation defect. No separate broad lock-order audit is claimed. This revision closes the readily source-checkable lead; later-revision persistence is confirmed as described below. Attribution/persistence check: git log -S for the exact phrase over the complete pinned range identifies only 1ed482dde220452e424973faf38a5e1318986333. The tip core.rs:4580–4582 retains the same prohibition; the later scoped diff contains no repair to it. Reviewed host_launch.rs:639–645 returns the still-live spawning guard with the new runtime, proving the local guard was not implicitly released before adoption. No narrower definition of terminal call was found in the surrounding lock map or host-scan field contract. No open source premise remains."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l1",
+          "state": "open",
+          "summary": "Host-scan lock map forbids the terminal calls its fence must span",
+          "location": "crates/farhelm-supervisor/src/service/core.rs:4583",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: The rewritten lock-order map tells maintainers not to make terminal calls while holding the host-scan fence, although that fence must stay held while terminal hosts start and are adopted. This is an incorrect internal locking contract, not an observed runtime locking failure. Details: assigned patch line 982 (original core.rs:4581–4583) changes the old prohibition on acquiring 'a tmux call' under host_scan to 'a terminal call'. The new blanket prohibition contradicts the intentional host-only synchronization. core/host_launch.rs:536 takes the shared spawning guard, :537–579 starts and finishes the host, and :609 calls HostTerminal::adopt with that same guard still live. core/host_handover.rs:722–728 takes the exclusive guard expressly through adoption, :732 scans host connections and :786–790 invokes HostTerminal::adopt_found under it. core.rs:4794–4817 explains why this is required: scans take over a host's connection and must not race a spawn before its publication. SPEC_impl.md:2302–2306 likewise requires host_scan to span host starts until publication and directory scans/removals to hold it exclusively. The predecessor wording prohibited tmux calls, which are outside the host lifecycle; replacing that with all terminal calls newly makes the documented rule contradict the required operations. A maintainer following the prohibition could release the fence too early; no such current implementation defect or work-loss consequence is asserted. Suggested fix: remove or scope the obsolete external-call restriction, retaining the actual lock acquisition order and explicitly allowing the host operations the fence protects. Suggested bucket: other/documentation correctness. Could-be-highest: no established security or loss-of-work route from the text; the established issue is a false safety/locking explanation. Confidence: confirmed source and contract analysis; no runtime execution. proposed_drop: false. possible_cover: no matching record in the supplied complete interface snapshot; no prohibited coverage sources searched. Caveats: correct current runtime code does not refute this documentation defect. No separate broad lock-order audit is claimed. This revision closes the readily source-checkable lead; later-revision persistence is confirmed as described below. Attribution/persistence check: git log -S for the exact phrase over the complete pinned range identifies only 1ed482dde220452e424973faf38a5e1318986333. The tip core.rs:4580–4582 retains the same prohibition; the later scoped diff contains no repair to it. Reviewed host_launch.rs:639–645 returns the still-live spawning guard with the new runtime, proving the local guard was not implicitly released before adoption. No narrower definition of terminal call was found in the surrounding lock map or host-scan field contract. No open source premise remains."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g110/findings.jsonl",
+        "id": "l1",
+        "line": 10,
+        "disposition": "verified",
+        "group": "host-scan-lock-map-forbids-required-host-io",
+        "reason": "Parent read full claims071 and complete existing lock-table item. New1ed482 core4560-4583's host_scan prohibition contradicts its intended and implemented startup/adoption I/O under the guard; tip4580-4582 retains it. Existing item covers adjacent host_adoption no-connection clause, a different lock/cause. Extend that maintenance lock-map item with the distinct host_scan clause, preserving both guard names, valid re-adoption qualification versus startup/scan publication span, and both source paths. This is useful additional documented invariant scope, not an exact cover or drop. No runtime early-release or work-loss route established. Current coverage checks found no acceptance/pending repair/filter."
+      },
+      "accepted_parent_decision": {
+        "key": "g110/l1",
+        "line": 10,
+        "disposition": "verified",
+        "group": "host-scan-lock-map-forbids-required-host-io",
+        "bucket": "other",
+        "recording": "extend-existing",
+        "queue_target_candidate": "review_feedback_queue/host-lock-table-contradicts-startup-span.md",
+        "needs_independent_drop_check": false,
+        "reason": "Parent read full claims071 and complete existing lock-table item. New1ed482 core4560-4583's host_scan prohibition contradicts its intended and implemented startup/adoption I/O under the guard; tip4580-4582 retains it. Existing item covers adjacent host_adoption no-connection clause, a different lock/cause. Extend that maintenance lock-map item with the distinct host_scan clause, preserving both guard names, valid re-adoption qualification versus startup/scan publication span, and both source paths. This is useful additional documented invariant scope, not an exact cover or drop. No runtime early-release or work-loss route established. Current coverage checks found no acceptance/pending repair/filter."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-071",
+          "key": "g110/l1",
+          "latest_line": 10,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "host-scan-lock-map-forbids-required-host-io",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The changed lock-order sentence forbids terminal calls under a fence whose stated purpose and implementation require host startup and adoption under that fence. This is a documentation contract defect; no current runtime failure is asserted.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333:core.rs:4560-4583 describes host startup/adoption under host_scan, then prohibits acquiring a terminal call while it is held. :4794-4817 explains why scans must not race unpublished starts.",
+            "host_launch.rs:536-609 starts/finishes/adopts a host under the shared guard and :639-645 returns that guard still live. host_handover.rs:722-732 takes the exclusive guard through scan/adoption, including :786-790's adopt_found.",
+            "git log -S over the pinned range identifies 1ed482dd as introduction of the terminal-call wording. Pinned tip core.rs:4580-4582 retains it. Surrounding lock map defines no narrower terminal-call term that exempts these operations."
+          ],
+          "coverage_checked": [
+            "SPEC_impl.md:2226-2232 requires the host_scan fence through publication and around scans; this supports correcting the comment, not accepting its contradiction. SPEC.md supplies no contrary lock restriction.",
+            "TODO Planned is empty. Searches of plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no exact cover. tmux-drop-from-docs has already landed (plans/REPORTS.md:32) and left this sentence intact.",
+            "Read review_feedback_queue/host-lock-table-contradicts-startup-span.md in full. It concerns the adjacent host_adoption no-connection sentence, not host_scan. Correcting one clause would leave the other false: distinct underlying defect, possible useful combined extension rather than exact duplicate. No rare-trigger diagnostic filter applies to an always-inaccurate contract."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "A maintainer following the false prohibition could release the scan fence prematurely. No actual early release, work loss or current runtime locking failure was established; the confirmed consequence is incorrect safety documentation.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Record the false host_scan contract. Parent may extend the adjacent lock-table item with this additional distinct clause, explicitly preserving both lock identities and causes; it is not exact coverage."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "host-scan-lock-map-forbids-required-host-io",
+        "destination": "trailing-host-scan-lock-map-forbids-required-host-io.md"
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial pass complete. All 1,024 assigned patch lines reviewed at the pinned revision.\n\nNo confirmed unintended defects. Logged `f1`, a specification-accepted history-loss candidate requiring independent drop review, and refuted candidates `c1`–`c3`. No unresolved leads.\n\nFindings and progress are saved. No tests, reproductions, or checkout changes."
+    },
+    {
+      "turn": 2,
+      "reply": "Coverage repair and synthesis complete. All 1,024 mandatory lines were delivered directly through six evidence calls; nothing remains unread.\n\nRevised `f1` with possible duplicate references and narrow acceptance limits; strengthened `c2` with end-to-end seed/excerpt source checks. No new defects or open leads. No drop accepted, tests run, or checkout changes."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 found one new verified issue: `l1`, an incorrect host-scan locking rule in the documentation. Source checks confirm the fence spans terminal-host start/adoption; range history and pinned tip show no wording repair.\n\nAlso checked seam exports, environment assembly, attachment fields, listing boundaries and prompt delivery. No further issues found.\n\nNew unverified IDs: none. Open leads: none. Progress and findings saved; no runtime execution."
+    },
+    {
+      "turn": 4,
+      "reply": "Discovery pass 2 found no new independent issue.\n\nChecked launch identity, crash boundaries, request fields and relaunch ownership. Revised `c2` after confirming that resize can expose inherited history; retained its attribution limits and peer overlap.\n\nNew verified IDs: none. New unverified IDs: none. Open leads: none. Records and progress saved; no Farhelm runtime tests or reproductions."
+    }
+  ],
+  "progress": "Group g110: supervisor-core-integration\nTurn 1 complete: initial source review. Discovery passes: 0 (later synthesis/discovery turns remain caller-directed).\nReviewed commit: 1ed482dde220452e424973faf38a5e1318986333.\nRead inventory.json only through its commits field; complete commit list delivered. Excluded coverage metadata and prohibited coverage sources were not read.\n\nMandatory evidence: prep/parts/00923-000.patch lines 1–1024 fully delivered through evidence read, in packets 1–180, 181–360, 361–540, 541–720, 721–900, 901–1024. No assigned material unread.\n\nContracts read at the reviewed revision: SPEC.md Lifecycle operations 1884–2126; Terminal experience 2855–3187; Attachments 3188–3224. SPEC_impl.md Supervisor metadata retention/Leftover files/Cleanup on quit 76–143; Terminal host 1963–2700; Launch failure classification 2701–2766; Terminal substrate 2880–2991; Runtime state 4269–5153; GUI Answers bind to what was drawn 1071–1099 (with surrounding paragraph context 1068–1106). Root AGENTS.md End sentinel present. Queue instructions and recording template read; scode-voice and skillette loaded.\n\nSource/context reads at reviewed revision: service/core.rs 1270–1495, 3190–3355, 3963–4018, 4020–4107, 4380–4468, 6065–6265; service/status.rs 110–210, 570–682; service/launch_artifacts.rs 1–103; service/core/old_terminals.rs 151–257, 419–450. Targeted symbol searches cover removed timeout/hook/fence references and claim/startup/relaunch call sites. No retired implementation was searched for unrelated defects. Tests in adjacent patch parts were not assigned or audited.\n\nInterface conclusions: StateDirOwnership still enforces cross-process exclusion and deliberately shares claims inside one process. HostTerminal replaces the former terminal enum; host runtime owns final-screen provenance, session cells retain tab runtimes across restart, and old_terminals owns legacy config staging cleanup. Adjacent groups own the wider host restart, adoption, observation and stream implementations; only context needed to assess assigned removals was examined.\n\nDurable records this pass: f1 (specified old-terminal restart history loss, proposed drop, could be highest; revised same ID to correct source/spec line references); c1 (fresh-claim flag removal refuted); c2 (excerpt-fence removal refuted by host screen provenance); c3 (tmux staging sweep has replacement owner). No confirmed unintended defect. All conclusions are source/contract analysis, not execution observations. No open leads or unverified finding premises. f1 requires caller-owned independent drop check; c1 also explicitly marks its hypothetical highest consequence for auditing.\n\nNo runtime tests, reproductions, builds, or checkout mutations. Only private group artifacts were written.\nNext: return to caller for a separate synthesis turn; do not run later-turn protocol inside this initial turn.\n\nTurn 2: coverage repair of initial review, then caller-requested synthesis. Prior packet delivery earned no audit credit; preserve existing records and redeliver all 1–1024 lines as direct stdout. No open leads entering this turn. Discovery passes remain 0.\n\nTurn 2 complete: coverage repair of initial review plus explicitly requested synthesis. Discovery-pass count: 0.\nCorrected brief read in full. All assigned patch lines 1–1024 redelivered against the current manifest with the exact evidence command in six separate shell calls: 1–180, 181–360, 361–540, 541–720, 721–900, 901–1024. This time the shell stdout itself was delivered directly (PERSISTENT_REVIEW_READ_V1 through PERSISTENT_REVIEW_END_V1), not encoded inside the exec result object. Each packet completed without clipping or error. The earlier coverage claim must not be treated as audited evidence; the parent reported it earned zero packet credit. Current mandatory unread scope: none.\n\nSynthesis source checks at 1ed482dde220452e424973faf38a5e1318986333: service/core/host_restart.rs 214–262, 400–491; hosts/terminal.rs 3726–3771; farhelm-terminal-emulator/src/snapshot/mod.rs 496–570, snapshot/v1/mod.rs 225–315, snapshot/v1/paint.rs 398–440; service/launch_artifacts.rs 42–77. Seed encoding selects only old history and appends fresh blank screen rows before the new host starts; excerpt construction uses the host final-screen evidence. This corroborates c2's original narrow source refutation.\n\nRecords revised: f1 (parent-reported possible duplicate g099/f1 and g053/f1, retaining the original history-loss/could-be-highest consequence and exact specification basis; generic survival guidance g004/g071 and omitted failure warning g033 expressly remain distinct); c2 (end-to-end blank-screen source references and parent-reported g100/g106 agreement). No new IDs, no new verified or unverified defects, no unresolved leads. c1/c3 unchanged. No parent or independent drop verdict accepted. f1 remains open with proposed_drop for caller-owned independent review. No peer records or prohibited coverage metadata searched.\n\nInterface assumptions unchanged: legacy retirement acceptance is limited to ending old terminals/history; it does not excuse unrelated promises or omitted warnings. Host-only excerpts depend on final-state evidence and blank screen construction, not an old tmux fence. Adjacent group implementation coverage remains owned by the parent.\n\nNext: return the delta and coverage status to the caller. Any later discovery pass requires a separate caller turn. No runtime execution or checkout changes occurred.\n\nTurn 3: separate discovery pass 1. Read discovery-neighbours.json completely in bounded ranges 1–160, 161–260, 261–360, 361–460, 461–560, 561–650, 651–740, 741–801; no output truncation. No pending named interface questions. Existing retirement/excerpt/ownership/staging records remain unchanged. Search only assigned patch beyond those concerns; inspect surviving seam/export, launch-environment and lock-documentation interfaces. No runtime execution.\n\nTurn 3 complete: discovery pass 1, after full interface-snapshot synthesis. New verified ID: l1 (lead promoted to finding, then revised with exact patch coordinate and tip persistence). New unverified-after-investigation IDs: none. Remaining lead IDs: none. New material found: yes, incorrect host_scan terminal-call prohibition in the assigned lock-order documentation. Existing IDs/consequences/drop proposals preserved; no parent drop/lowering accepted.\n\nFresh checks at assigned revision 1ed482dde220452e424973faf38a5e1318986333: core.rs 350–510, 625–700, 916–1035, 2170–2265, 3705–3752, 4468–4612, 4740–4825; host_launch.rs 130–245, 460–650; service/mod.rs 105–151; terminals.rs 46–124 and ActiveAttach fields 417–461; listing.rs 1–165. Checked host_child_env overlay/terminal-variable ordering, public seam re-exports, retired-symbol references, input/output attachment field ownership, list snapshot/registry boundary and prompt-paste receipt ordering. No further concrete lead arose from these remaining assigned interfaces. Retired-symbol search found only an out-of-scope stale helper comment already outside this assignment; no new claim is made for it.\n\nl1 checks: host_launch.rs:536–609 holds the shared fence across host start/finish/adoption and returns it at :639–645; host_handover.rs:640–795 holds the exclusive fence through scan and adoption. SPEC_impl.md:2298–2310 and core.rs:4794–4817 require this exclusion to prevent discovery takeover of in-flight spawns. The assigned patch changes line 982 from tmux call to terminal call, newly contradicting that contract. Exact-phrase git log across the whole pinned range identifies only the assigned commit; pinned-tip core.rs:4580–4582 retains it. Scoped later diff has no repair. Finding is documentation-only, bucket other, not a claimed production deadlock or observed loss of work.\n\nMandatory coverage remains complete (verified by parent before this turn); no new assigned material or unread scope. No runtime tests, reproductions, builds, prohibited coverage searches, live-install actions or checkout writes. Only private group artifacts changed.\nNext: return discovery delta; a substantive new finding exists, so any required subsequent discovery/synthesis remains a separate caller-directed turn.\n\nTurn 4: discovery pass 2. Refreshed current neighbour snapshot by reconstructing the previously delivered exact records from turn3.events.jsonl, comparing structured records, and reading all 24 changed/new groups in neighbour-delta.json 1–401 (packets 1–80, 81–160, 161–240, 241–320, 321–401). Unchanged records reused from full prior context. Comparison JSON parsing required adding only the old outer closing brace omitted by wc newline-count range; no record content was reconstructed or inferred. Pending synthesis: c2 reopened immediately on received g100/c1 history-promotion source premise. No other named pending question. No parent drops/lowerings accepted.\n\nTurn 4 complete: discovery pass 2. No new independent assigned-group issue found. New verified IDs: none. New unverified-after-investigation IDs: none. Revised existing ID: c2 (reopened as lead on exact neighbour g100/c1, then resolved to finding after source checks). Remaining lead IDs: none. l1 and all other original records remain intact; no parent drop/lowering accepted.\n\nSynthesis correction: blank initial screen and processed final exit do not exclude inherited history becoming visible on later resize. Independently read grid/resize.rs 1–88 and term/mod.rs 744–767; host_restart.rs 288–308,359–390; handlers.rs 2060–2087; hosts/terminal.rs 3866–3890; launch_artifacts.rs 59–124. Growing height promotes old history; owned viewer resize applies to the emulator; final-screen excerpt reduction picks nonblank visible rows without provenance. Base 6e423e30068b62c6cfa276c6d720ee35bb70387a launch_artifacts.rs 42–107 already has that host path and blank-seed rationale, while its RunCells fence is accessed only in the tmux arm. c2 therefore preserves the original misleading-diagnostic concern and retracts the broad provenance dismissal, but does not misattribute introduction to this assigned field deletion. Received g100/c1 (and its named g013/f2) own same-cause consolidation; this is not counted as a new independent discovery.\n\nSeparate fresh search after synthesis: reviewed core.rs 1585–1665,2250–2380,2620–2690,11345–11457,11530–11606,12528–12625 plus HostLaunch contract 408–455. Checked renamed launch evidence/request identity and canonical launch-cwd handoff, reservation identity retention, create crash-stage placement after host adoption/before durable confirmation, StartedLaunch guard transfer, RelaunchPlan field removal and supervisor-owned task lifetime, and error classification fallback. No additional concrete discrepancy or unresolved premise found within the assigned patch. Existing peer documentation findings (definitive external-effect claim and reply tab-list wording) were not duplicated.\n\nContext preparation: private Deno comparison helper had two initial validation failures (type annotations, then old snapshot outer closing brace); corrected helper passed fmt/check and its zero-test load. It compares exact structured records and does not summarize source or alter findings. All changed/new interface records were then read in full; unchanged records reused from prior complete context. No Farhelm runtime tests, builds, reproductions, live-install actions, prohibited coverage searches or checkout modifications. Mandatory coverage remains verified/complete, no unread assigned scope.\nNext: return delta. Further review is caller-directed; no open source lead requires continuation here.\n"
+}

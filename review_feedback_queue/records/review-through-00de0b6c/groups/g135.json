@@ -1,0 +1,1069 @@
+{
+  "group": {
+    "id": "g135",
+    "domain": "terminal-link-file-actions",
+    "purpose": "terminal-link-file-actions: crates/farhelm-ui/assets/terminal-files.js, crates/farhelm-ui/js-tests/terminal-files.test.js, crates/farhelm-ui/assets/terminal-links.js, crates/farhelm-ui/js-tests/terminal-links.test.js, crates/farhelm-ui/js-tests/terminal-theme.test.js, crates/farhelm-ui/js-tests/terminal-tunnels.test.js; phases complete small per-commit changes",
+    "interfaces": [
+      "g009",
+      "g010",
+      "g011",
+      "g079",
+      "g080",
+      "g081",
+      "g082",
+      "g083",
+      "g084",
+      "g136",
+      "g188",
+      "g189",
+      "g190",
+      "g191",
+      "g192",
+      "g193",
+      "g194",
+      "g195",
+      "g196",
+      "g197"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00307-000.patch",
+        "ranges": [
+          [
+            1,
+            189
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/assets/terminal-files.js",
+        "commit": "04d85f0c98a9b635709d00b056719a0baa7fd3fc",
+        "notes": "patch header; patch character offsets [0,8838)",
+        "lines": 189,
+        "bytes": 8838,
+        "start": 0,
+        "end": 8838,
+        "original": "[private-run]/prep/originals/00307.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00309-000.patch",
+        "ranges": [
+          [
+            1,
+            285
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/js-tests/terminal-files.test.js",
+        "commit": "04d85f0c98a9b635709d00b056719a0baa7fd3fc",
+        "notes": "patch header; patch character offsets [0,16176)",
+        "lines": 285,
+        "bytes": 16176,
+        "start": 0,
+        "end": 16176,
+        "original": "[private-run]/prep/originals/00309.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01071-000.patch",
+        "ranges": [
+          [
+            1,
+            155
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/assets/terminal-files.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,7525)",
+        "lines": 155,
+        "bytes": 7525,
+        "start": 0,
+        "end": 7525,
+        "original": "[private-run]/prep/originals/01071.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01072-000.patch",
+        "ranges": [
+          [
+            1,
+            287
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/assets/terminal-links.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,14356)",
+        "lines": 287,
+        "bytes": 14368,
+        "start": 0,
+        "end": 14356,
+        "original": "[private-run]/prep/originals/01072.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01100-000.patch",
+        "ranges": [
+          [
+            1,
+            254
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/js-tests/terminal-links.test.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,13101)",
+        "lines": 254,
+        "bytes": 13109,
+        "start": 0,
+        "end": 13101,
+        "original": "[private-run]/prep/originals/01100.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01101-000.patch",
+        "ranges": [
+          [
+            1,
+            12
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/js-tests/terminal-theme.test.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,772)",
+        "lines": 12,
+        "bytes": 772,
+        "start": 0,
+        "end": 772,
+        "original": "[private-run]/prep/originals/01101.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01102-000.patch",
+        "ranges": [
+          [
+            1,
+            36
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/js-tests/terminal-tunnels.test.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,2329)",
+        "lines": 36,
+        "bytes": 2329,
+        "start": 0,
+        "end": 2329,
+        "original": "[private-run]/prep/originals/01102.patch"
+      }
+    ],
+    "lines": 1218,
+    "bytes": 63117
+  },
+  "records": [
+    {
+      "key": "g135/l1",
+      "owner": "g135",
+      "id": "l1",
+      "domain": "terminal-link-file-actions",
+      "purpose": "terminal-link-file-actions: crates/farhelm-ui/assets/terminal-files.js, crates/farhelm-ui/js-tests/terminal-files.test.js, crates/farhelm-ui/assets/terminal-links.js, crates/farhelm-ui/js-tests/terminal-links.test.js, crates/farhelm-ui/js-tests/terminal-theme.test.js, crates/farhelm-ui/js-tests/terminal-tunnels.test.js; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Verify retired container sessions cannot reach unconstrained file providers",
+            "location": "crates/farhelm-ui/assets/terminal-files.js:326",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: removing checkout admission would expose host paths if the retired supervisor-outside container sessions can still reach terminal file actions. Source: assigned patch removes checkoutLinks and OSC provider confinement. SPEC_impl.md:4093-4095 states: Container environments use these ordinary file rules against their in-container supervisor. The earlier checkout-confinement browser adapter and supervisor checks belong to the retired supervisor-outside model and are removed with its terminal access. Suggested bucket: highest if retired-session terminal access remains, because it changes the filesystem security boundary; confidence: unresolved lead awaiting caller and access-gate analysis. Could-be-highest: yes. proposed_drop: false. possible_cover: none searched. Next checks: inspect pinned session terminal mounting, supervisor file authorization and retired-session gate; no reproduction requested or performed."
+          }
+        },
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Retired container access is refused independently of removed link admission",
+            "location": "crates/farhelm-ui/assets/terminal-files.js:326",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR considered: removing checkout admission could expose host files if retired outside-supervisor container sessions still reached terminal actions. Could-be-highest: yes, the original suspected consequence was a filesystem security-boundary bypass. Source refutation: crates/farhelm-supervisor/src/service/downloads.rs:54-66 checks require_active_launch before any path resolution; stat calls this at 189-193 and download start calls it at 217. core.rs:3729-3738 rejects every launch for which container::is_retired is true. service/terminals.rs:904-912 likewise refuses terminal resolution before selecting the terminal. Thus removing browser admission does not grant file or terminal authority to the retired session. Exact supporting contract at SPEC_impl.md:4093-4095: 'Container environments use these ordinary file rules against their in-container supervisor. The earlier checkout-confinement browser adapter and supervisor checks belong to the retired supervisor-outside model and are removed with its terminal access.' Suggested bucket if the missing route existed: highest; confidence: confirmed source refutation, not execution-observed. proposed_drop: source refutation above, with explicit contract acceptance supporting removal; not based solely on the specification. possible_cover: none searched. No reproduction or tests run; no claim about unrelated provider implementations."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Retirement guards narrowly refute access through the retired session identity",
+            "location": "crates/farhelm-ui/assets/terminal-files.js:326",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. Original TLDR hypothesis preserved: removing browser checkout admission could expose outside-host files if retired supervisor-outside container sessions still reached terminal file actions. Could-be-highest: yes, a filesystem security-boundary bypass if that route existed; no parent drop acceptance claimed. Source refutation is limited to the retired session identity: service/downloads.rs:54-66 fetches that session's stored launch and calls require_active_launch before path resolution; stat at 189-193 and begin at 217 share it. core.rs:3729-3738 rejects container::is_retired; container.rs:18-22 identifies the stored container launch intent rather than relying on mutable image/account settings. service/terminals.rs:904-912 rejects the same launch before terminal selection. Parent reports independent agreement from g079/g117/g096 that retired-session file and launch access is refused; this corroborates rather than broadens the local source conclusion. Exact supporting SPEC_impl.md:4093-4095: 'Container environments use these ordinary file rules against their in-container supervisor. The earlier checkout-confinement browser adapter and supervisor checks belong to the retired supervisor-outside model and are removed with its terminal access.' Suggested bucket for original bypass if established: highest. confidence: confirmed source checks, not execution-observed. proposed_drop: only the route through the retired session's file/terminal authority, for source refutation; subject to parent's independent drop check. possible_cover: none searched. No claim about reads through another active ordinary session, compromised helm authority, provider filesystem isolation generally, or unrelated lifecycle failures. Local l2/parent g136-l1 concerns startup test fidelity and is not covered by these retirement guards."
+          }
+        }
+      ],
+      "latest": {
+        "line": 12,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l1",
+          "state": "open",
+          "summary": "Retirement guards narrowly refute access through the retired session identity",
+          "location": "crates/farhelm-ui/assets/terminal-files.js:326",
+          "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. Original TLDR hypothesis preserved: removing browser checkout admission could expose outside-host files if retired supervisor-outside container sessions still reached terminal file actions. Could-be-highest: yes, a filesystem security-boundary bypass if that route existed; no parent drop acceptance claimed. Source refutation is limited to the retired session identity: service/downloads.rs:54-66 fetches that session's stored launch and calls require_active_launch before path resolution; stat at 189-193 and begin at 217 share it. core.rs:3729-3738 rejects container::is_retired; container.rs:18-22 identifies the stored container launch intent rather than relying on mutable image/account settings. service/terminals.rs:904-912 rejects the same launch before terminal selection. Parent reports independent agreement from g079/g117/g096 that retired-session file and launch access is refused; this corroborates rather than broadens the local source conclusion. Exact supporting SPEC_impl.md:4093-4095: 'Container environments use these ordinary file rules against their in-container supervisor. The earlier checkout-confinement browser adapter and supervisor checks belong to the retired supervisor-outside model and are removed with its terminal access.' Suggested bucket for original bypass if established: highest. confidence: confirmed source checks, not execution-observed. proposed_drop: only the route through the retired session's file/terminal authority, for source refutation; subject to parent's independent drop check. possible_cover: none searched. No claim about reads through another active ordinary session, compromised helm authority, provider filesystem isolation generally, or unrelated lifecycle failures. Local l2/parent g136-l1 concerns startup test fidelity and is not covered by these retirement guards."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g135/findings.jsonl",
+        "id": "l1",
+        "line": 12,
+        "disposition": "under-investigation",
+        "group": "g135-l1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-085",
+          "key": "g135/l1",
+          "latest_line": 12,
+          "recommendation": "refuted",
+          "bucket": "highest",
+          "underlying_key": "retired-container-session-file-authority",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The hypothesized route through the retired session identity is source-refuted. This says nothing about another active session's authority or general provider isolation.",
+          "checks": [
+            "04d85f0c98a9b635709d00b056719a0baa7fd3fc:crates/farhelm-supervisor/src/service/downloads.rs:54-66 loads the requested session and checks require_active_launch before resolving its path; stat:189-193 and start:217 use it.",
+            "Same revision service/core.rs:3729-3738 refuses container::is_retired; container.rs:18-22 derives retirement from stored launch intent. service/terminals.rs:904-912 checks the same gate before terminal selection. No runtime observation."
+          ],
+          "coverage_checked": [
+            "Current SPEC_impl.md:3513-3614 and 8313-8326 explicitly retire outside-supervisor sessions and remove their confinement adapter with terminal access; SPEC.md:3074-3168 describes ordinary file authority, not a bypass.",
+            "TODO.md:25 Planned is empty; plans/queue/INDEX.md has no unlanded entries. Retained podman-environments.md:278-295 agrees with retirement but is not active plan coverage.",
+            "BUGS.md has only the SSH-helper install hang. Targeted INDEX/active TRIAGE_OUTCOMES searches found no exact retired-session file-authority claim. No archive read. FILTER has no applicable security exclusion."
+          ],
+          "exact_cover_quotes": [
+            "SPEC_impl.md:8318: A retired session supports Delete only.",
+            "SPEC_impl.md:3611-3613: Container environments use these ordinary file rules against their in-container supervisor. The earlier checkout-confinement browser adapter and supervisor checks belong to the retired supervisor-outside model and are removed with its terminal access."
+          ],
+          "missing_premise": "Original exposure would require a retired session's file/terminal operation to pass the stored-launch gate; the checked routes refuse it.",
+          "original_stronger_consequence": "Removing browser admission could expose outside-host files through retired supervisor-outside container sessions, a filesystem security-boundary bypass.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Narrow source refutation of the retired-session-identity route, corroborated by the explicit retirement contract; no parent drop decision inferred."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retired-container-session-file-authority",
+        "destination": null
+      }
+    },
+    {
+      "key": "g135/c2",
+      "owner": "g135",
+      "id": "c2",
+      "domain": "terminal-link-file-actions",
+      "purpose": "terminal-link-file-actions: crates/farhelm-ui/assets/terminal-files.js, crates/farhelm-ui/js-tests/terminal-files.test.js, crates/farhelm-ui/assets/terminal-links.js, crates/farhelm-ui/js-tests/terminal-links.test.js, crates/farhelm-ui/js-tests/terminal-theme.test.js, crates/farhelm-ui/js-tests/terminal-tunnels.test.js; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Simplified link press policy retains mouse-reporting and forced-selection guards",
+            "location": "crates/farhelm-ui/assets/terminal-links.js:171",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR considered: removing tracking and forced checks from interceptLinkPress could steal ordinary clicks or forced local selections. Source refutation: grid-terminal.js:1768-1777 computes tracking and forced and calls linkPress only for tracking && !forced && a primary hovered link (pressed is restricted to button zero at 1773). terminal.js:4338 onward supplies the pure press policy. This moves existing preconditions to their caller and does not broaden interception. SPEC_impl.md:1778-1785 explicitly requires that call boundary: 'Under mouse reporting the grid asks terminal.js’s linkPress about a primary press on a link, without the forcing modifier held, before reporting it'; exact source uses ASCII apostrophe/backticks in the document. Suggested bucket if present: high (broken terminal selection/input), could-be-highest: no established security or loss-of-work consequence. confidence: confirmed by source, no execution. proposed_drop: source refutation at caller; possible_cover: none searched. Test patch at js-tests/terminal-links.test.js:84-95 now pins only this policy’s remaining conditions, consistent with the caller-owned conditions."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Simplified link press policy retains mouse-reporting and forced-selection guards",
+            "location": "crates/farhelm-ui/assets/terminal-links.js:171",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR considered: removing tracking and forced checks from interceptLinkPress could steal ordinary clicks or forced local selections. Source refutation: grid-terminal.js:1768-1777 computes tracking and forced and calls linkPress only for tracking && !forced && a primary hovered link (pressed is restricted to button zero at 1773). terminal.js:4338 onward supplies the pure press policy. This moves existing preconditions to their caller and does not broaden interception. Exact supporting SPEC_impl.md:1778-1781 text: 'Under mouse reporting the grid asks terminal.js's `linkPress` about a primary press on a link, without the forcing\nmodifier held, before reporting it; in interception mode a web link's press is withheld (`interceptLinkPress`), and the\ngrid then reports neither the press nor its drag nor its release to the program, while the release still activates the\nlink through its ordinary click admission.' Suggested bucket if present: high (broken terminal selection/input), could-be-highest: no established security or loss-of-work consequence. confidence: confirmed by source, no execution. proposed_drop: source refutation at caller; possible_cover: none searched. Test patch at js-tests/terminal-links.test.js:84-95 now pins only this policy's remaining conditions, consistent with the caller-owned conditions. This revision corrects the preceding event's typographic quotation; it preserves the original suspected consequence."
+          }
+        }
+      ],
+      "latest": {
+        "line": 4,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Simplified link press policy retains mouse-reporting and forced-selection guards",
+          "location": "crates/farhelm-ui/assets/terminal-links.js:171",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR considered: removing tracking and forced checks from interceptLinkPress could steal ordinary clicks or forced local selections. Source refutation: grid-terminal.js:1768-1777 computes tracking and forced and calls linkPress only for tracking && !forced && a primary hovered link (pressed is restricted to button zero at 1773). terminal.js:4338 onward supplies the pure press policy. This moves existing preconditions to their caller and does not broaden interception. Exact supporting SPEC_impl.md:1778-1781 text: 'Under mouse reporting the grid asks terminal.js's `linkPress` about a primary press on a link, without the forcing\nmodifier held, before reporting it; in interception mode a web link's press is withheld (`interceptLinkPress`), and the\ngrid then reports neither the press nor its drag nor its release to the program, while the release still activates the\nlink through its ordinary click admission.' Suggested bucket if present: high (broken terminal selection/input), could-be-highest: no established security or loss-of-work consequence. confidence: confirmed by source, no execution. proposed_drop: source refutation at caller; possible_cover: none searched. Test patch at js-tests/terminal-links.test.js:84-95 now pins only this policy's remaining conditions, consistent with the caller-owned conditions. This revision corrects the preceding event's typographic quotation; it preserves the original suspected consequence."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g135/findings.jsonl",
+        "id": "c2",
+        "line": 4,
+        "disposition": "excluded",
+        "group": "link-press-caller-tracking-forcing-guards",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-085 after inspecting it. The removed policy arguments were already fixed by the grid caller's conditions; their removal does not admit ordinary or forced-selection presses. Source refutation by caller preconditions, preserving the original suspected high consequence. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/assets/grid-terminal.js:1768-1777 calculates tracking/forced, restricts pressed links to button zero, and calls linkPress only for tracking && !forced && link. terminal.js:4338-4343 delegates the remaining policy; terminal-links.js:171-173 checks primary/web/intercept. Source only.\"] Current coverage/results: [\"SPEC.md:3076-3084 and SPEC_impl.md:1770-1786 require the checked caller boundary. TODO Planned empty; plans/queue/INDEX empty; BUGS has no matching item.\",\"Targeted INDEX and active TRIAGE_OUTCOMES searches found no exact ordinary/forced press regression. Read secondary-button-erases-intercepted-primary-ownership.md: its second-button replacement trigger is different. FILTER not needed for refutation.\"] Exact cited cover: [\"SPEC_impl.md:1780-1781: Under mouse reporting the grid asks terminal.js's `linkPress` about a primary press on a link, without the forcing modifier held, before reporting it\"] Original stronger consequence and missing premise remain preserved: \"Removing tracking/forced checks might steal ordinary clicks or forced local selections; suspected high input/selection impact, no established loss of work.\"; \"A caller invoking this policy outside its tracking/non-forced primary-link boundary was not found in the checked route.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g135/c2",
+        "line": 4,
+        "disposition": "excluded",
+        "group": "link-press-caller-tracking-forcing-guards",
+        "bucket": "high",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-085 after inspecting it. The removed policy arguments were already fixed by the grid caller's conditions; their removal does not admit ordinary or forced-selection presses. Source refutation by caller preconditions, preserving the original suspected high consequence. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/assets/grid-terminal.js:1768-1777 calculates tracking/forced, restricts pressed links to button zero, and calls linkPress only for tracking && !forced && link. terminal.js:4338-4343 delegates the remaining policy; terminal-links.js:171-173 checks primary/web/intercept. Source only.\"] Current coverage/results: [\"SPEC.md:3076-3084 and SPEC_impl.md:1770-1786 require the checked caller boundary. TODO Planned empty; plans/queue/INDEX empty; BUGS has no matching item.\",\"Targeted INDEX and active TRIAGE_OUTCOMES searches found no exact ordinary/forced press regression. Read secondary-button-erases-intercepted-primary-ownership.md: its second-button replacement trigger is different. FILTER not needed for refutation.\"] Exact cited cover: [\"SPEC_impl.md:1780-1781: Under mouse reporting the grid asks terminal.js's `linkPress` about a primary press on a link, without the forcing modifier held, before reporting it\"] Original stronger consequence and missing premise remain preserved: \"Removing tracking/forced checks might steal ordinary clicks or forced local selections; suspected high input/selection impact, no established loss of work.\"; \"A caller invoking this policy outside its tracking/non-forced primary-link boundary was not found in the checked route.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-085",
+          "key": "g135/c2",
+          "latest_line": 4,
+          "recommendation": "refuted",
+          "bucket": "high",
+          "underlying_key": "link-press-caller-tracking-forcing-guards",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The removed policy arguments were already fixed by the grid caller's conditions; their removal does not admit ordinary or forced-selection presses.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/assets/grid-terminal.js:1768-1777 calculates tracking/forced, restricts pressed links to button zero, and calls linkPress only for tracking && !forced && link. terminal.js:4338-4343 delegates the remaining policy; terminal-links.js:171-173 checks primary/web/intercept. Source only."
+          ],
+          "coverage_checked": [
+            "SPEC.md:3076-3084 and SPEC_impl.md:1770-1786 require the checked caller boundary. TODO Planned empty; plans/queue/INDEX empty; BUGS has no matching item.",
+            "Targeted INDEX and active TRIAGE_OUTCOMES searches found no exact ordinary/forced press regression. Read secondary-button-erases-intercepted-primary-ownership.md: its second-button replacement trigger is different. FILTER not needed for refutation."
+          ],
+          "exact_cover_quotes": [
+            "SPEC_impl.md:1780-1781: Under mouse reporting the grid asks terminal.js's `linkPress` about a primary press on a link, without the forcing modifier held, before reporting it"
+          ],
+          "missing_premise": "A caller invoking this policy outside its tracking/non-forced primary-link boundary was not found in the checked route.",
+          "original_stronger_consequence": "Removing tracking/forced checks might steal ordinary clicks or forced local selections; suspected high input/selection impact, no established loss of work.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation by caller preconditions, preserving the original suspected high consequence."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "link-press-caller-tracking-forcing-guards",
+        "destination": null
+      }
+    },
+    {
+      "key": "g135/c3",
+      "owner": "g135",
+      "id": "c3",
+      "domain": "terminal-link-file-actions",
+      "purpose": "terminal-link-file-actions: crates/farhelm-ui/assets/terminal-files.js, crates/farhelm-ui/js-tests/terminal-files.test.js, crates/farhelm-ui/assets/terminal-links.js, crates/farhelm-ui/js-tests/terminal-links.test.js, crates/farhelm-ui/js-tests/terminal-theme.test.js, crates/farhelm-ui/js-tests/terminal-tunnels.test.js; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Removed xterm gesture helpers are replaced by grid-owned admission",
+            "location": "crates/farhelm-ui/assets/terminal-links.js:158",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR considered: deleting createLinkGesture/reset and suppressMouseReport could allow a reporting-program drag, including away-and-back movement or a listener gap, to activate a download or tunnel. Could-be-highest: yes if an unintentional download-and-open bypassed explicit activation. Source refutation: grid-terminal.js:1651-1656 permanently clears gesture.link on excursions beyond CLICK_JITTER_PX; 1687-1694 requires primary release, distance within jitter, current hovered object/current cells and coverage, then admits only the exact release. isLinkClick at 2039-2040 compares event identity. freeze at 2080-2084 and dispose at 2123 call stopGesture, whose 1754-1758 clears gesture and removes document listeners together. terminal.js:958,1010,1043-1050,1103-1104 routes web/file activation through that admission; the new tunnel test pins denial for click:false. For report suppression, the grid conditionally sends structured mouse input at 1657-1659,1670,1792 instead of filtering encoded output callbacks. Search across pinned assets/js-tests found no surviving references to the deleted APIs other than no callers; references returned only the grid replacements. Contract: SPEC.md Terminal experience says 'Dragging across a terminal link never opens its target, downloads a file or opens a saved file, including while a\n  program has mouse reporting on. Small pointer jitter still counts as a click.' Suggested bucket if present: highest for bypassed open authority, otherwise high for unintended navigation. confidence: confirmed source refutation of the removed-helper concern, no execution. proposed_drop: replacement contracts and source checks above; possible_cover: none searched. This does not certify unrelated grid gesture behavior outside deletion implications."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Grid source refutes specific deleted-helper drag and listener-gap hypotheses",
+            "location": "crates/farhelm-ui/assets/terminal-links.js:158",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. Original TLDR hypothesis preserved: deleting createLinkGesture/reset and suppressMouseReport might let a reporting-program drag, including an away-and-back excursion or held press across a listener gap, activate a download, file opening or tunnel. Could-be-highest: yes for an unintended downloaded-file opening bypassing explicit activation; this possibility is not lowered or accepted for drop by the parent. Narrow source refutation: grid-terminal.js:1651-1656 permanently clears gesture.link on an observed excursion beyond four pixels; 1687-1694 requires primary release within jitter, the identical hovered link, hoverCurrent and link coverage, then admits only that release. isLinkClick at 2039-2040 uses event identity, consumed by terminal.js:958,1010,1043-1050,1103-1104. freeze at 2080-2084 and dispose at 2123 call stopGesture, which clears gesture and removes both document listeners together at 1754-1758. Structured reports are conditionally sent at 1657-1659,1670,1792 instead of filtered from an encoded callback. Synthesis with hover evidence: grid-terminal.js:1308-1319 refuses covered-row changes and revalidates only neighboring evidence; FileLinks.download at 587-606 independently requires ready current hover, not-leaving, exact current displayed range text, printed-path re-recognition, visible uncovered disclosure, and the hover's can_open before requesting the disclosed canonical path. FileLinks.hover at 412 ignores replaced/departing hover replies; normal successful-component disposal clears hover and aborts owned transfers at 641-647, and download completion at 609/615 tests abort. These checks refute only the stated deletion-induced loss of admission, not all possible grid event sequences or all lifecycle failures. Failed creation has a separate unsafe production accessor and revised test-premise finding l2 (parent g136/l1), which this record does not cover. Exact contract: SPEC.md Terminal experience says 'Dragging across a terminal link never opens its target, downloads a file or opens a saved file, including while a\n  program has mouse reporting on. Small pointer jitter still counts as a click.' Suggested bucket for the original opening-security hypothesis if established: highest; otherwise high for unintended navigation. confidence: source-confirmed checks, no execution. proposed_drop: only the specifically stated missing replacement guards, for source reasons above, subject to parent's independent check; no general security or lifecycle drop proposed. possible_cover: none searched."
+          }
+        }
+      ],
+      "latest": {
+        "line": 11,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Grid source refutes specific deleted-helper drag and listener-gap hypotheses",
+          "location": "crates/farhelm-ui/assets/terminal-links.js:158",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. Original TLDR hypothesis preserved: deleting createLinkGesture/reset and suppressMouseReport might let a reporting-program drag, including an away-and-back excursion or held press across a listener gap, activate a download, file opening or tunnel. Could-be-highest: yes for an unintended downloaded-file opening bypassing explicit activation; this possibility is not lowered or accepted for drop by the parent. Narrow source refutation: grid-terminal.js:1651-1656 permanently clears gesture.link on an observed excursion beyond four pixels; 1687-1694 requires primary release within jitter, the identical hovered link, hoverCurrent and link coverage, then admits only that release. isLinkClick at 2039-2040 uses event identity, consumed by terminal.js:958,1010,1043-1050,1103-1104. freeze at 2080-2084 and dispose at 2123 call stopGesture, which clears gesture and removes both document listeners together at 1754-1758. Structured reports are conditionally sent at 1657-1659,1670,1792 instead of filtered from an encoded callback. Synthesis with hover evidence: grid-terminal.js:1308-1319 refuses covered-row changes and revalidates only neighboring evidence; FileLinks.download at 587-606 independently requires ready current hover, not-leaving, exact current displayed range text, printed-path re-recognition, visible uncovered disclosure, and the hover's can_open before requesting the disclosed canonical path. FileLinks.hover at 412 ignores replaced/departing hover replies; normal successful-component disposal clears hover and aborts owned transfers at 641-647, and download completion at 609/615 tests abort. These checks refute only the stated deletion-induced loss of admission, not all possible grid event sequences or all lifecycle failures. Failed creation has a separate unsafe production accessor and revised test-premise finding l2 (parent g136/l1), which this record does not cover. Exact contract: SPEC.md Terminal experience says 'Dragging across a terminal link never opens its target, downloads a file or opens a saved file, including while a\n  program has mouse reporting on. Small pointer jitter still counts as a click.' Suggested bucket for the original opening-security hypothesis if established: highest; otherwise high for unintended navigation. confidence: source-confirmed checks, no execution. proposed_drop: only the specifically stated missing replacement guards, for source reasons above, subject to parent's independent check; no general security or lifecycle drop proposed. possible_cover: none searched."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g135/findings.jsonl",
+        "id": "c3",
+        "line": 11,
+        "disposition": "under-investigation",
+        "group": "g135-c3",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-085",
+          "key": "g135/c3",
+          "latest_line": 11,
+          "recommendation": "refuted",
+          "bucket": "highest",
+          "underlying_key": "removed-link-gesture-replacement-admission",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The specific deletion-induced absence of gesture admission is refuted by replacement guards. This is not a certification of all grid input sequences or failed-mount cleanup.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e:grid-terminal.js:1651-1656 permanently clears an observed excursion's link; :1687-1694 requires primary release, jitter bound, same hovered link, current evidence and coverage. :2039-2040 compares release event identity. :1754-1758 stops the gesture and both document listeners; freeze:2080-2084/dispose:2123 call it.",
+            "Same revision terminal.js:958,1010,1043-1050,1103-1104 consumes click admission; terminal-files.js:587-606 independently requires a ready current hover, unchanged range text, printed-path recognition and disclosure before transfer. Structured mouse sends retain withheld checks at grid-terminal.js:1657-1659,1670,1792. git grep over pinned assets/js-tests found no deleted createLinkGesture/suppressMouseReport references. Source only."
+          ],
+          "coverage_checked": [
+            "SPEC.md:3074-3084 requires drag refusal, not acceptance of accidental activation; SPEC_impl.md:1770-1800,3513-3614 describes the replacement. Planned empty; no unlanded plan INDEX entries; BUGS has no matching issue.",
+            "Read existing secondary-button-erases-intercepted-primary-ownership.md in full: it concerns a second reporting press replacing withheld ownership, not loss of the deleted helper's observed-excursion or release admission. No exact alias or extension established. Read container redraw/publication queue items: different asynchronous admission triggers. Active ledger search found no exact match. FILTER cannot exclude security consequences."
+          ],
+          "exact_cover_quotes": [
+            "SPEC.md:3074-3075: Dragging across a terminal link never opens its target, downloads a file or opens a saved file, including while a program has mouse reporting on. Small pointer jitter still counts as a click."
+          ],
+          "missing_premise": "An unintended activation bypassing these replacement guards is not established. Unobserved movement and other grid sequences are outside this narrow refutation.",
+          "original_stronger_consequence": "Deleting gesture/reset/report helpers could let a reporting-program drag, away-and-back excursion or listener gap activate a download, saved-file opening or tunnel; unintended opening could cross explicit activation authority.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Refute only the claimed absence of replacement admission and report suppression, subject to fresh independent drop review; preserve unrelated lifecycle and input concerns."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "removed-link-gesture-replacement-admission",
+        "destination": null
+      }
+    },
+    {
+      "key": "g135/c4",
+      "owner": "g135",
+      "id": "c4",
+      "domain": "terminal-link-file-actions",
+      "purpose": "terminal-link-file-actions: crates/farhelm-ui/assets/terminal-files.js, crates/farhelm-ui/js-tests/terminal-files.test.js, crates/farhelm-ui/assets/terminal-links.js, crates/farhelm-ui/js-tests/terminal-links.test.js, crates/farhelm-ui/js-tests/terminal-theme.test.js, crates/farhelm-ui/js-tests/terminal-tunnels.test.js; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Deleting the xterm line adapter leaves the grid hyperlink evidence intact",
+            "location": "crates/farhelm-ui/assets/terminal-links.js:514",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR considered: removing xtermLines and range conversions or replacing their private-tag tests could disable multirow deceptive-link warnings or stale-file evidence. Could-be-highest: yes for a lost security disclosure if a supported terminal still required the adapter. Source refutation: terminal.js:945-950 supplies grid.linkLines directly; oscLink uses the native found.ranges at 1030-1048; printed paths use link-lines ranges at 1085-1104. grid-buffer.js:617-639 exposes characters, widths and per-link integer tags, including zero for unlinked cells; linkLines at 660-678 constructs this same interface over source rows. terminal.js:4313 creates only the grid and 4350 disposes gridLinks with it. The removed xterm-only functions have no surviving callers in pinned assets or js-tests (git grep checked the removed API names). The assigned terminal-links tests remove only xterm-specific seam tests and keep the undefined-tag fallback against taggedTerminal; line adapter removal does not remove the shared hover comparison functions. Exact supporting SPEC_impl.md:1790-1792 text: 'which the grid offers directly (`grid-buffer.js`'s `linkLines`). The text is joined by `linkHoverText` from the cells'\nhyperlink tags.' Suggested bucket if the route existed: highest for loss of a security disclosure; confidence: confirmed source refutation, no execution. proposed_drop: adapter is unused by the supported replacement and native grid evidence persists; possible_cover: none searched. No claim about unrelated grid detection algorithms, which are outside this assigned patch."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Normal-mount grid evidence refutes only the removed-adapter dependency",
+            "location": "crates/farhelm-ui/assets/terminal-links.js:514",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. Original TLDR hypothesis preserved: deleting xtermLines and range conversions or replacing their private-tag tests could disable multirow deceptive-link warnings or stale-file evidence, potentially a highest security consequence if a supported terminal still needed that adapter. Narrow source refutation: after successful component creation, terminal.js:945-950 supplies grid.linkLines directly, oscLink uses native found.ranges at 1030-1048, and printed paths use link-lines ranges at 1085-1104. grid-buffer.js:617-639 exposes fresh characters, widths and integer link tags, with zero for unlinked cells; linkLines at 660-678 constructs that interface. No surviving references to the deleted xterm APIs were found in pinned assets/js-tests. Additional synthesis: grid-terminal.js:1294-1319 tracks covered rows and neighboring recognition evidence; 1357-1380 checks lookup token, disposal and row identity before publishing a provider answer; 1407-1420 captures row evidence before hover. These establish the grid-native evidence path, not universal correctness of hyperlink warning or file admission behavior. Exact supporting SPEC_impl.md text: 'which the grid offers directly (`grid-buffer.js`'s `linkLines`). The text is joined by `linkHoverText` from the cells'\nhyperlink tags.' Lifecycle limitation: terminal.js:4350 registers ordinary component disposal, but that does NOT establish rollback when no component exists. Parent-supplied g136/l1 and local l2 show the production view.element=getGrid().element getter can throw during a failed create; the revised absent-element fixture is different and is neither covered nor refuted by this adapter result. The pre-range production getter and the new test claim are tracked under l2. Suggested bucket for original missing-adapter security route if established: highest; could-be-highest: yes, unchanged. confidence: confirmed source refutation only of continued dependence on the deleted xterm adapter; no execution and no claim to settle failed-mount cleanup or other grid algorithms. proposed_drop: only the narrowly stated removed-adapter dependency, for the cited source reasons; no parent drop acceptance claimed. possible_cover: none searched; l2/g136-l1 are separate overlapping-context findings, not coverage for this security hypothesis."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c4",
+          "state": "open",
+          "summary": "Normal-mount grid evidence refutes only the removed-adapter dependency",
+          "location": "crates/farhelm-ui/assets/terminal-links.js:514",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. Original TLDR hypothesis preserved: deleting xtermLines and range conversions or replacing their private-tag tests could disable multirow deceptive-link warnings or stale-file evidence, potentially a highest security consequence if a supported terminal still needed that adapter. Narrow source refutation: after successful component creation, terminal.js:945-950 supplies grid.linkLines directly, oscLink uses native found.ranges at 1030-1048, and printed paths use link-lines ranges at 1085-1104. grid-buffer.js:617-639 exposes fresh characters, widths and integer link tags, with zero for unlinked cells; linkLines at 660-678 constructs that interface. No surviving references to the deleted xterm APIs were found in pinned assets/js-tests. Additional synthesis: grid-terminal.js:1294-1319 tracks covered rows and neighboring recognition evidence; 1357-1380 checks lookup token, disposal and row identity before publishing a provider answer; 1407-1420 captures row evidence before hover. These establish the grid-native evidence path, not universal correctness of hyperlink warning or file admission behavior. Exact supporting SPEC_impl.md text: 'which the grid offers directly (`grid-buffer.js`'s `linkLines`). The text is joined by `linkHoverText` from the cells'\nhyperlink tags.' Lifecycle limitation: terminal.js:4350 registers ordinary component disposal, but that does NOT establish rollback when no component exists. Parent-supplied g136/l1 and local l2 show the production view.element=getGrid().element getter can throw during a failed create; the revised absent-element fixture is different and is neither covered nor refuted by this adapter result. The pre-range production getter and the new test claim are tracked under l2. Suggested bucket for original missing-adapter security route if established: highest; could-be-highest: yes, unchanged. confidence: confirmed source refutation only of continued dependence on the deleted xterm adapter; no execution and no claim to settle failed-mount cleanup or other grid algorithms. proposed_drop: only the narrowly stated removed-adapter dependency, for the cited source reasons; no parent drop acceptance claimed. possible_cover: none searched; l2/g136-l1 are separate overlapping-context findings, not coverage for this security hypothesis."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g135/findings.jsonl",
+        "id": "c4",
+        "line": 10,
+        "disposition": "under-investigation",
+        "group": "g135-c4",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-085",
+          "key": "g135/c4",
+          "latest_line": 10,
+          "recommendation": "refuted",
+          "bucket": "highest",
+          "underlying_key": "removed-xterm-link-lines-adapter-dependency",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The supported terminal supplies native link-line evidence and native ranges; it has no remaining dependency on the removed xterm adapter. Failed creation remains a separate test-fidelity finding.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e:terminal.js:945-950 reads grid.linkLines after creation; :1030-1048 uses found.ranges for OSC disclosure; :1085-1104 uses native path ranges. grid-buffer.js:617-639 returns fresh characters, widths and integer tags including zero; :660-678 builds linkLines from source rows.",
+            "git grep at f560058d over assets/js-tests found no xtermLines/fromXtermRange/XtermFileLinksAddon references. terminal.js:4313 mounts the grid. Normal onDispose:4350 does not prove constructor rollback; l2 remains distinct. Source only."
+          ],
+          "coverage_checked": [
+            "SPEC.md:3084-3107 requires mismatch disclosures and accepts bounded comparison limitations; SPEC_impl.md:1787-1800 explicitly supplies grid-native tagged link lines. No specification acceptance of losing disclosures was used.",
+            "TODO Planned empty; plans/queue/INDEX empty. Retained tmux-end-old-terminals.md:125-132 describes deletion of adapters but is not active coverage. BUGS, targeted queue INDEX and active ledger searches found no exact missing-adapter issue; related redraw/publication queue files have different triggers. FILTER lacks a security exclusion."
+          ],
+          "exact_cover_quotes": [
+            "SPEC_impl.md:1791-1792: which the grid offers directly (`grid-buffer.js`'s `linkLines`). The text is joined by `linkHoverText` from the cells' hyperlink tags."
+          ],
+          "missing_premise": "No supported terminal still requiring xterm line/range conversion was found; no universal claim about warning algorithms or rollback follows.",
+          "original_stronger_consequence": "Adapter/test removal could disable multirow deceptive-link warnings or stale-file evidence, potentially losing a security disclosure if a supported terminal still needed it.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Narrow source refutation of continued dependence on the deleted adapter; independent security drop check still required."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "removed-xterm-link-lines-adapter-dependency",
+        "destination": null
+      }
+    },
+    {
+      "key": "g135/l2",
+      "owner": "g135",
+      "id": "l2",
+      "domain": "terminal-link-file-actions",
+      "purpose": "terminal-link-file-actions: crates/farhelm-ui/assets/terminal-files.js, crates/farhelm-ui/js-tests/terminal-files.test.js, crates/farhelm-ui/assets/terminal-links.js, crates/farhelm-ui/js-tests/terminal-links.test.js, crates/farhelm-ui/js-tests/terminal-theme.test.js, crates/farhelm-ui/js-tests/terminal-tunnels.test.js; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l2",
+            "state": "open",
+            "summary": "Reconcile failed-mount cleanup with the production grid accessor",
+            "location": "crates/farhelm-ui/assets/terminal.js:4356",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. Parent supplied g136/l1: the revised failed-mount test uses a safe host.element getter, while production createGridLinks.view.element calls getGrid().element and created is undefined if grid creation throws; FileLinks.dispose can then throw and mask the original startup error. The production accessor predates this change, while the changed test newly claims rollback coverage. TLDR suspected: terminal startup failures may lose their useful original diagnosis, and the replacement test does not establish production rollback. Suggested bucket: other for the changed test's unsupported contract; material startup UX may be high if the production failure route is attributed to an in-range change. Could-be-highest: no established security or loss-of-work route in this rollback hypothesis; this does not lower c3/c4's separate potentially highest click/disclosure hypotheses. confidence: parent source report, pending local reconciliation. proposed_drop: false. possible_cover: g136/l1, as communicated by parent, without searching queue or other coverage sources. Next checks: inspect pinned production accessor/dispose path, exact changed test and pre-change accessor; distinguish this hypothesis from normal-mount adapter compatibility. No reproduction requested or performed."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l2",
+            "state": "open",
+            "summary": "Replacement failed-mount fixture does not model production element access",
+            "location": "crates/farhelm-ui/js-tests/terminal-files.test.js:835",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: the revised failed-mount test can pass while terminal startup cleanup replaces the useful original error with an undefined-component exception. Source-confirmed mismatch: noticeFixture at 671-677 creates a host object even with opened=false, and view.element returns host.element safely; the revised test at 834 onward describes grid links created before their component and asserts safe disposal. Production terminal.js:945-948 instead evaluates getGrid().element, with getGrid bound to created at 4302-4311; assignment at 4313 occurs only if create returns. If creation throws, catch at 4356-4358 calls gridLinks.dispose -> FileLinks.dispose at terminal-files.js:641-645 -> clearHover at 467; evaluating view.element throws before optional chaining can handle the absent element. The subsequent throw err is not reached. This is distinct from c4's normal-mount adapter compatibility, which does not establish failed-mount rollback. Suggested bucket: other for an in-range test-premise gap; the underlying startup diagnostic failure may be high depending on its originating change and trigger. Could-be-highest: no established security/loss-of-work route for this separate rollback finding; c3/c4's original potentially highest consequences remain unchanged. confidence: confirmed source/contract mismatch and conditional masking, not execution-observed; pre-range origin supplied by parent still being locally checked. proposed_drop: false. possible_cover: g136/l1 as explicitly supplied by parent; parent owns deduplication. Contract: test's changed docstring says 'The grid's links are created before the component whose element they\n * read. Failed mounts must also dispose safely; notice listeners belong to a\n * later, existing terminal element.' Fix/test direction: exercise the actual production accessor with the component absent, or use an equally throwing accessor in the fixture, and make production cleanup tolerate absent component without hiding the original error. No reproduction or runtime test performed."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l2",
+            "state": "open",
+            "summary": "Replacement failed-mount fixture does not model production element access",
+            "location": "crates/farhelm-ui/js-tests/terminal-files.test.js:834",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: the revised failed-mount test passes a safer element accessor than production, so it cannot substantiate its claim that startup cleanup preserves the original terminal creation failure. Source-confirmed mismatch: noticeFixture at 671-677 always creates a host object, and view.element returns host.element safely even with opened=false; test at 834-848 describes links created before their component and calls dispose. Production terminal.js:945-948 instead evaluates getGrid().element, with getGrid bound to created at 4302-4311; assignment at 4313 occurs only if create returns. If create throws, catch at 4356-4358 calls gridLinks.dispose -> FileLinks.dispose at terminal-files.js:641-645 -> clearHover at 467; view.element throws before optional chaining can handle the absent element, so throw err is not reached. Local baseline check confirms this production accessor and cleanup structure predate the review range: 6e423e30068b62c6cfa276c6d720ee35bb70387a terminal.js:1194-1215 and 5981-6044 already contain getGrid().element, the unassigned created closure and the catch calling gridLinks.dispose before throw err. Thus this is an in-range misleading test/fixture contract, not a claim that f560058d introduced the production bug. Original suspected consequence remains loss of useful startup diagnosis when creation fails; this event attributes only the test-premise gap to this commit. This is distinct from c4's normal-mount adapter compatibility and is not covered/refuted by it. Suggested bucket: other for the changed test-premise gap. Could-be-highest: no established security/loss-of-work route for this rollback finding; c3/c4's potentially highest hypotheses remain separately recorded. confidence: confirmed source/contract mismatch and conditional exception masking, not execution-observed; no missing premise needed for the test gap. proposed_drop: false. possible_cover: g136/l1 as supplied by parent; parent owns deduplication, no coverage sources searched. Exact changed test contract: 'The grid's links are created before the component whose element they\n * read. Failed mounts must also dispose safely; notice listeners belong to a\n * later, existing terminal element.' Fix/test direction: exercise the production accessor with component absent, or an equivalent throwing accessor, and ensure startup cleanup tolerates the absent component while preserving the original error. No runtime test or reproduction performed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 9,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l2",
+          "state": "open",
+          "summary": "Replacement failed-mount fixture does not model production element access",
+          "location": "crates/farhelm-ui/js-tests/terminal-files.test.js:834",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: the revised failed-mount test passes a safer element accessor than production, so it cannot substantiate its claim that startup cleanup preserves the original terminal creation failure. Source-confirmed mismatch: noticeFixture at 671-677 always creates a host object, and view.element returns host.element safely even with opened=false; test at 834-848 describes links created before their component and calls dispose. Production terminal.js:945-948 instead evaluates getGrid().element, with getGrid bound to created at 4302-4311; assignment at 4313 occurs only if create returns. If create throws, catch at 4356-4358 calls gridLinks.dispose -> FileLinks.dispose at terminal-files.js:641-645 -> clearHover at 467; view.element throws before optional chaining can handle the absent element, so throw err is not reached. Local baseline check confirms this production accessor and cleanup structure predate the review range: 6e423e30068b62c6cfa276c6d720ee35bb70387a terminal.js:1194-1215 and 5981-6044 already contain getGrid().element, the unassigned created closure and the catch calling gridLinks.dispose before throw err. Thus this is an in-range misleading test/fixture contract, not a claim that f560058d introduced the production bug. Original suspected consequence remains loss of useful startup diagnosis when creation fails; this event attributes only the test-premise gap to this commit. This is distinct from c4's normal-mount adapter compatibility and is not covered/refuted by it. Suggested bucket: other for the changed test-premise gap. Could-be-highest: no established security/loss-of-work route for this rollback finding; c3/c4's potentially highest hypotheses remain separately recorded. confidence: confirmed source/contract mismatch and conditional exception masking, not execution-observed; no missing premise needed for the test gap. proposed_drop: false. possible_cover: g136/l1 as supplied by parent; parent owns deduplication, no coverage sources searched. Exact changed test contract: 'The grid's links are created before the component whose element they\n * read. Failed mounts must also dispose safely; notice listeners belong to a\n * later, existing terminal element.' Fix/test direction: exercise the production accessor with component absent, or an equivalent throwing accessor, and ensure startup cleanup tolerates the absent component while preserving the original error. No runtime test or reproduction performed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g135/findings.jsonl",
+        "id": "l2",
+        "line": 9,
+        "disposition": "duplicate",
+        "group": "file-links-failed-grid-mount-fixture-getter-mismatch",
+        "reason": "Parent read full claims085 and canonical retained g083/l1claims054. Same rewritten f560058 terminal-files.test615-678/834-848 uses safely existing host getter where production createGridSurface's preassignment getGrid().element throws during failed-constructor disposal. In-range fixture/explanation mismatch persists; production masking structure predates exclusivebase. Join one retained test-fidelity finding with exact g083/g135/g136 provenance and all constructorfrequency/no broaderleak/nohighest caveats. No currentfixturefailure observed, no blanket productionrollback certificate."
+      },
+      "accepted_parent_decision": {
+        "key": "g135/l2",
+        "line": 9,
+        "disposition": "duplicate",
+        "group": "file-links-failed-grid-mount-fixture-getter-mismatch",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "needs_independent_drop_check": false,
+        "reason": "Parent read full claims085 and canonical retained g083/l1claims054. Same rewritten f560058 terminal-files.test615-678/834-848 uses safely existing host getter where production createGridSurface's preassignment getGrid().element throws during failed-constructor disposal. In-range fixture/explanation mismatch persists; production masking structure predates exclusivebase. Join one retained test-fidelity finding with exact g083/g135/g136 provenance and all constructorfrequency/no broaderleak/nohighest caveats. No currentfixturefailure observed, no blanket productionrollback certificate."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-085",
+          "key": "g135/l2",
+          "latest_line": 9,
+          "recommendation": "duplicate",
+          "bucket": "other",
+          "underlying_key": "failed-grid-mount-test-safe-alternate-view",
+          "aliases": [
+            "g136/l1"
+          ],
+          "target_queue_file": null,
+          "why": "Same changed fixture, failed-mount assertion and production accessor as g136/l1. Consolidate into that retained finding without losing attribution or caveats.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e:terminal-files.test.js:615-678 claims the grid hosting shape but always constructs host and safely reads host.element; :834-848 asserts disposal before component existence. terminal.js:945-950 instead dereferences getGrid().element; :4302-4313 binds it to created before assignment; :4356-4358 disposes on create failure. terminal-files.js:641-645 calls clearHover, whose :467 invokes the throwing getter.",
+            "Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:terminal.js:1194-1215,5981-6044 already has the unsafe getter/catch; this production weakness is pre-range. In-range defect is the rewritten test premise. Pinned tip retains both getter and test. No runtime execution."
+          ],
+          "coverage_checked": [
+            "SPEC.md Terminal experience and SPEC_impl.md Session-host file reads describe ordinary disposal/admission, not acceptance of a falsely modeled failed mount. TODO Planned empty; plans/queue/INDEX empty; BUGS has no match.",
+            "Targeted queue INDEX/active ledger searches for failed mount, absent component, disposal and recognition found no exact item. changed-file-hover-test-clicks-before-stat-readiness.md concerns a different readiness oracle. FILTER's rare-diagnostic rule does not cover the whole test-fidelity consequence; constructor failure frequency is also unestablished."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "None for the test mismatch and conditional masking. Additional leak, retry failure, permanent inability to mount, security or lost user work is not established.",
+          "original_stronger_consequence": "Useful terminal startup diagnosis may be masked; early notes considered high startup impact depending on provenance/trigger. Later source checks establish other for the in-range test gap, with no highest route alleged.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Exact same-root consolidation with g136/l1, retaining the source-confirmed test defect and pre-range production caveat."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "file-links-failed-grid-mount-fixture-getter-mismatch",
+        "destination": "trailing-file-links-failed-grid-mount-fixture-getter-mismatch.md"
+      }
+    },
+    {
+      "key": "g135/l3",
+      "owner": "g135",
+      "id": "l3",
+      "domain": "terminal-link-file-actions",
+      "purpose": "terminal-link-file-actions: crates/farhelm-ui/assets/terminal-files.js, crates/farhelm-ui/js-tests/terminal-files.test.js, crates/farhelm-ui/assets/terminal-links.js, crates/farhelm-ui/js-tests/terminal-links.test.js, crates/farhelm-ui/js-tests/terminal-theme.test.js, crates/farhelm-ui/js-tests/terminal-tunnels.test.js; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l3",
+            "state": "open",
+            "summary": "Check whether the new synchronous-recognition test observes callback timing",
+            "location": "crates/farhelm-ui/js-tests/terminal-files.test.js:400",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR suspected: the added test claims that ordinary path recognition stays synchronous, but awaiting a Promise around provideLinks may assert only eventual output and absence of host requests. The assigned patch explicitly documents synchronous recognition and installs a throwing request stub, then awaits callback resolution before comparing offered paths. Exact premise to check: whether any assertion observes callback delivery before provideLinks returns, or whether this is only an inaccurate test claim with no independently required synchronous boundary. Suggested bucket: other for a distinct test-oracle/description gap if established; could-be-highest: false, no established security or loss-of-work route from callback timing. confidence: concrete source lead, not yet fully settled; no runtime observation. proposed_drop: false. possible_cover: none; parent-supplied interface records concern other tests, and no prohibited coverage sources searched. Next checks: pinned full added test and provider callback context, governing recognition contract, and whole-range history to distinguish introduction and later removal. No reproductions requested or performed."
+          }
+        },
+        {
+          "line": 14,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l3",
+            "state": "open",
+            "summary": "Synchronous-recognition test only asserts eventual callback output",
+            "location": "crates/farhelm-ui/js-tests/terminal-files.test.js:410",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: the new test says it protects immediate file-link recognition, but would still pass if recognition delivered the same result asynchronously; it cannot catch the scheduling regression it explicitly claims to prevent. Source: test comment at 398-399 says 'Recognition must stay synchronous for ordinary supervisor files. Retiring\n * checkout confinement must not add host Stat requests before offering a path.' The test at 400-413 installs a request stub that throws, then line 410 awaits a Promise resolved by provideLinks and only compares the eventual paths at 411. No assertion checks whether the callback ran before provideLinks returned. The host-lookup stub does protect the no-request half, but both synchronous and deferred no-request callbacks satisfy the timing-blind observable. Production provideLinks at terminal-files.js:672-677 currently calls back synchronously, so no production timing regression is alleged; production correctness does not establish the test's stated timing oracle. The review charter's test checklist requires an observable that distinguishes competing mechanisms, and the test itself declares the synchronous contract. Related SPEC.md:3126 requires immediate underline/checking feedback; SPEC_impl.md:4062-4065 specifically preserves synchronous neighboring-row re-recognition, although neither is needed to invent a stronger global provider timing promise. Whole pinned-range history for terminal-files.js/test.js shows only 04d85f0c introducing this test and f560058da19e02716e6f943883a9508b447aff4e deleting it with xterm. This is a historical intermediate-commit test-oracle defect within the assigned patch, absent from the final pinned tip; it is not a surviving product bug. Suggested bucket: other. Could-be-highest: false; no established security or loss-of-work route from this test gap. confidence: confirmed by source/JavaScript Promise semantics, no execution or reproduction. proposed_drop: false; later deletion is a material disposition caveat for the parent, not a silently accepted drop. possible_cover: none; interface context has no same timing-oracle finding, and no prohibited coverage sources searched. Fix direction at the reviewed revision: capture callback delivery in a local value and assert it immediately after provideLinks returns, retaining the no-request assertion; alternatively narrow the comment/title if synchronous delivery is not the intended protected contract."
+          }
+        }
+      ],
+      "latest": {
+        "line": 14,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l3",
+          "state": "open",
+          "summary": "Synchronous-recognition test only asserts eventual callback output",
+          "location": "crates/farhelm-ui/js-tests/terminal-files.test.js:410",
+          "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: the new test says it protects immediate file-link recognition, but would still pass if recognition delivered the same result asynchronously; it cannot catch the scheduling regression it explicitly claims to prevent. Source: test comment at 398-399 says 'Recognition must stay synchronous for ordinary supervisor files. Retiring\n * checkout confinement must not add host Stat requests before offering a path.' The test at 400-413 installs a request stub that throws, then line 410 awaits a Promise resolved by provideLinks and only compares the eventual paths at 411. No assertion checks whether the callback ran before provideLinks returned. The host-lookup stub does protect the no-request half, but both synchronous and deferred no-request callbacks satisfy the timing-blind observable. Production provideLinks at terminal-files.js:672-677 currently calls back synchronously, so no production timing regression is alleged; production correctness does not establish the test's stated timing oracle. The review charter's test checklist requires an observable that distinguishes competing mechanisms, and the test itself declares the synchronous contract. Related SPEC.md:3126 requires immediate underline/checking feedback; SPEC_impl.md:4062-4065 specifically preserves synchronous neighboring-row re-recognition, although neither is needed to invent a stronger global provider timing promise. Whole pinned-range history for terminal-files.js/test.js shows only 04d85f0c introducing this test and f560058da19e02716e6f943883a9508b447aff4e deleting it with xterm. This is a historical intermediate-commit test-oracle defect within the assigned patch, absent from the final pinned tip; it is not a surviving product bug. Suggested bucket: other. Could-be-highest: false; no established security or loss-of-work route from this test gap. confidence: confirmed by source/JavaScript Promise semantics, no execution or reproduction. proposed_drop: false; later deletion is a material disposition caveat for the parent, not a silently accepted drop. possible_cover: none; interface context has no same timing-oracle finding, and no prohibited coverage sources searched. Fix direction at the reviewed revision: capture callback delivery in a local value and assert it immediately after provideLinks returns, retaining the no-request assertion; alternatively narrow the comment/title if synchronous delivery is not the intended protected contract."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g135/findings.jsonl",
+        "id": "l3",
+        "line": 14,
+        "disposition": "rejected",
+        "group": "ordinary-path-provider-test-awaits-synchronous-oracle",
+        "reason": "Parent read full claims085.04d85f0c newly adds test398-413 claiming synchronous callback recognition but awaits resolve-only promise before assertions; throwing request stub proves no hostrequest, not callback-before-return. Actual production callback is synchronous; true historical missingtiming oracle, not runtimefailure. f560058 deletes this retired XtermFileLinksAddon test and adapter; absent at00de. Preserve defect and later removal without residual actionable queueitem. This does not refute required retained grid recognition tests or assertion fidelity generally; no highest consequence."
+      },
+      "accepted_parent_decision": {
+        "key": "g135/l3",
+        "line": 14,
+        "disposition": "rejected",
+        "group": "ordinary-path-provider-test-awaits-synchronous-oracle",
+        "bucket": "other",
+        "recording": "removed-in-range",
+        "needs_independent_drop_check": false,
+        "reason": "Parent read full claims085.04d85f0c newly adds test398-413 claiming synchronous callback recognition but awaits resolve-only promise before assertions; throwing request stub proves no hostrequest, not callback-before-return. Actual production callback is synchronous; true historical missingtiming oracle, not runtimefailure. f560058 deletes this retired XtermFileLinksAddon test and adapter; absent at00de. Preserve defect and later removal without residual actionable queueitem. This does not refute required retained grid recognition tests or assertion fidelity generally; no highest consequence."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-085",
+          "key": "g135/l3",
+          "latest_line": 14,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "ordinary-path-provider-test-awaits-synchronous-oracle",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The intermediate test explicitly claims synchronous recognition but only checks eventual callback output. Its later deletion is material disposition context, not a source refutation of the historical test defect.",
+          "checks": [
+            "04d85f0c98a9b635709d00b056719a0baa7fd3fc:terminal-files.test.js:398-413 promises synchronous recognition, installs a throwing request stub, then awaits new Promise(resolve => provider.provideLinks(1, resolve)) before comparing paths. There is no before-return callback witness. The stub covers no host request, not callback timing.",
+            "Same revision terminal-files.js:672-677 actually calls back synchronously; no production scheduling regression is alleged. Full-range path history contains 04d85f0c and f560058d only; f560058d's diff deletes this test and XtermFileLinksAddon. Absent at pinned tip; no runtime execution."
+          ],
+          "coverage_checked": [
+            "SPEC.md:3140 requires immediate hover feedback; SPEC_impl.md:3578-3582 preserves synchronous neighboring evidence re-recognition, not a new universal provider promise. Neither accepts the test's blind oracle.",
+            "Planned empty; plans/queue/INDEX empty; retained xterm-removal plans describe the already-landed deletion, not an unlanded fix. BUGS has no match. Queue INDEX/active ledger searches for callback timing, recognition and file-link tests found no exact item; changed-file-hover-test-clicks-before-stat-readiness.md is a separate test. FILTER does not cover an inaccurate timing oracle as merely a rare diagnostic."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "None for the historical test-oracle gap. It no longer exists at the final tip, and no surviving product timing failure is claimed.",
+          "original_stronger_consequence": "A test claiming immediate recognition would miss an asynchronous no-request callback regression; other/test accuracy only, never a security or loss-of-work claim.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain historical in-range test defect with explicit later removal. Parent may decide how to record an already-deleted test; do not present it as currently actionable."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "ordinary-path-provider-test-awaits-synchronous-oracle",
+        "destination": "trailing-ordinary-path-provider-test-awaits-synchronous-oracle.md"
+      }
+    },
+    {
+      "key": "g135/c5",
+      "owner": "g135",
+      "id": "c5",
+      "domain": "terminal-link-file-actions",
+      "purpose": "terminal-link-file-actions: crates/farhelm-ui/assets/terminal-files.js, crates/farhelm-ui/js-tests/terminal-files.test.js, crates/farhelm-ui/assets/terminal-links.js, crates/farhelm-ui/js-tests/terminal-links.test.js, crates/farhelm-ui/js-tests/terminal-theme.test.js, crates/farhelm-ui/js-tests/terminal-tunnels.test.js; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 15,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c5",
+            "state": "open",
+            "summary": "Link-opening comment retains an explicit native-tunnel consent exception",
+            "location": "crates/farhelm-ui/assets/terminal-links.js:24",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR considered: the changed statement 'no link asks for a confirmation' could misdescribe native Cmd-click tunnels that need user consent. Exact local text at 21-25 establishes the distinction within the same paragraph: 'Ordinary opening does no fetching, confirmation or async lookup and stays\n// inside the activation stack. Native remote Meta-click instead hands an\n// explicit tunnel intent to Rust, which owns consent and the async request.\n// This asset never sends tunnel HTTP requests, and no link asks for a\n// confirmation (e2e/tests/terminal-links.spec.ts pins that).' Source at 153-158 separately dispatches tunnel and raw opening callbacks without a confirmation in this asset. The paragraph explicitly identifies Rust's consent exception before the shortened ordinary-link statement, so it does not establish a distinct false claim that native tunnel consent is absent. Suggested bucket if context omitted: other/documentation accuracy. Could-be-highest: false; this comment is for source readers and does not authorize crossing a security boundary. confidence: confirmed contextual refutation from exact changed comment and local dispatch, no execution. proposed_drop: narrowly refuted by the paragraph's explicit ordinary/native distinction, not by production correctness alone. possible_cover: none; prohibited coverage sources not searched."
+          }
+        }
+      ],
+      "latest": {
+        "line": 15,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c5",
+          "state": "open",
+          "summary": "Link-opening comment retains an explicit native-tunnel consent exception",
+          "location": "crates/farhelm-ui/assets/terminal-links.js:24",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR considered: the changed statement 'no link asks for a confirmation' could misdescribe native Cmd-click tunnels that need user consent. Exact local text at 21-25 establishes the distinction within the same paragraph: 'Ordinary opening does no fetching, confirmation or async lookup and stays\n// inside the activation stack. Native remote Meta-click instead hands an\n// explicit tunnel intent to Rust, which owns consent and the async request.\n// This asset never sends tunnel HTTP requests, and no link asks for a\n// confirmation (e2e/tests/terminal-links.spec.ts pins that).' Source at 153-158 separately dispatches tunnel and raw opening callbacks without a confirmation in this asset. The paragraph explicitly identifies Rust's consent exception before the shortened ordinary-link statement, so it does not establish a distinct false claim that native tunnel consent is absent. Suggested bucket if context omitted: other/documentation accuracy. Could-be-highest: false; this comment is for source readers and does not authorize crossing a security boundary. confidence: confirmed contextual refutation from exact changed comment and local dispatch, no execution. proposed_drop: narrowly refuted by the paragraph's explicit ordinary/native distinction, not by production correctness alone. possible_cover: none; prohibited coverage sources not searched."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g135/findings.jsonl",
+        "id": "c5",
+        "line": 15,
+        "disposition": "excluded",
+        "group": "ordinary-link-comment-native-consent-context",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-085 after inspecting it. The same paragraph explicitly gives native remote Meta-click consent to Rust before saying ordinary links do not confirm. The considered false claim is not established in context. Contextual source-comment refutation, not production correctness alone. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:terminal-links.js:21-25 distinguishes ordinary opening from native tunnel intent and Rust-owned consent. :153-158 dispatches tunnel versus raw opening without implementing consent here. Source/comment check only.\"] Current coverage/results: [\"SPEC.md:3076-3077 requires ordinary unprompted opening; :3115-3120 requires first-tunnel consent, consistent with the full paragraph. SPEC_impl Links in terminals supplies ordinary click ownership. Planned and unlanded-plan INDEX empty; BUGS/targeted queue INDEX/active ledger searches have no exact comment issue. No filter relied upon.\"] Exact cited cover: [\"Reviewed terminal-links.js:22-23: Native remote Meta-click instead hands an explicit tunnel intent to Rust, which owns consent and the async request.\"] Original stronger consequence and missing premise remain preserved: \"Source comment might misdescribe native Cmd-click consent; documentation accuracy only, with no user authorization crossing established.\"; \"The suspected statement would need the immediately preceding native-consent distinction to be omitted or ignored.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g135/c5",
+        "line": 15,
+        "disposition": "excluded",
+        "group": "ordinary-link-comment-native-consent-context",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-085 after inspecting it. The same paragraph explicitly gives native remote Meta-click consent to Rust before saying ordinary links do not confirm. The considered false claim is not established in context. Contextual source-comment refutation, not production correctness alone. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:terminal-links.js:21-25 distinguishes ordinary opening from native tunnel intent and Rust-owned consent. :153-158 dispatches tunnel versus raw opening without implementing consent here. Source/comment check only.\"] Current coverage/results: [\"SPEC.md:3076-3077 requires ordinary unprompted opening; :3115-3120 requires first-tunnel consent, consistent with the full paragraph. SPEC_impl Links in terminals supplies ordinary click ownership. Planned and unlanded-plan INDEX empty; BUGS/targeted queue INDEX/active ledger searches have no exact comment issue. No filter relied upon.\"] Exact cited cover: [\"Reviewed terminal-links.js:22-23: Native remote Meta-click instead hands an explicit tunnel intent to Rust, which owns consent and the async request.\"] Original stronger consequence and missing premise remain preserved: \"Source comment might misdescribe native Cmd-click consent; documentation accuracy only, with no user authorization crossing established.\"; \"The suspected statement would need the immediately preceding native-consent distinction to be omitted or ignored.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-085",
+          "key": "g135/c5",
+          "latest_line": 15,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "ordinary-link-comment-native-consent-context",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The same paragraph explicitly gives native remote Meta-click consent to Rust before saying ordinary links do not confirm. The considered false claim is not established in context.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e:terminal-links.js:21-25 distinguishes ordinary opening from native tunnel intent and Rust-owned consent. :153-158 dispatches tunnel versus raw opening without implementing consent here. Source/comment check only."
+          ],
+          "coverage_checked": [
+            "SPEC.md:3076-3077 requires ordinary unprompted opening; :3115-3120 requires first-tunnel consent, consistent with the full paragraph. SPEC_impl Links in terminals supplies ordinary click ownership. Planned and unlanded-plan INDEX empty; BUGS/targeted queue INDEX/active ledger searches have no exact comment issue. No filter relied upon."
+          ],
+          "exact_cover_quotes": [
+            "Reviewed terminal-links.js:22-23: Native remote Meta-click instead hands an explicit tunnel intent to Rust, which owns consent and the async request."
+          ],
+          "missing_premise": "The suspected statement would need the immediately preceding native-consent distinction to be omitted or ignored.",
+          "original_stronger_consequence": "Source comment might misdescribe native Cmd-click consent; documentation accuracy only, with no user authorization crossing established.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Contextual source-comment refutation, not production correctness alone."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "ordinary-link-comment-native-consent-context",
+        "destination": null
+      }
+    },
+    {
+      "key": "g135/c6",
+      "owner": "g135",
+      "id": "c6",
+      "domain": "terminal-link-file-actions",
+      "purpose": "terminal-link-file-actions: crates/farhelm-ui/assets/terminal-files.js, crates/farhelm-ui/js-tests/terminal-files.test.js, crates/farhelm-ui/assets/terminal-links.js, crates/farhelm-ui/js-tests/terminal-links.test.js, crates/farhelm-ui/js-tests/terminal-theme.test.js, crates/farhelm-ui/js-tests/terminal-tunnels.test.js; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 16,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c6",
+            "state": "open",
+            "summary": "Revised tunnel predicate test states the narrower boundary it actually observes",
+            "location": "crates/farhelm-ui/js-tests/terminal-tunnels.test.js:55",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR considered: replacing the old real-gesture helper test with click:false might wrongly claim it tests actual grid drag recognition. Exact revised comment at 55-59 says 'A drag the grid did not admit as a click' and the title at 60 is 'a release not admitted as a click never tunnels'. Assertions at 61-63 establish that all remaining conditions permit a tunnel with click:true and reject the same offer with click:false. Thus the changed test expressly starts after click admission, and its oracle distinguishes precisely the stated predicate behavior; it does not claim to drive the actual grid gesture as the separately removed helper test did. This differs from l3, whose test explicitly promises synchronous callback delivery but only waits for eventual output. Suggested bucket if misleading: other/test description accuracy. Could-be-highest: false for this narrowly considered description/test mismatch; separate c3 click-security hypotheses remain unchanged. confidence: confirmed source refutation of the test-description concern, no execution. proposed_drop: the exact revised test/comment scope matches its assertions; possible_cover: none, no prohibited coverage sources searched."
+          }
+        }
+      ],
+      "latest": {
+        "line": 16,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c6",
+          "state": "open",
+          "summary": "Revised tunnel predicate test states the narrower boundary it actually observes",
+          "location": "crates/farhelm-ui/js-tests/terminal-tunnels.test.js:55",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR considered: replacing the old real-gesture helper test with click:false might wrongly claim it tests actual grid drag recognition. Exact revised comment at 55-59 says 'A drag the grid did not admit as a click' and the title at 60 is 'a release not admitted as a click never tunnels'. Assertions at 61-63 establish that all remaining conditions permit a tunnel with click:true and reject the same offer with click:false. Thus the changed test expressly starts after click admission, and its oracle distinguishes precisely the stated predicate behavior; it does not claim to drive the actual grid gesture as the separately removed helper test did. This differs from l3, whose test explicitly promises synchronous callback delivery but only waits for eventual output. Suggested bucket if misleading: other/test description accuracy. Could-be-highest: false for this narrowly considered description/test mismatch; separate c3 click-security hypotheses remain unchanged. confidence: confirmed source refutation of the test-description concern, no execution. proposed_drop: the exact revised test/comment scope matches its assertions; possible_cover: none, no prohibited coverage sources searched."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g135/findings.jsonl",
+        "id": "c6",
+        "line": 16,
+        "disposition": "excluded",
+        "group": "tunnel-click-predicate-test-stated-scope",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-085 after inspecting it. The revised test expressly assumes the grid denied click admission. Its click true/false comparison tests that declared predicate boundary rather than claiming to drive a gesture. The exact stated test contract matches its assertions; no broader gesture-security conclusion. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:terminal-tunnels.test.js:55-63 says 'A drag the grid did not admit as a click', titles the test 'a release not admitted as a click never tunnels', and proves a qualifying offer tunnels with click:true but refuses click:false. Source only.\"] Current coverage/results: [\"SPEC.md:3074-3075 and tunnel paragraphs require drag refusal; SPEC_impl Links in terminals gives grid click admission ownership. Neither creates an unstated integration-test claim. Planned and unlanded-plan INDEX empty; BUGS, targeted queue INDEX and active ledger searches have no exact description/predicate issue. Related secondary-button queue item has a different shipped input route. FILTER unnecessary.\"] Exact cited cover: [\"Reviewed terminal-tunnels.test.js:55: A drag the grid did not admit as a click\"] Original stronger consequence and missing premise remain preserved: \"Replacing a gesture helper test might misleadingly claim actual grid drag coverage; other/test-description concern only. Separate c3 opening-authority hypothesis is preserved.\"; \"No statement in this test claims the click:false fixture exercises the grid's physical gesture recognition.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g135/c6",
+        "line": 16,
+        "disposition": "excluded",
+        "group": "tunnel-click-predicate-test-stated-scope",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-085 after inspecting it. The revised test expressly assumes the grid denied click admission. Its click true/false comparison tests that declared predicate boundary rather than claiming to drive a gesture. The exact stated test contract matches its assertions; no broader gesture-security conclusion. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:terminal-tunnels.test.js:55-63 says 'A drag the grid did not admit as a click', titles the test 'a release not admitted as a click never tunnels', and proves a qualifying offer tunnels with click:true but refuses click:false. Source only.\"] Current coverage/results: [\"SPEC.md:3074-3075 and tunnel paragraphs require drag refusal; SPEC_impl Links in terminals gives grid click admission ownership. Neither creates an unstated integration-test claim. Planned and unlanded-plan INDEX empty; BUGS, targeted queue INDEX and active ledger searches have no exact description/predicate issue. Related secondary-button queue item has a different shipped input route. FILTER unnecessary.\"] Exact cited cover: [\"Reviewed terminal-tunnels.test.js:55: A drag the grid did not admit as a click\"] Original stronger consequence and missing premise remain preserved: \"Replacing a gesture helper test might misleadingly claim actual grid drag coverage; other/test-description concern only. Separate c3 opening-authority hypothesis is preserved.\"; \"No statement in this test claims the click:false fixture exercises the grid's physical gesture recognition.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-085",
+          "key": "g135/c6",
+          "latest_line": 16,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "tunnel-click-predicate-test-stated-scope",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The revised test expressly assumes the grid denied click admission. Its click true/false comparison tests that declared predicate boundary rather than claiming to drive a gesture.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e:terminal-tunnels.test.js:55-63 says 'A drag the grid did not admit as a click', titles the test 'a release not admitted as a click never tunnels', and proves a qualifying offer tunnels with click:true but refuses click:false. Source only."
+          ],
+          "coverage_checked": [
+            "SPEC.md:3074-3075 and tunnel paragraphs require drag refusal; SPEC_impl Links in terminals gives grid click admission ownership. Neither creates an unstated integration-test claim. Planned and unlanded-plan INDEX empty; BUGS, targeted queue INDEX and active ledger searches have no exact description/predicate issue. Related secondary-button queue item has a different shipped input route. FILTER unnecessary."
+          ],
+          "exact_cover_quotes": [
+            "Reviewed terminal-tunnels.test.js:55: A drag the grid did not admit as a click"
+          ],
+          "missing_premise": "No statement in this test claims the click:false fixture exercises the grid's physical gesture recognition.",
+          "original_stronger_consequence": "Replacing a gesture helper test might misleadingly claim actual grid drag coverage; other/test-description concern only. Separate c3 opening-authority hypothesis is preserved.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "The exact stated test contract matches its assertions; no broader gesture-security conclusion."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "tunnel-click-predicate-test-stated-scope",
+        "destination": null
+      }
+    },
+    {
+      "key": "g135/c7",
+      "owner": "g135",
+      "id": "c7",
+      "domain": "terminal-link-file-actions",
+      "purpose": "terminal-link-file-actions: crates/farhelm-ui/assets/terminal-files.js, crates/farhelm-ui/js-tests/terminal-files.test.js, crates/farhelm-ui/assets/terminal-links.js, crates/farhelm-ui/js-tests/terminal-links.test.js, crates/farhelm-ui/js-tests/terminal-theme.test.js, crates/farhelm-ui/js-tests/terminal-tunnels.test.js; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 17,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c7",
+            "state": "open",
+            "summary": "Unchanged range-span check is outside the assigned deletion implications",
+            "location": "crates/farhelm-ui/assets/terminal-links.js:503",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. Context-only consideration: linkRangeText rejects end.abs-start.abs greater than 128, which permits an inclusive 129-row range while its unchanged comment refers to a 128-row span. No new in-range defect is claimed. The assigned terminal-links.js patch changes comments about the renderer and removes the xterm adapter immediately after this function; it does not alter linkRangeText or its existing bound/comment. Whole-range assigned-path history previously checked shows terminal-links.js only changes in f560058d, and both old/new terminals already shared this helper before adapter removal. No deletion-specific route broadening of that bound was established. The charter excludes independently seeking unrelated defects in replacement context; this observation therefore remains outside the assigned change's implications rather than becoming an emulator/range-bound audit. Suggested bucket if an independent contract mismatch were separately established: other, finite span accounting only. Could-be-highest: false; no security or loss-of-work route considered or established for a one-row difference. confidence: confirmed assigned-patch non-change; no runtime observation. proposed_drop: no in-scope introduced or deletion-induced issue established; not specification acceptance of a separately proven bug. possible_cover: none searched. No execution or reproduction performed."
+          }
+        },
+        {
+          "line": 18,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c7",
+            "state": "open",
+            "summary": "Unchanged range-span check is outside the assigned deletion implications",
+            "location": "crates/farhelm-ui/assets/terminal-links.js:503",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. Context-only consideration: linkRangeText rejects end.abs-start.abs greater than 128, permitting an inclusive 129-row range while its unchanged comment refers to a 128-row span. No new in-range defect is claimed. Full-range provenance now directly checked: exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a terminal-links.js:558-576 already has the same comment, >128 check, inclusive loop and 8192-character bound. The only in-range terminal-links.js patch changes renderer comments and removes the xterm adapter after this function, leaving this common helper unchanged. Both old/new terminals already shared that helper; no deletion-induced route broadening was established. The charter does not authorize an independent range-bound audit unrelated to deletion/replacement implications, so this is an excluded contextual observation rather than a new reported bug. Suggested bucket if a separate contract mismatch were established: other/finite span accounting. Could-be-highest: false; no security or loss-of-work route considered or established for a one-row difference. confidence: confirmed baseline/assigned-patch non-change and common-helper ownership, no execution. proposed_drop: no in-scope introduced or deletion-induced issue established; not acceptance of a separately proven bug by the specification. possible_cover: none searched. Original considered consequence and scope basis preserved; no parent drop or lowering claimed. No runtime test or reproduction performed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 18,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c7",
+          "state": "open",
+          "summary": "Unchanged range-span check is outside the assigned deletion implications",
+          "location": "crates/farhelm-ui/assets/terminal-links.js:503",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. Context-only consideration: linkRangeText rejects end.abs-start.abs greater than 128, permitting an inclusive 129-row range while its unchanged comment refers to a 128-row span. No new in-range defect is claimed. Full-range provenance now directly checked: exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a terminal-links.js:558-576 already has the same comment, >128 check, inclusive loop and 8192-character bound. The only in-range terminal-links.js patch changes renderer comments and removes the xterm adapter after this function, leaving this common helper unchanged. Both old/new terminals already shared that helper; no deletion-induced route broadening was established. The charter does not authorize an independent range-bound audit unrelated to deletion/replacement implications, so this is an excluded contextual observation rather than a new reported bug. Suggested bucket if a separate contract mismatch were established: other/finite span accounting. Could-be-highest: false; no security or loss-of-work route considered or established for a one-row difference. confidence: confirmed baseline/assigned-patch non-change and common-helper ownership, no execution. proposed_drop: no in-scope introduced or deletion-induced issue established; not acceptance of a separately proven bug by the specification. possible_cover: none searched. Original considered consequence and scope basis preserved; no parent drop or lowering claimed. No runtime test or reproduction performed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g135/findings.jsonl",
+        "id": "c7",
+        "line": 18,
+        "disposition": "excluded",
+        "group": "link-range-inclusive-129-row-bound",
+        "reason": "Parent explicitly accepted named out-of-range proposal from claims-085 after inspecting it. The one-row accounting observation predates the entire range, and the sole in-range terminal-links patch leaves that common helper unchanged. No deletion-induced broadening was established. Pre-range unchanged contextual observation, not acceptance of a separately established defect. Checked source/results: [\"6e423e30068b62c6cfa276c6d720ee35bb70387a:terminal-links.js:558-576 already states a 128-row span, rejects only end.abs-start.abs >128, iterates inclusively and caps 8192 characters. f560058da19e02716e6f943883a9508b447aff4e:499-517 retains the same helper.\",\"Full-range terminal-links.js history identifies only f560058d; the reviewed diff removes the following xterm adapter and changes renderer prose, not this bound. Source only; no independent range-bound audit performed.\"] Current coverage/results: [\"SPEC_impl.md:3567 and :1793 bound related recognition/joining to 128 rows, but do not establish new in-range provenance for this unchanged helper. SPEC.md Terminal experience gives general evidence rules. Planned/unlanded-plan INDEX empty; BUGS and targeted queue INDEX/active ledger searches found no exact 129-row issue. No filter used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Finite span accounting permits an inclusive 129-row range despite a 128-row-span comment; no security or user-work-loss route alleged.\"; \"An in-range introduction or deletion-induced change in use of this common bound was not established.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g135/c7",
+        "line": 18,
+        "disposition": "excluded",
+        "group": "link-range-inclusive-129-row-bound",
+        "bucket": "other",
+        "recording": "out-of-range",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named out-of-range proposal from claims-085 after inspecting it. The one-row accounting observation predates the entire range, and the sole in-range terminal-links patch leaves that common helper unchanged. No deletion-induced broadening was established. Pre-range unchanged contextual observation, not acceptance of a separately established defect. Checked source/results: [\"6e423e30068b62c6cfa276c6d720ee35bb70387a:terminal-links.js:558-576 already states a 128-row span, rejects only end.abs-start.abs >128, iterates inclusively and caps 8192 characters. f560058da19e02716e6f943883a9508b447aff4e:499-517 retains the same helper.\",\"Full-range terminal-links.js history identifies only f560058d; the reviewed diff removes the following xterm adapter and changes renderer prose, not this bound. Source only; no independent range-bound audit performed.\"] Current coverage/results: [\"SPEC_impl.md:3567 and :1793 bound related recognition/joining to 128 rows, but do not establish new in-range provenance for this unchanged helper. SPEC.md Terminal experience gives general evidence rules. Planned/unlanded-plan INDEX empty; BUGS and targeted queue INDEX/active ledger searches found no exact 129-row issue. No filter used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Finite span accounting permits an inclusive 129-row range despite a 128-row-span comment; no security or user-work-loss route alleged.\"; \"An in-range introduction or deletion-induced change in use of this common bound was not established.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-085",
+          "key": "g135/c7",
+          "latest_line": 18,
+          "recommendation": "out-of-range",
+          "bucket": "other",
+          "underlying_key": "link-range-inclusive-129-row-bound",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The one-row accounting observation predates the entire range, and the sole in-range terminal-links patch leaves that common helper unchanged. No deletion-induced broadening was established.",
+          "checks": [
+            "6e423e30068b62c6cfa276c6d720ee35bb70387a:terminal-links.js:558-576 already states a 128-row span, rejects only end.abs-start.abs >128, iterates inclusively and caps 8192 characters. f560058da19e02716e6f943883a9508b447aff4e:499-517 retains the same helper.",
+            "Full-range terminal-links.js history identifies only f560058d; the reviewed diff removes the following xterm adapter and changes renderer prose, not this bound. Source only; no independent range-bound audit performed."
+          ],
+          "coverage_checked": [
+            "SPEC_impl.md:3567 and :1793 bound related recognition/joining to 128 rows, but do not establish new in-range provenance for this unchanged helper. SPEC.md Terminal experience gives general evidence rules. Planned/unlanded-plan INDEX empty; BUGS and targeted queue INDEX/active ledger searches found no exact 129-row issue. No filter used."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "An in-range introduction or deletion-induced change in use of this common bound was not established.",
+          "original_stronger_consequence": "Finite span accounting permits an inclusive 129-row range despite a 128-row-span comment; no security or user-work-loss route alleged.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Pre-range unchanged contextual observation, not acceptance of a separately established defect."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "link-range-inclusive-129-row-bound",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial pass complete: all 1,218 assigned patch lines reviewed at their recorded revisions.\n\nNo confirmed findings or unresolved leads. Four source-refuted candidates are recorded in [findings.jsonl]([private-run]/g135/findings.jsonl). Progress updated; no reproductions or runtime tests run."
+    },
+    {
+      "turn": 2,
+      "reply": "- Confirmed `l2`, matching `g136/l1`: the failed-mount fixture misses production’s throwing accessor. The production bug predates the range; the revised test’s unsupported rollback claim is in range.\n- Narrowed `l1`, `c3` and `c4` refutations, preserving potentially highest consequences and excluding failed-mount rollback.\n- Unresolved lead IDs: none. Log and progress updated."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 complete.\n\n- Checks: callback timing oracle, revised link/tunnel tests, comments, removed-member callers and whole-range history.\n- New verified: `l3`—the synchronous-recognition test checks only eventual callback output. It was later deleted.\n- New unverified: none.\n- Open leads: none.\n\nSomething new was found. Findings and progress updated; no runtime execution."
+    },
+    {
+      "turn": 4,
+      "reply": "Discovery pass 2 complete. Checked removed-helper references, retained exports and asset loading, lifecycle deletions, test assumptions, and later same-path changes.\n\n- New verified findings: none.\n- New unverified findings: none.\n- Open leads: none.\n\nNo new in-scope issue found. Log and progress updated; no runtime execution."
+    }
+  ],
+  "progress": "Group g135 terminal-link-file-actions. Initial review turn 1; discovery passes 0. Findings log verified; reviewing seven patch packets at commits 04d85f0c98a9b635709d00b056719a0baa7fd3fc and f560058da19e02716e6f943883a9508b447aff4e. All mandatory patch ranges unread. Next: read all mandatory patches, governing pinned SPEC sections, and caller/lifecycle context. No runtime tests or reproductions. Interface assumptions pending source review. No findings yet.\n\nInitial review turn 1 complete. Discovery-pass count: 0 (initial assigned pass only; no synthesis/discovery continuation attempted).\nMandatory evidence coverage: all 1,218 assigned patch lines delivered by evidence read at <=200 lines per packet: 00307 1-189; 00309 1-170 and 171-285; 01071 1-155; 01072 1-160 and 161-287; 01100 1-170 and 171-254; 01101 1-12; 01102 1-36. No unread assigned patch scope. Complete inventory commits field read; excluded coverage metadata not read.\nResults: no confirmed reportable finding; no unverified finding; no open lead. l1 initially recorded as lead then revised to source-refuted candidate; c2/c3/c4 recorded as source-refuted candidates. Their full consequences, possible highest impacts, contracts and source checks remain in findings.jsonl. The first attempt to record l1 revision used unsupported state closed and failed; immediately corrected to state open and successfully recorded as candidate under the same ID. Candidate kind resolves that prior lead.\nInterface assumptions checked: retired legacy container launch intent is rejected by the supervisor before file path resolution and terminal selection (downloads.rs 54-66,189-193,217; core.rs 3729-3738; terminals.rs 904-912; container.rs 18-22 at 04d85f0c). Current terminal mounting uses only grid; grid owns exact-release admission, permanent drag rejection, structured-report withholding, and coupled gesture/listener teardown; terminal.js links consume grid admission and line tags (f560058d). Native grid line/range evidence replaces xterm adapter; unrelated grid/provider algorithms were not independently reviewed.\nPinned contract/context reads: 04d85f0c SPEC.md 2093-2147 and 3030-3170; SPEC_impl.md 1055-1095,1855-1944,3984-4112. f560058d SPEC.md 3055-3200 (re-read 3078-3186 after aggregated-output truncation); SPEC_impl.md 1069-1107,1755-1887,3584-3686 (re-read full file-read section after aggregate truncation). Root AGENTS End sentinel present; machine, review queue AGENTS, recording instructions and skillette read. Context source: f560058d terminal-files.js 285-487; terminal.js 925-1140,4285-4368; grid-terminal.js 1580-1825,2010-2146; grid-buffer.js 602-687; terminal-theme.test.js 1-43; terminal-tunnels.test.js 1-64. At 04d85f0c downloads.rs 1-230, core.rs 3720-3750, terminals.rs 900-940, session_view.rs 50-100, container.rs 1-100, terminal.js per-commit patch.\nValidation: source/contract analysis only; no runtime tests, builds or reproductions requested or run. No checkout changes. Next action: wait for caller's later synthesis/discovery prompt; parent retains coverage reconciliation and independent drop handling.\n\nLater-turn synthesis, turn 2 complete. Discovery-pass count remains 0; this was the requested synthesis pass, not a separate discovery pass. Reviewed interactions among retirement gates, grid click identity, row/hover evidence, transfer cancellation and normal/failed creation teardown. No unread assigned patch scope; no additional mandatory packets assigned this turn.\nEvents this turn: l2 lead -> finding -> finding revision (confirmed source/test-contract mismatch, suggested other, matching parent-supplied g136/l1); c4 revised to limit adapter refutation to normal successful component creation and explicitly exclude failed-mount rollback; c3 revised with click-time hover/text/recognition/disclosure/open-offer checks and normal lifecycle limits; l1 revised to state exact retired-identity route and parent corroboration without broadening it. Parent's reference to c1 corresponds to local l1; no c1 ID existed in this log. Potentially highest original hypotheses retained under l1/c3/c4; all drops remain proposals for independent check, with no parent acceptance claimed.\nNew verified local ID: l2 (parent-known g136/l1, not an independent new discovery). New unverified IDs: none. Unresolved lead IDs: none. l2 preserves the startup diagnostic consequence but attributes only the newly misleading failed-mount test/fixture claim to this range; the production getter/catch pattern was locally verified at the exclusive range base 6e423e30068b62c6cfa276c6d720ee35bb70387a.\nAdditional reads at f560058d: complete terminal-files.test.js per-commit patch as cross-group context; terminal-files.js 381-439,446-477,497-578,576-657; terminal.js 940-960,1118-1126,4294-4360,4360-4485,4695-4727,4774-4844; grid-terminal.js 1260-1495,1650-1696,1747-1759,2075-2086,2121-2141; SPEC_impl.md 3656-3686. Base terminal.js 1194-1217,5981-6005,6033-6048 confirms getter and failed-create catch provenance. Local source checks also confirm ordinary unmount calls grid.freeze for kept reconnect screens (terminal.js 4815-4829), otherwise grid.dispose; mount rollback calls grid.dispose once a grid exists (4719). Those normal component paths retire held gestures, while the distinct pre-component failure remains l2.\nValidation: source/contract analysis only. No runtime tests, builds or reproductions run; no checkout changes. Interface assumptions narrowed: successful-component adapter compatibility is separate from absent-component rollback; the test's safe host.element fixture cannot substitute for production getGrid().element. Next action: return deltas and await parent-directed later pass; parent handles overlap and independent drop checks.\n\nDiscovery turn 3 complete. Discovery-pass count: 1. Read discovery-neighbours.json fully in bounded line chunks (1-160,161-164) before new source checks. Named pending questions were empty. Interface synthesis: the supplied failed-mount records remain the known local l2 overlap; old-page JSON input reinterpretation and Shift+Enter write-guarantee findings belong to other groups and do not broaden this group's targets. No inherited highest hypotheses or proposed-drop bases were lowered or accepted.\nNew verified finding: l3, introduced at 04d85f0c98a9b635709d00b056719a0baa7fd3fc terminal-files.test.js:398-413. The synchronous-recognition test awaits its callback and only observes eventual result/no host request, so it does not assert the timing guarantee in its own comment. This is a distinct test-oracle gap, not a claim of a production asynchronous-recognition defect. Whole-range path history confirms the test was introduced at that commit and removed by f560058da19e02716e6f943883a9508b447aff4e; it is absent at the final tip. Source-only confidence; suggested other. l3 was recorded as a lead immediately and revised to finding after checks.\nNew unverified-after-investigation IDs: none. Open lead IDs: none. New candidates recorded immediately on deciding not to report: c5 (changed no-confirmation comment retains explicit native-tunnel Rust-consent exception in the same paragraph); c6 (revised tunnel test explicitly claims only the post-admission click:false predicate boundary it actually asserts). No new production defect established.\nUseful discovery checks/results: at 04d85f0c read terminal-files.test.js 392-442 and terminal-files.js 658-698; callback source is synchronous but does not supply a timing assertion to its test. Targeted SPEC searches found immediate hover presentation at SPEC.md:3126 and synchronous neighboring evidence recognition at SPEC_impl.md:4063; did not infer a broader unstated product promise. At f560058d read terminal-links.js 1-181, terminal-links.test.js 62-102 and355-417, terminal-tunnels.test.js54-64, terminal-theme.test.js1-43. Revised tag fallback asserts missing-tag fixture premise and unknown/row text; pure press test states caller-owned tracking/forced conditions; tunnel test distinguishes click:true/false after its named admission boundary; theme change is comment-only and retains direct palette/CSS assertions. Full pinned-range log over all six assigned paths returns only the two assigned commits. Static search for checkoutLinks/oscCandidates/proseCandidates/linkLookups/fileLinks.disposed in 04d85f0c assets/js-tests returns no matches (git grep status1), finding no stale callers of those removed admission members.\nCoverage status: no assigned patch scope unread; source-only discovery pass finished after recording the new timing-oracle finding, including the remaining test/comment/deletion checks. No runtime tests, reproductions, builds, live-install actions, prohibited coverage searches or checkout changes. Next action: return this pass's deltas; because this pass produced a new verified historical test finding, a further discovery pass, if required, must be a later parent-directed turn rather than another pass inside this turn.\n\nDiscovery turn 4 complete. Discovery-pass count: 2. Result: no new in-scope finding. New verified finding IDs: none. New unverified-after-investigation IDs: none. Remaining lead IDs: none. Existing findings/consequences/proposed-drop bases unchanged, with no accepted parent drop or lowering.\nRead latest discovery-neighbours.json fully before source checks in chunks1-80,81-145,146-198,199-243. Named pending questions were empty. Synthesized context for novelty: known failed-mount and cursor-explanation findings stay with their existing records/owners; stale-page input reinterpretation, lost output attributes and cursor colors are other groups' already-known replacement questions. No new same-group premise or cross-group action was raised, and no scope expansion was undertaken.\nUseful fresh checks: read 04d85f0c terminal-files.js288-332,640-707 and f560058d terminal-files.js288-326,638-657 to compare remaining lifetime state, adapter removal and public exports. Search over pinned f560058d UI/e2e for XtermFileLinksAddon,xtermLines,fromXtermRange,toXtermRange,createLinkGesture,suppressMouseReport,checkoutLinks,oscCandidates,proseCandidates,linkLookups returned no matches (git grep exit1). An independent lib.rs search then confirmed TERMINAL_FILES_JS/TERMINAL_LINKS_JS assets and script injection remain at1473-1474,1919-1920; the first chained search had not run that second check after its expected no-match exit, and this separate command supplied it. Thus no dangling removed-helper caller/export dependency established.\nRead f560058d terminal-links.js382-522,615-639 for surviving line readers and export table. Context-only c7 recorded immediately, then revised with direct full-range-base source558-576: a possible inclusive-span wording detail is unchanged in the common helper already used by old/grid terminals and is not an assigned deletion-induced defect. This is a narrow scope exclusion, not an accepted contract exception or broader bound-correctness claim.\nRechecked 04d85f0c terminal-files.test.js415-434 for real-provider identity before/after add-on disposal and arbitrary-label evidence; f560058d terminal-links.test.js367-401 for explicit missing-tag fixture and unknown/row-text assertion; terminal-tunnels.test.js1-7,25-64 for preserved actual predicate/dispatch imports and click admission boundary. No new oracle mismatch found beyond existing records. Direct theme-test diff confirms its assigned change is commentary only. Diff stat from f560058d through final pinned tip over all six assigned files is empty, so later source does not add or repair another same-path concern. No unread assigned source scope.\nValidation remains source/contract analysis only: no runtime tests, builds, reproductions, live-install actions, prohibited coverage searches or checkout changes. This is a separate finished discovery pass, not a repeated pass inside an earlier turn. Next action: return the empty new-finding result and await parent direction.\n"
+}

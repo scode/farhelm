@@ -1,0 +1,216 @@
+[
+  {
+    "key": "g010/f3",
+    "latest_line": 8,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "grid-input-font-inline-owner-rationale",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The newly written explanation assigns the font to the textarea, while the root owns the inline font and the textarea inherits it. This is an in-range documentation defect. The earlier runtime font-regression concern is source-refuted; that does not refute this explanation defect.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e:SPEC_impl.md:692-696 says the input sets its own font inline; that commit's diff introduces the sentence, replacing the xterm-textarea exclusion.",
+      "At f560058, crates/farhelm-ui/assets/grid-terminal.js:367-392 creates the input under element and assigns fontFamily/fontSize to element. Whole-file input.style/input.setAttribute/element.style.font search finds input positioning/reset at 1605,1613-1614 and root font assignments at 391-392,2022, with no input font assignment.",
+      "At f560058, app.css:579-585 repeats the inaccurate rationale and supplies font-family:inherit; 8791-8805 has no input font declaration. The root's terminal face therefore survives; no runtime typeface replacement is established.",
+      "00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:SPEC_impl.md:692-696 retains the sentence. Source-only checks; no execution."
+    ],
+    "coverage_checked": [
+      "Recording-time SPEC_impl.md:692-696 contains the statement being challenged, not acceptance of inaccurate ownership. SPEC.md searches for font/typeface/inheritance supply no acceptance of this explanation.",
+      "TODO.md:23-27 has an empty Planned bucket. Targeted plans/queue searches found only the completed tmux documentation sweep; plans/REPORTS.md:29-32 confirms the tmux series landed. A general sweep does not explicitly cover the erroneous inline owner.",
+      "BUGS.md contains only the SSH-helper provisioning hang. INDEX.md and active TRIAGE_OUTCOMES.md searches for font, input, inheritance and typeface found font-test readiness items, not this rationale. No matching queue item or active decision found.",
+      "FILTER.md has no boundary covering a persistent inaccurate implementation explanation."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Possible replacement of the terminal face by the chrome face was considered at line 6 and refuted by root ownership/inheritance. Lines 7-8 withdraw the proposed dismissal of the separate documentation defect. No security or work-loss consequence was asserted.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain the narrow source-confirmed explanation defect as other; do not turn it into a runtime styling regression.",
+    "new_interface_evidence": "The same direct-input inline-font rationale appears in f560058:crates/farhelm-ui/assets/app.css:579-582. Consolidate that comment and SPEC_impl.md under this underlying key if its owner reports it."
+  },
+  {
+    "key": "g010/f4",
+    "latest_line": 12,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "secondary-button-erases-intercepted-primary-ownership",
+    "aliases": ["review_feedback_queue/secondary-button-erases-intercepted-primary-ownership.md"],
+    "target_queue_file": "review_feedback_queue/secondary-button-erases-intercepted-primary-ownership.md",
+    "why": "The runtime trigger and consequence exactly match an existing item. The in-range replacement specification adds a useful documentation extension: it newly describes the grid as preserving an invariant that its existing singleton gesture does not preserve. Extend the existing item with this new assertion rather than create another runtime finding.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e:SPEC_impl.md:1778-1784, especially 1781, newly promises no forwarded press, drag or release for an intercepted link press.",
+      "At f560058, grid-terminal.js:1747-1758 replaces the singleton gesture. 1773-1792 gives a second non-primary reporting press link=null and withheld=false. 1651-1674 subsequently checks only that replacement's withheld flag; 1689-1693 also loses the original link. This establishes the conditional handler route, not observed runtime incidence.",
+      "6e423e30068b62c6cfa276c6d720ee35bb70387a:grid-terminal.js:1677,1690,1768-1769,1799 already has the same suppression and replacement predicates. The runtime defect predates this range; the newly written grid-specific explanation is the in-range addition.",
+      "At 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, grid-terminal.js:1652-1669,1742-1746,1768-1802 and SPEC_impl.md:1779-1785 retain the mechanism and assertion."
+    ],
+    "coverage_checked": [
+      "SPEC.md:3077-3085 requires primary press/release/drag withholding and preserves other buttons; SPEC_impl.md:1779-1785 incorrectly asserts that behavior rather than accepting the overlap exception.",
+      "INDEX.md:1267-1269 points to secondary-button-erases-intercepted-primary-ownership.md. Read that complete file: exact runtime trigger, forwarded primary motion/release, lost activation, and proposed independent ownership all match. Its historical SPEC_impl reference predates the new grid-only paragraph, so the new inaccurate assertion is useful additional evidence.",
+      "TODO.md Planned is empty. Targeted plans/queue searches found no unlanded plan fixing this ownership state; the tmux series is landed per plans/REPORTS.md:29-32. BUGS.md has no match. Active TRIAGE_OUTCOMES.md has no matching interception/secondary-button decision.",
+      "FILTER.md does not establish that a deliberate overlapping-button gesture meets its rare-trigger boundary. No filter proposed."
+    ],
+    "exact_cover_quotes": [
+      "Existing queue TLDR: Holding a web-link click and pressing a second mouse button loses the primary click's interception, so its subsequent drag/release reaches the terminal program and its original link no longer opens."
+    ],
+    "missing_premise": null,
+    "original_stronger_consequence": "The original lead alleged an unmatched primary release or drag. The final claim preserves that consequence and adds lost link identity. No destructive or privileged action from the mouse report was established. Ordinary single-button intercepted clicks remain outside the trigger.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Extend the existing item with the false in-range grid-specific promise and its attribution. Runtime scope is exact existing coverage; the documentation evidence is an extension, not grounds to lose the claim."
+  },
+  {
+    "key": "g011/c1",
+    "latest_line": 11,
+    "recommendation": "retain-verified",
+    "bucket": "highest",
+    "underlying_key": "legacy-browser-binary-input-reinterpreted-as-grid-json",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Source establishes a conditional route from a literal JSON paste in a fresh legacy xterm surface to decoded unbracketed control input. Ordinary malformed-input detach and display breakage are accepted, but the specification does not explicitly accept successful command reinterpretation. Preserve the stronger consequence and the prior proposed drop separately.",
+    "checks": [
+      "1ed482dde220452e424973faf38a5e1318986333:crates/farhelm-ui/assets/terminal.js:4650-4665 builds xterm for an unknown kind; 5718-5724 and 5905-5924 treat a missing notice as bytes unless a grid was mounted directly. 3568-3624 has asset/font/DOM gates and no build-skew mount veto. src/skew.rs:31-35 explicitly states no blocking/refusal to render. src/session_view.rs:1861-1917 limits mismatch handling to unattended reconnect policy.",
+      "At 1ed482d, terminal.js:2649-2675 sends a text clipboard paste through insert; 2232-2235 and term-bytes.js:55-56 remove literal ESC, not JSON escapes. terminal.js:4628-4634 calls term.paste. The vendored xterm.js:1 paste function emits one triggerDataEvent and brackets only when bracketedPasteMode is true; its default is false. terminal.js:4158-4159,4191-4195 sends that whole event as one UTF-8 binary message.",
+      "f560058da19e02716e6f943883a9508b447aff4e:helm terminal.rs:762-773 forwards each binary message as grid input. proto grid.rs:1565-1566,1610,1650-1655 parses tagged JSON; 1686-1693 limits Text length without refusing decoded CR. supervisor grid_input.rs:175 returns Text bytes directly; service/grid_stream.rs:1064-1090 queues those bytes outside paste collection. No runtime reproduction or destructive command was performed.",
+      "The f560058 helm terminal.rs diff removes stream notices and changes binary input to unconditional grid forwarding. From f560058 to 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, terminal.js and helm terminal.rs are unchanged; the complete grid.rs/grid_input.rs/grid_stream.rs diff contains comments/documentation only. The checked route persists at the inclusive tip."
+    ],
+    "coverage_checked": [
+      "Current SPEC_impl.md:2940-2955 explicitly accepts old-page reload, display misinterpretation and malformed-input detachment. Its statement that typing ends the attachment does not describe valid JSON being accepted and transformed into controls. SPEC.md searches of terminal input, paste, protocol/skew and upgrade requirements found no explicit acceptance of successful literal-paste reinterpretation.",
+      "TODO.md Planned is empty. Searches of plans/queue for old pages, JSON paste, stream notice and reload found the tmux removal plan, whose removal work has already landed (plans/REPORTS.md:29-32); no unlanded plan states a repair for this ambiguity.",
+      "BUGS.md has no match. Targeted INDEX.md and active TRIAGE_OUTCOMES.md searches for old/legacy page, paste, JSON, stream notice and skew found no exact queued trigger/consequence. Legacy static-server rebinding and auth-skew remount bookkeeping concern different roots.",
+      "FILTER.md's older-upgrade-plus-rare-condition filter excludes security/trust-boundary consequences. Successful transformation into unbracketed commands is also outside the diagnostic/self-correcting filters. Rarity alone is not a basis to omit this route."
+    ],
+    "exact_cover_quotes": [
+      "SPEC_impl.md:2950: from the previous helm and left open across the update must be reloaded; nothing keeps it working.",
+      "SPEC_impl.md:2954-2955: what is typed into it ends the attachment as malformed input. Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy."
+    ],
+    "missing_premise": "Occurrence and frequency were not executed. The established route is conditional on a fresh unknown-kind legacy xterm surface remaining attached until a small valid Text JSON paste, while its initially-off bracketed-paste mode has not been enabled by misinterpreted output. Known-kind direct-grid mounts instead refuse the missing notice; ordinary typing generally fails JSON decoding. The old client listings' absent optional kinds and mount gates support the conditional path; no claim that every stale mount is affected.",
+    "original_stronger_consequence": "Lines 1,3,5 proposed dropping ordinary old-page misdraw/refusal/malformed detach as accepted and stated no highest route. Line 6 introduced the valid-message concern; lines 7,9,11 supersede that broad no-highest conclusion with literal JSON becoming real unbracketed Enter/control input capable of running unintended shell commands. No particular data loss or attack was observed. No parent drop was accepted.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Retain the successful-input reinterpretation as highest from its conditional command-execution route. If the parent proposes to apply the general reload acceptance, an upgrade filter, a duplicate disposition, or any consequence lowering, send that exact proposal and the preserved history to an independent drop check. Aliases mentioned in the supplied history belong to other batches and were not independently compared here."
+  },
+  {
+    "key": "g011/c2",
+    "latest_line": 4,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "grid-osc-scheme-allowlist-after-xterm-removal",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The replacement adapter retains an explicit scheme gate before activation; removing xterm's gate does not establish arbitrary local-handler execution. This is a narrow source refutation, not an exhaustive link-security verdict.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e:terminal-files.js:123-148 classifies parsed HTTP/HTTPS or validated absolute file targets and returns null for other schemes.",
+      "At f560058, terminal.js:1029-1059 calls oscTarget before activation and supplies inert callbacks otherwise; 1108-1115 maps every OSC result through this adapter before printed web/file providers. grid-buffer.js:378-417 gives tagged cells OSC links and forbids printed URL recognition over those cells.",
+      "The f560058-to-00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db path diff has no changes to terminal.js, terminal-files.js or grid-buffer.js. No execution."
+    ],
+    "coverage_checked": [
+      "SPEC.md:3168-3169 limits OSC schemes to http, https and file. SPEC_impl.md:3656-3658 at f560058 explicitly assigns the replacement gate to oscTarget; current targeted searches retain that boundary.",
+      "TODO.md Planned is empty; plans/queue scheme/OSC searches found no unlanded plan covering arbitrary-handler activation. Completed tmux-removal plans are not future coverage. BUGS.md has no match. INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact removal/allowlist item.",
+      "No FILTER.md rule needed or proposed: refutation rests on the gated activation path."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Removing the old renderer filter might allow terminal output to open arbitrary local URL handlers, a highest/security consequence if reachable. Both history entries keep that consequence and propose only its source refutation. No shipped activation route outside the allowlist was established.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Propose narrow refutation of the removed-boundary candidate, subject to an independent security drop check. Preserve the explicit caveat that unrelated parser and link-subsystem defects were not assessed."
+  },
+  {
+    "key": "g011/c3",
+    "latest_line": 10,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "lazy-history-retained-row-validation-contract",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The promise is explicitly limited to retained rows. Dropping unread rows before semantic validation does not contradict it.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e:SPEC_impl.md:1869-1875 says retained rows are validated before storage and promises no decoded-history cache.",
+      "At f560058, grid-model.js:876-905 queues rows and trims before drain; 916-955 explicitly discards unread excess rows, preserving only the retained suffix. 971-1008 calls walkBinaryRow before pushing each retained body/token. 1090-1101 reads an applied row afresh. The f560058-to-inclusive-tip path diff has no grid-model.js change.",
+      "This checks the claimed retained-row contract only, not all malformed-frame categories or resource bounds. Source-only."
+    ],
+    "coverage_checked": [
+      "Current SPEC_impl.md:1869-1875 retains the same retained-row qualifier. SPEC.md Terminal experience's retained scrollback delivery requirements do not require semantic parsing of discarded unread rows.",
+      "TODO.md Planned is empty. plans/queue retained-row/lazy-history searches found no unlanded matching work. BUGS.md has no match. INDEX.md and active TRIAGE_OUTCOMES.md history/validation searches found history numbering and history-fixture issues, not this qualifier.",
+      "No FILTER.md rule needed or proposed; the alleged contradiction is source-refuted."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "A possibly false promise that every received row was fully validated. Both history entries limit the concern to documentation accuracy; neither asserted security or user-work loss. Discarded unread rows are not claimed to receive full semantic validation.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Propose refutation of this exact documentation candidate by the retained-row qualifier and validate-before-storage path."
+  },
+  {
+    "key": "g012/c1",
+    "latest_line": 4,
+    "recommendation": "covered",
+    "bucket": "other",
+    "underlying_key": "uninstall-accepted-outlived-private-tmux-residual",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Both current specifications explicitly accept precisely this surviving server after its supervisor was already stopped. The narrow cleanup consequence is real in the stated topology but accepted; it is not a finding about incorrect termination or missing terminal-host cleanup.",
+    "checks": [
+      "500548b9253b07a26fd03119679184b69544e31d:crates/farhelm-helm/src/provisioning/backend.rs:3254-3357 stops the unit if active and invokes stop-terminal-hosts when hosts exists, requiring status 0. It contains no socket-addressed tmux stop. A pre-existing server outside the stopped unit's group is outside these stop actions.",
+      "Current SPEC.md:209-218 and SPEC_impl.md:7814-7837 explicitly name the prior-stop residual and preserve terminal-host confirmation before lib removal. No runtime observation or broader cleanup certification."
+    ],
+    "coverage_checked": [
+      "SPEC.md:212-215 and SPEC_impl.md:7824-7827 exactly match trigger, surviving server consequence and remote-uninstall scope.",
+      "TODO.md Planned is empty. tmux-drop-from-install.md:58-63,98-104 repeats this acceptance, but plans/REPORTS.md:30 says it has landed, so it is corroborating decision context rather than unlanded-plan coverage. Other tmux plans are also landed per REPORTS.md:29-32; user-tmux cleanup is a different root.",
+      "BUGS.md has no match. INDEX.md and active TRIAGE_OUTCOMES.md searches found no remaining exact private-server residual item. The plan references removal of offline-uninstall-live-tmux-history-unresolved; no archival ledger was read.",
+      "No FILTER.md rule needed or proposed; exact explicit specification acceptance supplies the basis."
+    ],
+    "exact_cover_quotes": [
+      "SPEC_impl.md:7824-7827: Uninstall has no tmux step: a private tmux server that outlived a supervisor stopped before uninstall (a host never updated to a release that ends it at startup, or one whose startup ending failed and whose supervisor was later stopped) keeps running. The maintainer accepted that residual on 2026-11-11 when the step was removed."
+    ],
+    "missing_premise": null,
+    "original_stronger_consequence": "Uninstall may leave an earlier private tmux server running. Both history entries retain this residual-process consequence and disclaim incorrect termination, missing terminal-host cleanup or loss of processes. Surviving processes are not established lost work.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Propose coverage only for the explicitly accepted out-of-control-group residual. Independent confirmation is conservative because the proposed dismissal concerns surviving user processes; it cannot cover termination beyond confirmation or another cleanup route."
+  },
+  {
+    "key": "g012/c2",
+    "latest_line": 5,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "removed-mac-tmux-preflight-no-longer-needed",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The removed gate no longer guards an executable dependency of terminal-host startup or old-server cleanup. The cleanup reaches the old server directly through its socket; the desktop prerequisite and spawn paths no longer select tmux.",
+    "checks": [
+      "17a3fe858c5511a24b7403af15dd41c93bf69fd7:old_terminals.rs:14-34 documents the executable-independent contract and 176-200 implements UnixStream::connect plus peer identification. This is not a claim that all cleanup outcomes succeed.",
+      "At 17a3fe8, desktop.rs:1147-1158 checks the session-program path; 1175-1200 launches farhelm supervisor run by its program path without a tmux handoff. A pinned git grep across desktop.rs, setup.rs, supervisor source and units.rs for FARHELM_TMUX, tmux::, tmux_preflight, tmux_probe and Command::new(\"tmux\") found only environment scrubbing, old-unit explanations and tests, no runtime tmux execution.",
+      "From f96dd4363d97dc7e07dea5b8947c96be6bf912e8 to 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, desktop.rs and old_terminals.rs are unchanged. No runtime tests or reproduction."
+    ],
+    "coverage_checked": [
+      "Current SPEC_impl.md:7996-8001 explicitly says the supervisor runs no tmux and the Mac bundles/needs none. Current SPEC.md uninstall and terminal-host descriptions agree with that substrate; no acceptance of broken terminal startup is being inferred.",
+      "TODO.md Planned is empty. tmux-drop-from-install.md:40-48 states the preflight removal; plans/REPORTS.md:30 confirms it landed, so it is not unlanded repair coverage. Other targeted plans concern completed removal or user-run tmux, not a remaining executable dependency.",
+      "BUGS.md, targeted INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact remaining Mac-preflight dependency item. No FILTER.md rule proposed."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Removing the preflight might break terminal startup or upgrade cleanup on a Mac without tmux. All three history entries retain that concern and source-refute its dependency premise; they do not certify every historical tmux-driver or terminal-host behavior.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Propose narrow no-executable-dependency refutation. Because the original concern includes upgrade cleanup of user processes, obtain an independent check before dismissing that part; do not reinterpret it as blanket cleanup correctness."
+  },
+  {
+    "key": "g012/c3",
+    "latest_line": 6,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "tab-browser-ambient-osstring-preservation",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The terminal-host boundary starts with the supervisor's complete OsString environment and overlays launch values. Inherited BROWSER, including non-UTF-8, therefore survives when no string override is added.",
+    "checks": [
+      "f96dd4363d97dc7e07dea5b8947c96be6bf912e8:service/core.rs:13812-13840 reads ambient BROWSER and passes it to append_tab_browser. launch.rs:1331-1350 preserves explicit launch values first, inherited values including empty next, and supplies fallback only on absence; a non-UTF-8 value remains ambient.",
+      "At f96dd43, service/core/host_tabs.rs:591-606 calls host_child_env(std::env::vars_os(), env, ...) and puts the result in ChildSpec. host_launch.rs:108-159 removes six named terminal/activation variables, none BROWSER, after collecting and overlaying the OsString base.",
+      "The f96dd43-to-00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db complete launch.rs/host_launch.rs diff contains explanatory comments and one test diagnostic change, with no browser environment change; host_tabs.rs is unchanged. Source-only."
+    ],
+    "coverage_checked": [
+      "SPEC.md:3956-3968 says existing inherited BROWSER, including empty, wins and lists external consumer limits. SPEC_impl.md:9053-9068 describes the host-child environment and the same limits. The source supports that contract rather than needing an exception.",
+      "TODO.md Planned is empty. Targeted plans/queue BROWSER and tab-environment searches found no unlanded matching plan. BUGS.md has no match. INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact inherited-browser loss item.",
+      "No FILTER.md rule needed or proposed; refutation is the base-plus-overlay implementation."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "The rewritten host-child contract might lose an inherited browser selection, particularly non-UTF-8, by clearing ambient state. The single history entry source-refutes that premise and explicitly separates it from new forwarding authority and external BROWSER reader compatibility.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Propose narrow source refutation of ambient-browser loss; retain the caveats about independent opener and template-consumer behavior."
+  }
+]

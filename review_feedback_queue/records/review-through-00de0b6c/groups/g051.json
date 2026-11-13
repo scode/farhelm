@@ -1,0 +1,912 @@
+{
+  "group": {
+    "id": "g051",
+    "domain": "sandbox-build-and-tunnels",
+    "purpose": "sandbox-build-and-tunnels: crates/farhelm-helm/src/tensorlake/mod.rs, crates/farhelm-helm/src/tensorlake/build_tests.rs, crates/farhelm-helm/src/tensorlake/orphans.rs, crates/farhelm-helm/src/tensorlake/prepared.rs, crates/farhelm-helm/src/tensorlake/prepared_tests.rs, crates/farhelm-helm/src/tensorlake/tunnel_relay_tests.rs, crates/farhelm-helm/src/tensorlake/tunnels.rs, crates/farhelm-helm/src/tensorlake/build_script.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g022",
+      "g023",
+      "g024",
+      "g025",
+      "g026",
+      "g027",
+      "g028",
+      "g029",
+      "g058",
+      "g059",
+      "g060"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00100-000.patch",
+        "ranges": [
+          [
+            1,
+            20
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/tensorlake/mod.rs",
+        "commit": "ee39aeacdaccfeaa0cea25246540b20008c868f0",
+        "notes": "patch header; patch character offsets [0,1194)",
+        "lines": 20,
+        "bytes": 1194,
+        "start": 0,
+        "end": 1194,
+        "original": "[private-run]/prep/originals/00100.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00128-000.patch",
+        "ranges": [
+          [
+            1,
+            165
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/tensorlake/build_tests.rs",
+        "commit": "56040bb964270bb40d191902173dbb84b3ba78fc",
+        "notes": "patch header; patch character offsets [0,6649)",
+        "lines": 165,
+        "bytes": 6649,
+        "start": 0,
+        "end": 6649,
+        "original": "[private-run]/prep/originals/00128.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00130-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/tensorlake/orphans.rs",
+        "commit": "56040bb964270bb40d191902173dbb84b3ba78fc",
+        "notes": "patch header; patch character offsets [0,595)",
+        "lines": 13,
+        "bytes": 595,
+        "start": 0,
+        "end": 595,
+        "original": "[private-run]/prep/originals/00130.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00131-000.patch",
+        "ranges": [
+          [
+            1,
+            30
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/tensorlake/prepared.rs",
+        "commit": "56040bb964270bb40d191902173dbb84b3ba78fc",
+        "notes": "patch header; patch character offsets [0,1289)",
+        "lines": 30,
+        "bytes": 1289,
+        "start": 0,
+        "end": 1289,
+        "original": "[private-run]/prep/originals/00131.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00132-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/tensorlake/prepared_tests.rs",
+        "commit": "56040bb964270bb40d191902173dbb84b3ba78fc",
+        "notes": "patch header; patch character offsets [0,706)",
+        "lines": 13,
+        "bytes": 706,
+        "start": 0,
+        "end": 706,
+        "original": "[private-run]/prep/originals/00132.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00135-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/tensorlake/tunnel_relay_tests.rs",
+        "commit": "56040bb964270bb40d191902173dbb84b3ba78fc",
+        "notes": "patch header; patch character offsets [0,596)",
+        "lines": 13,
+        "bytes": 596,
+        "start": 0,
+        "end": 596,
+        "original": "[private-run]/prep/originals/00135.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00136-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/tensorlake/tunnels.rs",
+        "commit": "56040bb964270bb40d191902173dbb84b3ba78fc",
+        "notes": "patch header; patch character offsets [0,543)",
+        "lines": 13,
+        "bytes": 543,
+        "start": 0,
+        "end": 543,
+        "original": "[private-run]/prep/originals/00136.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00208-000.patch",
+        "ranges": [
+          [
+            1,
+            267
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/tensorlake/build_script.rs",
+        "commit": "56659839785691f76da3af5d8f51b511cff4ba8b",
+        "notes": "patch header; patch character offsets [0,13167)",
+        "lines": 267,
+        "bytes": 13167,
+        "start": 0,
+        "end": 13167,
+        "original": "[private-run]/prep/originals/00208.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00212-000.patch",
+        "ranges": [
+          [
+            1,
+            41
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/tensorlake/mod.rs",
+        "commit": "56659839785691f76da3af5d8f51b511cff4ba8b",
+        "notes": "patch header; patch character offsets [0,1618)",
+        "lines": 41,
+        "bytes": 1618,
+        "start": 0,
+        "end": 1618,
+        "original": "[private-run]/prep/originals/00212.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00213-000.patch",
+        "ranges": [
+          [
+            1,
+            81
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/tensorlake/prepared.rs",
+        "commit": "56659839785691f76da3af5d8f51b511cff4ba8b",
+        "notes": "patch header; patch character offsets [0,3186)",
+        "lines": 81,
+        "bytes": 3186,
+        "start": 0,
+        "end": 3186,
+        "original": "[private-run]/prep/originals/00213.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00215-000.patch",
+        "ranges": [
+          [
+            1,
+            117
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/tensorlake/tunnels.rs",
+        "commit": "56659839785691f76da3af5d8f51b511cff4ba8b",
+        "notes": "patch header; patch character offsets [0,4328)",
+        "lines": 117,
+        "bytes": 4328,
+        "start": 0,
+        "end": 4328,
+        "original": "[private-run]/prep/originals/00215.patch"
+      }
+    ],
+    "lines": 773,
+    "bytes": 33871
+  },
+  "records": [
+    {
+      "key": "g051/c1",
+      "owner": "g051",
+      "id": "c1",
+      "domain": "sandbox-build-and-tunnels",
+      "purpose": "sandbox-build-and-tunnels: crates/farhelm-helm/src/tensorlake/mod.rs, crates/farhelm-helm/src/tensorlake/build_tests.rs, crates/farhelm-helm/src/tensorlake/orphans.rs, crates/farhelm-helm/src/tensorlake/prepared.rs, crates/farhelm-helm/src/tensorlake/prepared_tests.rs, crates/farhelm-helm/src/tensorlake/tunnel_relay_tests.rs, crates/farhelm-helm/src/tensorlake/tunnels.rs, crates/farhelm-helm/src/tensorlake/build_script.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Shared tunnels retain configured destinations rather than peer-selected targets",
+            "location": "crates/farhelm-helm/src/tensorlake/tunnels.rs:112",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: considered whether sharing the tunnel worker with containers lets an environment redirect the helm to an unapproved service. Source refutation: start_with_fake reads recipe.tunnels once at lines 112-114; run_relays resolves event.port only against those retained definitions at 291-303 and dials destination.host/port at 307-310; an unknown port is dropped without dialing at 294-301. SPEC_impl.md, Tensorlake recipe tunnels and unowned sandboxes: 'For each accepted event, the worker resolves the reported port against its own snapshot. An unknown port is refused without dialing'. Suggested bucket if established: highest/security. Could-be-highest: yes, if a peer could choose a destination beyond the recipe; that route is refuted by the retained snapshot and lookup. Confidence: confirmed by source, no execution. proposed_drop: source refutation, no destination-authority change in this extraction. possible_cover: none; prohibited coverage sources not read. Caveat: caller/lease lifetime analysis continues separately."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Shared tunnels retain configured destinations and connection-owned teardown",
+            "location": "crates/farhelm-helm/src/tensorlake/tunnels.rs:112",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: considered whether sharing the tunnel worker with containers lets an environment redirect the helm to an unapproved service or retain access after the host disconnects. Source refutation: start_with_fake reads recipe.tunnels once at lines 112-114; run_relays resolves event.port only against those retained definitions at 291-303 and dials destination.host/port at 307-310; unknown ports are dropped without dialing at 294-301. SPEC_impl.md, Tensorlake recipe tunnels and unowned sandboxes: 'For each accepted event, the worker resolves the reported port against its own snapshot. An unknown port is refused without dialing'. Follow-up lifetime check: Podman connected at environment/podman.rs:1383-1401 and Tensorlake connected at tensorlake/hosts.rs:339-355 both return the actual client's lease in ConnectedResources; manager.rs:3721-3736 races acquisition against nudge and retains the bundle across serve. There is no await between worker spawn and lease return in tunnels.rs:140-182, and Drop at 71-80 aborts the worker and retires the connection. Contract: 'Leaving the connected phase, entering a hold, removing the row or aborting the actor drops the lease' (SPEC_impl.md, same section). Suggested bucket if established: highest/security for unapproved targets or access beyond the lease. Could-be-highest: yes, but both routes are refuted by the snapshot lookup and owned lease. Confidence: confirmed by source, no execution. proposed_drop: source refutation, no destination-authority or lifetime escape found in the extraction and callers. possible_cover: none; prohibited coverage sources not read. Caveat: shared relay internals are unchanged; this review checks the extraction and its connected-hook interfaces, not every relay implementation."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c1",
+            "state": "open",
+            "summary": "Shared tunnels retain configured destinations and connection-owned teardown",
+            "location": "crates/farhelm-helm/src/tensorlake/tunnels.rs:112",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: considered whether sharing the tunnel worker with containers lets an environment redirect the helm to an unapproved service or retain access after the host disconnects. Source refutation: start_with_fake reads recipe.tunnels once at lines 112-114; run_relays resolves event.port only against those retained definitions at 291-303 and dials destination.host/port at 307-310; unknown ports are dropped without dialing at 294-301. SPEC_impl.md, Tensorlake recipe tunnels and unowned sandboxes: 'For each accepted event, the worker resolves the reported port against its own snapshot. An unknown port is refused without dialing'. Follow-up lifetime check: Podman connected at environment/podman.rs:1383-1401 and Tensorlake connected at tensorlake/hosts.rs:339-355 both return the actual client's lease in ConnectedResources; manager.rs:3721-3736 races acquisition against nudge and retains the bundle across serve. There is no await between worker spawn and lease return in tunnels.rs:140-182, and Drop at 71-80 aborts the worker and retires the connection. Contract: 'Leaving the connected phase, entering a hold, removing the row or aborting the actor drops the lease' (SPEC_impl.md, same section). Suggested bucket if established: highest/security for unapproved targets or access beyond the lease. Could-be-highest: yes, but both routes are refuted by the snapshot lookup and owned lease. Confidence: confirmed by source, no execution. proposed_drop: source refutation, no destination-authority or lifetime escape found in the extraction and callers. possible_cover: none; prohibited coverage sources not read. Caveat: shared relay internals are unchanged; this review checks the extraction and its connected-hook interfaces, not every relay implementation.\n\nSynthesis turn 2: caller supplies g020/l1 (latest line 9), establishing a pending agent approval can follow a retargeted cold Podman place. This does not refute the exact destination/lease source checks above, but they do not establish authorization of the physical route before the actual client is acquired. Open check: whether any assigned shared-access extraction itself assumes earlier-route consent, or loses a cancellation/resource boundary while resolving current access. Do not duplicate g020/l1. The prior proposed-drop applies only to peer-chosen tunnel destinations and post-acquisition lease escape, not initial endpoint authorization. Missing premise: the reference/retarget fences and route capture across preparation, connection acquisition and cancellation. Next source checks: provider route/place resolution, destination writer/reference checks, preparer caller task lifetime and script cancellation. Confidence for this newly separated premise: uninvestigated lead, not a confirmed finding. Original possible-highest consequences and exact refutations remain above."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Shared tunnels retain configured destinations and connection-owned teardown",
+            "location": "crates/farhelm-helm/src/tensorlake/tunnels.rs:112",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: considered whether sharing the tunnel worker with containers lets an environment redirect the helm to an unapproved service or retain access after the host disconnects. Source refutation: start_with_fake reads recipe.tunnels once at lines 112-114; run_relays resolves event.port only against those retained definitions at 291-303 and dials destination.host/port at 307-310; unknown ports are dropped without dialing at 294-301. SPEC_impl.md, Tensorlake recipe tunnels and unowned sandboxes: 'For each accepted event, the worker resolves the reported port against its own snapshot. An unknown port is refused without dialing'. Follow-up lifetime check: Podman connected at environment/podman.rs:1383-1401 and Tensorlake connected at tensorlake/hosts.rs:339-355 both return the actual client's lease in ConnectedResources; manager.rs:3721-3736 races acquisition against nudge and retains the bundle across serve. There is no await between worker spawn and lease return in tunnels.rs:140-182, and Drop at 71-80 aborts the worker and retires the connection. Contract: 'Leaving the connected phase, entering a hold, removing the row or aborting the actor drops the lease' (SPEC_impl.md, same section). Suggested bucket if established: highest/security for unapproved targets or access beyond the lease. Could-be-highest: yes, but both routes are refuted by the snapshot lookup and owned lease. Confidence: confirmed by source, no execution. proposed_drop: source refutation, no destination-authority or lifetime escape found in the extraction and callers. possible_cover: none; prohibited coverage sources not read. Caveat: shared relay internals are unchanged; this review checks the extraction and its connected-hook interfaces, not every relay implementation.\n\nSynthesis turn 2: caller supplies g020/l1 (latest line 9), establishing a pending agent approval can follow a retargeted cold Podman place. This does not refute the exact destination/lease source checks above, but they do not establish authorization of the physical route before the actual client is acquired. Open check: whether any assigned shared-access extraction itself assumes earlier-route consent, or loses a cancellation/resource boundary while resolving current access. Do not duplicate g020/l1. The prior proposed-drop applies only to peer-chosen tunnel destinations and post-acquisition lease escape, not initial endpoint authorization. Missing premise: the reference/retarget fences and route capture across preparation, connection acquisition and cancellation. Next source checks: provider route/place resolution, destination writer/reference checks, preparer caller task lifetime and script cancellation. Confidence for this newly separated premise: uninvestigated lead, not a confirmed finding. Original possible-highest consequences and exact refutations remain above.\n\nSynthesis resolution: the initial endpoint-authorization gap is real interface context supplied by g020/l1, but is not refuted by c1 and is not a separate defect in the shared tunnel extraction. At the reviewed revision, access.rs:397-427 resolves the actual current Podman place and confirmed container ID/login before the supervisor client exists. environment/podman.rs:1383-1401 gives that already-acquired client to Tunnels::start; the shared tunnel worker does not re-resolve physical access. Once the environment row exists, store/podman.rs:215-250 counts even pending/stopped rows through hosts.place_host, and update_ssh_destination at store.rs:7566-7567 executes that refusal in the same transaction before a destination edit. Thus the tunnel-acquisition path cannot independently move an established environment to another registry destination. A cold-place retarget before registration remains upstream authorization context, exactly g020/l1; a later successful lease and frozen destinations cannot certify that earlier consent. g023/f3 is not used as evidence of credentials or copied-state safety after retargeting. Keep the original proposed drop strictly for peer-directed destination widening and post-acquisition lifetime escape, both source-refuted above; do not extend it to the pending-card endpoint claim. Suggested bucket if those original routes were established remains highest/security, could-be-highest yes. possible_cover: g020/l1 covers the independently established earlier approval/physical-route boundary, not this candidate. Confidence: confirmed source checks for the extraction, no runtime execution. c1 lead resolved to candidate; no missing premise remains for its narrow refutation."
+          }
+        }
+      ],
+      "latest": {
+        "line": 9,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Shared tunnels retain configured destinations and connection-owned teardown",
+          "location": "crates/farhelm-helm/src/tensorlake/tunnels.rs:112",
+          "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: considered whether sharing the tunnel worker with containers lets an environment redirect the helm to an unapproved service or retain access after the host disconnects. Source refutation: start_with_fake reads recipe.tunnels once at lines 112-114; run_relays resolves event.port only against those retained definitions at 291-303 and dials destination.host/port at 307-310; unknown ports are dropped without dialing at 294-301. SPEC_impl.md, Tensorlake recipe tunnels and unowned sandboxes: 'For each accepted event, the worker resolves the reported port against its own snapshot. An unknown port is refused without dialing'. Follow-up lifetime check: Podman connected at environment/podman.rs:1383-1401 and Tensorlake connected at tensorlake/hosts.rs:339-355 both return the actual client's lease in ConnectedResources; manager.rs:3721-3736 races acquisition against nudge and retains the bundle across serve. There is no await between worker spawn and lease return in tunnels.rs:140-182, and Drop at 71-80 aborts the worker and retires the connection. Contract: 'Leaving the connected phase, entering a hold, removing the row or aborting the actor drops the lease' (SPEC_impl.md, same section). Suggested bucket if established: highest/security for unapproved targets or access beyond the lease. Could-be-highest: yes, but both routes are refuted by the snapshot lookup and owned lease. Confidence: confirmed by source, no execution. proposed_drop: source refutation, no destination-authority or lifetime escape found in the extraction and callers. possible_cover: none; prohibited coverage sources not read. Caveat: shared relay internals are unchanged; this review checks the extraction and its connected-hook interfaces, not every relay implementation.\n\nSynthesis turn 2: caller supplies g020/l1 (latest line 9), establishing a pending agent approval can follow a retargeted cold Podman place. This does not refute the exact destination/lease source checks above, but they do not establish authorization of the physical route before the actual client is acquired. Open check: whether any assigned shared-access extraction itself assumes earlier-route consent, or loses a cancellation/resource boundary while resolving current access. Do not duplicate g020/l1. The prior proposed-drop applies only to peer-chosen tunnel destinations and post-acquisition lease escape, not initial endpoint authorization. Missing premise: the reference/retarget fences and route capture across preparation, connection acquisition and cancellation. Next source checks: provider route/place resolution, destination writer/reference checks, preparer caller task lifetime and script cancellation. Confidence for this newly separated premise: uninvestigated lead, not a confirmed finding. Original possible-highest consequences and exact refutations remain above.\n\nSynthesis resolution: the initial endpoint-authorization gap is real interface context supplied by g020/l1, but is not refuted by c1 and is not a separate defect in the shared tunnel extraction. At the reviewed revision, access.rs:397-427 resolves the actual current Podman place and confirmed container ID/login before the supervisor client exists. environment/podman.rs:1383-1401 gives that already-acquired client to Tunnels::start; the shared tunnel worker does not re-resolve physical access. Once the environment row exists, store/podman.rs:215-250 counts even pending/stopped rows through hosts.place_host, and update_ssh_destination at store.rs:7566-7567 executes that refusal in the same transaction before a destination edit. Thus the tunnel-acquisition path cannot independently move an established environment to another registry destination. A cold-place retarget before registration remains upstream authorization context, exactly g020/l1; a later successful lease and frozen destinations cannot certify that earlier consent. g023/f3 is not used as evidence of credentials or copied-state safety after retargeting. Keep the original proposed drop strictly for peer-directed destination widening and post-acquisition lifetime escape, both source-refuted above; do not extend it to the pending-card endpoint claim. Suggested bucket if those original routes were established remains highest/security, could-be-highest yes. possible_cover: g020/l1 covers the independently established earlier approval/physical-route boundary, not this candidate. Confidence: confirmed source checks for the extraction, no runtime execution. c1 lead resolved to candidate; no missing premise remains for its narrow refutation."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g051/findings.jsonl",
+        "id": "c1",
+        "line": 9,
+        "disposition": "under-investigation",
+        "group": "g051-c1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-032",
+          "key": "g051/c1",
+          "latest_line": 9,
+          "recommendation": "refuted",
+          "bucket": "highest",
+          "underlying_key": "recipe-tunnel-extraction-destination-and-lease-authority",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The narrow candidate is source-refuted: a peer selects only a configured port, and the connected phase owns teardown. This does not certify consent to the physical machine chosen before connection acquisition. The intermediate lead about pre-registration retargeting was explicitly resolved as upstream context, not disproved by the tunnel checks.",
+          "checks": [
+            "56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/tensorlake/tunnels.rs:112-125 retains recipe.tunnels; :291-310 drops an unknown event port and dials only the matched definition's host/port.",
+            "Same revision tunnels.rs:71-80 aborts the worker and retires its client on lease drop; :140-182 has no await between spawning the worker and returning the lease. :272-305 owns accepted dials/relays in a JoinSet. This establishes owned asynchronous relay lifetime, not synchronous termination of every native resolver operation.",
+            "Same revision environment/podman.rs:1383-1401 and tensorlake/hosts.rs:339-355 pass the already acquired client and return the lease inside ConnectedResources. manager.rs:3721-3736 races resource acquisition against nudge and retains it across serving.",
+            "Same revision access.rs:397-427 resolves the current place, canonical container ID and login before client acquisition. store/podman.rs:215-250 counts all referring environment rows and recipe cleanup state; store.rs:7566-7567 applies refusal inside the destination-edit transaction. This prevents an established environment's independent registry retarget, but says nothing about consent before the row exists.",
+            "Reviewed commit is inside the supplied range. All conclusions are source-only; no runtime behavior was observed. Shared relay internals were context, not comprehensively re-reviewed."
+          ],
+          "coverage_checked": [
+            "Current SPEC_impl.md:6777-6806, Tensorlake recipe tunnels and unowned sandboxes, requires snapshot-bound destinations and connection-owned teardown. SPEC.md:4806-4883 gives containers ordinary supervisor recipe tunnels and prevents place retarget while referenced; neither accepts the suspected security defect.",
+            "TODO.md Planned bucket is empty; plans/queue/INDEX.md has no unlanded entries. No planned coverage.",
+            "BUGS.md's escaped local SSH-output helper concerns provisioning transfer pipes, not recipe relay authority. No exact coverage.",
+            "Searched review_feedback_queue/INDEX.md for tunnels, preparation, proxy, credentials and endpoint retargeting. Read removed-host-strands-tunnel-listeners.md and tunnel-dns-outlives-dial-admission.md: the former concerns user localhost listeners, the latter native DNS work outliving async timeout. Neither establishes peer-selected destinations or retained relay access. No exact alias or useful extension established.",
+            "Searched active TRIAGE_OUTCOMES.md; the tunnel-reuses-custom-helm-credential-origin.md decision concerns browser origin credential reuse, not recipe relay authority. Other matching entries concern UI consent. No exact coverage. FILTER.md has no applicable security-boundary filter. Archive not read."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "None for the narrow refutation. The earlier approval/physical-route issue attributed in the supplied history to g020/l1 is separate and must remain with its owner; this batch did not receive that named record and cannot adjudicate it.",
+          "original_stronger_consequence": "A container or sandbox peer could redirect the helm to an unapproved service, or retain recipe-tunnel access after host disconnection: highest/security if established. Line 8 briefly reopened initial endpoint authorization; line 9 resolved only the extraction-specific concern and preserved that upstream issue.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Source refutation limited to peer-directed destination widening and post-acquisition relay/lease escape. SPEC_impl.md states: 'For each accepted event, the worker resolves the reported port against its own snapshot. An unknown port is refused without dialing'. Its connected-hook paragraph requires lease drop on leaving the connected phase. Do not use this basis to drop pre-registration physical-route consent, native DNS lifetime, or unrelated credential delivery claims."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-032.json",
+          "key": "g051/c1",
+          "proposal": "claim-checks/claims-032/result.json",
+          "parent_proposal": "source-refuted-peer-directed-tunnel-destination-and-post-acquisition-lease-escape",
+          "final_independent_gate": "required-before-highest-security-drop",
+          "reason": "Parent read full032. A peer reports a port; the worker matches only its captured recipe definition and refuses unknown ports before dialing. Accepted relays belong to the worker JoinSet, with lease drop aborting the worker and retiring the client. Actual provider connected hooks retain the lease. No await separates worker spawn and lease return. This refutes the named destination widening and asynchronous ownership escape, not synchronous native resolver termination or earlier physical-place approval. Post-registration destination edits are fenced; pre-registration020l1 remains separate. Preserve the original service-access/security consequence and intermediate reopened route history for the fresh check."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "recipe-tunnel-extraction-destination-and-lease-authority",
+        "destination": null
+      }
+    },
+    {
+      "key": "g051/c2",
+      "owner": "g051",
+      "id": "c2",
+      "domain": "sandbox-build-and-tunnels",
+      "purpose": "sandbox-build-and-tunnels: crates/farhelm-helm/src/tensorlake/mod.rs, crates/farhelm-helm/src/tensorlake/build_tests.rs, crates/farhelm-helm/src/tensorlake/orphans.rs, crates/farhelm-helm/src/tensorlake/prepared.rs, crates/farhelm-helm/src/tensorlake/prepared_tests.rs, crates/farhelm-helm/src/tensorlake/tunnel_relay_tests.rs, crates/farhelm-helm/src/tensorlake/tunnels.rs, crates/farhelm-helm/src/tensorlake/build_script.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Prepared-facts relocation and shared freshness preserve the old contract",
+            "location": "crates/farhelm-helm/src/tensorlake/prepared.rs:113",
+            "detail": "Reviewed commits: 56040bb964270bb40d191902173dbb84b3ba78fc and 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: considered whether moving preparation facts or sharing freshness could admit a stale checkpoint or change persisted installation coordinates. At 56040 the removed PreparedInstallFacts has exactly the same derived serialization and fields as the re-exported environment::recipes::PreparedInstallFacts; at 566598 the shared type at recipes.rs:23-31 retains home/farhelm_path/state_dir/farhelm_version. The delegated prepared_stale_reason at recipes.rs:322-339 preserves the deleted function's version/source/strict age order and saturating subtraction exactly. Contract: SPEC_impl.md, Tensorlake prepared snapshots: 'A record is stale exactly when its age is strictly greater than 86,400 seconds, its Farhelm version differs from the helm’s, or its source built-snapshot ID differs from the recipe’s current one.' Suggested bucket if established: high for unusable stale installs. Could-be-highest: no established loss/security route from these changes. Confidence: confirmed by source only. proposed_drop: source refutation, persisted fields and freshness predicates remain equivalent. possible_cover: none. Caveat: checkpoint cleanup and route setup are reviewed separately."
+          }
+        },
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Prepared-facts relocation and shared freshness preserve the old contract",
+            "location": "crates/farhelm-helm/src/tensorlake/prepared.rs:113",
+            "detail": "Reviewed commits: 56040bb964270bb40d191902173dbb84b3ba78fc and 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: considered whether moving preparation facts or sharing freshness could admit a stale checkpoint or change persisted installation coordinates. At 56040 the removed PreparedInstallFacts has exactly the same derived serialization and fields as the re-exported environment::recipes::PreparedInstallFacts; at 566598 the shared type at recipes.rs:23-31 retains home/farhelm_path/state_dir/farhelm_version. The delegated prepared_stale_reason at recipes.rs:322-339 preserves the deleted function's version/source/strict age order and saturating subtraction exactly. Contract: SPEC_impl.md, Tensorlake prepared snapshots: 'A record is stale exactly when its age is strictly greater than 86,400 seconds, its Farhelm version differs from the helm’s, or its source built-snapshot ID differs from the recipe’s current one.' Suggested bucket if established: high for unusable stale installs. Could-be-highest: no established loss/security route from these changes. Confidence: confirmed by source only. proposed_drop: source refutation, persisted fields and freshness predicates remain equivalent. possible_cover: none. Caveat: checkpoint cleanup and route setup are reviewed separately.\n\nSynthesis turn 2, producer/consumer boundary: PreparedInstallFacts stores installation coordinates/version, not an approved physical endpoint. The common producer freezes route.clone into ProvisioningTarget::Remote at provisioning/snapshot_preparer.rs:75, performs inspect/copied-state refusal/install/final cleanup against that target, and only then returns facts at 48-61. Tensorlake validates absolute coordinates/version before snapshotting at tensorlake/build.rs:2389-2399; Podman performs the analogous check at environment/podman/build.rs:355-362. The extracted freshness helper is a cache predicate over version/source/age, not permission to switch physical routes. The serialization/freshness equivalence refutation above remains exact and does not attest authorization of a route that was selected after an earlier approval (g020/l1). No producer/consumer mismatch attributable to relocating these fields or delegating this predicate was established. Original suspected impact remains unusable stale installation, high if established; could-be-highest remains no for that narrow equivalence concern. proposed_drop: same source-equivalence refutation; possible_cover: g020/l1 only for the distinct earlier endpoint-approval issue. Confidence: source-confirmed; no runtime execution."
+          }
+        }
+      ],
+      "latest": {
+        "line": 13,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Prepared-facts relocation and shared freshness preserve the old contract",
+          "location": "crates/farhelm-helm/src/tensorlake/prepared.rs:113",
+          "detail": "Reviewed commits: 56040bb964270bb40d191902173dbb84b3ba78fc and 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: considered whether moving preparation facts or sharing freshness could admit a stale checkpoint or change persisted installation coordinates. At 56040 the removed PreparedInstallFacts has exactly the same derived serialization and fields as the re-exported environment::recipes::PreparedInstallFacts; at 566598 the shared type at recipes.rs:23-31 retains home/farhelm_path/state_dir/farhelm_version. The delegated prepared_stale_reason at recipes.rs:322-339 preserves the deleted function's version/source/strict age order and saturating subtraction exactly. Contract: SPEC_impl.md, Tensorlake prepared snapshots: 'A record is stale exactly when its age is strictly greater than 86,400 seconds, its Farhelm version differs from the helm’s, or its source built-snapshot ID differs from the recipe’s current one.' Suggested bucket if established: high for unusable stale installs. Could-be-highest: no established loss/security route from these changes. Confidence: confirmed by source only. proposed_drop: source refutation, persisted fields and freshness predicates remain equivalent. possible_cover: none. Caveat: checkpoint cleanup and route setup are reviewed separately.\n\nSynthesis turn 2, producer/consumer boundary: PreparedInstallFacts stores installation coordinates/version, not an approved physical endpoint. The common producer freezes route.clone into ProvisioningTarget::Remote at provisioning/snapshot_preparer.rs:75, performs inspect/copied-state refusal/install/final cleanup against that target, and only then returns facts at 48-61. Tensorlake validates absolute coordinates/version before snapshotting at tensorlake/build.rs:2389-2399; Podman performs the analogous check at environment/podman/build.rs:355-362. The extracted freshness helper is a cache predicate over version/source/age, not permission to switch physical routes. The serialization/freshness equivalence refutation above remains exact and does not attest authorization of a route that was selected after an earlier approval (g020/l1). No producer/consumer mismatch attributable to relocating these fields or delegating this predicate was established. Original suspected impact remains unusable stale installation, high if established; could-be-highest remains no for that narrow equivalence concern. proposed_drop: same source-equivalence refutation; possible_cover: g020/l1 only for the distinct earlier endpoint-approval issue. Confidence: source-confirmed; no runtime execution."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g051/findings.jsonl",
+        "id": "c2",
+        "line": 13,
+        "disposition": "excluded",
+        "group": "prepared-facts-relocation-and-freshness-equivalence",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-032 after inspecting it. The moved facts retain their persisted fields and serialization derives, and the shared freshness predicate preserves all three checks, their precedence and strict age boundary. Installation coordinates are not a physical-endpoint authorization token. Source-equivalence refutation at the two reviewed commits. The governing current specification requires stale status when age is strictly greater than 86,400 seconds, version differs, or source differs; the extraction preserves that rule. Do not extend this dismissal to endpoint consent or checkpoint cleanup. Checked source/results: [\"56040bb964270bb40d191902173dbb84b3ba78fc^:crates/farhelm-helm/src/tensorlake/prepared.rs:13-21 has the same derived serialization and home/farhelm_path/state_dir/farhelm_version fields as 56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/environment/recipes.rs:23-31. The 56040 revision re-exports the shared type at prepared.rs:11-12.\",\"56040 parent prepared.rs:70-84 checks version, source, then now.saturating_sub(prepared_at) > 86_400. The 566598 extraction diff and environment/recipes.rs:322-339 preserve exactly those checks and order.\",\"566598:provisioning/snapshot_preparer.rs:75 freezes route.clone, :97-121 preserves copied-state refusal and installation, and :48-61 withholds facts until finish_snapshot_install succeeds. tensorlake/build.rs:2385-2399 and environment/podman/build.rs:349-362 validate version and absolute paths before checkpoint publication.\",\"Both reviewed commits are inside the supplied range. No execution. Cleanup and endpoint approval are distinct concerns; serialization and freshness equivalence do not prove their correctness.\"] Current coverage/results: [\"Current SPEC.md:574-592 and SPEC_impl.md:6532-6583 describe exactly version/source/strict age invalidation and credential-free preparer facts. SPEC_impl.md:6010-6047 applies the same freshness rule to both providers. These require the observed behavior, rather than accepting the suspected stale-install defect.\",\"TODO.md Planned is empty; plans/queue/INDEX.md contains no unlanded plans. BUGS.md has no serialization/freshness entry.\",\"Searched review_feedback_queue/INDEX.md and active TRIAGE_OUTCOMES.md for prepared/preparer, stale snapshots, copied state and endpoint retargeting. Matches concern unrelated terminal snapshots, build-source cleanup, or display history; no exact trigger/consequence/scope match. No target queue item or alias. Archive not read.\",\"FILTER.md does not justify omitting an unusable stale install; no filter is needed for the source refutation.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Relocating preparation facts or sharing freshness could change persisted installation coordinates or admit an unusable stale checkpoint; high if established. The complete history names no established security or user-work loss route for this narrow concern.\"; \"None for field/predicate equivalence. Authorization of a route chosen after earlier approval remains outside these facts and is attributed to g020/l1 in the supplied history.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g051/c2",
+        "line": 13,
+        "disposition": "excluded",
+        "group": "prepared-facts-relocation-and-freshness-equivalence",
+        "bucket": "high",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-032 after inspecting it. The moved facts retain their persisted fields and serialization derives, and the shared freshness predicate preserves all three checks, their precedence and strict age boundary. Installation coordinates are not a physical-endpoint authorization token. Source-equivalence refutation at the two reviewed commits. The governing current specification requires stale status when age is strictly greater than 86,400 seconds, version differs, or source differs; the extraction preserves that rule. Do not extend this dismissal to endpoint consent or checkpoint cleanup. Checked source/results: [\"56040bb964270bb40d191902173dbb84b3ba78fc^:crates/farhelm-helm/src/tensorlake/prepared.rs:13-21 has the same derived serialization and home/farhelm_path/state_dir/farhelm_version fields as 56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/environment/recipes.rs:23-31. The 56040 revision re-exports the shared type at prepared.rs:11-12.\",\"56040 parent prepared.rs:70-84 checks version, source, then now.saturating_sub(prepared_at) > 86_400. The 566598 extraction diff and environment/recipes.rs:322-339 preserve exactly those checks and order.\",\"566598:provisioning/snapshot_preparer.rs:75 freezes route.clone, :97-121 preserves copied-state refusal and installation, and :48-61 withholds facts until finish_snapshot_install succeeds. tensorlake/build.rs:2385-2399 and environment/podman/build.rs:349-362 validate version and absolute paths before checkpoint publication.\",\"Both reviewed commits are inside the supplied range. No execution. Cleanup and endpoint approval are distinct concerns; serialization and freshness equivalence do not prove their correctness.\"] Current coverage/results: [\"Current SPEC.md:574-592 and SPEC_impl.md:6532-6583 describe exactly version/source/strict age invalidation and credential-free preparer facts. SPEC_impl.md:6010-6047 applies the same freshness rule to both providers. These require the observed behavior, rather than accepting the suspected stale-install defect.\",\"TODO.md Planned is empty; plans/queue/INDEX.md contains no unlanded plans. BUGS.md has no serialization/freshness entry.\",\"Searched review_feedback_queue/INDEX.md and active TRIAGE_OUTCOMES.md for prepared/preparer, stale snapshots, copied state and endpoint retargeting. Matches concern unrelated terminal snapshots, build-source cleanup, or display history; no exact trigger/consequence/scope match. No target queue item or alias. Archive not read.\",\"FILTER.md does not justify omitting an unusable stale install; no filter is needed for the source refutation.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Relocating preparation facts or sharing freshness could change persisted installation coordinates or admit an unusable stale checkpoint; high if established. The complete history names no established security or user-work loss route for this narrow concern.\"; \"None for field/predicate equivalence. Authorization of a route chosen after earlier approval remains outside these facts and is attributed to g020/l1 in the supplied history.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-032",
+          "key": "g051/c2",
+          "latest_line": 13,
+          "recommendation": "refuted",
+          "bucket": "high",
+          "underlying_key": "prepared-facts-relocation-and-freshness-equivalence",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The moved facts retain their persisted fields and serialization derives, and the shared freshness predicate preserves all three checks, their precedence and strict age boundary. Installation coordinates are not a physical-endpoint authorization token.",
+          "checks": [
+            "56040bb964270bb40d191902173dbb84b3ba78fc^:crates/farhelm-helm/src/tensorlake/prepared.rs:13-21 has the same derived serialization and home/farhelm_path/state_dir/farhelm_version fields as 56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/environment/recipes.rs:23-31. The 56040 revision re-exports the shared type at prepared.rs:11-12.",
+            "56040 parent prepared.rs:70-84 checks version, source, then now.saturating_sub(prepared_at) > 86_400. The 566598 extraction diff and environment/recipes.rs:322-339 preserve exactly those checks and order.",
+            "566598:provisioning/snapshot_preparer.rs:75 freezes route.clone, :97-121 preserves copied-state refusal and installation, and :48-61 withholds facts until finish_snapshot_install succeeds. tensorlake/build.rs:2385-2399 and environment/podman/build.rs:349-362 validate version and absolute paths before checkpoint publication.",
+            "Both reviewed commits are inside the supplied range. No execution. Cleanup and endpoint approval are distinct concerns; serialization and freshness equivalence do not prove their correctness."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:574-592 and SPEC_impl.md:6532-6583 describe exactly version/source/strict age invalidation and credential-free preparer facts. SPEC_impl.md:6010-6047 applies the same freshness rule to both providers. These require the observed behavior, rather than accepting the suspected stale-install defect.",
+            "TODO.md Planned is empty; plans/queue/INDEX.md contains no unlanded plans. BUGS.md has no serialization/freshness entry.",
+            "Searched review_feedback_queue/INDEX.md and active TRIAGE_OUTCOMES.md for prepared/preparer, stale snapshots, copied state and endpoint retargeting. Matches concern unrelated terminal snapshots, build-source cleanup, or display history; no exact trigger/consequence/scope match. No target queue item or alias. Archive not read.",
+            "FILTER.md does not justify omitting an unusable stale install; no filter is needed for the source refutation."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "None for field/predicate equivalence. Authorization of a route chosen after earlier approval remains outside these facts and is attributed to g020/l1 in the supplied history.",
+          "original_stronger_consequence": "Relocating preparation facts or sharing freshness could change persisted installation coordinates or admit an unusable stale checkpoint; high if established. The complete history names no established security or user-work loss route for this narrow concern.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source-equivalence refutation at the two reviewed commits. The governing current specification requires stale status when age is strictly greater than 86,400 seconds, version differs, or source differs; the extraction preserves that rule. Do not extend this dismissal to endpoint consent or checkpoint cleanup."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "prepared-facts-relocation-and-freshness-equivalence",
+        "destination": null
+      }
+    },
+    {
+      "key": "g051/c3",
+      "owner": "g051",
+      "id": "c3",
+      "domain": "sandbox-build-and-tunnels",
+      "purpose": "sandbox-build-and-tunnels: crates/farhelm-helm/src/tensorlake/mod.rs, crates/farhelm-helm/src/tensorlake/build_tests.rs, crates/farhelm-helm/src/tensorlake/orphans.rs, crates/farhelm-helm/src/tensorlake/prepared.rs, crates/farhelm-helm/src/tensorlake/prepared_tests.rs, crates/farhelm-helm/src/tensorlake/tunnel_relay_tests.rs, crates/farhelm-helm/src/tensorlake/tunnels.rs, crates/farhelm-helm/src/tensorlake/build_script.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Tensorlake preparer wrapper preserves access selection and checkpoint guards",
+            "location": "crates/farhelm-helm/src/tensorlake/prepared.rs:36",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: considered whether the extracted Tensorlake wrapper loses the one-shot SSH selection, copied-state refusal, or credential-free checkpoint boundary. Source: prepared.rs:36-55 verifies the selected access, constructs the same gateway route, awaits prepare_tensorlake_sandbox, then calls installer.prepare. ProductionProvisioning at provisioning/service.rs:428-434,455-474 passes the same one-shot backend into both wrapper and installer. Comparing provisioning/snapshot_preparer.rs at parent and reviewed revision shows inspect, refuse_copied_supervisor, payload preparation, skipped AttachSupervisor/EnableLinger, degraded-outcome refusal and final finish_snapshot_install are preserved; reviewed lines 48-61 return facts only after that cleanup guard. SPEC_impl.md, Tensorlake prepared snapshots: 'It owns no manager, host row, delivery service or tunnel.' and 'A separate one-shot SystemBackend instance governs every preparer SSH operation, including inspection and uploads' (backticks omitted here). Suggested bucket if established: highest/security for copied identity or credential-bearing preparation. Could-be-highest: yes, but extracted paths preserve those guards. Confidence: confirmed through source comparison; no execution. proposed_drop: source refutation; no missing guard or backend mismatch found. possible_cover: none. Caveat: shared installer internals outside the extraction are interface context, not a separate whole-module review."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Tensorlake preparer wrapper preserves access selection and checkpoint guards",
+            "location": "crates/farhelm-helm/src/tensorlake/prepared.rs:36",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: considered whether the extracted Tensorlake wrapper loses the one-shot SSH selection, copied-state refusal, or credential-free checkpoint boundary. Source: prepared.rs:36-55 verifies the selected access, constructs the same gateway route, awaits prepare_tensorlake_sandbox, then calls installer.prepare. ProductionProvisioning at provisioning/service.rs:428-434,455-474 passes the same one-shot backend into both wrapper and installer. Comparing provisioning/snapshot_preparer.rs at parent and reviewed revision shows inspect, refuse_copied_supervisor, payload preparation, skipped AttachSupervisor/EnableLinger, degraded-outcome refusal and final finish_snapshot_install are preserved; reviewed lines 48-61 return facts only after that cleanup guard. SPEC_impl.md, Tensorlake prepared snapshots: 'It owns no manager, host row, delivery service or tunnel.' and 'A separate one-shot SystemBackend instance governs every preparer SSH operation, including inspection and uploads' (backticks omitted here). Suggested bucket if established: highest/security for copied identity or credential-bearing preparation. Could-be-highest: yes, but extracted paths preserve those guards. Confidence: confirmed through source comparison; no execution. proposed_drop: source refutation; no missing guard or backend mismatch found. possible_cover: none. Caveat: shared installer internals outside the extraction are interface context, not a separate whole-module review.\n\nSynthesis turn 2, cancellation and endpoint boundaries: the wrapper itself does not make preparation uncancellable. Tensorlake build.rs:2204-2219 owns preparation in a spawned registry task; an initiating waiter disappearing does not drop that task. Explicit recipe deletion sends cancellation and awaits both jobs at 1792-1812. prepare_remote:2222-2233 races cancellation against installer execution at 2385-2388; cancellation leaves no facts and cannot advance to Snapshotting at 2399. Create and ownership writes are outside that cancellable wait; run_preparation:2255-2285 retains vendor ownership and deletion then reconciles the recorded preparer at 1859-1862. This is the existing trait contract, prepared.rs:67: \"Cancellation leaves vendor cleanup to the recipe engine.\" Do not claim cancellation synchronously stops every remote descendant: cleanup belongs to the owned sandbox engine. Podman differs deliberately: build.rs:718-724 owns the job, cancel_podman:779-785 sets a flag and awaits task completion; environment/podman/build.rs:349-355 awaits the whole shared installer before checking that flag. Failure cleanup is awaited at 267-279. Its helper name/start are recorded before run at 554-565; edit_at:488-499 uses update_recipe_place_state, whose immediate transaction at tensorlake/build.rs:330-340 compares entry UUID, kind and destination. Once that state exists, store/podman.rs:215-250 blocks registry retargeting through needs_cleanup. The common installer freezes one route at snapshot_preparer.rs:75 and uses it for inspection, copied-state refusal, install actions and final cleanup. It returns PreparedInstallFacts only after finish_snapshot_install at 48-61. These checks refute a new cancellation-induced unguarded checkpoint or a mid-preparer registry retarget caused by this extraction. The earlier approved physical endpoint is a different contract: a route selected after a pre-registration retarget can still be the wrong approved machine (g020/l1); none of this validates that approval. g023/f3 is solely never-created rollback evidence and is not evidence for copied-state/credential safety. Original possible-highest copied-identity/credential consequence, exact source refutations and suggested highest bucket if established are preserved. proposed_drop remains the extraction-specific source refutation, not a claim that all earlier endpoint consent is sound. possible_cover: g020/l1 for pre-registration route consent. Confidence: confirmed source/contract analysis; no runtime execution, no new substantive finding."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Tensorlake preparer wrapper preserves access selection and checkpoint guards",
+          "location": "crates/farhelm-helm/src/tensorlake/prepared.rs:36",
+          "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: considered whether the extracted Tensorlake wrapper loses the one-shot SSH selection, copied-state refusal, or credential-free checkpoint boundary. Source: prepared.rs:36-55 verifies the selected access, constructs the same gateway route, awaits prepare_tensorlake_sandbox, then calls installer.prepare. ProductionProvisioning at provisioning/service.rs:428-434,455-474 passes the same one-shot backend into both wrapper and installer. Comparing provisioning/snapshot_preparer.rs at parent and reviewed revision shows inspect, refuse_copied_supervisor, payload preparation, skipped AttachSupervisor/EnableLinger, degraded-outcome refusal and final finish_snapshot_install are preserved; reviewed lines 48-61 return facts only after that cleanup guard. SPEC_impl.md, Tensorlake prepared snapshots: 'It owns no manager, host row, delivery service or tunnel.' and 'A separate one-shot SystemBackend instance governs every preparer SSH operation, including inspection and uploads' (backticks omitted here). Suggested bucket if established: highest/security for copied identity or credential-bearing preparation. Could-be-highest: yes, but extracted paths preserve those guards. Confidence: confirmed through source comparison; no execution. proposed_drop: source refutation; no missing guard or backend mismatch found. possible_cover: none. Caveat: shared installer internals outside the extraction are interface context, not a separate whole-module review.\n\nSynthesis turn 2, cancellation and endpoint boundaries: the wrapper itself does not make preparation uncancellable. Tensorlake build.rs:2204-2219 owns preparation in a spawned registry task; an initiating waiter disappearing does not drop that task. Explicit recipe deletion sends cancellation and awaits both jobs at 1792-1812. prepare_remote:2222-2233 races cancellation against installer execution at 2385-2388; cancellation leaves no facts and cannot advance to Snapshotting at 2399. Create and ownership writes are outside that cancellable wait; run_preparation:2255-2285 retains vendor ownership and deletion then reconciles the recorded preparer at 1859-1862. This is the existing trait contract, prepared.rs:67: \"Cancellation leaves vendor cleanup to the recipe engine.\" Do not claim cancellation synchronously stops every remote descendant: cleanup belongs to the owned sandbox engine. Podman differs deliberately: build.rs:718-724 owns the job, cancel_podman:779-785 sets a flag and awaits task completion; environment/podman/build.rs:349-355 awaits the whole shared installer before checking that flag. Failure cleanup is awaited at 267-279. Its helper name/start are recorded before run at 554-565; edit_at:488-499 uses update_recipe_place_state, whose immediate transaction at tensorlake/build.rs:330-340 compares entry UUID, kind and destination. Once that state exists, store/podman.rs:215-250 blocks registry retargeting through needs_cleanup. The common installer freezes one route at snapshot_preparer.rs:75 and uses it for inspection, copied-state refusal, install actions and final cleanup. It returns PreparedInstallFacts only after finish_snapshot_install at 48-61. These checks refute a new cancellation-induced unguarded checkpoint or a mid-preparer registry retarget caused by this extraction. The earlier approved physical endpoint is a different contract: a route selected after a pre-registration retarget can still be the wrong approved machine (g020/l1); none of this validates that approval. g023/f3 is solely never-created rollback evidence and is not evidence for copied-state/credential safety. Original possible-highest copied-identity/credential consequence, exact source refutations and suggested highest bucket if established are preserved. proposed_drop remains the extraction-specific source refutation, not a claim that all earlier endpoint consent is sound. possible_cover: g020/l1 for pre-registration route consent. Confidence: confirmed source/contract analysis; no runtime execution, no new substantive finding."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g051/findings.jsonl",
+        "id": "c3",
+        "line": 10,
+        "disposition": "under-investigation",
+        "group": "g051-c3",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-032",
+          "key": "g051/c3",
+          "latest_line": 10,
+          "recommendation": "refuted",
+          "bucket": "highest",
+          "underlying_key": "snapshot-preparer-extraction-security-guards",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The extraction preserves selected one-shot access, copied-state refusal, exclusion of attachment and credential hooks, and final cleanup before facts publication. Cancellation owns no successful checkpoint: Tensorlake reconciles its durably owned sandbox, while Podman waits between whole installer commands. None of this validates earlier physical-endpoint approval.",
+          "checks": [
+            "56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/tensorlake/prepared.rs:23-56 captures selected access, checks equality, creates the gateway route, performs login preparation and invokes the common installer. provisioning/service.rs:428-434,455-474 uses the same preparation_backend, constructed with SystemBackend::one_shot, in wrapper and installer.",
+            "The parent-to-reviewed diff of provisioning/snapshot_preparer.rs moves route/login preparation into the wrapper but leaves inspect, copied-state refusal, payload preparation, AttachSupervisor/EnableLinger exclusion, degraded-result refusal and finish_installation intact. Reviewed :48-61 returns facts only after finish_snapshot_install; :75 freezes the route for all these operations.",
+            "Same revision tensorlake/build.rs:2204-2219 owns preparation in a spawned registry task. :1792-1812 cancels and joins both task kinds; :2222-2233 and :2385-2399 make installer cancellation exit before Snapshotting; :2255-2285 retains ownership, and :1859-1862 reconciles the recorded preparer during deletion. prepared.rs:60-67 explicitly leaves vendor cleanup to the engine rather than promising immediate remote-descendant death.",
+            "Same revision tensorlake/build.rs:718-724,773-785 owns Podman work and awaits cancellation completion. environment/podman/build.rs:349-362 awaits the installer, then checks cancellation before publishing; :267-279 awaits failure cleanup. :488-499,554-565 records helper ownership against the observed place before run, with the immediate identity/destination transaction at tensorlake/build.rs:330-340. store/podman.rs:215-250 prevents later retarget while ownership exists.",
+            "Reviewed commit is in range. These are source and contract checks only. Shared installer internals beyond the preserved interface were not a new whole-module review; no runtime descendant-liveness or copied-credential observation is claimed."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:562-587 and SPEC_impl.md:6532-6583 require no copied supervisor state, no host attachment or credential delivery, one-shot preparation and final cleanup before facts. SPEC_impl.md:6010-6047 describes provider-owned cancellation/cleanup. Neither accepts a missing security guard.",
+            "TODO.md Planned is empty; plans/queue/INDEX.md has no unlanded entries. BUGS.md's escaped local SSH-helper transfer hang does not cover copied identity, credential delivery or checkpoint publication.",
+            "Searched review_feedback_queue/INDEX.md and active TRIAGE_OUTCOMES.md for preparation, copied state, identity, credentials, retargeting and checkpoint cleanup. No existing item has this extraction-specific trigger and consequence. Queue credential-retirement and browser-origin concerns differ; no alias or extension established. Archive not read.",
+            "FILTER.md excludes security and user-work loss from the potentially nearby rare-failure filters; no filter applies."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "None for the narrow extraction refutation. Earlier consent to a cold place's physical endpoint is separate g020/l1 context supplied by the owner; g023/f3 is not evidence of copied-state or credential safety and was not used here.",
+          "original_stronger_consequence": "The extracted preparer might lose one-shot SSH selection, copied-supervisor refusal or the credential-free checkpoint boundary, yielding copied identity or credential-bearing clones: highest/security if established. The cancellation follow-up preserved that concern and narrowed its proposed refutation to the extraction.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Source-preserving extraction plus producer/consumer checks, not blanket provisioning correctness. SPEC_impl.md says the preparer 'owns no manager, host row, delivery service or tunnel' and requires a separate one-shot backend for preparer SSH operations. The unchanged final guard and attachment exclusion enforce that boundary before facts return. Retain any separate pre-registration endpoint-consent finding."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-032.json",
+          "key": "g051/c3",
+          "proposal": "claim-checks/claims-032/result.json",
+          "parent_proposal": "source-refuted-extracted-preparer-security-guard-loss",
+          "final_independent_gate": "required-before-highest-security-drop",
+          "reason": "Full032 traces the same selected one-shot backend/access equality and preserved inspect/copied-state refusal, no attachment/delivery authority, final cleanup before facts. Tensorlake owns preparer cancellation/join and reconciles its durably recorded resource before deletion; Podman awaits whole commands and checks cancellation before image publication, with cleanup ownership tied to the observed place. This is the extraction boundary, not proof of immediate remote-descendant death or all installer internals. Earlier physical endpoint approval remains020l1, and023f3 is not a credential-safety proof. Preserve copied identity/credential-bearing clone hypotheses for a narrow fresh verdict."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "snapshot-preparer-extraction-security-guards",
+        "destination": null
+      }
+    },
+    {
+      "key": "g051/c4",
+      "owner": "g051",
+      "id": "c4",
+      "domain": "sandbox-build-and-tunnels",
+      "purpose": "sandbox-build-and-tunnels: crates/farhelm-helm/src/tensorlake/mod.rs, crates/farhelm-helm/src/tensorlake/build_tests.rs, crates/farhelm-helm/src/tensorlake/orphans.rs, crates/farhelm-helm/src/tensorlake/prepared.rs, crates/farhelm-helm/src/tensorlake/prepared_tests.rs, crates/farhelm-helm/src/tensorlake/tunnel_relay_tests.rs, crates/farhelm-helm/src/tensorlake/tunnels.rs, crates/farhelm-helm/src/tensorlake/build_script.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Unsupported-base regression test checks refusal before provider work",
+            "location": "crates/farhelm-helm/src/tensorlake/build_tests.rs:357",
+            "detail": "Reviewed commit: 56040bb964270bb40d191902173dbb84b3ba78fc. TLDR: considered whether cached Tensorlake artifacts let a container-only recipe start billed work, or whether the new test can pass without establishing its premise. The test saves ContainerImage, checks supports(Tensorlake) is false, verifies default state, plants and reads back a cached snapshot, invokes both ensure paths, then checks provider operations remain empty and both pending-create markers absent. Source checks: build.rs:589-590 refuses unsupported definitions before key/resource work; ensure_snapshot at 679-684 and ensure_prepared_snapshot_inner at 1739-1744 reject the frozen definition before reading/reusing caches. An already-running build may be joined by start_definition:579-580, but that does not start new unsupported work and ensure paths still refuse their unsupported frozen input. Proto recipes.rs:99-111 exhaustively admits bases by provider; serde tags at 75-92 preserve existing names despite enum renames in the other assigned fixtures. Suggested bucket if established: high for unsupported launches, no established loss/security route. Could-be-highest: no. Confidence: source-confirmed, no execution. proposed_drop: source and fixture premises refute bypass in this changed test and the fixture renames. possible_cover: none. Caveat: this is the assigned test's admission scenario, not a general audit of build.rs."
+          }
+        },
+        {
+          "line": 14,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Unsupported-base regression test checks refusal before provider work",
+            "location": "crates/farhelm-helm/src/tensorlake/build_tests.rs:357",
+            "detail": "Reviewed commit: 56040bb964270bb40d191902173dbb84b3ba78fc. TLDR: considered whether cached Tensorlake artifacts let a container-only recipe start billed work, or whether the new test can pass without establishing its premise. The test saves ContainerImage, checks supports(Tensorlake) is false, verifies default state, plants and reads back a cached snapshot, invokes both ensure paths, then checks provider operations remain empty and both pending-create markers absent. Source checks: build.rs:589-590 refuses unsupported definitions before key/resource work; ensure_snapshot at 679-684 and ensure_prepared_snapshot_inner at 1739-1744 reject the frozen definition before reading/reusing caches. An already-running build may be joined by start_definition:579-580, but that does not start new unsupported work and ensure paths still refuse their unsupported frozen input. Proto recipes.rs:99-111 exhaustively admits bases by provider; serde tags at 75-92 preserve existing names despite enum renames in the other assigned fixtures. Suggested bucket if established: high for unsupported launches, no established loss/security route. Could-be-highest: no. Confidence: source-confirmed, no execution. proposed_drop: source and fixture premises refute bypass in this changed test and the fixture renames. possible_cover: none. Caveat: this is the assigned test's admission scenario, not a general audit of build.rs.\n\nDiscovery turn 3, test-oracle check independent of production correctness: reread the full added test and fixture at pinned build_tests.rs:353-437. The artificial cached snapshot is read back before either ensure action, so the relevant cached-artifact premise is established. If ensure_snapshot lost its unsupported-base guard, the valid cached snapshot would return Ok and fail the is_err assertion; this is checked against build.rs:679-697, not inferred merely from correct production code. For the preparation path, fixture installs the API key and readable stand-in key before creating the managed recipe; provider calls would be visible in MemoryApi ops and violate the final empty-ops assertion. Therefore a later unrelated preparation error cannot silently certify the claimed no-provider-work boundary. The separate start_or_join assertion requires UnsupportedBase rather than generic Err. No distinct false-pass oracle defect established in the changed test. Original potential unsupported-launch consequence and high-if-established bucket remain preserved, could-be-highest no. proposed_drop remains source/fixture refutation. Confidence: source-only; no mutation, runtime reproduction or test execution. possible_cover: none. This is additional checking of the original candidate, not a new finding."
+          }
+        },
+        {
+          "line": 16,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Unsupported-base regression test checks refusal before provider work",
+            "location": "crates/farhelm-helm/src/tensorlake/build_tests.rs:357",
+            "detail": "Reviewed commit: 56040bb964270bb40d191902173dbb84b3ba78fc. TLDR: considered whether cached Tensorlake artifacts let a container-only recipe start billed work, or whether the new test can pass without establishing its premise. The test saves ContainerImage, checks supports(Tensorlake) is false, verifies default state, plants and reads back a cached snapshot, invokes both ensure paths, then checks provider operations remain empty and both pending-create markers absent. Source checks: build.rs:589-590 refuses unsupported definitions before key/resource work; ensure_snapshot at 679-684 and ensure_prepared_snapshot_inner at 1739-1744 reject the frozen definition before reading/reusing caches. An already-running build may be joined by start_definition:579-580, but that does not start new unsupported work and ensure paths still refuse their unsupported frozen input. Proto recipes.rs:99-111 exhaustively admits bases by provider; serde tags at 75-92 preserve existing names despite enum renames in the other assigned fixtures. Suggested bucket if established: high for unsupported launches, no established loss/security route. Could-be-highest: no. Confidence: source-confirmed, no execution. proposed_drop: source and fixture premises refute bypass in this changed test and the fixture renames. possible_cover: none. Caveat: this is the assigned test's admission scenario, not a general audit of build.rs.\n\nDiscovery turn 3, test-oracle check independent of production correctness: reread the full added test and fixture at pinned build_tests.rs:353-437. The artificial cached snapshot is read back before either ensure action, so the relevant cached-artifact premise is established. If ensure_snapshot lost its unsupported-base guard, the valid cached snapshot would return Ok and fail the is_err assertion; this is checked against build.rs:679-697, not inferred merely from correct production code. For the preparation path, fixture installs the API key and readable stand-in key before creating the managed recipe; provider calls would be visible in MemoryApi ops and violate the final empty-ops assertion. Therefore a later unrelated preparation error cannot silently certify the claimed no-provider-work boundary. The separate start_or_join assertion requires UnsupportedBase rather than generic Err. No distinct false-pass oracle defect established in the changed test. Original potential unsupported-launch consequence and high-if-established bucket remain preserved, could-be-highest no. proposed_drop remains source/fixture refutation. Confidence: source-only; no mutation, runtime reproduction or test execution. possible_cover: none. This is additional checking of the original candidate, not a new finding.\n\nDiscovery follow-up source premise settled: MemoryApi::call logs an operation before consulting failure injection at build_tests.rs:65-75, and get_sandbox/create_sandbox call it at 112-122. The preparation engine reaches get_sandbox while checking the preparer name at build.rs:1963-1965, before installer errors. Therefore the test’s empty operations assertion does observe an attempted provider access even if that access later fails; this is not an assumed successful mutation-only log. No unresolved oracle premise remains. Source analysis only; original disposition unchanged."
+          }
+        }
+      ],
+      "latest": {
+        "line": 16,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c4",
+          "state": "open",
+          "summary": "Unsupported-base regression test checks refusal before provider work",
+          "location": "crates/farhelm-helm/src/tensorlake/build_tests.rs:357",
+          "detail": "Reviewed commit: 56040bb964270bb40d191902173dbb84b3ba78fc. TLDR: considered whether cached Tensorlake artifacts let a container-only recipe start billed work, or whether the new test can pass without establishing its premise. The test saves ContainerImage, checks supports(Tensorlake) is false, verifies default state, plants and reads back a cached snapshot, invokes both ensure paths, then checks provider operations remain empty and both pending-create markers absent. Source checks: build.rs:589-590 refuses unsupported definitions before key/resource work; ensure_snapshot at 679-684 and ensure_prepared_snapshot_inner at 1739-1744 reject the frozen definition before reading/reusing caches. An already-running build may be joined by start_definition:579-580, but that does not start new unsupported work and ensure paths still refuse their unsupported frozen input. Proto recipes.rs:99-111 exhaustively admits bases by provider; serde tags at 75-92 preserve existing names despite enum renames in the other assigned fixtures. Suggested bucket if established: high for unsupported launches, no established loss/security route. Could-be-highest: no. Confidence: source-confirmed, no execution. proposed_drop: source and fixture premises refute bypass in this changed test and the fixture renames. possible_cover: none. Caveat: this is the assigned test's admission scenario, not a general audit of build.rs.\n\nDiscovery turn 3, test-oracle check independent of production correctness: reread the full added test and fixture at pinned build_tests.rs:353-437. The artificial cached snapshot is read back before either ensure action, so the relevant cached-artifact premise is established. If ensure_snapshot lost its unsupported-base guard, the valid cached snapshot would return Ok and fail the is_err assertion; this is checked against build.rs:679-697, not inferred merely from correct production code. For the preparation path, fixture installs the API key and readable stand-in key before creating the managed recipe; provider calls would be visible in MemoryApi ops and violate the final empty-ops assertion. Therefore a later unrelated preparation error cannot silently certify the claimed no-provider-work boundary. The separate start_or_join assertion requires UnsupportedBase rather than generic Err. No distinct false-pass oracle defect established in the changed test. Original potential unsupported-launch consequence and high-if-established bucket remain preserved, could-be-highest no. proposed_drop remains source/fixture refutation. Confidence: source-only; no mutation, runtime reproduction or test execution. possible_cover: none. This is additional checking of the original candidate, not a new finding.\n\nDiscovery follow-up source premise settled: MemoryApi::call logs an operation before consulting failure injection at build_tests.rs:65-75, and get_sandbox/create_sandbox call it at 112-122. The preparation engine reaches get_sandbox while checking the preparer name at build.rs:1963-1965, before installer errors. Therefore the test’s empty operations assertion does observe an attempted provider access even if that access later fails; this is not an assumed successful mutation-only log. No unresolved oracle premise remains. Source analysis only; original disposition unchanged."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g051/findings.jsonl",
+        "id": "c4",
+        "line": 16,
+        "disposition": "excluded",
+        "group": "tensorlake-unsupported-base-cache-admission-test",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-032 after inspecting it. Unsupported container bases are refused before Tensorlake cache reuse or provider work. The changed test separately establishes the cached-artifact premise and observes provider attempts, so its oracle is not justified merely by production correctness. Source refusal before cache/resource access, plus a separate check of the fixture's premises and failure sensitivity. Preserve the distinction between a correct production guard and evidence that a test catches its removal. Checked source/results: [\"56040bb964270bb40d191902173dbb84b3ba78fc:crates/farhelm-helm/src/tensorlake/build.rs:579-590 may join an existing build but otherwise refuses unsupported bases before reading keys or starting resources. :679-697 refuses the frozen unsupported base before returning a cached snapshot; :1739-1744 similarly guards preparation.\",\"Same revision tensorlake/build_tests.rs:353-407 saves ContainerImage, proves supports(Tensorlake) false, requires UnsupportedBase for start_or_join, verifies default state, plants and reads back tensorlake-built, calls both ensure paths and checks no provider calls or pending creates. Removing ensure_snapshot's guard would return the valid cached ID and fail its is_err assertion.\",\"Fixture :409-437 provides API and readable stand-in SSH keys. MemoryApi::call at :65-75 records attempts before failure injection; get_sandbox/create_sandbox at :112-122 use it. build.rs:1963-1965 reaches get_sandbox before installer execution, so a later unrelated installer failure cannot hide an attempted provider operation from empty-ops assertion.\",\"Same revision crates/farhelm-proto/src/recipes.rs:75-111 preserves historical serde tags and exhaustively maps supported providers. Reviewed commit is inside range. No test was executed and no general build-engine audit is claimed.\"] Current coverage/results: [\"Current SPEC_impl.md:6010-6047 explicitly assigns managed Ubuntu to both providers and container images to Podman; current SPEC.md:541-592 and :4806-4825 retain separate Tensorlake and container artifact paths. These support refusal, not acceptance of the suspected billed-work bypass.\",\"TODO.md Planned is empty; plans/queue/INDEX.md has no unlanded plans; BUGS.md has no unsupported-base/cache or test-oracle entry.\",\"Searched review_feedback_queue/INDEX.md and active TRIAGE_OUTCOMES.md for unsupported bases, container bases, cached snapshots, provider work and preparation. Existing snapshot cleanup and unrelated test-oracle entries do not match this trigger/consequence/scope. No alias or useful extension established. Archive not read.\",\"FILTER.md is not invoked; source and independent oracle analysis refute the candidate.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Cached Tensorlake artifacts might let a container-only recipe start unsupported billed work; the new regression might fail to establish its premise or pass after a meaningful guard regression. Original suggested bucket high, with no established security or user-work loss route.\"; \"None for the named admission scenario or attempt-log oracle. Joining already-running work is distinct from starting new unsupported billed work.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g051/c4",
+        "line": 16,
+        "disposition": "excluded",
+        "group": "tensorlake-unsupported-base-cache-admission-test",
+        "bucket": "high",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-032 after inspecting it. Unsupported container bases are refused before Tensorlake cache reuse or provider work. The changed test separately establishes the cached-artifact premise and observes provider attempts, so its oracle is not justified merely by production correctness. Source refusal before cache/resource access, plus a separate check of the fixture's premises and failure sensitivity. Preserve the distinction between a correct production guard and evidence that a test catches its removal. Checked source/results: [\"56040bb964270bb40d191902173dbb84b3ba78fc:crates/farhelm-helm/src/tensorlake/build.rs:579-590 may join an existing build but otherwise refuses unsupported bases before reading keys or starting resources. :679-697 refuses the frozen unsupported base before returning a cached snapshot; :1739-1744 similarly guards preparation.\",\"Same revision tensorlake/build_tests.rs:353-407 saves ContainerImage, proves supports(Tensorlake) false, requires UnsupportedBase for start_or_join, verifies default state, plants and reads back tensorlake-built, calls both ensure paths and checks no provider calls or pending creates. Removing ensure_snapshot's guard would return the valid cached ID and fail its is_err assertion.\",\"Fixture :409-437 provides API and readable stand-in SSH keys. MemoryApi::call at :65-75 records attempts before failure injection; get_sandbox/create_sandbox at :112-122 use it. build.rs:1963-1965 reaches get_sandbox before installer execution, so a later unrelated installer failure cannot hide an attempted provider operation from empty-ops assertion.\",\"Same revision crates/farhelm-proto/src/recipes.rs:75-111 preserves historical serde tags and exhaustively maps supported providers. Reviewed commit is inside range. No test was executed and no general build-engine audit is claimed.\"] Current coverage/results: [\"Current SPEC_impl.md:6010-6047 explicitly assigns managed Ubuntu to both providers and container images to Podman; current SPEC.md:541-592 and :4806-4825 retain separate Tensorlake and container artifact paths. These support refusal, not acceptance of the suspected billed-work bypass.\",\"TODO.md Planned is empty; plans/queue/INDEX.md has no unlanded plans; BUGS.md has no unsupported-base/cache or test-oracle entry.\",\"Searched review_feedback_queue/INDEX.md and active TRIAGE_OUTCOMES.md for unsupported bases, container bases, cached snapshots, provider work and preparation. Existing snapshot cleanup and unrelated test-oracle entries do not match this trigger/consequence/scope. No alias or useful extension established. Archive not read.\",\"FILTER.md is not invoked; source and independent oracle analysis refute the candidate.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Cached Tensorlake artifacts might let a container-only recipe start unsupported billed work; the new regression might fail to establish its premise or pass after a meaningful guard regression. Original suggested bucket high, with no established security or user-work loss route.\"; \"None for the named admission scenario or attempt-log oracle. Joining already-running work is distinct from starting new unsupported billed work.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-032",
+          "key": "g051/c4",
+          "latest_line": 16,
+          "recommendation": "refuted",
+          "bucket": "high",
+          "underlying_key": "tensorlake-unsupported-base-cache-admission-test",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Unsupported container bases are refused before Tensorlake cache reuse or provider work. The changed test separately establishes the cached-artifact premise and observes provider attempts, so its oracle is not justified merely by production correctness.",
+          "checks": [
+            "56040bb964270bb40d191902173dbb84b3ba78fc:crates/farhelm-helm/src/tensorlake/build.rs:579-590 may join an existing build but otherwise refuses unsupported bases before reading keys or starting resources. :679-697 refuses the frozen unsupported base before returning a cached snapshot; :1739-1744 similarly guards preparation.",
+            "Same revision tensorlake/build_tests.rs:353-407 saves ContainerImage, proves supports(Tensorlake) false, requires UnsupportedBase for start_or_join, verifies default state, plants and reads back tensorlake-built, calls both ensure paths and checks no provider calls or pending creates. Removing ensure_snapshot's guard would return the valid cached ID and fail its is_err assertion.",
+            "Fixture :409-437 provides API and readable stand-in SSH keys. MemoryApi::call at :65-75 records attempts before failure injection; get_sandbox/create_sandbox at :112-122 use it. build.rs:1963-1965 reaches get_sandbox before installer execution, so a later unrelated installer failure cannot hide an attempted provider operation from empty-ops assertion.",
+            "Same revision crates/farhelm-proto/src/recipes.rs:75-111 preserves historical serde tags and exhaustively maps supported providers. Reviewed commit is inside range. No test was executed and no general build-engine audit is claimed."
+          ],
+          "coverage_checked": [
+            "Current SPEC_impl.md:6010-6047 explicitly assigns managed Ubuntu to both providers and container images to Podman; current SPEC.md:541-592 and :4806-4825 retain separate Tensorlake and container artifact paths. These support refusal, not acceptance of the suspected billed-work bypass.",
+            "TODO.md Planned is empty; plans/queue/INDEX.md has no unlanded plans; BUGS.md has no unsupported-base/cache or test-oracle entry.",
+            "Searched review_feedback_queue/INDEX.md and active TRIAGE_OUTCOMES.md for unsupported bases, container bases, cached snapshots, provider work and preparation. Existing snapshot cleanup and unrelated test-oracle entries do not match this trigger/consequence/scope. No alias or useful extension established. Archive not read.",
+            "FILTER.md is not invoked; source and independent oracle analysis refute the candidate."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "None for the named admission scenario or attempt-log oracle. Joining already-running work is distinct from starting new unsupported billed work.",
+          "original_stronger_consequence": "Cached Tensorlake artifacts might let a container-only recipe start unsupported billed work; the new regression might fail to establish its premise or pass after a meaningful guard regression. Original suggested bucket high, with no established security or user-work loss route.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refusal before cache/resource access, plus a separate check of the fixture's premises and failure sensitivity. Preserve the distinction between a correct production guard and evidence that a test catches its removal."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "tensorlake-unsupported-base-cache-admission-test",
+        "destination": null
+      }
+    },
+    {
+      "key": "g051/c5",
+      "owner": "g051",
+      "id": "c5",
+      "domain": "sandbox-build-and-tunnels",
+      "purpose": "sandbox-build-and-tunnels: crates/farhelm-helm/src/tensorlake/mod.rs, crates/farhelm-helm/src/tensorlake/build_tests.rs, crates/farhelm-helm/src/tensorlake/orphans.rs, crates/farhelm-helm/src/tensorlake/prepared.rs, crates/farhelm-helm/src/tensorlake/prepared_tests.rs, crates/farhelm-helm/src/tensorlake/tunnel_relay_tests.rs, crates/farhelm-helm/src/tensorlake/tunnels.rs, crates/farhelm-helm/src/tensorlake/build_script.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c5",
+            "state": "open",
+            "summary": "Proxy preservation uses fixed names and the test isolates only child environments",
+            "location": "crates/farhelm-helm/src/tensorlake/build_script.rs:151",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: considered whether package-install proxy support puts proxy passwords in privileged command arguments, modifies the test process environment, or tests only script text. PACKAGE_PROXY_ENV at build_script.rs:35 is a fixed allowlist; package commands at 151-152 pass only those names through sudo --preserve-env. The changed executable fixture at 415-574 creates a private bin directory, clears only Command's child environment, includes awkward/empty/missing proxy values, and records actual apt/dpkg argv and environments; it asserts six child events and update/install arguments. It neither changes std::env nor reaches installed sudo/apt/dpkg through its restricted PATH. Podman script at environment/podman.rs:355-368 exports actual values only into private stdin; package use is at environment/podman/build.rs:164-170. Contract: SPEC.md, Container sessions: 'Containers inherit proxy variables from the container host’s systemd user manager environment at creation.' Suggested bucket if argv leakage established: highest/security. Could-be-highest: yes for disclosed proxy credentials, but no argv leakage route exists in the changed script or inspected production caller. Confidence: source-confirmed, no execution. proposed_drop: fixed-name environment preservation and private-stdin production caller refute the considered disclosure; the fixture exercises child environments without process-global mutation. possible_cover: none. Caveat: the stand-in deliberately does not prove a real sudo authentication/policy configuration allows preservation; the source does not claim it does. Unrelated package logs and pre-existing Tensorlake diagnostic paths are not introduced by the change."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c5",
+            "state": "open",
+            "summary": "Proxy preservation uses fixed names and the test isolates only child environments",
+            "location": "crates/farhelm-helm/src/tensorlake/build_script.rs:151",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: considered whether package-install proxy support puts proxy passwords in privileged command arguments, modifies the test process environment, or tests only script text. PACKAGE_PROXY_ENV at build_script.rs:35 is a fixed allowlist; package commands at 151-152 pass only those names through sudo --preserve-env. The changed executable fixture at 415-574 creates a private bin directory, clears only Command's child environment, includes awkward/empty/missing proxy values, and records actual apt/dpkg argv and environments; it asserts six child events and update/install arguments. It neither changes std::env nor reaches installed sudo/apt/dpkg through its restricted PATH. Podman script at environment/podman.rs:355-368 exports actual values only into private stdin; package use is at environment/podman/build.rs:164-170. Contract: SPEC.md, Container sessions: 'Containers inherit proxy variables from the container host’s systemd user manager environment at creation.' Suggested bucket if argv leakage established: highest/security. Could-be-highest: yes for disclosed proxy credentials, but no argv leakage route exists in the changed script or inspected production caller. Confidence: source-confirmed, no execution. proposed_drop: fixed-name environment preservation and private-stdin production caller refute the considered disclosure; the fixture exercises child environments without process-global mutation. possible_cover: none. Caveat: the stand-in deliberately does not prove a real sudo authentication/policy configuration allows preservation; the source does not claim it does. Unrelated package logs and pre-existing Tensorlake diagnostic paths are not introduced by the change.\n\nSynthesis turn 2, script/test lifetime check: the package fixture in the assigned patch sets kill_on_drop on its child command, calls isolate_process_group, and awaits capture_child with a ten-second bound before reading events. provisioning/backend.rs:1979-2019 drains both streams with byte caps and on timeout/read error explicitly awaits terminate_child plus bounded reader joins; terminate_child at 2268-2278 kills that isolated process group and reaps the direct child. This supports the fixture timeout/resource-bound premise without running it. In production Podman, the shared package script is awaited inside the registry-owned cooperative job, with check(cancel) only between package and agent scripts at environment/podman/build.rs:162-183, so waiter cancellation is not permission to publish an unfinished layer or abandon the current mutator. These are source conclusions, not observed behavior. They do not extend the fixture to proving real sudo policy, which remains its explicit omission. The original possible-highest proxy-credential-in-argv consequence and its fixed-name/private-stdin refutation remain unchanged. No new independent script/test defect established. proposed_drop remains source refutation; possible_cover remains none for the original argv concern. Physical-route approval is upstream g020/l1 and is not attested by private stdin or this fixture."
+          }
+        },
+        {
+          "line": 15,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c5",
+            "state": "open",
+            "summary": "Proxy preservation uses fixed names and the test isolates only child environments",
+            "location": "crates/farhelm-helm/src/tensorlake/build_script.rs:151",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: considered whether package-install proxy support puts proxy passwords in privileged command arguments, modifies the test process environment, or tests only script text. PACKAGE_PROXY_ENV at build_script.rs:35 is a fixed allowlist; package commands at 151-152 pass only those names through sudo --preserve-env. The changed executable fixture at 415-574 creates a private bin directory, clears only Command's child environment, includes awkward/empty/missing proxy values, and records actual apt/dpkg argv and environments; it asserts six child events and update/install arguments. It neither changes std::env nor reaches installed sudo/apt/dpkg through its restricted PATH. Podman script at environment/podman.rs:355-368 exports actual values only into private stdin; package use is at environment/podman/build.rs:164-170. Contract: SPEC.md, Container sessions: 'Containers inherit proxy variables from the container host’s systemd user manager environment at creation.' Suggested bucket if argv leakage established: highest/security. Could-be-highest: yes for disclosed proxy credentials, but no argv leakage route exists in the changed script or inspected production caller. Confidence: source-confirmed, no execution. proposed_drop: fixed-name environment preservation and private-stdin production caller refute the considered disclosure; the fixture exercises child environments without process-global mutation. possible_cover: none. Caveat: the stand-in deliberately does not prove a real sudo authentication/policy configuration allows preservation; the source does not claim it does. Unrelated package logs and pre-existing Tensorlake diagnostic paths are not introduced by the change.\n\nSynthesis turn 2, script/test lifetime check: the package fixture in the assigned patch sets kill_on_drop on its child command, calls isolate_process_group, and awaits capture_child with a ten-second bound before reading events. provisioning/backend.rs:1979-2019 drains both streams with byte caps and on timeout/read error explicitly awaits terminate_child plus bounded reader joins; terminate_child at 2268-2278 kills that isolated process group and reaps the direct child. This supports the fixture timeout/resource-bound premise without running it. In production Podman, the shared package script is awaited inside the registry-owned cooperative job, with check(cancel) only between package and agent scripts at environment/podman/build.rs:162-183, so waiter cancellation is not permission to publish an unfinished layer or abandon the current mutator. These are source conclusions, not observed behavior. They do not extend the fixture to proving real sudo policy, which remains its explicit omission. The original possible-highest proxy-credential-in-argv consequence and its fixed-name/private-stdin refutation remain unchanged. No new independent script/test defect established. proposed_drop remains source refutation; possible_cover remains none for the original argv concern. Physical-route approval is upstream g020/l1 and is not attested by private stdin or this fixture.\n\nDiscovery turn 3, separate oracle/documentation check: reread the complete new executable fixture at build_script.rs:412-576 without treating production correctness as evidence of test sensitivity. Omitting the preservation option would leave preserve empty in the stand-in and fail the expected-name assertion at 553-554; altered/missing/empty proxy values are separately compared in apt/dpkg events at 556, against a map whose empty HTTP_PROXY and absent no_proxy premises are asserted before spawn at 495. The event count and dpkg/update/install identities at 541-574 prevent silent child skipping from satisfying an environment-only oracle. Thus no distinct false-pass mechanism was established for those claimed observations. The documentation at 425-427 expressly excludes authentication/privilege-policy emulation; the test remains limited to an env-resetting child boundary rather than a real sudo-policy oracle. This does not erase that limitation, and it is not being dropped on production correctness. Original proxy-password-in-argv consequence and its highest-if-established assessment stay preserved. proposed_drop remains the exact source/fixture refutation already recorded; no new defect, no new ID, no execution."
+          }
+        }
+      ],
+      "latest": {
+        "line": 15,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c5",
+          "state": "open",
+          "summary": "Proxy preservation uses fixed names and the test isolates only child environments",
+          "location": "crates/farhelm-helm/src/tensorlake/build_script.rs:151",
+          "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: considered whether package-install proxy support puts proxy passwords in privileged command arguments, modifies the test process environment, or tests only script text. PACKAGE_PROXY_ENV at build_script.rs:35 is a fixed allowlist; package commands at 151-152 pass only those names through sudo --preserve-env. The changed executable fixture at 415-574 creates a private bin directory, clears only Command's child environment, includes awkward/empty/missing proxy values, and records actual apt/dpkg argv and environments; it asserts six child events and update/install arguments. It neither changes std::env nor reaches installed sudo/apt/dpkg through its restricted PATH. Podman script at environment/podman.rs:355-368 exports actual values only into private stdin; package use is at environment/podman/build.rs:164-170. Contract: SPEC.md, Container sessions: 'Containers inherit proxy variables from the container host’s systemd user manager environment at creation.' Suggested bucket if argv leakage established: highest/security. Could-be-highest: yes for disclosed proxy credentials, but no argv leakage route exists in the changed script or inspected production caller. Confidence: source-confirmed, no execution. proposed_drop: fixed-name environment preservation and private-stdin production caller refute the considered disclosure; the fixture exercises child environments without process-global mutation. possible_cover: none. Caveat: the stand-in deliberately does not prove a real sudo authentication/policy configuration allows preservation; the source does not claim it does. Unrelated package logs and pre-existing Tensorlake diagnostic paths are not introduced by the change.\n\nSynthesis turn 2, script/test lifetime check: the package fixture in the assigned patch sets kill_on_drop on its child command, calls isolate_process_group, and awaits capture_child with a ten-second bound before reading events. provisioning/backend.rs:1979-2019 drains both streams with byte caps and on timeout/read error explicitly awaits terminate_child plus bounded reader joins; terminate_child at 2268-2278 kills that isolated process group and reaps the direct child. This supports the fixture timeout/resource-bound premise without running it. In production Podman, the shared package script is awaited inside the registry-owned cooperative job, with check(cancel) only between package and agent scripts at environment/podman/build.rs:162-183, so waiter cancellation is not permission to publish an unfinished layer or abandon the current mutator. These are source conclusions, not observed behavior. They do not extend the fixture to proving real sudo policy, which remains its explicit omission. The original possible-highest proxy-credential-in-argv consequence and its fixed-name/private-stdin refutation remain unchanged. No new independent script/test defect established. proposed_drop remains source refutation; possible_cover remains none for the original argv concern. Physical-route approval is upstream g020/l1 and is not attested by private stdin or this fixture.\n\nDiscovery turn 3, separate oracle/documentation check: reread the complete new executable fixture at build_script.rs:412-576 without treating production correctness as evidence of test sensitivity. Omitting the preservation option would leave preserve empty in the stand-in and fail the expected-name assertion at 553-554; altered/missing/empty proxy values are separately compared in apt/dpkg events at 556, against a map whose empty HTTP_PROXY and absent no_proxy premises are asserted before spawn at 495. The event count and dpkg/update/install identities at 541-574 prevent silent child skipping from satisfying an environment-only oracle. Thus no distinct false-pass mechanism was established for those claimed observations. The documentation at 425-427 expressly excludes authentication/privilege-policy emulation; the test remains limited to an env-resetting child boundary rather than a real sudo-policy oracle. This does not erase that limitation, and it is not being dropped on production correctness. Original proxy-password-in-argv consequence and its highest-if-established assessment stay preserved. proposed_drop remains the exact source/fixture refutation already recorded; no new defect, no new ID, no execution."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g051/findings.jsonl",
+        "id": "c5",
+        "line": 15,
+        "disposition": "under-investigation",
+        "group": "g051-c5",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-032",
+          "key": "g051/c5",
+          "latest_line": 15,
+          "recommendation": "refuted",
+          "bucket": "highest",
+          "underlying_key": "package-proxy-fixed-name-preservation-and-private-stdin",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The changed package commands pass fixed environment variable names to sudo, not proxy values. The Podman caller passes values through private stdin. The executable fixture alters only its child's environment and observes independent privileged-command events. Its explicit limitation remains: it does not prove installed sudo policy permits preservation.",
+          "checks": [
+            "56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/tensorlake/build_script.rs:33-35 defines a fixed ten-name allowlist; :143-157 passes only that list in --preserve-env and fixed package controls. environment/podman.rs:355-368 prepends proxy exports to a script sent as command_with_input stdin; environment/podman/build.rs:164-171 invokes the shared package script.",
+            "Same revision build_script.rs:412-576 executes an env-resetting Python stand-in from a private PATH. :513-516 uses Command.env_clear/envs, not process-global mutation. :495 proves empty and absent values; :541-575 requires six events, fixed preservation names, exact child proxy maps, no unrelated variable, argv without marker and dpkg/update/install identities. Omitting preservation leaves preserve empty and fails :554; losing values fails :556. This checks oracle sensitivity separately from production correctness.",
+            "Same revision build_script.rs:425-427 expressly excludes sudo authentication/privilege policy. :520-534 sets kill_on_drop, isolates a group and awaits capture_child with a ten-second bound. provisioning/backend.rs:1979-2019 kills/reaps and joins bounded readers on timeout/read failure; :2268-2278 targets the isolated group. No cancellation-wide descendant-death claim follows from that timeout path.",
+            "Same revision environment/podman/build.rs:162-183 awaits each command and checks cancellation between commands; registry ownership/cancellation at tensorlake/build.rs:718-724,773-785 prevents waiter disappearance from publishing unfinished layers. Reviewed commit is in range. No execution."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:4877-4883 and SPEC_impl.md:6082-6085 require deterministic inheritance from the place host's user-manager environment. They do not accept proxy values in argv or prove real sudo policy.",
+            "TODO.md Planned is empty; plans/queue/INDEX.md contains no unlanded plans; BUGS.md's escaped SSH-helper output hang does not cover privileged proxy argv disclosure or this fixture.",
+            "Searched review_feedback_queue/INDEX.md and active TRIAGE_OUTCOMES.md for proxies, passwords, argv/command disclosure and preparation. Existing privacy-fixture URL-check findings concern repository guard parsing, not package proxy transport. No exact item, alias or extension established. Archive not read.",
+            "FILTER.md has no applicable security-disclosure filter. This recommendation uses exact source/fixture refutation, not rarity or production correctness alone."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No missing premise for the changed commands' fixed-name/private-stdin transport or the named fixture observations. Actual installed sudo policy remains deliberately untested. Unrelated package log disclosure, pre-existing Tensorlake diagnostics, and earlier physical-route consent are not refuted by this result.",
+          "original_stronger_consequence": "Proxy credentials might appear in privileged process arguments (highest/security if established); the executable test might mutate the running test process environment or provide only a textual/insensitive oracle. The history preserves real-sudo-policy and unrelated-log limitations throughout.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Fixed-name sudo environment preservation and the inspected Podman private-stdin caller refute the original argv disclosure route. The fixture's own reset and event assertions refute the separate claimed environment-mutation/text-only oracle concerns. Do not promote its stand-in into a real sudo-policy guarantee or extend the drop to package logs, older diagnostics or upstream endpoint consent."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-032.json",
+          "key": "g051/c5",
+          "proposal": "claim-checks/claims-032/result.json",
+          "parent_proposal": "source-refuted-proxy-value-argv-and-test-global-environment-mutation",
+          "final_independent_gate": "required-before-highest-credential-drop",
+          "reason": "Full032 fixed ten environment variable names, rather than values, are passed to sudo; Podman values travel in private script stdin. The env-resetting stand-in uses child-only env_clear/envs and independently observes six privileged events, exact proxy maps, absent unrelated names and value-free argv. This directly supports oracle sensitivity rather than relying on correct production code. Real sudo policy/authentication is explicitly outside the fixture, as are package logs, older Tensorlake diagnostics and earlier physical-route consent. Bounded timeout kill/reap does not establish every cancellation descendant lifetime. Preserve the original proxy-secret disclosure and test-oracle concerns for the fresh gate."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "package-proxy-fixed-name-preservation-and-private-stdin",
+        "destination": null
+      }
+    },
+    {
+      "key": "g051/c6",
+      "owner": "g051",
+      "id": "c6",
+      "domain": "sandbox-build-and-tunnels",
+      "purpose": "sandbox-build-and-tunnels: crates/farhelm-helm/src/tensorlake/mod.rs, crates/farhelm-helm/src/tensorlake/build_tests.rs, crates/farhelm-helm/src/tensorlake/orphans.rs, crates/farhelm-helm/src/tensorlake/prepared.rs, crates/farhelm-helm/src/tensorlake/prepared_tests.rs, crates/farhelm-helm/src/tensorlake/tunnel_relay_tests.rs, crates/farhelm-helm/src/tensorlake/tunnels.rs, crates/farhelm-helm/src/tensorlake/build_script.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c6",
+            "state": "open",
+            "summary": "Readiness waiter is bounded and leaves prepared clones unrepaired",
+            "location": "crates/farhelm-helm/src/tensorlake/build_script.rs:80",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: considered whether a container marked Running is admitted before its user manager starts, or whether the new waiter repairs a broken prepared image and masks missing boot preparation. build_script.rs:80-92 queries the intended user's systemctl --user through XDG_RUNTIME_DIR and returns HOME only for running/degraded; it performs no service mutation and returns failure after its poll. provisioning/tensorlake_backend.rs:14-25 keeps logind/linger mutation in the ordinary preparation prefix, and prepare_sandbox:98-126 bounds the whole command to 90 seconds and validates absolute HOME. The final Podman clone path at environment/podman.rs:1197-1205 gives the read-only waiter a 45-second execution bound before proxy installation and supervisor restart. Thus an individually blocked systemctl is also bounded by callers. Contract: SPEC_impl.md, Podman places, creation and images: 'Preparation uses the common installer and login-manager/linger setup.'; prepared clone readiness must preserve the resulting boot proof rather than create it. Suggested bucket if established: high/material launch failure. Could-be-highest: no established loss/security route. Confidence: source-confirmed, no execution. proposed_drop: source refutation; read-only readiness and external execution bounds are present in both callers. possible_cover: none. Caveat: no timing claim was observed on a real systemd container."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c6",
+            "state": "open",
+            "summary": "Readiness waiter is bounded and leaves prepared clones unrepaired",
+            "location": "crates/farhelm-helm/src/tensorlake/build_script.rs:80",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: considered whether a container marked Running is admitted before its user manager starts, or whether the new waiter repairs a broken prepared image and masks missing boot preparation. build_script.rs:80-92 queries the intended user's systemctl --user through XDG_RUNTIME_DIR and returns HOME only for running/degraded; it performs no service mutation and returns failure after its poll. provisioning/tensorlake_backend.rs:14-25 keeps logind/linger mutation in the ordinary preparation prefix, and prepare_sandbox:98-126 bounds the whole command to 90 seconds and validates absolute HOME. The final Podman clone path at environment/podman.rs:1197-1205 gives the read-only waiter a 45-second execution bound before proxy installation and supervisor restart. Thus an individually blocked systemctl is also bounded by callers. Contract: SPEC_impl.md, Podman places, creation and images: 'Preparation uses the common installer and login-manager/linger setup.'; prepared clone readiness must preserve the resulting boot proof rather than create it. Suggested bucket if established: high/material launch failure. Could-be-highest: no established loss/security route. Confidence: source-confirmed, no execution. proposed_drop: source refutation; read-only readiness and external execution bounds are present in both callers. possible_cover: none. Caveat: no timing claim was observed on a real systemd container.\n\nSynthesis turn 2: external execution bounds apply while these calls are awaited, not as a blanket cancellation guarantee. SystemBackend::run_shell at provisioning/backend.rs:911-939 sets child kill_on_drop, isolates its process group and awaits bounded capture_child; explicit timeout/read failure follows the group-kill/reap path at 1995-2017. Tensorlake recipe deletion can cancel the enclosing prepare future, after which the engine retains and reconciles its vendor sandbox (c3 synthesis source refs); Podman recipe deletion waits for the running installer command and checks cancellation between commands. The assigned read-only waiter cannot independently publish PreparedInstallFacts or a checkpoint. Therefore no new cancellation exception to the stated read-only-readiness refutation was found. Its HOME output is validated by prepare_sandbox:118-126; Podman image preparation additionally compares HOME to the observed login in environment/podman/build.rs:106-113. No runtime timing or descendant-liveness claim was observed. Original high launch-availability suspicion, could-be-highest no, proposed-drop source refutation and possible_cover none remain unchanged; earlier physical-route consent is outside this readiness guarantee."
+          }
+        }
+      ],
+      "latest": {
+        "line": 12,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c6",
+          "state": "open",
+          "summary": "Readiness waiter is bounded and leaves prepared clones unrepaired",
+          "location": "crates/farhelm-helm/src/tensorlake/build_script.rs:80",
+          "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: considered whether a container marked Running is admitted before its user manager starts, or whether the new waiter repairs a broken prepared image and masks missing boot preparation. build_script.rs:80-92 queries the intended user's systemctl --user through XDG_RUNTIME_DIR and returns HOME only for running/degraded; it performs no service mutation and returns failure after its poll. provisioning/tensorlake_backend.rs:14-25 keeps logind/linger mutation in the ordinary preparation prefix, and prepare_sandbox:98-126 bounds the whole command to 90 seconds and validates absolute HOME. The final Podman clone path at environment/podman.rs:1197-1205 gives the read-only waiter a 45-second execution bound before proxy installation and supervisor restart. Thus an individually blocked systemctl is also bounded by callers. Contract: SPEC_impl.md, Podman places, creation and images: 'Preparation uses the common installer and login-manager/linger setup.'; prepared clone readiness must preserve the resulting boot proof rather than create it. Suggested bucket if established: high/material launch failure. Could-be-highest: no established loss/security route. Confidence: source-confirmed, no execution. proposed_drop: source refutation; read-only readiness and external execution bounds are present in both callers. possible_cover: none. Caveat: no timing claim was observed on a real systemd container.\n\nSynthesis turn 2: external execution bounds apply while these calls are awaited, not as a blanket cancellation guarantee. SystemBackend::run_shell at provisioning/backend.rs:911-939 sets child kill_on_drop, isolates its process group and awaits bounded capture_child; explicit timeout/read failure follows the group-kill/reap path at 1995-2017. Tensorlake recipe deletion can cancel the enclosing prepare future, after which the engine retains and reconciles its vendor sandbox (c3 synthesis source refs); Podman recipe deletion waits for the running installer command and checks cancellation between commands. The assigned read-only waiter cannot independently publish PreparedInstallFacts or a checkpoint. Therefore no new cancellation exception to the stated read-only-readiness refutation was found. Its HOME output is validated by prepare_sandbox:118-126; Podman image preparation additionally compares HOME to the observed login in environment/podman/build.rs:106-113. No runtime timing or descendant-liveness claim was observed. Original high launch-availability suspicion, could-be-highest no, proposed-drop source refutation and possible_cover none remain unchanged; earlier physical-route consent is outside this readiness guarantee."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g051/findings.jsonl",
+        "id": "c6",
+        "line": 12,
+        "disposition": "excluded",
+        "group": "prepared-clone-read-only-user-manager-readiness",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-032 after inspecting it. The new readiness waiter queries the intended user's bus and accepts only running/degraded. It cannot repair boot preparation, and both inspected callers impose whole-command bounds. These bounds are not a blanket guarantee about cancellation or remote descendants. Source refutation confined to read-only readiness, intended-user bus selection, HOME validation and explicit execution bounds in the two named callers. Keep runtime timing and remote-descendant behavior unobserved rather than inferring them from the timeout implementation. Checked source/results: [\"56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/tensorlake/build_script.rs:74-92 runs id/systemctl queries, returns HOME only for running/degraded and fails after the nominal poll; no service mutation occurs there.\",\"Same revision provisioning/tensorlake_backend.rs:14-25 retains logind unmask/start and linger setup in ordinary preparation before the shared waiter. :98-128 executes with a 90-second bound and validates absolute HOME. environment/podman.rs:1192-1207 gives clone readiness 45 seconds before proxy installation and supervisor admission work. environment/podman/build.rs:106-113 additionally compares ordinary preparation HOME to the observed login home.\",\"Same revision provisioning/backend.rs:911-939 isolates and captures a kill_on_drop child; :1992-2019 explicitly kills/reaps on timeout/read error. Dropping a caller is a different path. tensorlake/build.rs:2204-2233,2385-2399 owns/cancels preparation before facts and checkpoint advancement, with vendor ownership cleanup at :1859-1862. Podman awaits the installer then checks cancellation at environment/podman/build.rs:349-362.\",\"Reviewed commit is in range. No real systemd timing, cancellation liveness or descendant-liveness observation is claimed. The read-only waiter itself publishes neither PreparedInstallFacts nor a checkpoint.\"] Current coverage/results: [\"Current SPEC.md:198-203 requires ordinary Tensorlake login-manager/linger preparation. SPEC.md:4806-4825 requires systemd and the container user's manager; SPEC_impl.md:6058-6080 requires common installer/login-manager preparation and boot-enabled clean images. None accepts silently repairing an invalid prepared clone.\",\"TODO.md Planned is empty; plans/queue/INDEX.md has no unlanded plans; BUGS.md covers a different transfer-output lifetime.\",\"Searched review_feedback_queue/INDEX.md and active TRIAGE_OUTCOMES.md for prepared-clone readiness, user-manager startup, preparation and stale artifacts. No matching trigger/consequence/scope item or exact alias found. Archive not read.\",\"FILTER.md's hung-systemd-manager rule is not applied: this candidate concerns clone admission and boot proof, and source already supplies the inspected execution bounds.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Running could be mistaken for a ready user manager, or readiness could repair a broken prepared image and mask missing boot preparation, materially breaking launches. Original bucket high; the supplied history establishes no security or user-owned-work loss route.\"; \"None for the read-only waiter and awaited-call bounds. These do not establish all cancellation behavior or authorize a physical endpoint selected after an earlier approval.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g051/c6",
+        "line": 12,
+        "disposition": "excluded",
+        "group": "prepared-clone-read-only-user-manager-readiness",
+        "bucket": "high",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-032 after inspecting it. The new readiness waiter queries the intended user's bus and accepts only running/degraded. It cannot repair boot preparation, and both inspected callers impose whole-command bounds. These bounds are not a blanket guarantee about cancellation or remote descendants. Source refutation confined to read-only readiness, intended-user bus selection, HOME validation and explicit execution bounds in the two named callers. Keep runtime timing and remote-descendant behavior unobserved rather than inferring them from the timeout implementation. Checked source/results: [\"56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/tensorlake/build_script.rs:74-92 runs id/systemctl queries, returns HOME only for running/degraded and fails after the nominal poll; no service mutation occurs there.\",\"Same revision provisioning/tensorlake_backend.rs:14-25 retains logind unmask/start and linger setup in ordinary preparation before the shared waiter. :98-128 executes with a 90-second bound and validates absolute HOME. environment/podman.rs:1192-1207 gives clone readiness 45 seconds before proxy installation and supervisor admission work. environment/podman/build.rs:106-113 additionally compares ordinary preparation HOME to the observed login home.\",\"Same revision provisioning/backend.rs:911-939 isolates and captures a kill_on_drop child; :1992-2019 explicitly kills/reaps on timeout/read error. Dropping a caller is a different path. tensorlake/build.rs:2204-2233,2385-2399 owns/cancels preparation before facts and checkpoint advancement, with vendor ownership cleanup at :1859-1862. Podman awaits the installer then checks cancellation at environment/podman/build.rs:349-362.\",\"Reviewed commit is in range. No real systemd timing, cancellation liveness or descendant-liveness observation is claimed. The read-only waiter itself publishes neither PreparedInstallFacts nor a checkpoint.\"] Current coverage/results: [\"Current SPEC.md:198-203 requires ordinary Tensorlake login-manager/linger preparation. SPEC.md:4806-4825 requires systemd and the container user's manager; SPEC_impl.md:6058-6080 requires common installer/login-manager preparation and boot-enabled clean images. None accepts silently repairing an invalid prepared clone.\",\"TODO.md Planned is empty; plans/queue/INDEX.md has no unlanded plans; BUGS.md covers a different transfer-output lifetime.\",\"Searched review_feedback_queue/INDEX.md and active TRIAGE_OUTCOMES.md for prepared-clone readiness, user-manager startup, preparation and stale artifacts. No matching trigger/consequence/scope item or exact alias found. Archive not read.\",\"FILTER.md's hung-systemd-manager rule is not applied: this candidate concerns clone admission and boot proof, and source already supplies the inspected execution bounds.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Running could be mistaken for a ready user manager, or readiness could repair a broken prepared image and mask missing boot preparation, materially breaking launches. Original bucket high; the supplied history establishes no security or user-owned-work loss route.\"; \"None for the read-only waiter and awaited-call bounds. These do not establish all cancellation behavior or authorize a physical endpoint selected after an earlier approval.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-032",
+          "key": "g051/c6",
+          "latest_line": 12,
+          "recommendation": "refuted",
+          "bucket": "high",
+          "underlying_key": "prepared-clone-read-only-user-manager-readiness",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The new readiness waiter queries the intended user's bus and accepts only running/degraded. It cannot repair boot preparation, and both inspected callers impose whole-command bounds. These bounds are not a blanket guarantee about cancellation or remote descendants.",
+          "checks": [
+            "56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/tensorlake/build_script.rs:74-92 runs id/systemctl queries, returns HOME only for running/degraded and fails after the nominal poll; no service mutation occurs there.",
+            "Same revision provisioning/tensorlake_backend.rs:14-25 retains logind unmask/start and linger setup in ordinary preparation before the shared waiter. :98-128 executes with a 90-second bound and validates absolute HOME. environment/podman.rs:1192-1207 gives clone readiness 45 seconds before proxy installation and supervisor admission work. environment/podman/build.rs:106-113 additionally compares ordinary preparation HOME to the observed login home.",
+            "Same revision provisioning/backend.rs:911-939 isolates and captures a kill_on_drop child; :1992-2019 explicitly kills/reaps on timeout/read error. Dropping a caller is a different path. tensorlake/build.rs:2204-2233,2385-2399 owns/cancels preparation before facts and checkpoint advancement, with vendor ownership cleanup at :1859-1862. Podman awaits the installer then checks cancellation at environment/podman/build.rs:349-362.",
+            "Reviewed commit is in range. No real systemd timing, cancellation liveness or descendant-liveness observation is claimed. The read-only waiter itself publishes neither PreparedInstallFacts nor a checkpoint."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:198-203 requires ordinary Tensorlake login-manager/linger preparation. SPEC.md:4806-4825 requires systemd and the container user's manager; SPEC_impl.md:6058-6080 requires common installer/login-manager preparation and boot-enabled clean images. None accepts silently repairing an invalid prepared clone.",
+            "TODO.md Planned is empty; plans/queue/INDEX.md has no unlanded plans; BUGS.md covers a different transfer-output lifetime.",
+            "Searched review_feedback_queue/INDEX.md and active TRIAGE_OUTCOMES.md for prepared-clone readiness, user-manager startup, preparation and stale artifacts. No matching trigger/consequence/scope item or exact alias found. Archive not read.",
+            "FILTER.md's hung-systemd-manager rule is not applied: this candidate concerns clone admission and boot proof, and source already supplies the inspected execution bounds."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "None for the read-only waiter and awaited-call bounds. These do not establish all cancellation behavior or authorize a physical endpoint selected after an earlier approval.",
+          "original_stronger_consequence": "Running could be mistaken for a ready user manager, or readiness could repair a broken prepared image and mask missing boot preparation, materially breaking launches. Original bucket high; the supplied history establishes no security or user-owned-work loss route.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation confined to read-only readiness, intended-user bus selection, HOME validation and explicit execution bounds in the two named callers. Keep runtime timing and remote-descendant behavior unobserved rather than inferring them from the timeout implementation."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "prepared-clone-read-only-user-manager-readiness",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete: all 11 assigned patches, covering 773 lines.\n\nNo substantive findings or unresolved leads. Six considered candidates (`c1`–`c6`) are logged with source refutations. Findings log and progress updated. No tests, reproductions, or repository changes performed."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised `c1`, `c2`, `c3`, `c5`, and `c6`, preserving original consequences and source refutations.\n\nClarified acquisition consent versus tunnel lease safety; checked preparer route binding, cancellation ownership, and script bounds. No new findings or duplication of `g020/l1`.\n\nUnresolved lead IDs: none. Source analysis only; no runtime execution."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 complete. Checked whole-range attribution, pinned code, documentation, fixture coupling, and test-oracle sensitivity. Revised `c4` and `c5` with additional source evidence.\n\nNew verified IDs: none.  \nNew unverified-after-investigation IDs: none.  \nOpen leads: none.\n\nNothing new found. No runtime execution."
+    }
+  ],
+  "progress": "Group g051: sandbox-build-and-tunnels\nState: initial review complete; returned for caller's later synthesis turn.\nTurn type/count: initial / 1. Discovery-pass count: 0 (no later-turn protocol run).\n\nCoverage: all 11 assigned patch files, all 773 assigned lines read through evidence read; 00208 split into 1-160 and 161-267. Complete inventory commits field read, excluding coverage metadata. Pinned source and governing SPEC sections consulted for ee39aeacdaccfeaa0cea25246540b20008c868f0, 56040bb964270bb40d191902173dbb84b3ba78fc and 56659839785691f76da3af5d8f51b511cff4ba8b. No unread assigned patch scope. A broad search batch clipped its output; subsequent bounded reads supplied the contracts and source used for conclusions.\n\nResult: no verified or unverified findings. Six considered candidates, c1-c6, recorded with source refutations and proposed-drop bases; c1 revised after caller lifetime analysis. No open leads. No substantive new discovery requiring another discovery pass.\n\nInterface assumptions checked: historical base serde spellings and supports decision; unsupported frozen inputs before cached-artifact reuse; identical prepared-facts fields and stale predicates; same one-shot backend for wrapper and installer; cleanup before facts publication; read-only clone waiter with external command bounds; proxy values supplied through private stdin and fixed-name sudo preservation; actual-client tunnel leases retained through serve and dropped on cancellation; peer port resolution restricted to frozen recipe destinations. Existing tests were reviewed under the supplied checklist. No runtime tests, builds, reproductions, live-install actions, repository modifications or coverage-source reads.\n\nRecord tool note: the first c1 record attempt used unsupported state closed and was rejected. It was immediately corrected to state open and recorded before further analysis or source reads. Candidates use open as the accepted event state; kind candidate and proposed_drop carry the completed rejection basis.\n\nNext action: caller may request synthesis. Durable record is findings.jsonl; no separate final report created. Private artifact prose follows scode-voice.\n\nSynthesis turn 2 in progress. Discovery passes remain 0. c1 reopened as a lead to separate physical-route authorization before acquisition from frozen tunnel destinations and lease teardown afterwards. No runtime execution; next checks are route/reference fences and preparer/script task ownership.\n\nSynthesis turn 2 complete. Turn type/count: synthesis / 2. Discovery-pass count: 0.\nDelta: c1 briefly reopened as a lead, then resolved to candidate after checking access resolution and transactional reference fences. Revised c1, c2, c3, c5 and c6 under their original IDs; preserved all original possible-highest consequences and source refutations. No new verified or unverified findings, no new candidate IDs, and no unresolved leads. c4 unchanged after interaction checks; unsupported-base admission still precedes resource work and cache use.\n\nInterface resolution: frozen tunnel destinations and actual-client lease teardown do not establish consent for the physical endpoint before acquisition. An existing environment row blocks a registry destination edit; the upstream cold-place pre-registration approval gap remains g020/l1, not duplicated here. g023/f3 is used only as no-create rollback context, never as evidence for later copied-state or credential safety. The common installer uses one captured route, and returns facts only after its checkpoint guard. Helper intent is recorded with an immediate transaction checking entry UUID/kind/destination before run; recorded helpers/resources prevent later registry retarget. Facts/freshness do not encode approval authority.\n\nCancellation checked through owners: initial request cancellation detaches registry-owned work. Tensorlake explicit deletion can cancel remote preparation and awaits task termination before recorded-resource reconciliation; no facts/snapshot publish follows cancellation. Podman deletion flags jobs and waits through each command and failure cleanup. The script fixture bounds its awaited isolated process group; production timeout/reap paths checked. No claim that capture future drop synchronously reaps all remote descendants. Readiness bounds apply to awaited commands, with vendor/helper cleanup remaining the owning engine's responsibility.\n\nSource/contract analysis only; no runtime tests, builds or reproductions. No checkout edits or live-install actions. All readily checkable premises raised for this synthesis were resolved. Assigned patch coverage remains complete (773/773 lines across 11 sources); no unread assigned scope. Next action: return delta and await caller-directed later pass.\n\nDiscovery turn 3 started. Discovery-pass count: 1. Reading supplied neighbour context before searching assigned patches for new production, test-oracle or documentation issues. No open leads carried from synthesis.\n\nDiscovery turn 3 complete. Turn type/count: discovery / 3. Discovery-pass count: 1. Result: empty; nothing new found. New verified finding IDs: none. New unverified-after-investigation IDs: none. Remaining lead IDs: none. c4 and c5 received further source/test-oracle checks under their original IDs; no candidate IDs added and no original consequence or proposed-drop basis removed.\n\nRead supplied discovery-neighbours.json in full via bounded ranges 1-60, 61-100, 101-130, 131-158 after the initial 1-150 request clipped; no neighbour records were adopted or independently reviewed outside assigned scope. Known interface findings are novelty context only. No pending named question was supplied.\n\nUseful discovery checks: whole exclusive-base/inclusive-tip path history confirms exactly the three assigned commits touch these eight files. Compared the complete small module/prepared/fixture diffs and full tunnel diff across that range, then pinned changed source and tests. Looked separately for test false-pass mechanisms, rather than inferring oracle quality from correct production behavior: cached snapshot is asserted before ensure calls; specific start refusal is required; MemoryApi logs before even failing provider reads; proxy fixture verifies named preservation, exact missing/empty/awkward values, actual child events and command identities. Rechecked documentation against the shared-readiness return/error behavior, preparer route/access contract and fixture backend coupling. No distinct test-oracle or documentation defect established. with_preparer callers inspected pass the preparer and delivery from the same injected service. Whole-range comparisons showed no additional assigned-file mutation requiring attribution or intermediate-revert handling.\n\nNo runtime tests, builds, reproductions, repository edits, live-install actions or prohibited coverage-source searches. Required patch scope remains fully read, with no unread assigned material. No new substantive discovery requiring another discovery pass. Next action: return checks/result and await caller instructions.\n"
+}

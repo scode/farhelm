@@ -1,0 +1,748 @@
+{
+  "group": {
+    "id": "g153",
+    "domain": "rust-terminal-host-regressions",
+    "purpose": "rust-terminal-host-regressions: crates/farhelm/tests/e2e/host_tabs.rs, crates/farhelm/tests/e2e/terminal_backpressure.rs, crates/farhelm/tests/e2e/terminal_backpressure/rss.rs, crates/farhelm/tests/e2e/host_creates.rs, crates/farhelm/tests/terminal_host_runtime.rs, crates/farhelm/tests/e2e/host_connection.rs, crates/farhelm/tests/e2e/old_terminals.rs; phases -async fn a_paused_flood_detaches_relative_to_the_first_pause_despite_pause_spam() {",
+    "interfaces": [
+      "g001",
+      "g005",
+      "g006",
+      "g007",
+      "g008",
+      "g009",
+      "g010",
+      "g011",
+      "g144",
+      "g145",
+      "g146",
+      "g151",
+      "g152",
+      "g154",
+      "g155",
+      "g157",
+      "g158",
+      "g159",
+      "g160",
+      "g161",
+      "g162",
+      "g163",
+      "g164",
+      "g165",
+      "g166",
+      "g167",
+      "g168",
+      "g169",
+      "g170",
+      "g171",
+      "g172",
+      "g173"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00790-000.patch",
+        "ranges": [
+          [
+            1,
+            452
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/host_tabs.rs",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,19121)",
+        "lines": 452,
+        "bytes": 19121,
+        "start": 0,
+        "end": 19121,
+        "original": "[private-run]/prep/originals/00790.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00800-001.patch",
+        "ranges": [
+          [
+            1,
+            639
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/terminal_backpressure.rs",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "-async fn a_paused_flood_detaches_relative_to_the_first_pause_despite_pause_spam() {; patch character offsets [58731,88284)",
+        "lines": 639,
+        "bytes": 29595,
+        "start": 58731,
+        "end": 88284,
+        "original": "[private-run]/prep/originals/00800.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00801-000.patch",
+        "ranges": [
+          [
+            1,
+            160
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/terminal_backpressure/rss.rs",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,6572)",
+        "lines": 160,
+        "bytes": 6572,
+        "start": 0,
+        "end": 6572,
+        "original": "[private-run]/prep/originals/00801.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00974-000.patch",
+        "ranges": [
+          [
+            1,
+            115
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/host_creates.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,5976)",
+        "lines": 115,
+        "bytes": 5976,
+        "start": 0,
+        "end": 5976,
+        "original": "[private-run]/prep/originals/00974.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00988-000.patch",
+        "ranges": [
+          [
+            1,
+            43
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/terminal_host_runtime.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,1755)",
+        "lines": 43,
+        "bytes": 1755,
+        "start": 0,
+        "end": 1755,
+        "original": "[private-run]/prep/originals/00988.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01131-000.patch",
+        "ranges": [
+          [
+            1,
+            23
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/host_tabs.rs",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,720)",
+        "lines": 23,
+        "bytes": 720,
+        "start": 0,
+        "end": 720,
+        "original": "[private-run]/prep/originals/01131.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01565-000.patch",
+        "ranges": [
+          [
+            1,
+            15
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/host_connection.rs",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,658)",
+        "lines": 15,
+        "bytes": 660,
+        "start": 0,
+        "end": 658,
+        "original": "[private-run]/prep/originals/01565.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01577-000.patch",
+        "ranges": [
+          [
+            1,
+            15
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/old_terminals.rs",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,854)",
+        "lines": 15,
+        "bytes": 854,
+        "start": 0,
+        "end": 854,
+        "original": "[private-run]/prep/originals/01577.patch"
+      }
+    ],
+    "lines": 1462,
+    "bytes": 65253
+  },
+  "records": [
+    {
+      "key": "g153/l1",
+      "owner": "g153",
+      "id": "l1",
+      "domain": "rust-terminal-host-regressions",
+      "purpose": "rust-terminal-host-regressions: crates/farhelm/tests/e2e/host_tabs.rs, crates/farhelm/tests/e2e/terminal_backpressure.rs, crates/farhelm/tests/e2e/terminal_backpressure/rss.rs, crates/farhelm/tests/e2e/host_creates.rs, crates/farhelm/tests/terminal_host_runtime.rs, crates/farhelm/tests/e2e/host_connection.rs, crates/farhelm/tests/e2e/old_terminals.rs; phases -async fn a_paused_flood_detaches_relative_to_the_first_pause_despite_pause_spam() {",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Check removed legacy-terminal coverage while legacy serving remains supported",
+            "location": "crates/farhelm/tests/e2e/host_tabs.rs:379",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: Removing mixed-session and legacy pause tests may leave promised upgrade behavior untested. Source: assigned host_tabs patch removes mixed agent/tab teardown, last-tmux-tab and index-zero tests; assigned terminal_backpressure patch removes pause ownership, pause-spam and recovery tests. SPEC.md:3013-3066 still promises old-terminal survival and bounded stall behavior at this revision. Suggested bucket: other (test coverage); could-be-highest: no established product defect. Confidence: unresolved lead, checking replacement tests and explicit documented omissions. proposed_drop: false. possible_cover: none; parent owns queue coverage. No runtime execution. Next source checks: pinned tests and SPEC_impl known gaps; determine whether deletion introduces a concrete missing regression assertion or is explicitly accepted."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Keep the shared pause ownership regressions when removing tmux tests",
+            "location": "crates/farhelm/tests/e2e/terminal_backpressure.rs:1162",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: This change removes checks that one stalled or displaced viewer cannot silence another viewer. Those protections still apply to the new terminals, but their replacement stream tests bypass the connection and ownership machinery the removed tests checked. Details: assigned 00800-001.patch:65-208 deletes a_stall_detaches_only_its_own_attachment_not_the_connections_others and a_pause_from_a_client_that_lost_a_takeover_cannot_silence_the_winner. The latter deliberately collides channel IDs on different supervisor connections and barriers after the stale pause; the former holds two independent sessions on one connection. service/connection.rs:2219-2231 still routes PauseOutput by both channel and notify.same_channel, and grid_stream.rs:98-103 explicitly shares stall attachment machinery. Replacement grid_stream/tests.rs:118-144 creates its own watch channel and GridStreamParts directly, so tests at :485-507 and :778-796 do not exercise set_attachment_paused or session attachment-map teardown. The retained connection.rs:3502-3551 test checks apply_pause_transition directly, not the ownership lookup. Targeted searches at this commit found no remaining tests for the lost-client pause/channel-collision or cross-attachment stall isolation scenarios. SPEC.md:3038-3066 promises one owner per session, no viewer slowing an unattached session, and a bounded stall detach. Suggested fix: migrate these two backend-independent integration scenarios to host/grid attachments rather than delete them with the tmux recovery tests. Suggested bucket: other (regression-test coverage loss only); confidence: confirmed by source for the test gap. could-be-highest: no established security or loss-of-work defect; current ownership code contains both required checks. proposed_drop: false. possible_cover: none; parent owns queue coverage. Caveats: no runtime tests or reproductions; this does not claim the current implementation actually misroutes a pause or over-detaches. The original lead also considered removed mixed legacy-session tests; those cover a backend removed in the following commit, unlike these shared ownership scenarios. Their disappearance is not evidence of an implementation failure."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Keep the shared pause ownership regressions when removing tmux tests",
+            "location": "crates/farhelm/tests/e2e/terminal_backpressure.rs:1376",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: This change removes checks that one stalled or displaced viewer cannot silence another viewer. Those protections still apply to the new terminals, but their replacement stream tests bypass the connection and ownership machinery the removed tests checked. Details: location is the removed parent-side test at :1376 (the stale-pause test starts at :1452); assigned 00800-001.patch:65-208 deletes a_stall_detaches_only_its_own_attachment_not_the_connections_others and a_pause_from_a_client_that_lost_a_takeover_cannot_silence_the_winner. The latter deliberately collides channel IDs on different supervisor connections and barriers after the stale pause; the former holds two independent sessions on one connection. service/connection.rs:2219-2231 still routes PauseOutput by both channel and notify.same_channel, and grid_stream.rs:98-103 explicitly shares stall attachment machinery. Replacement grid_stream/tests.rs:118-144 creates its own watch channel and GridStreamParts directly, so tests at :485-507 and :778-796 do not exercise set_attachment_paused or session attachment-map teardown. The retained connection.rs:3502-3551 test checks apply_pause_transition directly, not the ownership lookup. Targeted searches at this commit found no remaining tests for the lost-client pause/channel-collision or cross-attachment stall isolation scenarios. SPEC.md:3038-3066 promises one owner per session, no viewer slowing an unattached session, and a bounded stall detach. Suggested fix: migrate these two backend-independent integration scenarios to host/grid attachments rather than delete them with the tmux recovery tests. Suggested bucket: other (regression-test coverage loss only); confidence: confirmed by source for the test gap. could-be-highest: no established security or loss-of-work defect; current ownership code contains both required checks. proposed_drop: false. possible_cover: none; parent owns queue coverage. Caveats: no runtime tests or reproductions; this does not claim the current implementation actually misroutes a pause or over-detaches. The original lead also considered removed mixed legacy-session tests; those cover a backend removed in the following commit, unlike these shared ownership scenarios. Their disappearance is not evidence of an implementation failure."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Retain the stale-owner pause regression on terminal hosts",
+            "location": "crates/farhelm/tests/e2e/terminal_backpressure.rs:1452",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: The change removes the integration check that a displaced viewer cannot pause its replacement, even though new terminals still use the same ownership lookup. Details: removed parent-side test a_pause_from_a_client_that_lost_a_takeover_cannot_silence_the_winner starts at :1452 (assigned 00800-001.patch:153-208). It creates two supervisor connections with equal numeric channel IDs, takes the session over on the second, sends PauseOutput from the displaced first, barriers on that connection, then requires fresh echoed output on the replacement. Nothing in that scenario depends on tmux recovery. service/connection.rs:2219-2231 still requires both a.channel == channel and a.notify.same_channel(tx); deleting the latter check would now leave the removed scenario untested. The grid-stream tests create their own pause watch directly (grid_stream/tests.rs:118-144), bypassing connection identity, while connection.rs:3502-3551 tests only the transition and timeout anchor. Broad git grep for pause_output( at this revision found two surviving e2e callers, tab_lifecycle_edges.rs:614 and terminal_tabs.rs:1442; both pause a currently owned channel and do not create a cross-connection channel collision. Suggested fix: preserve this backend-independent integration test using the ordinary host/grid harness and grid text observation helpers. Contract: SPEC.md:3038-3066 limits ownership to one client and prevents a viewer from slowing a session it is not attached to. Suggested bucket: other; confidence: confirmed by source for the lost regression coverage. could-be-highest: no established security or loss-of-work defect; current implementation has both ownership checks. proposed_drop: false. possible_cover: none; parent owns queue coverage. Caveats: no execution performed; no claim that the current implementation actually misroutes a pause. Original broader consequence: both ownership and cross-attachment stall isolation appeared untested after deletion. Narrowed after source inspection: tab_lifecycle_edges.rs:535-660 retains stall-detach isolation for an agent and sibling tab, and terminal_tabs.rs:1397-1472 retains paused-tab/agent stream isolation, so no separate stall-isolation coverage finding is retained. Mixed legacy-session tests remain removed at this intermediate revision, but their disappearance alone does not establish an implementation defect; legacy serving is removed in the next assigned commit."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Check tip host-terminal tests as possible later repair of stale-owner pause coverage",
+            "location": "crates/farhelm-supervisor/src/service/core/tests/host_terminals.rs:3649",
+            "detail": "Reviewed commit for original deletion: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513; pinned tip: 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. Original consequence preserved: removal of equal-numeric-channel/different-connection stale-owner PauseOutput integration coverage, bucket other, no production authorization bug established. New source search result: tip contains host_terminals.rs:3649-3694 naming stale-owner PauseOutput, plus a barrier helper near :3368; current connection.rs:1555 still requires a.channel == channel && a.notify.same_channel(tx). This is a readily checkable possible later repair, not yet a drop. Exact pending premise: inspect full fixture and barrier to establish that the losing pause has actually been processed before fresh output is produced, identify the shipped predicate that a competing implementation would omit, and identify when this coverage arrived. Confidence: confirmed initial deletion; tip equivalence unresolved pending these reads. could-be-highest: no (test gap only). proposed_drop: false pending source validation; prior narrowing of stall-isolation half remains preserved in earlier events. possible_cover: surviving source test, no queue search. No execution performed."
+          }
+        },
+        {
+          "line": 14,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Stale-owner pause coverage lost at 647f022 is restored at f560058",
+            "location": "crates/farhelm/tests/e2e/terminal_backpressure.rs:1452",
+            "detail": "Reviewed deletion commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513; later repair commit: f560058da19e02716e6f943883a9508b447aff4e; verified surviving at pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: The initial deletion removes a useful regression check, but an equivalent host-terminal test restores it before the pinned tip. Original consequence preserved: losing the test would allow a regression in which a displaced connection pauses a replacement with the same numeric channel to go undetected; no such production defect was established. Exact sensitivity: deletion-revision service/connection.rs:2225-2230 and tip :1552-1557 select an attachment with `.find(|a| a.channel == channel && a.notify.same_channel(tx))`. Omitting `a.notify.same_channel(tx)` is a meaningful competing implementation: after takeover, the only current attachment under the session/terminal key belongs to the winner and still has channel 1, so the loser’s PauseOutput would set the winner’s pause watch. The channel-only comparison passes; the connection-identity comparison rejects it. This is separate from sibling stall isolation. Test evidence: `git log -S` identifies f560058 as the addition of core/tests/host_terminals.rs::a_pause_from_a_client_that_lost_a_takeover_cannot_silence_the_winner (:3654-3707 there; :3649-3702 at tip). GridPeer::connect creates separate duplex connections through actual handle_connection (:3248-3273 at tip); the test attaches loser and winner on channel 1, requires the loser’s TakenOver notice, and waits for winner catch-up. It then executes `loser.send(&ControlMsg::PauseOutput { channel: 1 }).await; loser.round_trip(2).await; test_host.output(b\"after the losing pause\\r\\n\");` (tip :3689-3691). Its wait requires that new text or a detach, followed by asserting no detach, so a paused winner cannot pass on pre-pause output. Processing witness verified through source, not just helper documentation: round_trip sends ListSessions and waits for its reply (tip :3365-3378); handle_connection reads successive frames in its loop and awaits handle_control (:347-359,582-583,709-718), whose PauseOutput arm awaits set_attachment_paused inline (handlers.rs:3016-3018) before the next ListSessions frame can dispatch. Thus a spawned ListSessions handler cannot produce its reply before that preceding pause has been handled. The old correct predicate alone did not refute a missing test; this later equivalent test does repair ongoing coverage. Suggested bucket: other; confidence: confirmed by source. could-be-highest: no established security or loss-of-work defect; regression-test coverage only. proposed_drop: propose dropping only the claim that stale-owner pause coverage is still missing at the pinned tip, based on the equivalent f560058 test and verified processing witness; do not erase the intermediate deletion or treat it as covered at 647f022. Parent has accepted no drop. possible_cover: later source test at the named revision, no excluded coverage search. Previous proposed narrowing preserved: retained sibling tests refute the broad claim that stall isolation is entirely untested, but never substitute for stale-owner PauseOutput authorization. No runtime execution or reproduction; all conclusions are source analysis. No unresolved premise remains for l1."
+          }
+        }
+      ],
+      "latest": {
+        "line": 14,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l1",
+          "state": "open",
+          "summary": "Stale-owner pause coverage lost at 647f022 is restored at f560058",
+          "location": "crates/farhelm/tests/e2e/terminal_backpressure.rs:1452",
+          "detail": "Reviewed deletion commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513; later repair commit: f560058da19e02716e6f943883a9508b447aff4e; verified surviving at pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: The initial deletion removes a useful regression check, but an equivalent host-terminal test restores it before the pinned tip. Original consequence preserved: losing the test would allow a regression in which a displaced connection pauses a replacement with the same numeric channel to go undetected; no such production defect was established. Exact sensitivity: deletion-revision service/connection.rs:2225-2230 and tip :1552-1557 select an attachment with `.find(|a| a.channel == channel && a.notify.same_channel(tx))`. Omitting `a.notify.same_channel(tx)` is a meaningful competing implementation: after takeover, the only current attachment under the session/terminal key belongs to the winner and still has channel 1, so the loser’s PauseOutput would set the winner’s pause watch. The channel-only comparison passes; the connection-identity comparison rejects it. This is separate from sibling stall isolation. Test evidence: `git log -S` identifies f560058 as the addition of core/tests/host_terminals.rs::a_pause_from_a_client_that_lost_a_takeover_cannot_silence_the_winner (:3654-3707 there; :3649-3702 at tip). GridPeer::connect creates separate duplex connections through actual handle_connection (:3248-3273 at tip); the test attaches loser and winner on channel 1, requires the loser’s TakenOver notice, and waits for winner catch-up. It then executes `loser.send(&ControlMsg::PauseOutput { channel: 1 }).await; loser.round_trip(2).await; test_host.output(b\"after the losing pause\\r\\n\");` (tip :3689-3691). Its wait requires that new text or a detach, followed by asserting no detach, so a paused winner cannot pass on pre-pause output. Processing witness verified through source, not just helper documentation: round_trip sends ListSessions and waits for its reply (tip :3365-3378); handle_connection reads successive frames in its loop and awaits handle_control (:347-359,582-583,709-718), whose PauseOutput arm awaits set_attachment_paused inline (handlers.rs:3016-3018) before the next ListSessions frame can dispatch. Thus a spawned ListSessions handler cannot produce its reply before that preceding pause has been handled. The old correct predicate alone did not refute a missing test; this later equivalent test does repair ongoing coverage. Suggested bucket: other; confidence: confirmed by source. could-be-highest: no established security or loss-of-work defect; regression-test coverage only. proposed_drop: propose dropping only the claim that stale-owner pause coverage is still missing at the pinned tip, based on the equivalent f560058 test and verified processing witness; do not erase the intermediate deletion or treat it as covered at 647f022. Parent has accepted no drop. possible_cover: later source test at the named revision, no excluded coverage search. Previous proposed narrowing preserved: retained sibling tests refute the broad claim that stall isolation is entirely untested, but never substitute for stale-owner PauseOutput authorization. No runtime execution or reproduction; all conclusions are source analysis. No unresolved premise remains for l1."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g153/findings.jsonl",
+        "id": "l1",
+        "line": 14,
+        "disposition": "under-investigation",
+        "group": "g153-l1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-097",
+          "key": "g153/l1",
+          "latest_line": 14,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "647f022-stale-connection-pause-oracle-restored-f560058",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "An equivalent test added before the review tip restores the equal-channel/different-connection stale-pause oracle. This refutes ongoing missing coverage, while preserving the intermediate deletion and earlier narrower stall-isolation disposition.",
+          "checks": [
+            "git log -S for the exact test name identifies deletion in 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 and restoration in f560058da19e02716e6f943883a9508b447aff4e.",
+            "At tip 00de0b6, core/tests/host_terminals.rs:3248-3273 creates separate duplex connections through actual handle_connection. :3662-3702 attaches loser/winner on channel 1, verifies TakenOver, catches winner up, sends the stale pause and barriers on the losing connection before producing new text. It requires that fresh text and no detach.",
+            "The barrier is valid by source: :3372-3378 sends ListSessions and awaits its reply; connection.rs:347-359,582-583,709-718 reads successive frames and awaits handle_control; handlers.rs:3016-3018 awaits pause inline. A later spawned listing reply cannot precede handling the preceding pause.",
+            "connection.rs:1552-1557 selects channel AND same_channel(tx). Removing connection identity would pause the winner under this fixture and prevent its new text; current correctness alone was not used as a substitute for test sensitivity.",
+            "At 647f022, tab_lifecycle_edges.rs:535-660 retains sibling stall-detach isolation and terminal_tabs.rs:1397-1472 retains paused-tab/agent output isolation. The latter's eight-second observation is not proof of a sixty-second stall interval; that separate limitation is already recorded in host-flood-stall-window-claim. No runtime run or production pause bug established."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:3011-3022 and SPEC_impl.md Grid streams retain single-client ownership and no slowing unattached work. They do not accept stale-owner pauses.",
+            "Searched TODO Planned, plans/queue, BUGS.md, INDEX/matching queue terms and active ledger for the stale-owner pause/channel-collision oracle. No exact item found; Planned is empty. The existing flood-window item covers another assertion, not stale-owner routing.",
+            "No FILTER.md rule is used. Basis is a later equivalent source test, not rarity or general subsystem coverage."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Initially both displaced-viewer pause ownership and cross-attachment stall isolation appeared untested. The latter was narrowed after retained sibling tests were read. The stale-owner oracle really disappeared at 647f022, but was restored at f560058; neither narrowing establishes or refutes a production authorization defect.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Drop only ongoing stale-owner missing-coverage applicability at the tip, subject to the parent's independent check because the oracle concerns ownership enforcement. Preserve the historical gap, all prior caveats and the narrower stall-isolation conclusion."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "647f022-stale-connection-pause-oracle-restored-f560058",
+        "destination": "trailing-647f022-stale-connection-pause-oracle-restored-f560058.md"
+      }
+    },
+    {
+      "key": "g153/c1",
+      "owner": "g153",
+      "id": "c1",
+      "domain": "rust-terminal-host-regressions",
+      "purpose": "rust-terminal-host-regressions: crates/farhelm/tests/e2e/host_tabs.rs, crates/farhelm/tests/e2e/terminal_backpressure.rs, crates/farhelm/tests/e2e/terminal_backpressure/rss.rs, crates/farhelm/tests/e2e/host_creates.rs, crates/farhelm/tests/terminal_host_runtime.rs, crates/farhelm/tests/e2e/host_connection.rs, crates/farhelm/tests/e2e/old_terminals.rs; phases -async fn a_paused_flood_detaches_relative_to_the_first_pause_despite_pause_spam() {",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Default timeouts do not shorten a remaining terminal-host budget",
+            "location": "crates/farhelm/tests/e2e/host_creates.rs:1007",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered whether replacing suite_timeouts() makes host lifecycle tests fail under shared-machine load. Refuted by parent-revision harness.rs:2482-2502: the helper changes only tmux_exchange, tmux_pane_list and sink_ready, all legacy-tmux fields removed with this commit. No host deadline is reduced by the replacements at host_creates.rs:1007,1585,1673,1811,2074. Suggested bucket: other; confidence: confirmed by source; could-be-highest: no (test budget only). proposed_drop: refuted by the helper implementation. possible_cover: none. No execution evidence or flake claim."
+          }
+        }
+      ],
+      "latest": {
+        "line": 2,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Default timeouts do not shorten a remaining terminal-host budget",
+          "location": "crates/farhelm/tests/e2e/host_creates.rs:1007",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered whether replacing suite_timeouts() makes host lifecycle tests fail under shared-machine load. Refuted by parent-revision harness.rs:2482-2502: the helper changes only tmux_exchange, tmux_pane_list and sink_ready, all legacy-tmux fields removed with this commit. No host deadline is reduced by the replacements at host_creates.rs:1007,1585,1673,1811,2074. Suggested bucket: other; confidence: confirmed by source; could-be-highest: no (test budget only). proposed_drop: refuted by the helper implementation. possible_cover: none. No execution evidence or flake claim."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g153/findings.jsonl",
+        "id": "c1",
+        "line": 2,
+        "disposition": "excluded",
+        "group": "1ed482-suite-timeout-replacement-preserves-host-budgets",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-097 after inspecting it. This is the same source-refuted timeout-helper premise as g151/c4. Only removed tmux-facing fields differed from production defaults. Source refutation; exact same-root alias g151/c4. Checked source/results: [\"At 1ed482dde220452e424973faf38a5e1318986333 parent harness.rs:2482-2503, suite_timeouts starts from default and floors only tmux_exchange, tmux_pane_list and sink_ready.\",\"The 1ed482 core.rs diff removes those fields/defaults. Replacements at host_creates call sites therefore cannot lower any surviving host budget through this helper change. No execution or actual flake evidence.\"] Current coverage/results: [\"Searched both current specs, TODO Planned, plans/queue, BUGS.md, active ledger, INDEX and matching terms for the exact helper/budget claim. No exact external coverage. Planned is empty; relevant tmux plans are landed per REPORTS.md:29-32.\",\"FILTER.md is not needed; source refutes the changed-budget premise.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Default timeout replacement might make host lifecycle tests fail under shared-machine load. No host deadline change or observed failure was established.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g153/c1",
+        "line": 2,
+        "disposition": "excluded",
+        "group": "1ed482-suite-timeout-replacement-preserves-host-budgets",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-097 after inspecting it. This is the same source-refuted timeout-helper premise as g151/c4. Only removed tmux-facing fields differed from production defaults. Source refutation; exact same-root alias g151/c4. Checked source/results: [\"At 1ed482dde220452e424973faf38a5e1318986333 parent harness.rs:2482-2503, suite_timeouts starts from default and floors only tmux_exchange, tmux_pane_list and sink_ready.\",\"The 1ed482 core.rs diff removes those fields/defaults. Replacements at host_creates call sites therefore cannot lower any surviving host budget through this helper change. No execution or actual flake evidence.\"] Current coverage/results: [\"Searched both current specs, TODO Planned, plans/queue, BUGS.md, active ledger, INDEX and matching terms for the exact helper/budget claim. No exact external coverage. Planned is empty; relevant tmux plans are landed per REPORTS.md:29-32.\",\"FILTER.md is not needed; source refutes the changed-budget premise.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Default timeout replacement might make host lifecycle tests fail under shared-machine load. No host deadline change or observed failure was established.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-097",
+          "key": "g153/c1",
+          "latest_line": 2,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "1ed482-suite-timeout-replacement-preserves-host-budgets",
+          "aliases": [
+            "g151/c4"
+          ],
+          "target_queue_file": null,
+          "why": "This is the same source-refuted timeout-helper premise as g151/c4. Only removed tmux-facing fields differed from production defaults.",
+          "checks": [
+            "At 1ed482dde220452e424973faf38a5e1318986333 parent harness.rs:2482-2503, suite_timeouts starts from default and floors only tmux_exchange, tmux_pane_list and sink_ready.",
+            "The 1ed482 core.rs diff removes those fields/defaults. Replacements at host_creates call sites therefore cannot lower any surviving host budget through this helper change. No execution or actual flake evidence."
+          ],
+          "coverage_checked": [
+            "Searched both current specs, TODO Planned, plans/queue, BUGS.md, active ledger, INDEX and matching terms for the exact helper/budget claim. No exact external coverage. Planned is empty; relevant tmux plans are landed per REPORTS.md:29-32.",
+            "FILTER.md is not needed; source refutes the changed-budget premise."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Default timeout replacement might make host lifecycle tests fail under shared-machine load. No host deadline change or observed failure was established.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation; exact same-root alias g151/c4."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "1ed482-suite-timeout-replacement-preserves-host-budgets",
+        "destination": null
+      }
+    },
+    {
+      "key": "g153/c2",
+      "owner": "g153",
+      "id": "c2",
+      "domain": "rust-terminal-host-regressions",
+      "purpose": "rust-terminal-host-regressions: crates/farhelm/tests/e2e/host_tabs.rs, crates/farhelm/tests/e2e/terminal_backpressure.rs, crates/farhelm/tests/e2e/terminal_backpressure/rss.rs, crates/farhelm/tests/e2e/host_creates.rs, crates/farhelm/tests/terminal_host_runtime.rs, crates/farhelm/tests/e2e/host_connection.rs, crates/farhelm/tests/e2e/old_terminals.rs; phases -async fn a_paused_flood_detaches_relative_to_the_first_pause_despite_pause_spam() {",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Removed stream-kind assertion follows the grid-only protocol",
+            "location": "crates/farhelm/tests/e2e/host_tabs.rs:147",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: Considered whether attach_grid can now silently accept the wrong terminal representation. Refutation: client.rs:3967-3976,4016-4025 constructs the sole TermStream representation; host_tabs.rs wait_for_grid_text still decodes Data as GridOutput and rejects malformed output. Contract: SPEC_impl.md, Grid streams: Protocol 77 removed the byte streams with the old terminals and xterm.js: every attachment’s data channel carries a grid stream, so Attach, Attached and the browser’s socket say nothing about it. The removed kind assertion referred to a protocol field that no longer exists. Suggested bucket: other; confidence: confirmed by source; could-be-highest: no (no alternative byte-stream route exists at this revision). proposed_drop: refuted by the grid-only protocol and retained decoding assertion. possible_cover: none. No execution performed."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Removed stream-kind assertion follows the grid-only protocol",
+            "location": "crates/farhelm/tests/e2e/host_tabs.rs:147",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: Considered whether attach_grid can now silently accept the wrong terminal representation. Refutation: client.rs:3967-3976,4016-4025 constructs the sole TermStream representation; host_tabs.rs:154-183 still decodes Data as GridOutput and rejects malformed output. Exact contract, SPEC_impl.md:3015-3018, Grid streams: \"Protocol 77 removed the byte streams with the old terminals and xterm.js: every attachment's data channel carries a grid stream, so `Attach`, `Attached` and the browser's socket say nothing about it, and `SessionInfo` and `TabInfo` no longer report a terminal kind.\" The removed assertion referred to a protocol field that no longer exists. Suggested bucket: other; confidence: confirmed by source; could-be-highest: no (no alternative byte-stream route at this revision). proposed_drop: refuted by the grid-only protocol and retained decoding assertion. possible_cover: none. No execution performed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Removed stream-kind assertion follows the grid-only protocol",
+          "location": "crates/farhelm/tests/e2e/host_tabs.rs:147",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: Considered whether attach_grid can now silently accept the wrong terminal representation. Refutation: client.rs:3967-3976,4016-4025 constructs the sole TermStream representation; host_tabs.rs:154-183 still decodes Data as GridOutput and rejects malformed output. Exact contract, SPEC_impl.md:3015-3018, Grid streams: \"Protocol 77 removed the byte streams with the old terminals and xterm.js: every attachment's data channel carries a grid stream, so `Attach`, `Attached` and the browser's socket say nothing about it, and `SessionInfo` and `TabInfo` no longer report a terminal kind.\" The removed assertion referred to a protocol field that no longer exists. Suggested bucket: other; confidence: confirmed by source; could-be-highest: no (no alternative byte-stream route at this revision). proposed_drop: refuted by the grid-only protocol and retained decoding assertion. possible_cover: none. No execution performed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g153/findings.jsonl",
+        "id": "c2",
+        "line": 10,
+        "disposition": "excluded",
+        "group": "f560058-grid-only-attach-removes-stream-discriminator",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-097 after inspecting it. A removed stream-kind assertion no longer names a protocol choice. Grid decoding and text/catch-up assertions remain in the helper's consumers. Source-refuted assertion-removal concern. Same API transition as g152/c1, with a distinct helper observation rather than an additional defect. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e client.rs:3967-3976,4007-4074 has one attach representation, no stream discriminator, GRID_EVENT_QUEUE and grid flow.\",\"Same revision host_tabs.rs:147-151 obtains that stream; :154-183 decodes Data as GridOutput, requires expected text and catch-up, and fails on malformed output or detachment. No alternative supported byte-stream route is selected by removing the assertion.\",\"No test execution or product stream mismatch was observed.\"] Current coverage/results: [\"Reviewed SPEC_impl.md:3015-3017 explicitly states Protocol 77 removed byte streams and terminal kinds; current Grid streams preserves that contract. SPEC.md's current terminal rules name only terminal hosts.\",\"Searched TODO Planned, plans/queue, BUGS.md, active ledger, INDEX and matching terms for removed stream-kind assertion/attach-grid coverage. No exact queue or decision item found; Planned is empty and tmux-removal plans are landed. No FILTER.md rule is used.\"] Exact cited cover: [\"f560058 SPEC_impl.md:3015-3017: every attachment's data channel carries a grid stream, so Attach, Attached and the browser's socket say nothing about it\"] Original stronger consequence and missing premise remain preserved: \"attach_grid could silently accept the wrong representation after stream_kind disappeared. The sole representation and retained decoder refute that premise.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g153/c2",
+        "line": 10,
+        "disposition": "excluded",
+        "group": "f560058-grid-only-attach-removes-stream-discriminator",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-097 after inspecting it. A removed stream-kind assertion no longer names a protocol choice. Grid decoding and text/catch-up assertions remain in the helper's consumers. Source-refuted assertion-removal concern. Same API transition as g152/c1, with a distinct helper observation rather than an additional defect. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e client.rs:3967-3976,4007-4074 has one attach representation, no stream discriminator, GRID_EVENT_QUEUE and grid flow.\",\"Same revision host_tabs.rs:147-151 obtains that stream; :154-183 decodes Data as GridOutput, requires expected text and catch-up, and fails on malformed output or detachment. No alternative supported byte-stream route is selected by removing the assertion.\",\"No test execution or product stream mismatch was observed.\"] Current coverage/results: [\"Reviewed SPEC_impl.md:3015-3017 explicitly states Protocol 77 removed byte streams and terminal kinds; current Grid streams preserves that contract. SPEC.md's current terminal rules name only terminal hosts.\",\"Searched TODO Planned, plans/queue, BUGS.md, active ledger, INDEX and matching terms for removed stream-kind assertion/attach-grid coverage. No exact queue or decision item found; Planned is empty and tmux-removal plans are landed. No FILTER.md rule is used.\"] Exact cited cover: [\"f560058 SPEC_impl.md:3015-3017: every attachment's data channel carries a grid stream, so Attach, Attached and the browser's socket say nothing about it\"] Original stronger consequence and missing premise remain preserved: \"attach_grid could silently accept the wrong representation after stream_kind disappeared. The sole representation and retained decoder refute that premise.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-097",
+          "key": "g153/c2",
+          "latest_line": 10,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "f560058-grid-only-attach-removes-stream-discriminator",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "A removed stream-kind assertion no longer names a protocol choice. Grid decoding and text/catch-up assertions remain in the helper's consumers.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e client.rs:3967-3976,4007-4074 has one attach representation, no stream discriminator, GRID_EVENT_QUEUE and grid flow.",
+            "Same revision host_tabs.rs:147-151 obtains that stream; :154-183 decodes Data as GridOutput, requires expected text and catch-up, and fails on malformed output or detachment. No alternative supported byte-stream route is selected by removing the assertion.",
+            "No test execution or product stream mismatch was observed."
+          ],
+          "coverage_checked": [
+            "Reviewed SPEC_impl.md:3015-3017 explicitly states Protocol 77 removed byte streams and terminal kinds; current Grid streams preserves that contract. SPEC.md's current terminal rules name only terminal hosts.",
+            "Searched TODO Planned, plans/queue, BUGS.md, active ledger, INDEX and matching terms for removed stream-kind assertion/attach-grid coverage. No exact queue or decision item found; Planned is empty and tmux-removal plans are landed. No FILTER.md rule is used."
+          ],
+          "exact_cover_quotes": [
+            "f560058 SPEC_impl.md:3015-3017: every attachment's data channel carries a grid stream, so Attach, Attached and the browser's socket say nothing about it"
+          ],
+          "missing_premise": null,
+          "original_stronger_consequence": "attach_grid could silently accept the wrong representation after stream_kind disappeared. The sole representation and retained decoder refute that premise.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source-refuted assertion-removal concern. Same API transition as g152/c1, with a distinct helper observation rather than an additional defect."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "f560058-grid-only-attach-removes-stream-discriminator",
+        "destination": null
+      }
+    },
+    {
+      "key": "g153/l2",
+      "owner": "g153",
+      "id": "l2",
+      "domain": "rust-terminal-host-regressions",
+      "purpose": "rust-terminal-host-regressions: crates/farhelm/tests/e2e/host_tabs.rs, crates/farhelm/tests/e2e/terminal_backpressure.rs, crates/farhelm/tests/e2e/terminal_backpressure/rss.rs, crates/farhelm/tests/e2e/host_creates.rs, crates/farhelm/tests/terminal_host_runtime.rs, crates/farhelm/tests/e2e/host_connection.rs, crates/farhelm/tests/e2e/old_terminals.rs; phases -async fn a_paused_flood_detaches_relative_to_the_first_pause_despite_pause_spam() {",
+      "history": [
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l2",
+            "state": "open",
+            "summary": "Check surviving integration pauses against l1 isolation claim",
+            "location": "crates/farhelm/tests/e2e/tab_lifecycle_edges.rs:614",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: A broader call-site search found surviving integration pauses that may narrow l1. Actual result: git grep pause_output( found tab_lifecycle_edges.rs:614 and terminal_tabs.rs:1442, in addition to the client transport test; these were not found by scenario-name searches. Next check: inspect their complete test scenarios and assertions to determine whether they already exercise cross-attachment stall isolation or displaced-owner pause. Suggested bucket: other; confidence: unresolved source lead. could-be-highest: no (possible refutation of a test gap, no product defect). proposed_drop: false. possible_cover: source tests only, no queue search. l1 remains provisional until these checks settle."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l2",
+            "state": "open",
+            "summary": "Surviving host tests retain stall-detach isolation coverage",
+            "location": "crates/farhelm/tests/e2e/tab_lifecycle_edges.rs:622",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: The surviving integration tests refute the broad claim that removing terminal_backpressure leaves cross-attachment stall isolation entirely untested. Actual checks: tab_lifecycle_edges.rs:535-660 attaches agent plus two tabs under one connection/lease, stalls one, asserts Stalled, then proves the other agent and tab accept fresh round trips and the stalled tab reattaches with retained output. terminal_tabs.rs:1397-1472 separately keeps the agent producing during a paused tab and resumes the tab. Both use the ordinary host harness. Neither covers a stale owner pausing a replacement on a second connection, so l1 is narrowed to that distinct test gap. Suggested bucket: other; confidence: confirmed by source; could-be-highest: no (coverage-only concern, no product failure shown). proposed_drop: broad stall-isolation gap refuted by retained integration tests at the cited lines. possible_cover: none. This resolves lead l2; no runtime execution."
+          }
+        }
+      ],
+      "latest": {
+        "line": 8,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l2",
+          "state": "open",
+          "summary": "Surviving host tests retain stall-detach isolation coverage",
+          "location": "crates/farhelm/tests/e2e/tab_lifecycle_edges.rs:622",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: The surviving integration tests refute the broad claim that removing terminal_backpressure leaves cross-attachment stall isolation entirely untested. Actual checks: tab_lifecycle_edges.rs:535-660 attaches agent plus two tabs under one connection/lease, stalls one, asserts Stalled, then proves the other agent and tab accept fresh round trips and the stalled tab reattaches with retained output. terminal_tabs.rs:1397-1472 separately keeps the agent producing during a paused tab and resumes the tab. Both use the ordinary host harness. Neither covers a stale owner pausing a replacement on a second connection, so l1 is narrowed to that distinct test gap. Suggested bucket: other; confidence: confirmed by source; could-be-highest: no (coverage-only concern, no product failure shown). proposed_drop: broad stall-isolation gap refuted by retained integration tests at the cited lines. possible_cover: none. This resolves lead l2; no runtime execution."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g153/findings.jsonl",
+        "id": "l2",
+        "line": 8,
+        "disposition": "excluded",
+        "group": "terminal-tests/broad-stall-isolation-absence",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-098 after inspecting it. Source refutes the broad absence-of-isolation-tests claim. This does not refute the separate stale-owner PauseOutput gap, which is outside this batch. The result concerns test protection, not a demonstrated product defect. Refute only the broad test-absence candidate using the retained same-revision integration test. Do not dismiss another named claim from this result. Checked source/results: [\"At 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513, crates/farhelm/tests/e2e/tab_lifecycle_edges.rs:539-660 attaches an agent and two tabs under one connection/lease, pauses one tab, requires Stalled, then checks fresh agent/sibling output and reattaches for BEFORE-STALL.\",\"Same revision terminal_tabs.rs:1397-1472 retains a separate paused-tab/agent round-trip test. Its eight-second interval is not a proof of crossing the sixty-second stall deadline; the first cited test supplies the actual detach witness. Neither scenario sends stale-owner pause from a displaced connection. No runtime checks ran.\"] Current coverage/results: [\"Recording main 24bc058066fd57848e788b465719b0e6da2f98f7: SPEC.md Terminal experience:3013-3031 and SPEC_impl.md Grid streams/transport require attachment isolation; they do not accept its absence from tests.\",\"TODO.md Planned:25-27 is empty. Searched plans/queue for stall/isolation/backpressure: no unlanded plan for this exact missing oracle. tmux removal plans are marked landed at plans/REPORTS.md:29-32.\",\"BUGS.md concerns an SSH provisioning-output hang only. Full INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact test-gap coverage. Read host-flood-stall-window-claim.md: its eight-versus-sixty-second documentation issue is adjacent, not this broad absence claim. FILTER.md has no test-coverage-removal filter.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing terminal_backpressure might leave cross-attachment stall isolation entirely untested. Latest record explicitly narrows that claim and preserves the separate displaced-owner scenario.\"; \"None for the narrow refutation; no conclusion about displaced-owner pause authorization or every real-stack race follows.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g153/l2",
+        "line": 8,
+        "disposition": "excluded",
+        "group": "terminal-tests/broad-stall-isolation-absence",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-098 after inspecting it. Source refutes the broad absence-of-isolation-tests claim. This does not refute the separate stale-owner PauseOutput gap, which is outside this batch. The result concerns test protection, not a demonstrated product defect. Refute only the broad test-absence candidate using the retained same-revision integration test. Do not dismiss another named claim from this result. Checked source/results: [\"At 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513, crates/farhelm/tests/e2e/tab_lifecycle_edges.rs:539-660 attaches an agent and two tabs under one connection/lease, pauses one tab, requires Stalled, then checks fresh agent/sibling output and reattaches for BEFORE-STALL.\",\"Same revision terminal_tabs.rs:1397-1472 retains a separate paused-tab/agent round-trip test. Its eight-second interval is not a proof of crossing the sixty-second stall deadline; the first cited test supplies the actual detach witness. Neither scenario sends stale-owner pause from a displaced connection. No runtime checks ran.\"] Current coverage/results: [\"Recording main 24bc058066fd57848e788b465719b0e6da2f98f7: SPEC.md Terminal experience:3013-3031 and SPEC_impl.md Grid streams/transport require attachment isolation; they do not accept its absence from tests.\",\"TODO.md Planned:25-27 is empty. Searched plans/queue for stall/isolation/backpressure: no unlanded plan for this exact missing oracle. tmux removal plans are marked landed at plans/REPORTS.md:29-32.\",\"BUGS.md concerns an SSH provisioning-output hang only. Full INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact test-gap coverage. Read host-flood-stall-window-claim.md: its eight-versus-sixty-second documentation issue is adjacent, not this broad absence claim. FILTER.md has no test-coverage-removal filter.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing terminal_backpressure might leave cross-attachment stall isolation entirely untested. Latest record explicitly narrows that claim and preserves the separate displaced-owner scenario.\"; \"None for the narrow refutation; no conclusion about displaced-owner pause authorization or every real-stack race follows.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-098",
+          "key": "g153/l2",
+          "latest_line": 8,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "terminal-tests/broad-stall-isolation-absence",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Source refutes the broad absence-of-isolation-tests claim. This does not refute the separate stale-owner PauseOutput gap, which is outside this batch. The result concerns test protection, not a demonstrated product defect.",
+          "checks": [
+            "At 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513, crates/farhelm/tests/e2e/tab_lifecycle_edges.rs:539-660 attaches an agent and two tabs under one connection/lease, pauses one tab, requires Stalled, then checks fresh agent/sibling output and reattaches for BEFORE-STALL.",
+            "Same revision terminal_tabs.rs:1397-1472 retains a separate paused-tab/agent round-trip test. Its eight-second interval is not a proof of crossing the sixty-second stall deadline; the first cited test supplies the actual detach witness. Neither scenario sends stale-owner pause from a displaced connection. No runtime checks ran."
+          ],
+          "coverage_checked": [
+            "Recording main 24bc058066fd57848e788b465719b0e6da2f98f7: SPEC.md Terminal experience:3013-3031 and SPEC_impl.md Grid streams/transport require attachment isolation; they do not accept its absence from tests.",
+            "TODO.md Planned:25-27 is empty. Searched plans/queue for stall/isolation/backpressure: no unlanded plan for this exact missing oracle. tmux removal plans are marked landed at plans/REPORTS.md:29-32.",
+            "BUGS.md concerns an SSH provisioning-output hang only. Full INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact test-gap coverage. Read host-flood-stall-window-claim.md: its eight-versus-sixty-second documentation issue is adjacent, not this broad absence claim. FILTER.md has no test-coverage-removal filter."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "None for the narrow refutation; no conclusion about displaced-owner pause authorization or every real-stack race follows.",
+          "original_stronger_consequence": "Removing terminal_backpressure might leave cross-attachment stall isolation entirely untested. Latest record explicitly narrows that claim and preserves the separate displaced-owner scenario.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Refute only the broad test-absence candidate using the retained same-revision integration test. Do not dismiss another named claim from this result."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "terminal-tests/broad-stall-isolation-absence",
+        "destination": null
+      }
+    },
+    {
+      "key": "g153/c3",
+      "owner": "g153",
+      "id": "c3",
+      "domain": "rust-terminal-host-regressions",
+      "purpose": "rust-terminal-host-regressions: crates/farhelm/tests/e2e/host_tabs.rs, crates/farhelm/tests/e2e/terminal_backpressure.rs, crates/farhelm/tests/e2e/terminal_backpressure/rss.rs, crates/farhelm/tests/e2e/host_creates.rs, crates/farhelm/tests/terminal_host_runtime.rs, crates/farhelm/tests/e2e/host_connection.rs, crates/farhelm/tests/e2e/old_terminals.rs; phases -async fn a_paused_flood_detaches_relative_to_the_first_pause_despite_pause_spam() {",
+      "history": [
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Deleted mixed-session tests do not themselves remove legacy serving",
+            "location": "crates/farhelm/tests/e2e/host_tabs.rs:379",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: Initially considered whether deleting mixed legacy/new-terminal regression tests also breaks sessions upgraded from an earlier release. No product failure was established from this deletion. Source checks: the removed tests create legacy terminals through tmux_tab_seams and migrate_agent_to_host_for_test; the tmux creation switch and test-only migration facility are removed. Production open_tab still dispatches separately for Terminal::Tmux and Terminal::Host at service/core.rs:14562-14589, preserving the independent gate for a host agent whose final legacy tab has closed. SPEC_impl.md:2350-2409 explicitly retains mixed-session ordering, close/reap and takeover contracts, so lack of tests is not permission to break them. This is a limitation of intermediate-revision coverage, not evidence that the test removal changes those operations. Subsequent assigned commit 1ed482dde220452e424973faf38a5e1318986333 removes legacy serving under its changed Terminal substrate contract: This release ends them at startup (below); every terminal runs in a terminal host. The retained finding l1 concerns a different, backend-independent ownership scenario and is not dismissed on that basis. Suggested bucket: other; confidence: confirmed for the deletion and remaining runtime gate, no broader runtime claim. could-be-highest: no established loss-of-work route from the test deletion. proposed_drop: no implementation regression established; test-only legacy fixtures were removed with their creation seam. possible_cover: none; no excluded coverage sources searched. No execution performed."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c3",
+            "state": "open",
+            "summary": "Reassess intermediate mixed-session test coverage loss independently of later retirement",
+            "location": "crates/farhelm/tests/e2e/host_tabs.rs:379",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: The earlier candidate disposition did not settle the test-only concern: mixed-session regression assertions disappear while that revision still serves legacy terminals. Prior proposed_drop preserved for audit: no implementation regression established; test-only legacy fixtures were removed with their creation seam. That basis does not refute useful regression coverage loss, and later retirement cannot retroactively repair intermediate coverage. Known source basis: assigned 00790-000.patch deletes mixed-session list/takeover/Delete and last-old-tab host-survival tests; SPEC_impl.md:2350-2409 still retains their contracts. Suggested bucket: other; confidence: source-established removal, checking surviving intermediate tests and exact governing text before final disposition. could-be-highest: no established product security or loss-of-work bug; test coverage only. proposed_drop: false pending this reassessment. possible_cover: none. No runtime execution or excluded coverage search. Next checks: source at the deletion revision for equivalent mixed-session assertions, then distinguish changed contract at 1ed482dde220452e424973faf38a5e1318986333."
+          }
+        },
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c3",
+            "state": "open",
+            "summary": "Mixed-session regression coverage disappears before legacy serving retires",
+            "location": "crates/farhelm/tests/e2e/host_tabs.rs:406",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: At this intermediate revision, upgrading users can still have old terminals beside new terminals, but the change deletes the tests that check their combined tab ordering, takeover, Delete and survival when the last old tab closes. Details: assigned 00790-000.patch:63-385 removes a_mixed_session_lists_tmux_tabs_first_and_its_delete_ends_its_tab_hosts and a_host_agent_outlives_its_last_tmux_tab_and_still_opens_tabs, together with the fixtures they depended on; location :406 is the parent-side deletion hunk. Exact governing text, SPEC_impl.md:2370-2376: \"every new tab is a terminal host of its own, whatever its session's agent runs in, so a tmux agent's session holds its old tmux tabs and new host tabs side by side (a mixed session)\" and \"A host agent's session has a tmux session only while it has old tmux tabs, and losing the last of them (tmux ends a session with its last window) touches neither its agent nor its host tabs.\" Also :2395-2396: \"The tab strip and every tab lookup merge the two kinds: tmux tabs first, in window order, then host tabs by their tags' creation times\"; :2409-2410: \"A takeover displaces the previous client's attachments to every terminal of the session, tmux and host alike\". Source checks at the same commit found no replacement mixed-session tests through searches for mixed-session/last-tmux-tab/lone-tmux-tab/order/migration fixture names across supervisor and integration tests. host_terminals.rs contains legacy-row evidence and cleanup tests, but its tmux references do not set up the deleted mixed live tab scenarios. Production core.rs:6428-6433 still adopts an earlier supervisor's tmux server and :14562-14589 still serves/open-gates both kinds, so this is live behavior at the reviewed revision. Suggested fix at that revision: keep equivalent tests by seeding earlier-release tmux state directly and adopting it, instead of relying on the removed create switch. Suggested bucket: other; confidence: confirmed by source for loss of these specific regression scenarios, not an implementation bug. could-be-highest: no established product security or loss-of-work failure; test coverage only. proposed_drop: false. possible_cover: none. Prior proposed drop preserved: \"no implementation regression established; test-only legacy fixtures were removed with their creation seam\". That is insufficient for a test-only finding and is superseded. Later retirement, distinct from repair: 1ed482dde220452e424973faf38a5e1318986333 SPEC_impl.md:2882-2888 says \"This release ends them at startup (below); every terminal runs in a terminal host\" and \"its driver of the old terminals is gone\". That removes the subject prospectively and does not establish coverage at 647f022. Parent has accepted no drop. No runtime execution or excluded coverage search."
+          }
+        }
+      ],
+      "latest": {
+        "line": 13,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "c3",
+          "state": "open",
+          "summary": "Mixed-session regression coverage disappears before legacy serving retires",
+          "location": "crates/farhelm/tests/e2e/host_tabs.rs:406",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: At this intermediate revision, upgrading users can still have old terminals beside new terminals, but the change deletes the tests that check their combined tab ordering, takeover, Delete and survival when the last old tab closes. Details: assigned 00790-000.patch:63-385 removes a_mixed_session_lists_tmux_tabs_first_and_its_delete_ends_its_tab_hosts and a_host_agent_outlives_its_last_tmux_tab_and_still_opens_tabs, together with the fixtures they depended on; location :406 is the parent-side deletion hunk. Exact governing text, SPEC_impl.md:2370-2376: \"every new tab is a terminal host of its own, whatever its session's agent runs in, so a tmux agent's session holds its old tmux tabs and new host tabs side by side (a mixed session)\" and \"A host agent's session has a tmux session only while it has old tmux tabs, and losing the last of them (tmux ends a session with its last window) touches neither its agent nor its host tabs.\" Also :2395-2396: \"The tab strip and every tab lookup merge the two kinds: tmux tabs first, in window order, then host tabs by their tags' creation times\"; :2409-2410: \"A takeover displaces the previous client's attachments to every terminal of the session, tmux and host alike\". Source checks at the same commit found no replacement mixed-session tests through searches for mixed-session/last-tmux-tab/lone-tmux-tab/order/migration fixture names across supervisor and integration tests. host_terminals.rs contains legacy-row evidence and cleanup tests, but its tmux references do not set up the deleted mixed live tab scenarios. Production core.rs:6428-6433 still adopts an earlier supervisor's tmux server and :14562-14589 still serves/open-gates both kinds, so this is live behavior at the reviewed revision. Suggested fix at that revision: keep equivalent tests by seeding earlier-release tmux state directly and adopting it, instead of relying on the removed create switch. Suggested bucket: other; confidence: confirmed by source for loss of these specific regression scenarios, not an implementation bug. could-be-highest: no established product security or loss-of-work failure; test coverage only. proposed_drop: false. possible_cover: none. Prior proposed drop preserved: \"no implementation regression established; test-only legacy fixtures were removed with their creation seam\". That is insufficient for a test-only finding and is superseded. Later retirement, distinct from repair: 1ed482dde220452e424973faf38a5e1318986333 SPEC_impl.md:2882-2888 says \"This release ends them at startup (below); every terminal runs in a terminal host\" and \"its driver of the old terminals is gone\". That removes the subject prospectively and does not establish coverage at 647f022. Parent has accepted no drop. No runtime execution or excluded coverage search."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g153/findings.jsonl",
+        "id": "c3",
+        "line": 13,
+        "disposition": "under-investigation",
+        "group": "g153-c3",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-098",
+          "key": "g153/c3",
+          "latest_line": 13,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "legacy-test-removal-before-retirement/mixed-session-lifecycle",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The intermediate revision deletes distinct mixed-session ordering, takeover, Delete and last-old-tab survival oracles while still adopting and serving old terminals. Later retirement ends the subject prospectively; it does not restore historical test protection. No production lifecycle defect is established.",
+          "checks": [
+            "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513^:crates/farhelm/tests/e2e/host_tabs.rs:409-600 contains mixed ordering/kind assertions, takeover across both kinds, guarded Delete refusal, host/process/socket cleanup and bystander survival; :603-680 contains last-tmux-tab closure and continuing host-agent/tab assertions.",
+            "At 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513, exact-name/order/migration searches across integration and supervisor core tests found no replacement. core.rs:6428-6433 still adopts the old server and :14562-14589 gates tab opening by the agent's actual terminal kind. SPEC_impl.md:2370-2411 still specifies the mixed-session behavior.",
+            "At dbfc69751215dbf15e1d31d5bed73c3754c4ebc4, core.rs:6426-6438 ends the old server and disables its driver; :6965-6969 resolves old rows as absent. This is retirement, not a test repair. No runtime checks ran."
+          ],
+          "coverage_checked": [
+            "Both current specifications were searched for mixed/old terminals and lifecycle. SPEC.md:2998-3010 now accepts ending old terminals at startup; SPEC_impl.md Terminal host/Ending the old private tmux server describes that retirement, not acceptance of the historical test gap.",
+            "TODO.md Planned is empty. Matching tmux-end-old-terminals and follower plans are landed according to plans/REPORTS.md:29-32, so none is unlanded coverage of this gap. BUGS.md has no matching entry.",
+            "Full INDEX.md, matching terminal-test entries and active TRIAGE_OUTCOMES.md searches found no same trigger/consequence/scope. g154/c3 and g154/l4 concern separate mode and RSS oracles, not exact aliases. FILTER.md's older-upgrade filter does not match test deletion alone: no additional rare trigger is required."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No missing premise for the historical removal of these specific assertions. A shipped loss-of-work route would need separate evidence; restoring obsolete tmux cases at current tip is not the proposed fix.",
+          "original_stronger_consequence": "The first record considered broken upgraded sessions, then proposed dropping because no implementation regression was found and creation fixtures were removed. The later records withdraw that basis for the independent test-only gap. Preserve both the no-product-failure limit and the historical gap.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Retain the intermediate historical test-oracle finding, other priority. The flag preserves independent review of the earlier dismissal of a possible upgraded-session/process consequence; this consultation does not authorize that drop."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "legacy-test-removal-before-retirement/mixed-session-lifecycle",
+        "destination": "trailing-mixed-session-regression-coverage-disappears-before-legacy-serving-retires.md"
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial pass complete: all assigned patches read; no unread scope.\n\nRecorded `l1` (`other`): removal of the stale-owner pause regression leaves connection-ownership behavior untested. No product defect established. Three candidates and all lead resolutions are logged; no leads remain open.\n\nUpdated `findings.jsonl` and `progress.md`. No runtime execution performed."
+    },
+    {
+      "turn": 2,
+      "reply": "- `l1`: Verified sensitivity to omitting the connection-identity predicate. Equivalent coverage, including a valid processing witness, was restored in `f560058` and survives at the pinned tip. Recorded a proposed drop of the ongoing-gap claim only.\n- `c3`: Promoted to an `other` finding for useful mixed-session coverage removed while legacy serving remained supported. Preserved and superseded the earlier drop rationale.\n\nAll revisions logged. Open lead IDs: none. No runtime execution."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 complete. Nothing new found.\n\nChecked process-state assertions, environment/scope comments, deleted-helper references, grid decoding/readiness handling, and remaining comment changes against pinned source.\n\nNew verified IDs: none. New unverified IDs: none. Open leads: none.\n\nProgress updated. No runtime execution."
+    }
+  ],
+  "progress": "Group: g153 (rust-terminal-host-regressions)\nTurn type/count: discovery / 3. Discovery-pass count: 1 (complete).\nResult: no new issue found. New verified IDs: none. New unverified-after-investigation IDs: none. Open lead IDs: none.\nOriginal assigned coverage remains complete: all 8 patch parts / 1,462 lines. No unread assigned scope.\nInterface context: all discovery-neighbours.json lines 1-448 read in bounded chunks before source search. Initial 1-160 output clipped, then all content redelivered as 1-50,51-100,101-160,161-210,211-260,261-310,311-360,361-410,411-448. Named pending questions were empty. Neighbour findings used only for context and novelty, with no inferred queue disposition.\nChecks/results: rechecked assigned 1ed482 host_creates and terminal_host_runtime diffs with surrounding test contracts. Running/Dead assertions preserve the predecessor pid/dead distinction under the changed enum; production HostStatus::probe maps live pinned children and processed exits correspondingly.\nChecks/results: compared changed credential/environment and launch-scope comments with retained test assertions and host_child_env: TMUX/TMUX_PANE are removed even from launch overrides, host environment is asserted empty, and scope test verifies child membership plus host exclusion and survival after Stop. No new contradiction found in the assigned changed prose.\nChecks/results: no ProcessRss, mod rss or deleted RSS-module references remain in the integration test tree/Cargo manifest at the deletion revision or pinned tip. Removed host_tabs helpers have no remaining references in that file. No dangling dependency from those deletions found.\nChecks/results: rechecked f560058 attach helper and its downstream strict GridOutput decoding plus ReplayComplete/error handling. Re-read the retained terminal_backpressure module and the narrow 08399d host_connection/old_terminals comment diffs; no additional changed behavior or independent oracle defect identified.\nSource ranges this pass: 1ed482 host_creates.rs:351-425,618-686; parent/current terminal_process.rs:1-125/1-90; host_launch.rs NOT_INHERITED/host_child_env and adjacent docs; 1ed482 hosts/terminal.rs selected adapter/probe diff; f560058 host_tabs.rs:137-184; 647f022 terminal_backpressure.rs:1-99; full assigned 1ed482 and 08399d patch contexts redelivered with git show. Prior mandatory evidence and contracts reused.\nExisting findings, candidates, original consequences and proposed-drop bases remain unchanged. No parent drops or lowerings accepted.\nValidation: source-only. No runtime tests, builds, reproductions, live-install actions, prohibited coverage searches or checkout writes.\nNext action: caller-defined follow-up; this was one separate discovery pass and does not certify unassigned source.\n"
+}

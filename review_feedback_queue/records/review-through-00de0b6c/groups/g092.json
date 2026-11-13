@@ -1,0 +1,628 @@
+{
+  "group": {
+    "id": "g092",
+    "domain": "browser-test-fixtures",
+    "purpose": "browser-test-fixtures: e2e/tests/helpers/program-input.test.ts, e2e/tests/helpers/real-agent.ts, e2e/tests/helpers/term.ts, e2e/tests/helpers/terminal-readiness.ts, e2e/grid-client/playwright.config.ts, e2e/stack-slots.ts, e2e/tests/helpers/terminal-suite.ts; phases complete small per-commit changes",
+    "interfaces": [
+      "g002",
+      "g009",
+      "g010",
+      "g011",
+      "g039",
+      "g040",
+      "g042",
+      "g091",
+      "g148",
+      "g174",
+      "g175",
+      "g176",
+      "g177",
+      "g178",
+      "g179",
+      "g180",
+      "g181",
+      "g182"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/01150-000.patch",
+        "ranges": [
+          [
+            1,
+            118
+          ]
+        ],
+        "original_path": "e2e/tests/helpers/program-input.test.ts",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,7933)",
+        "lines": 118,
+        "bytes": 8045,
+        "start": 0,
+        "end": 7933,
+        "original": "[private-run]/prep/originals/01150.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01152-000.patch",
+        "ranges": [
+          [
+            1,
+            159
+          ]
+        ],
+        "original_path": "e2e/tests/helpers/real-agent.ts",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,8695)",
+        "lines": 159,
+        "bytes": 8715,
+        "start": 0,
+        "end": 8695,
+        "original": "[private-run]/prep/originals/01152.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01153-000.patch",
+        "ranges": [
+          [
+            1,
+            417
+          ]
+        ],
+        "original_path": "e2e/tests/helpers/term.ts",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,23163)",
+        "lines": 417,
+        "bytes": 23163,
+        "start": 0,
+        "end": 23163,
+        "original": "[private-run]/prep/originals/01153.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01154-000.patch",
+        "ranges": [
+          [
+            1,
+            115
+          ]
+        ],
+        "original_path": "e2e/tests/helpers/terminal-readiness.ts",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,5402)",
+        "lines": 115,
+        "bytes": 5406,
+        "start": 0,
+        "end": 5402,
+        "original": "[private-run]/prep/originals/01154.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01507-000.patch",
+        "ranges": [
+          [
+            1,
+            15
+          ]
+        ],
+        "original_path": "e2e/grid-client/playwright.config.ts",
+        "commit": "61e632323dbc6b4a35ed27bf5b9833102ffd5a4e",
+        "notes": "patch header; patch character offsets [0,811)",
+        "lines": 15,
+        "bytes": 811,
+        "start": 0,
+        "end": 811,
+        "original": "[private-run]/prep/originals/01507.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01508-000.patch",
+        "ranges": [
+          [
+            1,
+            40
+          ]
+        ],
+        "original_path": "e2e/stack-slots.ts",
+        "commit": "61e632323dbc6b4a35ed27bf5b9833102ffd5a4e",
+        "notes": "patch header; patch character offsets [0,2464)",
+        "lines": 40,
+        "bytes": 2464,
+        "start": 0,
+        "end": 2464,
+        "original": "[private-run]/prep/originals/01508.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01509-000.patch",
+        "ranges": [
+          [
+            1,
+            29
+          ]
+        ],
+        "original_path": "e2e/tests/helpers/terminal-suite.ts",
+        "commit": "61e632323dbc6b4a35ed27bf5b9833102ffd5a4e",
+        "notes": "patch header; patch character offsets [0,1871)",
+        "lines": 29,
+        "bytes": 1877,
+        "start": 0,
+        "end": 1871,
+        "original": "[private-run]/prep/originals/01509.patch"
+      }
+    ],
+    "lines": 893,
+    "bytes": 50481
+  },
+  "records": [
+    {
+      "key": "g092/c1",
+      "owner": "g092",
+      "id": "c1",
+      "domain": "browser-test-fixtures",
+      "purpose": "browser-test-fixtures: e2e/tests/helpers/program-input.test.ts, e2e/tests/helpers/real-agent.ts, e2e/tests/helpers/term.ts, e2e/tests/helpers/terminal-readiness.ts, e2e/grid-client/playwright.config.ts, e2e/stack-slots.ts, e2e/tests/helpers/terminal-suite.ts; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Grid-only fixture readers follow the pinned terminal contract",
+            "location": "e2e/tests/helpers/term.ts:22",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether removing the old terminal readers, byte-input test cases, and host-kind premise checks leaves supported sessions untestable. Details: the assigned patches remove xterm branches from term.ts and real-agent.ts, narrow terminal-readiness.ts to the grid component, and remove byte-stream cases from program-input.test.ts. SPEC_impl.md at this commit, Terminal widget: the grid island, lines 1506-1508, says: 'Every terminal runs in a terminal host (\"Terminal host\") and is interpreted by the supervisor’s emulator, so the browser draws a grid stream with its own grid client'. The grid client, lines 1857-1859, says: 'Input goes up as small JSON messages (keys, text, pastes, mouse and focus events), never as encoded bytes'. Testing, lines 8205-8207, states that the browser stacks create new terminals as shipped supervisors do. This explicitly supports the fixture narrowing at the reviewed revision; it is not a regression in supported byte-terminal coverage. Suggested bucket: other (maintainer test coverage only). Confidence: confirmed specification acceptance, pending surrounding-source checks for separate issues. proposed_drop: the exact grid-only specification contract above. possible_cover: none beyond that specification. Could-be-highest: no; the considered consequence is confined to test fixture coverage. No execution or reproduction was performed."
+          }
+        },
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Grid-only fixture readers follow the pinned terminal contract",
+            "location": "e2e/tests/helpers/term.ts:22",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: removing the old byte-terminal readers and checks does not leave a supported terminal kind untestable. Details: considered the removals in term.ts:22-215, real-agent.ts:110-168, terminal-readiness.ts:7-78 and 164-250, and program-input.test.ts:9-81. SPEC_impl.md, Terminal widget: the grid island, lines 1506-1508, says exactly: 'Every terminal runs in a terminal host (\"Terminal host\") and is interpreted by the supervisor's emulator, so the browser\ndraws a grid stream with its own grid client (\"The grid client\", at the end of this section), mounted as a JS island\ninside the Dioxus tree.' The grid client, lines 1857-1859, also states that input is JSON messages, never encoded bytes. SPEC.md, Terminal experience, lines 3005-3015 explicitly retires old terminals; it does not promise continued byte-terminal support. Source checks: terminal.js:3387-3428 constructs the grid before its socket; 3474-3487 publishes precisely the retained replay fields; 4654-4668 publishes the primary grid/socket globals and per-island grid/socket/test registry used by the readers. program-input.ts:11-30 and 75-105 agree with the changed test frames and binary-only listener test. terminal-readiness.ts:120-178 and 201-354 retain session/tab identity, open/revealed/focused boundaries, and host-driven polling. Pinned git grep found no surviving e2e/tests or e2e/grid-client references to terminalKind, host-premise, or the deleted replay fields; the remaining __farhelmTerm matches name an unrelated socket counter. Caller context checked: keyboard-shortcuts.spec.ts:78-139 observes sockets before navigation and proves readiness plus an owned echo; real-agent.spec.ts:215-225 waits on the requested terminal before agent-marker polling. The preserved grid branches have the same model, wrapping, viewport and input behavior as before their extraction. Suggested bucket: other (maintainer test coverage only). Confidence: confirmed by source and specification; no execution or reproduction. proposed_drop: explicit grid-only contract quoted above, corroborated by the product mount and fixture interfaces. possible_cover: none beyond those specification sections. Could-be-highest: no; the considered consequence is confined to test fixture coverage. This revision corrects the initial quotation's apostrophe and replaces its pending-source-check caveat with completed source checks."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Grid-only fixture readers follow the pinned terminal contract",
+            "location": "e2e/tests/helpers/term.ts:22",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: removing the byte-terminal readers does not leave a supported terminal kind untestable or require held-replay tests to finish replay prematurely. Details: the considered consequence remains unsupported fixture coverage after removing xterm branches in term.ts, real-agent.ts and terminal-readiness.ts and byte-stream cases in program-input.test.ts. SPEC_impl.md, Terminal widget: the grid island, 1506-1508 says exactly: 'Every terminal runs in a terminal host (\"Terminal host\") and is interpreted by the supervisor's emulator, so the browser\ndraws a grid stream with its own grid client (\"The grid client\", at the end of this section), mounted as a JS island\ninside the Dioxus tree.' SPEC.md, Terminal experience, 3005-3015 retires old terminals. Product source terminal.js:3387-3428 constructs the grid before its socket and 4654-4668 publishes the grid/socket/test interface these fixtures read. The retained fields match terminal.js:3474-3487, and the input frames/listeners match program-input.ts:11-30 and 75-105. terminal-readiness.ts:120-178 and 201-354 preserve session/tab identity and distinct mount, open, revealed and focused boundaries. Initial checks found no remaining e2e callers of removed symbols/fields; keyboard-shortcuts.spec.ts:78-139 and real-agent.spec.ts:215-225 establish their own live-input/agent readiness witnesses. Synthesis checks: terminal-replay-rename.spec.ts:323-383 reloads to a fresh grid, waits only for the requested mount plus held catch-up, then releases and checks marker, tail, replayed output and owned live echo. At 394-413 the focus-protection test intentionally uses mount/held/reveal rather than focused readiness, and explicitly establishes header-button focus before release. At 426-487 the tab case identifies session and tab independently, holds replay, selects the pane before hidden assertions, then checks replay and later live shell output. Thus the grid-only mount predicate neither consumes the unsettled boundary nor forces focus in these callers. Parent-supplied g091 checks corroborate unconditional grid mounting and absence of fresh-stack tmux-server creation; these are external source-review reports, not my execution observations or an accepted parent drop. Suggested bucket: other (maintainer fixture coverage). Confidence: confirmed by source and specification, no execution or reproduction. proposed_drop: the exact grid-only specification contract above, corroborated by mount/registry and caller-boundary source. possible_cover: none beyond those specification sections. Could-be-highest: no; the original considered consequence is test coverage only. No unresolved premise in this candidate; the caller retains the final drop decision."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Grid-only fixture readers follow the pinned terminal contract",
+            "location": "e2e/tests/helpers/term.ts:22",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: the removed byte-terminal fixture paths are outside the supported terminal contract; inspected input and replay callers retain their intended readiness boundaries. Details: the original considered consequence was losing supported coverage through removal of xterm readers in term.ts and real-agent.ts, the old-kind checks in terminal-readiness.ts and byte-stream cases in program-input.test.ts. SPEC_impl.md, Terminal widget: the grid island, 1506-1508 says exactly: 'Every terminal runs in a terminal host (\"Terminal host\") and is interpreted by the supervisor's emulator, so the browser\ndraws a grid stream with its own grid client (\"The grid client\", at the end of this section), mounted as a JS island\ninside the Dioxus tree.' SPEC.md, Terminal experience, 3005-3015 explicitly retires old terminals. terminal.js:3387-3428 constructs the grid before its socket; 3474-3487 supplies the retained replay fields; 4654-4668 publishes the primary globals and per-island registry used by the readers. The extracted grid branches preserve their model, wrap, viewport and input behavior. terminal-readiness.ts:120-178 and 201-354 preserves identity-specific mount/open/reveal/focus observations; no removed-symbol callers remained in the initial pinned e2e searches. Synthesis: terminal-replay-rename.spec.ts:323-383 and 426-487 identify fresh post-reload attachments, deliberately wait only on mount while replay is held, release replay explicitly, then check marker/tail/output and later live input. Its 394-413 focus-protection caller establishes button focus before release and does not wait for terminal focus. keyboard-shortcuts.spec.ts:78-139 installs input observation before navigation and proves later owned echo. real-agent.spec.ts:215-225 establishes terminal readiness before agent markers. Further input checks: grid-input.js:417-438 splits text on character/format bounds; 479-489 encodes JSON into Uint8Array binary frames; terminal.js:4495-4507 sends those encoded frames only on an open socket. This matches program-input.ts:11-30's sent-binary collector and the revised program-input.test.ts:65-81 assertion without any received stream-kind notice. sendTerminalInput in term.ts:69-80 uses those same text builders/encoder and checks socket OPEN and all encoding results before sending. The real-agent caller path still focuses the pane before input (real-agent.ts:319-338 and 376-389), and reply matching retains per-page fresh-marker tracking (392-465). Parent reports g091 corroborated unconditional grid mounting and no fresh-stack tmux-server creation; this is external source-review corroboration, not execution evidence or parent acceptance of a drop. Suggested bucket: other (maintainer test coverage). Confidence: confirmed by source and specification; no execution or reproduction. proposed_drop: the exact grid-only specification contract above, corroborated by mount/registry, input encoding and inspected callers. possible_cover: none beyond those specification sections. Could-be-highest: no; the original considered consequence is fixture coverage only. No unresolved premise remains for this candidate. These checks establish compatibility of the changed fixture paths, not exhaustive correctness of the unchanged encoder or all suite teardown paths. The caller retains the final drop decision."
+          }
+        }
+      ],
+      "latest": {
+        "line": 7,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Grid-only fixture readers follow the pinned terminal contract",
+          "location": "e2e/tests/helpers/term.ts:22",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: the removed byte-terminal fixture paths are outside the supported terminal contract; inspected input and replay callers retain their intended readiness boundaries. Details: the original considered consequence was losing supported coverage through removal of xterm readers in term.ts and real-agent.ts, the old-kind checks in terminal-readiness.ts and byte-stream cases in program-input.test.ts. SPEC_impl.md, Terminal widget: the grid island, 1506-1508 says exactly: 'Every terminal runs in a terminal host (\"Terminal host\") and is interpreted by the supervisor's emulator, so the browser\ndraws a grid stream with its own grid client (\"The grid client\", at the end of this section), mounted as a JS island\ninside the Dioxus tree.' SPEC.md, Terminal experience, 3005-3015 explicitly retires old terminals. terminal.js:3387-3428 constructs the grid before its socket; 3474-3487 supplies the retained replay fields; 4654-4668 publishes the primary globals and per-island registry used by the readers. The extracted grid branches preserve their model, wrap, viewport and input behavior. terminal-readiness.ts:120-178 and 201-354 preserves identity-specific mount/open/reveal/focus observations; no removed-symbol callers remained in the initial pinned e2e searches. Synthesis: terminal-replay-rename.spec.ts:323-383 and 426-487 identify fresh post-reload attachments, deliberately wait only on mount while replay is held, release replay explicitly, then check marker/tail/output and later live input. Its 394-413 focus-protection caller establishes button focus before release and does not wait for terminal focus. keyboard-shortcuts.spec.ts:78-139 installs input observation before navigation and proves later owned echo. real-agent.spec.ts:215-225 establishes terminal readiness before agent markers. Further input checks: grid-input.js:417-438 splits text on character/format bounds; 479-489 encodes JSON into Uint8Array binary frames; terminal.js:4495-4507 sends those encoded frames only on an open socket. This matches program-input.ts:11-30's sent-binary collector and the revised program-input.test.ts:65-81 assertion without any received stream-kind notice. sendTerminalInput in term.ts:69-80 uses those same text builders/encoder and checks socket OPEN and all encoding results before sending. The real-agent caller path still focuses the pane before input (real-agent.ts:319-338 and 376-389), and reply matching retains per-page fresh-marker tracking (392-465). Parent reports g091 corroborated unconditional grid mounting and no fresh-stack tmux-server creation; this is external source-review corroboration, not execution evidence or parent acceptance of a drop. Suggested bucket: other (maintainer test coverage). Confidence: confirmed by source and specification; no execution or reproduction. proposed_drop: the exact grid-only specification contract above, corroborated by mount/registry, input encoding and inspected callers. possible_cover: none beyond those specification sections. Could-be-highest: no; the original considered consequence is fixture coverage only. No unresolved premise remains for this candidate. These checks establish compatibility of the changed fixture paths, not exhaustive correctness of the unchanged encoder or all suite teardown paths. The caller retains the final drop decision."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g092/findings.jsonl",
+        "id": "c1",
+        "line": 7,
+        "disposition": "excluded",
+        "group": "removed-byte-terminal-fixture-readers-outside-supported-contract",
+        "reason": "Parent explicitly accepted named covered proposal from claims-060 after inspecting it. The removed readers and byte-input cases target a terminal kind the reviewed revision explicitly retires. The retained readers use the exact grid/socket/test interface product code publishes. This is specification acceptance of that narrowing, not a claim that all remaining fixtures are correct. Treat the narrowly named removal of unsupported byte-terminal fixture paths as specification-covered. g091/c1 overlaps in context but concerns the lost premise watch rather than the same reader defect; no exact alias is asserted. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:SPEC.md:3002-3015 ends old terminals; SPEC_impl.md:1506-1508 specifies the grid island. Current SPEC.md:2899 onward and SPEC_impl.md:1694-1696,1859-1867,8193-8194 retain host/grid-only terminal and browser-stack contracts.\",\"At f560058, terminal.js:3387-3428 constructs the grid and :4654-4668 publishes the precise handles read by e2e/tests/helpers/term.ts:22-80. terminalTextInPage:162-174 expressly excludes unapplied sliced history.\",\"terminal-readiness.ts:120-178,272-354 keeps exact session/tab identity and distinct mount/open/reveal/focus boundaries. grid-input.js:479-488 emits complete JSON binary messages, matching program-input.ts:21-30,75-105. Targeted e2e grep found no deleted-kind/premise consumers.\",\"No runtime observations are claimed. This does not certify unchanged encoders, all replay callers or all teardown paths; the histories' inspected-caller reports remain limited to the callers they name.\"] Current coverage/results: [\"Exact coverage is the specifications' retirement of byte terminals and host/grid-only contract. Input is small JSON messages rather than terminal-encoded bytes; binary WebSocket transport does not contradict that semantic distinction.\",\"TODO.md Planned is empty; plans/queue/INDEX.md has no unlanded plan. BUGS.md, INDEX.md/queue text and active TRIAGE_OUTCOMES.md searches found no additional exact reader-removal item. FILTER.md is unnecessary and has no whole matching boundary.\"] Exact cited cover: [\"SPEC_impl.md:1694-1696: Every terminal runs in a terminal host (\\\"Terminal host\\\") and is interpreted by the supervisor's emulator, so the browser draws a grid stream with its own grid client\",\"SPEC_impl.md:1859: Input goes up as small JSON messages (keys, text, pastes, mouse and focus events), never as encoded bytes\",\"SPEC_impl.md:8193-8194: the browser suite, which runs every terminal in a host on a real stack\"] Original stronger consequence and missing premise remain preserved: \"The candidate considered losing supported coverage by deleting xterm readers, host-kind checks and byte-stream input cases, including prematurely consuming held replay. Later source checks completed initially pending checks and found compatible retained mount, input and caller boundaries. It remained a maintainer fixture-coverage concern with no product security or user-work-loss consequence. Related misleading helper documentation is not covered by production correctness.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g092/c1",
+        "line": 7,
+        "disposition": "excluded",
+        "group": "removed-byte-terminal-fixture-readers-outside-supported-contract",
+        "bucket": "other",
+        "recording": "covered",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named covered proposal from claims-060 after inspecting it. The removed readers and byte-input cases target a terminal kind the reviewed revision explicitly retires. The retained readers use the exact grid/socket/test interface product code publishes. This is specification acceptance of that narrowing, not a claim that all remaining fixtures are correct. Treat the narrowly named removal of unsupported byte-terminal fixture paths as specification-covered. g091/c1 overlaps in context but concerns the lost premise watch rather than the same reader defect; no exact alias is asserted. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:SPEC.md:3002-3015 ends old terminals; SPEC_impl.md:1506-1508 specifies the grid island. Current SPEC.md:2899 onward and SPEC_impl.md:1694-1696,1859-1867,8193-8194 retain host/grid-only terminal and browser-stack contracts.\",\"At f560058, terminal.js:3387-3428 constructs the grid and :4654-4668 publishes the precise handles read by e2e/tests/helpers/term.ts:22-80. terminalTextInPage:162-174 expressly excludes unapplied sliced history.\",\"terminal-readiness.ts:120-178,272-354 keeps exact session/tab identity and distinct mount/open/reveal/focus boundaries. grid-input.js:479-488 emits complete JSON binary messages, matching program-input.ts:21-30,75-105. Targeted e2e grep found no deleted-kind/premise consumers.\",\"No runtime observations are claimed. This does not certify unchanged encoders, all replay callers or all teardown paths; the histories' inspected-caller reports remain limited to the callers they name.\"] Current coverage/results: [\"Exact coverage is the specifications' retirement of byte terminals and host/grid-only contract. Input is small JSON messages rather than terminal-encoded bytes; binary WebSocket transport does not contradict that semantic distinction.\",\"TODO.md Planned is empty; plans/queue/INDEX.md has no unlanded plan. BUGS.md, INDEX.md/queue text and active TRIAGE_OUTCOMES.md searches found no additional exact reader-removal item. FILTER.md is unnecessary and has no whole matching boundary.\"] Exact cited cover: [\"SPEC_impl.md:1694-1696: Every terminal runs in a terminal host (\\\"Terminal host\\\") and is interpreted by the supervisor's emulator, so the browser draws a grid stream with its own grid client\",\"SPEC_impl.md:1859: Input goes up as small JSON messages (keys, text, pastes, mouse and focus events), never as encoded bytes\",\"SPEC_impl.md:8193-8194: the browser suite, which runs every terminal in a host on a real stack\"] Original stronger consequence and missing premise remain preserved: \"The candidate considered losing supported coverage by deleting xterm readers, host-kind checks and byte-stream input cases, including prematurely consuming held replay. Later source checks completed initially pending checks and found compatible retained mount, input and caller boundaries. It remained a maintainer fixture-coverage concern with no product security or user-work-loss consequence. Related misleading helper documentation is not covered by production correctness.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-060",
+          "key": "g092/c1",
+          "latest_line": 7,
+          "recommendation": "covered",
+          "bucket": "other",
+          "underlying_key": "removed-byte-terminal-fixture-readers-outside-supported-contract",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The removed readers and byte-input cases target a terminal kind the reviewed revision explicitly retires. The retained readers use the exact grid/socket/test interface product code publishes. This is specification acceptance of that narrowing, not a claim that all remaining fixtures are correct.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e:SPEC.md:3002-3015 ends old terminals; SPEC_impl.md:1506-1508 specifies the grid island. Current SPEC.md:2899 onward and SPEC_impl.md:1694-1696,1859-1867,8193-8194 retain host/grid-only terminal and browser-stack contracts.",
+            "At f560058, terminal.js:3387-3428 constructs the grid and :4654-4668 publishes the precise handles read by e2e/tests/helpers/term.ts:22-80. terminalTextInPage:162-174 expressly excludes unapplied sliced history.",
+            "terminal-readiness.ts:120-178,272-354 keeps exact session/tab identity and distinct mount/open/reveal/focus boundaries. grid-input.js:479-488 emits complete JSON binary messages, matching program-input.ts:21-30,75-105. Targeted e2e grep found no deleted-kind/premise consumers.",
+            "No runtime observations are claimed. This does not certify unchanged encoders, all replay callers or all teardown paths; the histories' inspected-caller reports remain limited to the callers they name."
+          ],
+          "coverage_checked": [
+            "Exact coverage is the specifications' retirement of byte terminals and host/grid-only contract. Input is small JSON messages rather than terminal-encoded bytes; binary WebSocket transport does not contradict that semantic distinction.",
+            "TODO.md Planned is empty; plans/queue/INDEX.md has no unlanded plan. BUGS.md, INDEX.md/queue text and active TRIAGE_OUTCOMES.md searches found no additional exact reader-removal item. FILTER.md is unnecessary and has no whole matching boundary."
+          ],
+          "exact_cover_quotes": [
+            "SPEC_impl.md:1694-1696: Every terminal runs in a terminal host (\"Terminal host\") and is interpreted by the supervisor's emulator, so the browser draws a grid stream with its own grid client",
+            "SPEC_impl.md:1859: Input goes up as small JSON messages (keys, text, pastes, mouse and focus events), never as encoded bytes",
+            "SPEC_impl.md:8193-8194: the browser suite, which runs every terminal in a host on a real stack"
+          ],
+          "missing_premise": null,
+          "original_stronger_consequence": "The candidate considered losing supported coverage by deleting xterm readers, host-kind checks and byte-stream input cases, including prematurely consuming held replay. Later source checks completed initially pending checks and found compatible retained mount, input and caller boundaries. It remained a maintainer fixture-coverage concern with no product security or user-work-loss consequence. Related misleading helper documentation is not covered by production correctness.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Treat the narrowly named removal of unsupported byte-terminal fixture paths as specification-covered. g091/c1 overlaps in context but concerns the lost premise watch rather than the same reader defect; no exact alias is asserted."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "removed-byte-terminal-fixture-readers-outside-supported-contract",
+        "destination": null
+      }
+    },
+    {
+      "key": "g092/c2",
+      "owner": "g092",
+      "id": "c2",
+      "domain": "browser-test-fixtures",
+      "purpose": "browser-test-fixtures: e2e/tests/helpers/program-input.test.ts, e2e/tests/helpers/real-agent.ts, e2e/tests/helpers/term.ts, e2e/tests/helpers/terminal-readiness.ts, e2e/grid-client/playwright.config.ts, e2e/stack-slots.ts, e2e/tests/helpers/terminal-suite.ts; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Reset still needs deletion to discard terminal history",
+            "location": "e2e/tests/helpers/terminal-suite.ts:166",
+            "detail": "Reviewed commit: 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e. TLDR: considered whether the new comment wrongly claims that restarting a host-backed terminal retains history, potentially misleading future fixture cleanup. Details: terminal-suite.ts:154-195 deletes listed sessions and recreates the shared one; the patch changes only the explanation at 166-170. SPEC.md, Lifecycle operations, lines 1942-1945 explicitly says: 'Restart keeps whatever scrollback the session’s agent terminal retained: the terminal is replaced by a new one for each run, which starts with the old one’s scrollback above a blank screen in default modes.' The apostrophes in that quotation are typographically normalized; its text and contract are otherwise verbatim. Thus a new terminal instance does not imply a clean history, and delete/recreate is consistent with the stated fixture isolation purpose. Suggested bucket: other. Confidence: confirmed by source and specification, no execution. proposed_drop: refuted by the explicit retained-scrollback contract and the unchanged reset implementation. possible_cover: none beyond that specification. Could-be-highest: no; this is an explanatory comment in test cleanup, not a product deletion path."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Reset still needs deletion to discard terminal history",
+            "location": "e2e/tests/helpers/terminal-suite.ts:166",
+            "detail": "Reviewed commit: 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e. TLDR: the reset comment correctly explains why restarting a session does not discard its old terminal history. Details: considered whether a fresh host-backed terminal makes the comment's retained-history rationale wrong. terminal-suite.ts:154-195 deletes listed sessions and recreates the shared one; the assigned patch changes only its explanation at 166-170. SPEC.md, Lifecycle operations, lines 1942-1945 says exactly: 'Restart keeps whatever scrollback the session's agent terminal retained: the\n  terminal is replaced by a new one for each run, which starts with the old one's scrollback above a blank screen in\n  default modes.' A new terminal instance therefore does not imply clean history; delete/recreate follows the fixture isolation purpose. The other assigned comment-only changes in stack-slots.ts:4-12 and 29-38 and grid-client/playwright.config.ts:3-9 match SPEC_impl.md, Testing, lines 8168-8170 and 8186-8194, which describe real host-backed browser stacks alongside the static grid-client suite. Suggested bucket: other. Confidence: confirmed by source and specification; no execution or reproduction. proposed_drop: refuted by the exact retained-scrollback contract quoted above and the unchanged reset implementation. possible_cover: none beyond that specification. Could-be-highest: no; the considered issue is explanatory test-cleanup wording, not a product deletion path. This revision supplies the verbatim quotation, including original apostrophes and line breaks, rather than the previous typographically normalized quotation."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Reset still needs deletion to discard terminal history",
+            "location": "e2e/tests/helpers/terminal-suite.ts:166",
+            "detail": "Reviewed commit: 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e. TLDR: the reset comment correctly explains why a restart cannot replace delete/recreate when a browser-test file needs clean terminal history. Details: the original considered consequence was misleading test-cleanup guidance after moving to one terminal host per run. terminal-suite.ts:154-195 still deletes listed sessions and recreates the shared one; the patch changes only the explanation at 166-170. SPEC.md, Lifecycle operations, 1942-1945 says exactly: 'Restart keeps whatever scrollback the session's agent terminal retained: the\n  terminal is replaced by a new one for each run, which starts with the old one's scrollback above a blank screen in\n  default modes.' The comment-only stack-slots/config edits also match SPEC_impl.md, Testing, 8168-8170 and 8186-8194. Synthesis checks: playwright.config.ts:27-34 and 57-85 bind each worker's page/request options to its own slot, retain serial tests within a project, and do not share a stack between workers; evidence.ts:33-67 adds timeline/context observation without overriding the request fixture. terminal-suite.ts:204-223 registers reset in beforeAll and drains page routes in afterEach, while tab scratch removal runs at file end. Its openTerminal caller at 292-318 separately observes the listed shared ID, requested attachment readiness, and the fake-agent banner; the create response in reset is not treated as proof of program readiness. terminal-tabs.spec.ts:137-178 establishes requested agent/tab readiness and live shell/agent output, then awaits cleanupSession in finally. term.ts:404-430 explicitly stops the owned fixture session and tabs, checks stop before delete, checks deletion, and surfaces non-404 failures; scratch deletion does not substitute for session cleanup. These checks establish the normal inspected caller's cleanup order and slot isolation, not an assertion that all teardown failures recover or that every suite caller was re-reviewed. Suggested bucket: other. Confidence: confirmed by source and specification; no execution or reproduction. proposed_drop: refuted by the exact retained-scrollback contract quoted above and corroborated by the unchanged reset plus checked caller/worker isolation. possible_cover: none beyond that specification. Could-be-highest: no; the considered consequence is explanatory test-cleanup wording, not a product deletion path. Parent has not accepted a drop; this remains the recorded reviewer proposal."
+          }
+        }
+      ],
+      "latest": {
+        "line": 6,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Reset still needs deletion to discard terminal history",
+          "location": "e2e/tests/helpers/terminal-suite.ts:166",
+          "detail": "Reviewed commit: 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e. TLDR: the reset comment correctly explains why a restart cannot replace delete/recreate when a browser-test file needs clean terminal history. Details: the original considered consequence was misleading test-cleanup guidance after moving to one terminal host per run. terminal-suite.ts:154-195 still deletes listed sessions and recreates the shared one; the patch changes only the explanation at 166-170. SPEC.md, Lifecycle operations, 1942-1945 says exactly: 'Restart keeps whatever scrollback the session's agent terminal retained: the\n  terminal is replaced by a new one for each run, which starts with the old one's scrollback above a blank screen in\n  default modes.' The comment-only stack-slots/config edits also match SPEC_impl.md, Testing, 8168-8170 and 8186-8194. Synthesis checks: playwright.config.ts:27-34 and 57-85 bind each worker's page/request options to its own slot, retain serial tests within a project, and do not share a stack between workers; evidence.ts:33-67 adds timeline/context observation without overriding the request fixture. terminal-suite.ts:204-223 registers reset in beforeAll and drains page routes in afterEach, while tab scratch removal runs at file end. Its openTerminal caller at 292-318 separately observes the listed shared ID, requested attachment readiness, and the fake-agent banner; the create response in reset is not treated as proof of program readiness. terminal-tabs.spec.ts:137-178 establishes requested agent/tab readiness and live shell/agent output, then awaits cleanupSession in finally. term.ts:404-430 explicitly stops the owned fixture session and tabs, checks stop before delete, checks deletion, and surfaces non-404 failures; scratch deletion does not substitute for session cleanup. These checks establish the normal inspected caller's cleanup order and slot isolation, not an assertion that all teardown failures recover or that every suite caller was re-reviewed. Suggested bucket: other. Confidence: confirmed by source and specification; no execution or reproduction. proposed_drop: refuted by the exact retained-scrollback contract quoted above and corroborated by the unchanged reset plus checked caller/worker isolation. possible_cover: none beyond that specification. Could-be-highest: no; the considered consequence is explanatory test-cleanup wording, not a product deletion path. Parent has not accepted a drop; this remains the recorded reviewer proposal."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g092/findings.jsonl",
+        "id": "c2",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "terminal-suite-reset-retained-scrollback-comment",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-060 after inspecting it. A new terminal instance on Restart can inherit old scrollback. The changed reset comment accurately explains why delete/recreate is used to get clean fixture history. Refute the named documentation defect using the explicit retained-scrollback contract; keep the scope limited to that rationale. Checked source/results: [\"61e632323dbc6b4a35ed27bf5b9833102ffd5a4e:e2e/tests/helpers/terminal-suite.ts:154-195 still deletes the listed sessions and recreates the canonical session; :166-170 changes only its explanatory history rationale.\",\"SPEC.md:1942-1952 explicitly preserves retained scrollback into the new run, with bounded/copy-failure/absent-terminal caveats. Those exceptions do not make Restart a clean-history operation. Current SPEC_impl.md:8193-8194 also distinguishes static grid-client checks from host-backed real stacks.\",\"This is a comment-contract check, not execution evidence or proof that every teardown failure recovers. The reviewer histories' worker-isolation and normal-caller cleanup checks are limited to those inspected paths.\"] Current coverage/results: [\"Both specifications searched for Restart, retained history and fixture isolation. SPEC.md's explicit retained-scrollback contract refutes the named misleading-comment allegation.\",\"TODO.md Planned and plans/queue/INDEX.md are empty. BUGS.md, INDEX.md, matching queue text and active TRIAGE_OUTCOMES.md searches found no exact reset-rationale item.\",\"Read history-fixture-reset-races-selection-save.md: it concerns preference writes racing server restoration, not terminal history carried by Restart. FILTER.md supplies no applicable boundary.\"] Exact cited cover: [\"SPEC.md:1942-1944: Restart keeps whatever scrollback the session's agent terminal retained: the terminal is replaced by a new one for each run, which starts with the old one's scrollback above a blank screen in default modes.\"] Original stronger consequence and missing premise remain preserved: \"The candidate considered misleading future fixture cleanup by claiming a host-backed Restart retains history. Its initial quotation used normalized apostrophes; later records supplied exact spelling and unchanged-reset/caller context. This never alleged a harmful product deletion path or user-work-loss route.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g092/c2",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "terminal-suite-reset-retained-scrollback-comment",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-060 after inspecting it. A new terminal instance on Restart can inherit old scrollback. The changed reset comment accurately explains why delete/recreate is used to get clean fixture history. Refute the named documentation defect using the explicit retained-scrollback contract; keep the scope limited to that rationale. Checked source/results: [\"61e632323dbc6b4a35ed27bf5b9833102ffd5a4e:e2e/tests/helpers/terminal-suite.ts:154-195 still deletes the listed sessions and recreates the canonical session; :166-170 changes only its explanatory history rationale.\",\"SPEC.md:1942-1952 explicitly preserves retained scrollback into the new run, with bounded/copy-failure/absent-terminal caveats. Those exceptions do not make Restart a clean-history operation. Current SPEC_impl.md:8193-8194 also distinguishes static grid-client checks from host-backed real stacks.\",\"This is a comment-contract check, not execution evidence or proof that every teardown failure recovers. The reviewer histories' worker-isolation and normal-caller cleanup checks are limited to those inspected paths.\"] Current coverage/results: [\"Both specifications searched for Restart, retained history and fixture isolation. SPEC.md's explicit retained-scrollback contract refutes the named misleading-comment allegation.\",\"TODO.md Planned and plans/queue/INDEX.md are empty. BUGS.md, INDEX.md, matching queue text and active TRIAGE_OUTCOMES.md searches found no exact reset-rationale item.\",\"Read history-fixture-reset-races-selection-save.md: it concerns preference writes racing server restoration, not terminal history carried by Restart. FILTER.md supplies no applicable boundary.\"] Exact cited cover: [\"SPEC.md:1942-1944: Restart keeps whatever scrollback the session's agent terminal retained: the terminal is replaced by a new one for each run, which starts with the old one's scrollback above a blank screen in default modes.\"] Original stronger consequence and missing premise remain preserved: \"The candidate considered misleading future fixture cleanup by claiming a host-backed Restart retains history. Its initial quotation used normalized apostrophes; later records supplied exact spelling and unchanged-reset/caller context. This never alleged a harmful product deletion path or user-work-loss route.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-060",
+          "key": "g092/c2",
+          "latest_line": 6,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "terminal-suite-reset-retained-scrollback-comment",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "A new terminal instance on Restart can inherit old scrollback. The changed reset comment accurately explains why delete/recreate is used to get clean fixture history.",
+          "checks": [
+            "61e632323dbc6b4a35ed27bf5b9833102ffd5a4e:e2e/tests/helpers/terminal-suite.ts:154-195 still deletes the listed sessions and recreates the canonical session; :166-170 changes only its explanatory history rationale.",
+            "SPEC.md:1942-1952 explicitly preserves retained scrollback into the new run, with bounded/copy-failure/absent-terminal caveats. Those exceptions do not make Restart a clean-history operation. Current SPEC_impl.md:8193-8194 also distinguishes static grid-client checks from host-backed real stacks.",
+            "This is a comment-contract check, not execution evidence or proof that every teardown failure recovers. The reviewer histories' worker-isolation and normal-caller cleanup checks are limited to those inspected paths."
+          ],
+          "coverage_checked": [
+            "Both specifications searched for Restart, retained history and fixture isolation. SPEC.md's explicit retained-scrollback contract refutes the named misleading-comment allegation.",
+            "TODO.md Planned and plans/queue/INDEX.md are empty. BUGS.md, INDEX.md, matching queue text and active TRIAGE_OUTCOMES.md searches found no exact reset-rationale item.",
+            "Read history-fixture-reset-races-selection-save.md: it concerns preference writes racing server restoration, not terminal history carried by Restart. FILTER.md supplies no applicable boundary."
+          ],
+          "exact_cover_quotes": [
+            "SPEC.md:1942-1944: Restart keeps whatever scrollback the session's agent terminal retained: the terminal is replaced by a new one for each run, which starts with the old one's scrollback above a blank screen in default modes."
+          ],
+          "missing_premise": null,
+          "original_stronger_consequence": "The candidate considered misleading future fixture cleanup by claiming a host-backed Restart retains history. Its initial quotation used normalized apostrophes; later records supplied exact spelling and unchanged-reset/caller context. This never alleged a harmful product deletion path or user-work-loss route.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Refute the named documentation defect using the explicit retained-scrollback contract; keep the scope limited to that rationale."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "terminal-suite-reset-retained-scrollback-comment",
+        "destination": null
+      }
+    },
+    {
+      "key": "g092/l1",
+      "owner": "g092",
+      "id": "l1",
+      "domain": "browser-test-fixtures",
+      "purpose": "browser-test-fixtures: e2e/tests/helpers/program-input.test.ts, e2e/tests/helpers/real-agent.ts, e2e/tests/helpers/term.ts, e2e/tests/helpers/terminal-readiness.ts, e2e/grid-client/playwright.config.ts, e2e/stack-slots.ts, e2e/tests/helpers/terminal-suite.ts; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Replay wait rationale may retain the removed asynchronous write boundary",
+            "location": "e2e/tests/helpers/terminal-readiness.ts:38",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: the shared reveal-wait documentation may describe an asynchronous write completion that no longer exists after the fixture and product become grid-only. Details: terminal-readiness.ts:38-39 says exactly: '`revealed`, rather than `revealReason`, is the witness because the\n * reason is recorded one asynchronous write completion before the reveal.' This is distinct from g181/c2's held-marker-versus-history-applied helper contract. The assigned patch removes byte-renderer branches elsewhere in this file; neighbour context describes synchronous grid reveal, but that report is not yet my validation. Checks made: read the exact pinned helper text; git log over the entire pinned range identifies 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513, f560058da19e02716e6f943883a9508b447aff4e and 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e as changes to the assigned files. Missing premise: whether grid reveal or any retained ending still waits for an asynchronous terminal write, and when the rationale first became false within the full range. Next source checks: pinned terminal.js endCatchUp/reveal and range-base helper/product history. Suggested bucket: other, test documentation accuracy; confidence: unverified lead pending accessible source checks, not unverified-after-investigation. proposed_drop: false pending investigation. possible_cover: related g181/c2 concerns a different docstring and oracle; no known cover for this exact rationale. Could-be-highest: no; no product security or loss-of-work consequence is alleged. No runtime execution or reproduction."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Reveal-wait documentation describes a retired asynchronous write",
+            "location": "e2e/tests/helpers/terminal-readiness.ts:38",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: the shared browser-test readiness helper explains its synchronization using an asynchronous terminal write that no longer exists. Future test authors are given the wrong boundary to reason about. Details: terminal-readiness.ts:38-39 retains exactly: '`revealed`, rather than `revealReason`, is the witness because the\n * reason is recorded one asynchronous write completion before the reveal.' At this grid-only revision terminal.js:3890-3915 records revealReason and calls reveal synchronously. reveal at :3756-3785 performs its recovery guard, scrolls and calls grid.flush, then sets the observed revealed flag and shows the terminal; grid-terminal.js:1997-2000 implements flush as a direct paint() call with no completion callback. History can still be queued, explicitly stated at terminal.js:3774-3776 and SPEC_impl.md, The grid client, 1864-1867 ('applying a large history in slices between frames so that the screen stays usable'). Thus neither an asynchronous terminal-write boundary nor fully drained history is what waitForReplayReveal observes. The helper itself remains useful and no failing test or product behavior is alleged. Suggested correction: describe the recorded reveal flag as the observation of actual reveal, including that endCatchUp can record a reason while reveal is vetoed during recovery; do not describe an xterm callback or imply history drainage. Whole-range attribution: at exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a the same helper text existed, but terminal.js:5430-5488 still had an applicable byte-terminal path: it recorded the reason, then writeBytes(joined, () => reveal(true)); writeBytes at :5362-5389 passed that completion through term.write. The grid path was already synchronous at base, so the old unqualified explanation was overbroad there; f560058 removes its last applicable asynchronous-write mechanism and makes the helper/grid-only file universally stale. Tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db still carries the same wording at 38-39. Pinned path history also checked 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 and 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e; neither supplies an alternative async write to justify it. Suggested bucket: other, documentation accuracy in test tooling. Confidence: confirmed by source/contract and whole-range history analysis; no runtime execution or reproduction. proposed_drop: false. possible_cover: neighbour g181/c2 describes a distinct changed held-replay helper claiming applied history, not this retained asynchronous-write rationale; parent may group related documentation fixes, but no coverage/drop decision is assumed. Could-be-highest: no; there is no established product security or loss-of-work route. Original consequence preserved from l1 lead: misleading reveal synchronization documentation, not a broken reveal implementation. No unresolved source premise remains."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Reveal-wait documentation describes a retired asynchronous write",
+            "location": "e2e/tests/helpers/terminal-readiness.ts:38",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e, with attribution corrected by complete-range caller evidence. Original consequence preserved: the reveal-wait rationale tells future test authors to reason about an asynchronous terminal-write completion although their grid attachment reveals synchronously. TLDR: the wording is inaccurate for current grid callers, but the earlier claim that f560058 newly introduces that mismatch is not supported. Details: helper lines 38-39 say exactly: '`revealed`, rather than `revealReason`, is the witness because the\n * reason is recorded one asynchronous write completion before the reveal.' The same text exists at exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a. At base the ordinary run already creates host/grid terminals: e2e/suite-terminals.ts:4-8 and 16-20 explicitly separate ordinary product tests from the old-terminal run. Thus the rationale already described the wrong mechanism for ordinary grid callers. However, it was not wholly without an applicable client then: suite-terminals.ts:10-18 and 62-74 defines a separate tmux/xterm tagged run, and terminal-replay-rename.spec.ts:715-777 is an actual OLD_TERMINAL_TAG caller of waitForReplayReveal at :764 after injecting nonempty byte replay. Base terminal.js:5445 and 5467-5488 records the reason and calls writeBytes(joined, () => reveal(true)); writeBytes:5362-5389 invokes term.write completion. Base config search at :107-110,171-175,211 confirms explicit old-tag selection and propagation of tmux mode. Therefore 'all actual fixtures were already grid at base' is refuted; only the ordinary retained fixture population was. At 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 the old run and old-tag callers are removed, leaving the helper's ordinary grid call sites (terminal-replay-rename.spec.ts:370,417,479,1072,1161,1416,1502). The actual suite-usage transition therefore belongs to 647f0227, before f560058 removes the remaining production byte mechanism; helper text itself is unchanged in both commits and at pinned tip. Source-confirmed current mismatch remains: terminal.js:3893-3915 calls reveal synchronously; :3774-3781 flushes and records reveal; grid-terminal.js:1997-2000 flush is paint(), with history explicitly allowed still pending at terminal.js:3774-3776. Suggested bucket: other, test documentation. Confidence: confirmed mismatch and caller history by source analysis; no execution or reproduction. proposed_drop: propose excluding l1 as an introduced defect in the assigned f560058 change because the exact ordinary-grid mismatch predates the complete range and is inherited by the retained helper callers; removal of the last byte referent alone does not prove new documentation harm. Preserve the contrary contextual fact for parent judgment: an actually applicable old-run caller existed at base and its removal at in-range 647f0227 makes this rationale stale for the suite as a whole. If that caller-population change qualifies as new staleness, attribute it to 647f0227 rather than f560058. This supersedes the prior proposed_drop:false on attribution grounds, not on production correctness or the absence of a runtime bug. No parent drop/lowering is assumed accepted. possible_cover: parent cites g089/l2's separate-location pre-base grid rationale; this supports using the same attribution standard, not automatic duplication or coverage. g181/c2 remains a distinct newly changed applied-history claim. Could-be-highest: no; the consequence is inaccurate fixture documentation only. No unresolved source premise remains for the requested base-versus-transition question; the remaining introduced-defect classification is expressly submitted to the parent with both supported perspectives."
+          }
+        }
+      ],
+      "latest": {
+        "line": 11,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l1",
+          "state": "open",
+          "summary": "Reveal-wait documentation describes a retired asynchronous write",
+          "location": "e2e/tests/helpers/terminal-readiness.ts:38",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e, with attribution corrected by complete-range caller evidence. Original consequence preserved: the reveal-wait rationale tells future test authors to reason about an asynchronous terminal-write completion although their grid attachment reveals synchronously. TLDR: the wording is inaccurate for current grid callers, but the earlier claim that f560058 newly introduces that mismatch is not supported. Details: helper lines 38-39 say exactly: '`revealed`, rather than `revealReason`, is the witness because the\n * reason is recorded one asynchronous write completion before the reveal.' The same text exists at exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a. At base the ordinary run already creates host/grid terminals: e2e/suite-terminals.ts:4-8 and 16-20 explicitly separate ordinary product tests from the old-terminal run. Thus the rationale already described the wrong mechanism for ordinary grid callers. However, it was not wholly without an applicable client then: suite-terminals.ts:10-18 and 62-74 defines a separate tmux/xterm tagged run, and terminal-replay-rename.spec.ts:715-777 is an actual OLD_TERMINAL_TAG caller of waitForReplayReveal at :764 after injecting nonempty byte replay. Base terminal.js:5445 and 5467-5488 records the reason and calls writeBytes(joined, () => reveal(true)); writeBytes:5362-5389 invokes term.write completion. Base config search at :107-110,171-175,211 confirms explicit old-tag selection and propagation of tmux mode. Therefore 'all actual fixtures were already grid at base' is refuted; only the ordinary retained fixture population was. At 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 the old run and old-tag callers are removed, leaving the helper's ordinary grid call sites (terminal-replay-rename.spec.ts:370,417,479,1072,1161,1416,1502). The actual suite-usage transition therefore belongs to 647f0227, before f560058 removes the remaining production byte mechanism; helper text itself is unchanged in both commits and at pinned tip. Source-confirmed current mismatch remains: terminal.js:3893-3915 calls reveal synchronously; :3774-3781 flushes and records reveal; grid-terminal.js:1997-2000 flush is paint(), with history explicitly allowed still pending at terminal.js:3774-3776. Suggested bucket: other, test documentation. Confidence: confirmed mismatch and caller history by source analysis; no execution or reproduction. proposed_drop: propose excluding l1 as an introduced defect in the assigned f560058 change because the exact ordinary-grid mismatch predates the complete range and is inherited by the retained helper callers; removal of the last byte referent alone does not prove new documentation harm. Preserve the contrary contextual fact for parent judgment: an actually applicable old-run caller existed at base and its removal at in-range 647f0227 makes this rationale stale for the suite as a whole. If that caller-population change qualifies as new staleness, attribute it to 647f0227 rather than f560058. This supersedes the prior proposed_drop:false on attribution grounds, not on production correctness or the absence of a runtime bug. No parent drop/lowering is assumed accepted. possible_cover: parent cites g089/l2's separate-location pre-base grid rationale; this supports using the same attribution standard, not automatic duplication or coverage. g181/c2 remains a distinct newly changed applied-history claim. Could-be-highest: no; the consequence is inaccurate fixture documentation only. No unresolved source premise remains for the requested base-versus-transition question; the remaining introduced-defect classification is expressly submitted to the parent with both supported perspectives."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g092/findings.jsonl",
+        "id": "l1",
+        "line": 11,
+        "disposition": "rejected",
+        "group": "replay-reveal-helper-retired-async-write-rationale",
+        "reason": "Parent read full claims060 and judges the stated attribution question. The unchanged universal asynchronous-write rationale already misdescribes the retained ordinary-grid callers at the exclusive base; their source, false explanation and user consequence persist unchanged. Removing the last old-run caller to which that wording happened to apply makes it universally stale but adds no new false application or new promise for a surviving caller. Unlike a new branch or contract applying old text to a new domain, this only removes a correctly described branch. Preserve647f0227's removal and historical documentation mismatch, but no in-range introduced/worsened consequence established for this exact helper. Correct production reveal is not the refutation. No security/user-work loss or stronger consequence."
+      },
+      "accepted_parent_decision": {
+        "key": "g092/l1",
+        "line": 11,
+        "disposition": "rejected",
+        "group": "replay-reveal-helper-retired-async-write-rationale",
+        "bucket": "other",
+        "recording": "out-of-range",
+        "needs_independent_drop_check": false,
+        "reason": "Parent read full claims060 and judges the stated attribution question. The unchanged universal asynchronous-write rationale already misdescribes the retained ordinary-grid callers at the exclusive base; their source, false explanation and user consequence persist unchanged. Removing the last old-run caller to which that wording happened to apply makes it universally stale but adds no new false application or new promise for a surviving caller. Unlike a new branch or contract applying old text to a new domain, this only removes a correctly described branch. Preserve647f0227's removal and historical documentation mismatch, but no in-range introduced/worsened consequence established for this exact helper. Correct production reveal is not the refutation. No security/user-work loss or stronger consequence."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-060",
+          "key": "g092/l1",
+          "latest_line": 11,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "replay-reveal-helper-retired-async-write-rationale",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The reveal helper still explains a synchronous grid reveal using a retired asynchronous write callback. Keep the source-confirmed documentation mismatch while the parent settles attribution: the ordinary-grid mismatch predates the range, but removal of the last actually applicable old-run caller occurs inside it.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e:e2e/tests/helpers/terminal-readiness.ts:38-39 says the reason is recorded one asynchronous write completion before reveal. The exact same text is present at exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a and recording-time main 24bc058066fd57848e788b465719b0e6da2f98f7.",
+            "At f560058 terminal.js:3893-3915 records reason and calls reveal synchronously; :3756-3785 may veto reveal during recovery, otherwise flushes and records revealed. grid-terminal.js:1997-2000 flush directly calls paint. History may still be pending at terminal.js:3774-3776, as SPEC_impl.md:1866 also allows.",
+            "At exclusive base, e2e/suite-terminals.ts:4-20 already puts ordinary callers on grids, but :10-18,62-74 provides a separate old-terminal run. terminal-replay-rename.spec.ts:715-777 has an actual OLD_TERMINAL_TAG caller after injecting nonempty byte replay (:764). Base terminal.js:5445,5467-5488 still records reason before writeBytes(joined, () => reveal(true)).",
+            "At in-range 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 the old suite/callers disappear while waitForReplayReveal remains at terminal-replay-rename.spec.ts:370,417,479,1072,1161,1416,1502. Full-range helper path history names 647f0227 and f560058. Thus assigned-commit-only attribution to f560058 is unsound; whole-suite loss of the last applicable caller is attributable to 647f0227. No runtime bug is alleged or reproduced."
+          ],
+          "coverage_checked": [
+            "Both specifications' grid/replay contracts explain synchronous paint and sliced history, not an asynchronous terminal-write callback. They do not accept inaccurate synchronization rationale.",
+            "TODO.md Planned is empty; plans/queue/INDEX.md has no unlanded plan. tmux-drop-from-docs.md's broad rationale sweep is already landed and the current helper still carries this text; it is not prospective coverage.",
+            "Searches of BUGS.md, INDEX.md and queue bodies, and active TRIAGE_OUTCOMES.md found no exact waitForReplayReveal/asynchronous-write-rationale item. FILTER.md does not cover persistent explanatory test documentation merely because it concerns a rare replay ending. The history's g089/l2 and g181/c2 references concern different locations/contracts; no exact alias is established from this batch."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "Parent classification of introduced-defect scope: is removal of the last old-run caller enough to record newly universal staleness, despite ordinary retained callers already being misdescribed at the exclusive base? Source facts on both sides are established; no new harm to an ordinary-grid caller is demonstrated.",
+          "original_stronger_consequence": "The initial lead/finding alleged misleading synchronization documentation, not broken reveal code, and initially attributed universal staleness to f560058. Latest record proposes dropping assigned-patch attribution because ordinary-grid harm already existed before the range, while expressly preserving the contrary fact that an actual old-run caller existed at base and was removed by in-range 647f0227. Do not erase that withdrawal proposal or treat production correctness as refuting the documentation defect. History drainage is not what this helper observes.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain the verified documentation mismatch with the attribution caveat for parent judgment. If retained as in-range newly universal staleness, cite 647f0227's caller-population transition rather than claiming f560058 first introduced ordinary-grid misinformation. No exact existing coverage was found."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "replay-reveal-helper-retired-async-write-rationale",
+        "destination": "trailing-replay-reveal-helper-retired-async-write-rationale.md"
+      }
+    },
+    {
+      "key": "g092/c3",
+      "owner": "g092",
+      "id": "c3",
+      "domain": "browser-test-fixtures",
+      "purpose": "browser-test-fixtures: e2e/tests/helpers/program-input.test.ts, e2e/tests/helpers/real-agent.ts, e2e/tests/helpers/term.ts, e2e/tests/helpers/terminal-readiness.ts, e2e/grid-client/playwright.config.ts, e2e/stack-slots.ts, e2e/tests/helpers/terminal-suite.ts; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Signal-death explanation matches the terminal-host exit mapping",
+            "location": "e2e/tests/helpers/terminal-suite.ts:67",
+            "detail": "Reviewed commit: 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e. TLDR: considered whether removing the tmux qualification makes the stopped-badge comment wrongly say a host-backed signal death has no exit code. Details: the assigned patch changes the explanation at terminal-suite.ts:66-69 to 'a signal death, which has no exit code'; the STOPPED_BADGE regex at :78 still accepts both known numeric codes and unknown/absent codes. Source check: hosts/terminal.rs:835-859 derives status evidence from its stored ChildExit and explicitly documents None for a death by signal. Pinned git grep locates its exhaustive conversion at :886-889: ChildExit::Code(code) => Some(code), ChildExit::Signal(_) => None. The host records ChildExit::Signal from WTERMSIG at terminal-host/src/host.rs:467 and ChildExit::Code from WEXITSTATUS at :469. The new explanation is therefore accurate for the runtime the fixture now uses; it does not erase a synthetic 128-plus-signal exit code that this path actually returns. Suggested bucket: other (test documentation). Confidence: confirmed by source, no runtime execution or reproduction. proposed_drop: refuted by the explicit ChildExit-to-optional-code mapping and evidence accessor; no specification exception is needed. possible_cover: none. Could-be-highest: no; the considered consequence is a misleading fixture comment, with no product security or loss-of-work route."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Signal-death explanation matches the terminal-host exit mapping",
+          "location": "e2e/tests/helpers/terminal-suite.ts:67",
+          "detail": "Reviewed commit: 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e. TLDR: considered whether removing the tmux qualification makes the stopped-badge comment wrongly say a host-backed signal death has no exit code. Details: the assigned patch changes the explanation at terminal-suite.ts:66-69 to 'a signal death, which has no exit code'; the STOPPED_BADGE regex at :78 still accepts both known numeric codes and unknown/absent codes. Source check: hosts/terminal.rs:835-859 derives status evidence from its stored ChildExit and explicitly documents None for a death by signal. Pinned git grep locates its exhaustive conversion at :886-889: ChildExit::Code(code) => Some(code), ChildExit::Signal(_) => None. The host records ChildExit::Signal from WTERMSIG at terminal-host/src/host.rs:467 and ChildExit::Code from WEXITSTATUS at :469. The new explanation is therefore accurate for the runtime the fixture now uses; it does not erase a synthetic 128-plus-signal exit code that this path actually returns. Suggested bucket: other (test documentation). Confidence: confirmed by source, no runtime execution or reproduction. proposed_drop: refuted by the explicit ChildExit-to-optional-code mapping and evidence accessor; no specification exception is needed. possible_cover: none. Could-be-highest: no; the considered consequence is a misleading fixture comment, with no product security or loss-of-work route."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g092/findings.jsonl",
+        "id": "c3",
+        "line": 10,
+        "disposition": "excluded",
+        "group": "terminal-suite-signal-death-exit-code-comment",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-060 after inspecting it. The host-backed status path deliberately represents a signal death without a numeric exit code. Removing the old tmux qualification leaves the fixture explanation accurate. Refute the inaccurate-comment allegation with the exact ChildExit-to-optional-code conversion and host wait-status producer. Checked source/results: [\"61e632323dbc6b4a35ed27bf5b9833102ffd5a4e:e2e/tests/helpers/terminal-suite.ts:66-78 says signal death has no exit code and permits numeric or unknown/absent codes in STOPPED_BADGE.\",\"At that revision crates/terminal-host/src/host.rs:467-469 records WTERMSIG as ChildExit::Signal and WEXITSTATUS as ChildExit::Code. crates/farhelm-supervisor/src/hosts/terminal.rs:835-859 derives status from that record and documents None for signal death; :886-889 exhaustively maps Signal to None and Code to Some(code). No synthetic 128-plus-signal status is produced by this path.\",\"These are source and contract checks, not execution observations. No product security or user-work-loss route is alleged.\"] Current coverage/results: [\"Both specifications searched for signal/exit-code status. SPEC.md:2664-2674 requires known numeric evidence or explicit unknown, never a guess; SPEC_impl.md:2606 states the exit code comes from the host's exit record. The decisive refutation is the explicit source mapping.\",\"TODO.md Planned and plans/queue/INDEX.md are empty. Searches of BUGS.md, INDEX.md/queue bodies and active TRIAGE_OUTCOMES.md found no exact signal-death fixture-comment item. FILTER.md is not needed and does not match this documentation allegation.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The candidate asked whether removing the tmux qualification falsely says a host-backed signal death has no exit code and misleads future fixture authors. It was source-refuted on its only recorded turn; no broader product consequence was claimed.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g092/c3",
+        "line": 10,
+        "disposition": "excluded",
+        "group": "terminal-suite-signal-death-exit-code-comment",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-060 after inspecting it. The host-backed status path deliberately represents a signal death without a numeric exit code. Removing the old tmux qualification leaves the fixture explanation accurate. Refute the inaccurate-comment allegation with the exact ChildExit-to-optional-code conversion and host wait-status producer. Checked source/results: [\"61e632323dbc6b4a35ed27bf5b9833102ffd5a4e:e2e/tests/helpers/terminal-suite.ts:66-78 says signal death has no exit code and permits numeric or unknown/absent codes in STOPPED_BADGE.\",\"At that revision crates/terminal-host/src/host.rs:467-469 records WTERMSIG as ChildExit::Signal and WEXITSTATUS as ChildExit::Code. crates/farhelm-supervisor/src/hosts/terminal.rs:835-859 derives status from that record and documents None for signal death; :886-889 exhaustively maps Signal to None and Code to Some(code). No synthetic 128-plus-signal status is produced by this path.\",\"These are source and contract checks, not execution observations. No product security or user-work-loss route is alleged.\"] Current coverage/results: [\"Both specifications searched for signal/exit-code status. SPEC.md:2664-2674 requires known numeric evidence or explicit unknown, never a guess; SPEC_impl.md:2606 states the exit code comes from the host's exit record. The decisive refutation is the explicit source mapping.\",\"TODO.md Planned and plans/queue/INDEX.md are empty. Searches of BUGS.md, INDEX.md/queue bodies and active TRIAGE_OUTCOMES.md found no exact signal-death fixture-comment item. FILTER.md is not needed and does not match this documentation allegation.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The candidate asked whether removing the tmux qualification falsely says a host-backed signal death has no exit code and misleads future fixture authors. It was source-refuted on its only recorded turn; no broader product consequence was claimed.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-060",
+          "key": "g092/c3",
+          "latest_line": 10,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "terminal-suite-signal-death-exit-code-comment",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The host-backed status path deliberately represents a signal death without a numeric exit code. Removing the old tmux qualification leaves the fixture explanation accurate.",
+          "checks": [
+            "61e632323dbc6b4a35ed27bf5b9833102ffd5a4e:e2e/tests/helpers/terminal-suite.ts:66-78 says signal death has no exit code and permits numeric or unknown/absent codes in STOPPED_BADGE.",
+            "At that revision crates/terminal-host/src/host.rs:467-469 records WTERMSIG as ChildExit::Signal and WEXITSTATUS as ChildExit::Code. crates/farhelm-supervisor/src/hosts/terminal.rs:835-859 derives status from that record and documents None for signal death; :886-889 exhaustively maps Signal to None and Code to Some(code). No synthetic 128-plus-signal status is produced by this path.",
+            "These are source and contract checks, not execution observations. No product security or user-work-loss route is alleged."
+          ],
+          "coverage_checked": [
+            "Both specifications searched for signal/exit-code status. SPEC.md:2664-2674 requires known numeric evidence or explicit unknown, never a guess; SPEC_impl.md:2606 states the exit code comes from the host's exit record. The decisive refutation is the explicit source mapping.",
+            "TODO.md Planned and plans/queue/INDEX.md are empty. Searches of BUGS.md, INDEX.md/queue bodies and active TRIAGE_OUTCOMES.md found no exact signal-death fixture-comment item. FILTER.md is not needed and does not match this documentation allegation."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "The candidate asked whether removing the tmux qualification falsely says a host-backed signal death has no exit code and misleads future fixture authors. It was source-refuted on its only recorded turn; no broader product consequence was claimed.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Refute the inaccurate-comment allegation with the exact ChildExit-to-optional-code conversion and host wait-status producer."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "terminal-suite-signal-death-exit-code-comment",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete: all seven assigned patches read at their pinned revisions.\n\nNo actionable findings or unresolved leads. Candidates `c1` and `c2` were recorded with source and specification grounds for setting them aside. `findings.jsonl` and `progress.md` are updated.\n\nNo runtime tests or reproductions were run; no assigned material remains unread."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised `c1` with replay/focus boundary and binary-input encoding checks. Revised `c2` with worker isolation, reset readiness, and inspected cleanup-order evidence.\n\nNo new findings. Unresolved lead IDs: none. All conclusions are source-based; no execution performed."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 complete.\n\n- Checks: whole-range attribution, reader/test diffs, reveal implementation, history contract, and signal-exit mapping.\n- New verified finding: `l1` — reveal-wait documentation describes a retired asynchronous write boundary.\n- New unverified-after-investigation IDs: none.\n- Open leads: none.\n- Refuted candidate: `c3`.\n\n**New issue found: yes.** Logs updated; source analysis only, no execution."
+    },
+    {
+      "turn": 4,
+      "reply": "Discovery pass 2 complete.\n\n- Revised `l1` with base-caller evidence and a proposed attribution-based exclusion; parent decision remains pending.\n- Checked viewport/text extraction, selectors, font values, and direct-input caller boundaries.\n- New verified IDs: none.\n- New unverified-after-investigation IDs: none.\n- Open leads: none.\n- Anything new found: **no**.\n\nLogs updated. Source analysis only; no execution."
+    }
+  ],
+  "progress": "g092 browser-test-fixtures: initial review complete, turn 1.\n\nRead the brief and complete inventory commits field; excluded coverage metadata was not read. Findings log existed before source review and has append-only events for c1 and c2, including revisions. No actionable finding and no unresolved lead. New verified/unverified finding IDs: none. Considered candidates: c1 (grid-only reader/test narrowing), c2 (reset explanation and retained history), both set aside with source/specification basis. Neither could be highest. Discovery-pass count: 0; this was the assigned initial pass, not a later synthesis or discovery turn.\n\nAll assigned patch material was read through the evidence command, in separate packets:\n\n- 01150-000.patch: 1-118.\n- 01152-000.patch: 1-159.\n- 01153-000.patch: 1-150, 151-300, 301-417.\n- 01154-000.patch: 1-115.\n- 01507-000.patch: 1-15.\n- 01508-000.patch: 1-40.\n- 01509-000.patch: 1-29.\n\nGoverning contracts read at f560058da19e02716e6f943883a9508b447aff4e: SPEC.md Terminal experience 2855-3015 and 3016-3177; SPEC_impl.md Terminal widget: the grid island and The grid client 1504-1695 and 1696-1887; Testing 8200-8267; Answers bind to what was drawn 1069-1105. At 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e: SPEC.md Lifecycle operations 1888-2010 and 2011-2130; SPEC_impl.md Testing 8163-8230. An exploratory broad specification diff was truncated and was not used as evidence; governing sections were opened directly in bounded ranges.\n\nPinned surrounding source read at f560058da19e02716e6f943883a9508b447aff4e:\n\n- e2e/tests/helpers/term.ts: 1-355.\n- e2e/tests/helpers/real-agent.ts: 1-310.\n- e2e/tests/helpers/terminal-readiness.ts: 1-320, 317-354 (end).\n- e2e/tests/helpers/program-input.ts: 1-106 (end).\n- e2e/tests/helpers/program-input.test.ts: 1-81 (end).\n- crates/farhelm-ui/assets/terminal.js: 3350-3470, 3470-3538, 4640-4700.\n- e2e/tests/keyboard-shortcuts.spec.ts: 65-150.\n- e2e/tests/real-agent.spec.ts: 190-305.\n\nPinned source at 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e: e2e/tests/helpers/terminal-suite.ts 1-245; e2e/stack-slots.ts 1-108 (end); e2e/grid-client/playwright.config.ts 1-22 (end). Targeted git grep checked removed symbols/replay fields throughout e2e/tests and e2e/grid-client and located fixture callers. No surviving removed-symbol callers were found.\n\nInterface assumptions: all supported terminals use a host and grid; primary globals refer only to the agent terminal, with tabs accessed through the island registry. Mount, socket-open, replay-revealed and focused readiness remain distinct observations. Input observation intentionally records sent binary messages rather than text control frames. Restart creates a new terminal but carries prior scrollback, so delete/recreate still isolates fixture history. Assigned later-commit patches change comments only.\n\nUnread assigned scope: none. No runtime test, build or reproduction was run; all conclusions are source/contract analysis. No checkout files were created, changed or deleted; only private group artifacts were written. No coverage-source search, live-install access or helper-agent delegation occurred.\n\nTurn 2: later synthesis in progress. Parent audited all mandatory delivery and read the four events; no parent drop was accepted. Parent reports g091 independently confirmed unconditional grid mounting and no fresh-stack tmux-server creation route. These are corroboration only, not proof of caller readiness or teardown. Rechecking caller boundaries, input-observation lifetime and reset isolation. Discovery-pass count remains 0. Open leads: none at entry.\n\nTurn 2 completion: synthesis complete. Appended two revisions under c1 (held-replay/focus callers, then input encoding and real-agent input) and one under c2 (worker/request isolation, reset readiness and inspected cleanup order). New finding/lead IDs: none. Open leads: none. No new actionable finding; candidates remain reviewer proposals, with no parent drop acceptance inferred. No runtime execution, reproduction or checkout mutation occurred. Discovery-pass count: 0.\n\nAdditional pinned source delivered this turn:\n\n- At f560058da19e02716e6f943883a9508b447aff4e: terminal-replay-rename.spec.ts 310-490; grid-input.js 408-510; terminal.js 4468-4530; real-agent.ts 310-465. Targeted searches located mount/reveal callers and product reveal/input functions.\n- At 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e: terminal-suite.ts 245-510; term.ts 388-430 (end); terminal-tabs.spec.ts 128-225; playwright.config.ts 1-155; evidence.ts 1-200. Targeted searches located cleanup calls and worker/request fixture bindings.\n\nSynthesis results: held replay uses mount-only observation and explicit release; focus-protection callers establish the intended focus before reveal. Sent input is binary JSON from the same encoder the fixture uses, so removing socket-kind classification does not change interpretation on supported sockets. Per-slot config binds page and request fixtures to the same private stack, with tests serial within a project. Reset creation does not claim program readiness: openTerminal establishes ID-specific attachment readiness and the fake-agent banner separately. The inspected tab caller awaits owned-session Stop/Delete cleanup before the file-end scratch sweep; errors are surfaced rather than treated as successful deletion. These are checks of the changed fixture interfaces and inspected callers, not an exhaustive review of unchanged teardown failure recovery.\n\nUnread assigned scope: none. Next action: return this turn's delta and await the caller's next phase.\n\nTurn 3: separate discovery pass 1 in progress. Read discovery-neighbours.json completely in bounded ranges 1-65, 66-125, 126-168, 169-215 and 216-257 after an initial oversized preview was clipped. Named pending questions: none. Neighbour records distinguish historical renderer-specific test losses from current oracle/documentation defects, notably g181/c2's replay-marker-versus-history-drain distinction. They are novelty/interface context, not my source credit or accepted drops. New search stays within the seven assigned patches and their contracts/callers; no runtime execution. No open leads at entry.\n\nTurn 3 completion: discovery pass 1 complete. New verified finding: l1 (retained reveal-wait rationale describes the removed async xterm write). Its lead event was revised under the same ID to a confirmed source-based finding. New unverified-after-investigation IDs: none. Remaining lead IDs: none. New candidate considered and refuted: c3 (signal-death comment matches the actual optional-code mapping). c1/c2 consequences and proposed-drop bases are unchanged; no parent disposition inferred. Something new was found: yes, l1. The pass continued through the remaining assigned reader/test extraction and comment changes after l1 was recorded.\n\nUseful discovery checks/results:\n\n- Compared assigned paths across the complete exclusive-base-to-inclusive-tip range and inspected their path history (647f0227, f560058d and 61e63232). This distinguishes stale pre-existing grid wording from the in-range removal of its last applicable byte-write mechanism. Earlier 647f0227 changes were attribution context, not additional assigned review scope.\n- Read terminal-readiness.ts 1-82 at f560058d and the range base, its whole-range diff, and tip 31-57. The asynchronous-write explanation remains at 38-39 after the byte mechanism disappears.\n- Read f560058d terminal.js 3740-3925 and grid-terminal.js 1980-2015: endCatchUp records the reason then calls reveal synchronously; flush is direct paint. Read base terminal.js 5410-5515 and 5350-5392: the former byte path calls reveal only from term.write completion. The new l1 is documentation accuracy, not proof of a broken reveal or fully drained history. Read numbered SPEC_impl.md 1858-1872 to check the distinct sliced-history contract. A broad exploratory terminal.js diff was clipped; exact implementation ranges, not its preview, substantiate the finding.\n- Re-read complete whole-range diffs for program-input.test.ts and real-agent.ts in packets 1-200 and 201-360; re-read the assigned term.ts patch in packets 1-175, 176-350 and 351-470. No additional changed decoding, row-joining, notice-offset, alternate-screen or text-observation defect was established.\n- Re-read the three 61e63232 comment-only patches and whole-range config/slot/suite context. Checked hosts/terminal.rs 820-860 and located its Code/Signal conversion at 886-889 plus the host's wait-status construction. The signal-death rationale is source-correct and recorded as c3.\n\nUnread assigned scope: none. No runtime tests, builds, reproductions, live-install actions, prohibited coverage searches, helper agents or checkout mutations. Next action: return the discovery delta; because a substantive discovery was made, any further discovery is a separate caller-prompted turn.\n\nTurn 4: attribution synthesis followed by separate discovery pass 2 in progress. Read the updated discovery-neighbours.json completely in bounded ranges 1-65, 66-125, 126-168, 169-210, 211-250 and 251-306. Parent asks whether l1's callback rationale was already false for all actual helper callers at the range base, rather than newly invalidated at f560058d. Checking base suite selection and exact helper callers before the new search. No parent drops/lowerings accepted; no source checks or disposition for g089 are delegated or assumed.\n\nTurn 4 completion: attribution synthesis and discovery pass 2 complete. Revised l1 under its original ID. It remains a confirmed current documentation mismatch, but the proposed disposition now excludes it as newly introduced by the assigned f560058d change: the same rationale was wrong for retained ordinary grid callers at the full-range base. Preserve the countervailing fact: base also had real old-run helper callers for which the asynchronous-write rationale did apply; removal of those actual callers is at in-range 647f0227, not f560058d. The parent retains the final introduced-defect/disposition decision. No accepted drop/lowering is inferred and no independent g089 record was reopened.\n\nNamed-question source checks: base suite-terminals.ts 1-111 explicitly defines ordinary host/grid and separately tagged tmux/xterm runs; base terminal-replay-rename.spec.ts 705-785 contains a real old-tag waitForReplayReveal caller after nonempty replay, while 432-490 contains an ordinary grid caller of the same helper. Base config searches locate the mode-dependent filters at 107-110,171-175 and tmux-mode propagation at 211. At 647f0227, read config 94-118, its config/start-stack diff 1-165, start-stack 190-215 and located the supervisor invocations at 473/516 without a new-terminals override. These confirm removal of the old fixture run/caller population before production renderer removal. No inference of newness rests solely on removing the last production referent.\n\nSeparate new search: inspected helper consumer references and grid text/viewport/font/selector contracts beyond the known replay rationale. At f560058d read grid-buffer.js 60-110 (wide-cell and untrimmed row extraction), grid-terminal.js 520-570 and 2060-2085 (history/notice/alternate-screen viewport indexing), terminal-unicode.spec.ts 20-82 (ID-specific reveal, ordered command/reply and direct socket input), terminal-font.spec.ts 54-90 (focus, retained size and owned input witness), sidebar-resize.spec.ts 94-132 (proposal versus committed size and program-reported geometry). Targeted grid-terminal source checks locate the exact input/screen classes and inline font values the extracted helpers read. These checks found no additional defect in the assigned extraction or comment changes; no new candidate was manufactured from clean checks.\n\nDiscovery-pass count: 2. New verified IDs: none. New unverified-after-investigation IDs: none. Revised existing ID: l1. Remaining lead IDs: none. Anything new found in this pass: no. Unread assigned scope: none. All observations are source/contract analysis; no runtime tests, reproductions, builds, live-install actions, forbidden coverage-source searches, helper agents or checkout mutations occurred. Next action: return this turn's delta to the caller.\n"
+}

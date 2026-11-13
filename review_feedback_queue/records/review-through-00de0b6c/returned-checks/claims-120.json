@@ -1,0 +1,306 @@
+[
+  {
+    "key": "g191/c1",
+    "latest_line": 9,
+    "recommendation": "refuted",
+    "bucket": "high",
+    "underlying_key": "retired-xterm-current-page-mount-dependency",
+    "aliases": ["g192/c1"],
+    "target_queue_file": null,
+    "why": "The updated page registers and constructs the grid without the removed xterm global. This refutes the named dependency failure, not old-page compatibility or semantic parity.",
+    "checks": [
+      "At f560058da19e02716e6f943883a9508b447aff4e, UI lib.rs:1479-1496,1914-1926 registers grid assets and terminal.js; terminal.js:3191-3228 waits for grid helpers/fonts and :4294-4354 constructs farhelmGridTerminal.",
+      "Pinned git grep across UI src/assets for window.Terminal, new Terminal(, XTERM_JS, XTERM_CSS, addon-fit.js and vendor/xterm.js returned no references.",
+      "At that revision, proto lib.rs:255 is protocol 77; io.rs:595-659 refuses a different protocol; helm manager.rs:4503-4542 returns AttemptOutcome::Skew. This handshake concerns supervisor peers, not browser-build compatibility. Source only."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md Terminal experience:2855-3170 requires fidelity and terminal hosts; SPEC_impl.md Terminal widget:1693-1755 and grid client:1836-1886 describe grid ownership. No accepted fresh-page mount failure.",
+      "TODO.md Planned:25-26 is empty. BUGS.md contains only the unrelated SSH-helper transfer hang.",
+      "Searched plans/queue for xterm, grid, old-page and replacement terms; read matching tmux-end-old-terminals acceptance criteria and tmux-drop-from-docs scope. Removal/cleanup requirements do not cover a fresh-page mount failure or fix the distinct legacy input route.",
+      "Read INDEX.md in full and searched matching queue/active TRIAGE_OUTCOMES.md text. No exact mount-dependency item. Old-page authentication/shortcut items concern different triggers and consequences. No filter needed for a source refutation."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No stale executable xterm dependency was found. This does not establish compatibility for a pre-update page.",
+    "original_stronger_consequence": "Initially considered an unusable terminal after removal. Latest history expressly preserves the distinct potentially highest old-page JSON-to-command route attributed to g196/l1, g082/c2 and g083/c5; it must not be dropped with this candidate.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Refute only updated-page stale constructor/asset dependency and old-supervisor protocol acceptance. Keep all legacy-page input claims outside this disposition; independent judgment is needed before using this narrowing to dismiss any security or work-loss consequence."
+  },
+  {
+    "key": "g191/c2",
+    "latest_line": 8,
+    "recommendation": "refuted",
+    "bucket": "high",
+    "underlying_key": "retired-selection-service-current-grid-dependency",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Local selection and completed-selection copying are implemented and called independently of the deleted SelectionService.",
+    "checks": [
+      "At f560058da19e02716e6f943883a9508b447aff4e, grid-terminal.js:1044-1072 implements selection state/text/select-all; :1106-1165 implements character, word, line and block extension.",
+      "grid-terminal.js:1665-1685 calls onCopy for completed admitted selections; :1761-1809 chooses local versus program-owned gestures. terminal.js:4332-4334 supplies enqueueClipboardWrite as onCopy. Source only; no runtime clipboard result claimed."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:3060-3081 requires completed local selections to copy; SPEC_impl.md:1728-1755 and :1836-1886 assign clipboard/selection ownership. These are requirements, not acceptance of lost selection.",
+      "TODO Planned is empty; BUGS.md has only an unrelated SSH-transfer hang. Matching plans/queue removal and docs-cleanup sections preserve selection ports and behavior; they provide no separate cause-removing work for the hypothesis.",
+      "INDEX.md read fully; selection-related queue entries describe anchor invalidation, wheel selection and individual text-copy differences, not complete loss caused by deleting SelectionService. Active TRIAGE_OUTCOMES.md search found no exact trigger/consequence. FILTER.md does not need to be applied."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No call from the surviving selection/copy path to the removed service was found; this is not an exhaustive audit of grid selection correctness.",
+    "original_stronger_consequence": "Hypothetical loss of selection/select-to-copy availability, suggested high; no security or user-work-loss route was established in any supplied revision.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source-refuted deletion dependency only. Preserve separate selection defects and primary-selection notice claims."
+  },
+  {
+    "key": "g191/c3",
+    "latest_line": 5,
+    "recommendation": "refuted",
+    "bucket": "high",
+    "underlying_key": "retired-browser-parser-current-emulator-dependency",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Removing the browser parser does not remove the active output interpreter or palette/default-color path. This does not claim preservation of every removed theme capability.",
+    "checks": [
+      "At f560058da19e02716e6f943883a9508b447aff4e, emulator.rs:117-159 constructs Term/Processor and feeds QueryHandler; queries.rs:293-367 delegates cursor, scroll, color, title and hyperlink operations; :476-486 answers dynamic colors from stored values/theme.",
+      "grid_output.rs:276-288 resolves redefined palette colors; :461-477 sends foreground/background overrides. grid-style.js:100-121 builds the palette and :133 onward resolves styled colors; grid-terminal.js:831 applies defaults.",
+      "The cursor-color omission is independently confirmed in g191/l1 and the existing queue item; successful ownership does not refute it. Source only."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md Terminal experience requires full color/cursor fidelity. SPEC_impl.md:1693-1720,1836-1886,2670-2704 assigns interpretation to the supervisor and names unanswered-query exceptions; none is a blanket theme-parity waiver.",
+      "TODO Planned empty; BUGS unrelated. Plans/queue removal/docs-cleanup criteria preserve terminal behavior and do not independently repair a missing capability.",
+      "INDEX.md read fully; program-selected-cursor-color-never-reaches-viewer.md read fully and covers the distinct cursor-color omission, not total parser/theme loss. Active TRIAGE_OUTCOMES search found no exact parser-dependency decision. No FILTER applied."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No dependence of the active output path on the deleted parser/theme service. No exhaustive escape-sequence or theme parity claim is justified.",
+    "original_stronger_consequence": "Hypothetical lost terminal interpretation/query availability, suggested high. Supplied history establishes no security or user-work-loss consequence for this narrow hypothesis.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Refute removal-as-loss-of-active-interpreter. Keep cursor-color and any separately named semantic gaps outside that refutation."
+  },
+  {
+    "key": "g191/c4",
+    "latest_line": 6,
+    "recommendation": "refuted",
+    "bucket": "high",
+    "underlying_key": "retired-osc-link-service-current-grid-dependency",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "OSC 8 metadata travels from the emulator to grid links and their activation callbacks without the removed link service.",
+    "checks": [
+      "At f560058da19e02716e6f943883a9508b447aff4e, queries.rs:293-302,367 delegates hyperlinks; grid_output.rs:143-165 copies hyperlink id/URI into CellRun.",
+      "grid-buffer.js:285-345 resolves hyperlink identities and :379-405 builds OSC links; terminal.js:1029-1060 supplies web/file/inert-scheme callbacks and :1108-1116 installs the provider.",
+      "terminal.js:995-1017 checks admitted click/selection and disclosure for web activation. This confirms a retained path, not a whole-system link security audit. No execution."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:3082-3170 requires link behavior and target disclosure; SPEC_impl grid-client/terminal-widget sections assign the grid link interface. No accepted disappearance of OSC links.",
+      "TODO Planned empty; BUGS unrelated; matching removal/docs-cleanup plans preserve link behavior rather than accept or repair complete link-service dependency failure.",
+      "INDEX.md read fully; hyperlink identity, hover and copied-text entries concern distinct mechanisms. Active TRIAGE_OUTCOMES search found no exact deletion/availability decision. No FILTER applied."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No missing live link metadata or callback handoff was found. No wrong-target/disclosure-bypass consequence was established by this candidate.",
+    "original_stronger_consequence": "Hypothetical unavailable program hyperlinks, suggested high; history expressly disclaims an established wrong-target or disclosure-bypass route.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Refute lost OSC-link availability caused by removal only; do not treat this as security approval of other link behavior."
+  },
+  {
+    "key": "g191/c5",
+    "latest_line": 10,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "retained-grid-port-notices-after-xterm-removal",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The retained ports have their own complete license notices, still declared as a shipped asset independently of the removed bundle.",
+    "checks": [
+      "At f560058da19e02716e6f943883a9508b447aff4e, grid-ported-code-LICENSES.txt was read in full: it lists selection ports and retains xterm, add-on and VS Code MIT notices.",
+      "THIRD_PARTY_NOTICES.md:19-45 identifies the retained ports and separate notice. UI lib.rs:1484-1495 declares GRID_PORTED_CODE_LICENSES with #[used]. This is source/asset-declaration evidence, not an observed built-package audit or legal opinion."
+    ],
+    "coverage_checked": [
+      "Current SPEC_impl.md:1693-1700 states that ported-code attribution stays beside the code and in THIRD_PARTY_NOTICES.md; SPEC.md has no separate accepted attribution-loss rule.",
+      "TODO Planned empty; BUGS unrelated. plans/queue/tmux-end-old-terminals.md:125-129 and tmux-drop-from-docs.md:37-42,68-74 require retaining the independent notices; those requirements match the observed source, not a defect waiver.",
+      "INDEX.md read fully; matching attribution searches found no exact retained-port notice-loss item. Active TRIAGE_OUTCOMES had no matching decision. No FILTER applied."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No source-level loss of attribution. Built distribution contents were not inspected.",
+    "original_stronger_consequence": "Possible required-attribution loss, suggested other; no security or loss-of-work route in supplied history.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Refute source/asset-declaration omission only. Do not convert the result into a package audit."
+  },
+  {
+    "key": "g191/l1",
+    "latest_line": 14,
+    "recommendation": "covered",
+    "bucket": "other",
+    "underlying_key": "grid-osc12-cursor-color-not-transmitted",
+    "aliases": ["existing queue provenance g173/f4"],
+    "target_queue_file": "review_feedback_queue/program-selected-cursor-color-never-reaches-viewer.md",
+    "why": "The omission is source-established, but the exact trigger, consequence and scope are already recorded in the queue. The existing item already says it affects both live updates and reconnects.",
+    "checks": [
+      "At f560058da19e02716e6f943883a9508b447aff4e, vte ansi.rs:1486-1511 accepts OSC 12; term/mod.rs:2145-2154 stores the cursor color; queries.rs:357-358 delegates it and :476-486 answers queries from stored colors.",
+      "grid_output.rs:329-362 and :461-477 omit cursor color; proto grid.rs:1040-1048,1128-1153 has no field. grid-style.js:225-233 returns theme.cursor and grid-terminal.js:792-819 paints it.",
+      "Baseline grid-style.js:220-240 already has the same fixed-theme mapping. Complete baseline-to-tip diffs for grid-style.js and grid_output.rs change comments only. It is not a new f560058d regression for existing grid terminals; retain the supplied deletion/replacement-contract attribution caveat. No runtime reproduction."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:2860 requires fidelity; SPEC_impl.md:2670-2704 describes program-set color query answers and its complete Grid streams section has no cursor-color exception.",
+      "TODO Planned empty; BUGS unrelated. Matching plans/queue sections remove obsolete code/docs and retain cursor defaults but do not specify transmission of OSC 12 overrides.",
+      "INDEX.md:1315-1317 points to program-selected-cursor-color-never-reaches-viewer.md, read fully. Its existing g173/f4 evidence covers the same accepted OSC12 -> omitted field -> theme-only painter chain, with live/reconnect scope. Active TRIAGE_OUTCOMES search found no further exact decision. FILTER rare/self-correcting does not cover an ordinary program color change remaining wrong after reconnect."
+    ],
+    "exact_cover_quotes": [
+      "review_feedback_queue/program-selected-cursor-color-never-reaches-viewer.md, TLDR: A program that changes its text cursor color continues to show the theme's fixed cursor color, even though Farhelm's emulator accepts the new color.",
+      "Same file, Details: No transmitted value can represent the accepted OSC12 change, on live update or reconnect."
+    ],
+    "missing_premise": "None for the conditional source omission. No runtime occurrence/frequency was measured. The current review does not establish a newly introduced omission within this range.",
+    "original_stronger_consequence": "Cursor-color display/query disagreement, other throughout. Earlier parser/theme ownership refutation never established preservation of every ThemeService capability.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Exact existing-queue coverage, not source refutation or an accepted product exception. Optional provenance extension may add f560058d's retained replacement-gap confirmation and baseline attribution; it adds no new user-visible consequence."
+  },
+  {
+    "key": "g192/c1",
+    "latest_line": 1,
+    "recommendation": "refuted",
+    "bucket": "high",
+    "underlying_key": "retired-xterm-current-page-mount-dependency",
+    "aliases": ["g191/c1"],
+    "target_queue_file": null,
+    "why": "The reviewed page mounts the grid directly and has no surviving xterm global mount prerequisite.",
+    "checks": [
+      "At f560058da19e02716e6f943883a9508b447aff4e, UI lib.rs:1479-1496,1914-1926 declares/injects grid assets; terminal.js:3191-3228 waits for grid helpers and :4294-4367 creates farhelmGridTerminal.",
+      "Pinned product UI grep for retired constructor/asset names returned no references. Source only; deployment packaging and arbitrary grid features were not audited."
+    ],
+    "coverage_checked": [
+      "SPEC.md Terminal experience and SPEC_impl.md:1693-1720,1836-1886 require/describe direct grid mounts; no accepted fresh-page unavailability.",
+      "TODO Planned empty; BUGS unrelated. Matching tmux-end-old-terminals/docs-cleanup plan sections preserve a working direct grid and provide no separate fix for the hypothesized stale dependency.",
+      "INDEX.md fully read and searched with queue/active TRIAGE_OUTCOMES for mount/global/removal terms; no exact queue cover. No FILTER applied."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No stale global prerequisite was found.",
+    "original_stronger_consequence": "Hypothetical unusable terminal mount, high; no established work-loss/security route in this record. Its scope excludes previously loaded pages.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutation of the same narrow current-page dependency hypothesis as g191/c1; no broader compatibility conclusion."
+  },
+  {
+    "key": "g192/c2",
+    "latest_line": 12,
+    "recommendation": "refuted",
+    "bucket": "high",
+    "underlying_key": "retired-browser-parser-current-emulator-dependency",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The attachment caller always creates the grid stream, and the supervisor's emulator supplies cursor, saved-state, scroll-region and query behavior independently of the removed browser parser.",
+    "checks": [
+      "At f560058da19e02716e6f943883a9508b447aff4e, service/handlers.rs:1674-1692 refuses an unreadable resolved host; :1906-1943 unconditionally creates HostAttach/GridStream and publishes that channel route.",
+      "emulator.rs:117-159 feeds the parser; queries.rs:293-367 delegates cursor movement, save/restore, scroll regions, color, title and links; :381-421 implements identity, position and mode queries. grid_output.rs:329-362 extracts the resulting bounded cursor state. Source only."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:2860 requires fidelity; SPEC_impl.md:1836-1886,2670-2704 assigns interpretation/query ownership. Named unanswered-query exceptions are not a general waiver for parser regressions.",
+      "TODO Planned empty; BUGS unrelated. Matching removal/docs plans do not cause a separate missing-parser repair; they preserve the replacement responsibilities.",
+      "INDEX.md read fully; existing cursor-color item is a distinct semantic omission. Active TRIAGE_OUTCOMES search found no exact parser-dependency decision. No FILTER applied."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No live output consumer dependent on the removed parser was established. This does not certify parity for every sequence.",
+    "original_stronger_consequence": "Hypothetical TUI misdraw/stall from losing active parser behavior, suggested high. History explicitly preserves g192/c4's distinct potentially highest successful-input reinterpretation.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Refute the active-parser dependency only. Related to g191/c3 but narrower in cursor/scroll/query scope; retain independent capability omissions and g192/c4."
+  },
+  {
+    "key": "g192/c3",
+    "latest_line": 7,
+    "recommendation": "refuted",
+    "bucket": "high",
+    "underlying_key": "retired-xterm-resize-scrollback-dependency",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The grid's fit and scrolling paths are live, and resize reaches the attached terminal's runtime/emulator with ownership checks. Deleting the old resize/scrollbar machinery does not remove these responsibilities.",
+    "checks": [
+      "At f560058da19e02716e6f943883a9508b447aff4e, grid-terminal.js:463-498 fits, :530-594 tracks scroll position, :966-1039 owns scrollbar events and :2106-2139 disposes them. terminal.js:4554-4565 sends resize, :4593-4636 observes/refits pane/window changes.",
+      "helm terminal.rs:777-780 forwards resize on the attachment client/channel; supervisor handlers.rs:1990-2056 resolves and checks the owning connection/channel under the lock, then resizes. Attach-time resize is :1885.",
+      "hosts/terminal.rs:3853-3867,4040-4051 applies resize to emulator; emulator.rs:207-227 resizes Term; service/grid_stream.rs:686-718,860-864 reacts to layout/resizes and reads replacement history. Source only, not algorithm parity or measured rendering."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md Terminal experience requires resize, retained scrollback and whole-history replacement after rewrap; SPEC_impl.md grid client:1836-1886 describes independent fit/virtualized scrolling. No accepted total loss of resize/scrollback access.",
+      "TODO Planned empty; BUGS unrelated; matching removal/docs plan criteria retain fit/scrolling. The Maybe later back-buffer proposal is outside Planned and is not exact defect coverage.",
+      "INDEX.md read fully; history notices, cursor and individual copy defects do not cover removal-as-loss-of-resize/scrollbar. Active TRIAGE_OUTCOMES search found no exact decision. No FILTER applied."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No surviving dependency on removed Buffer.resize/reflow or scrollbar modules was found. No exhaustive comparison of resize algorithms.",
+    "original_stronger_consequence": "Hypothetical failed resize or inaccessible retained output, high. No established deletion of retained history, security or user-work loss.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source-refuted deletion route. g193/c1 overlaps the scrolling subset but does not have this record's resize scope; do not discard unrelated history defects."
+  },
+  {
+    "key": "g192/c4",
+    "latest_line": 11,
+    "recommendation": "retain-verified",
+    "bucket": "highest",
+    "underlying_key": "legacy-page-raw-paste-decoded-as-grid-text-command",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Under the stated old-page/fresh unknown-kind attachment conditions, a literal GridInput-shaped JSON paste crosses as one binary frame and is deserialized as Text. Escaped carriage returns become active unbracketed terminal input. The spec's reload requirement describes misdraw and malformed-input detach, not this successful reinterpretation consequence.",
+    "checks": [
+      "At f560058da19e02716e6f943883a9508b447aff4e parent, UI lib.rs:514-521 defaults absent agent_terminal to None; session_view.rs:1806-1810,3839-3852 passes unknown kind. terminal.js:4651-4666 builds fresh xterm when kind is unknown; :3590-3621 has helper/font/element mount gates, not build equality.",
+      "Parent terminal.js:1550-1579 explicitly leaves manual reconnect allowed on skew; :1871-1898 remounts it; :2649-2676,2232-2235,4628-4634 sends text paste through sanitizer/term.paste; :4158-4160,4191-4196 sends onData as a complete binary WebSocket message.",
+      "Parent vendor/xterm.js minified paste function normalizes actual newlines, conditionally adds bracketed-paste markers, then calls triggerDataEvent once. decPrivateModes.bracketedPasteMode defaults false. JSON's escaped control notation survives this stage.",
+      "Reviewed helm terminal.rs:762-773 relays binary input. grid.rs:1565-1566,1610-1612,1650-1655 decodes tagged JSON Text; :1686-1693 bounds length without excluding decoded CR. grid_input.rs:175 emits data.as_bytes directly, unlike Paste. grid_stream.rs:1064-1091 queues the successful bytes; invalid decode alone reaches connection.rs:536-563 attachment teardown.",
+      "This establishes a conditional source route, not an executed command or observed damage. Ordinary keystrokes usually detach first; output that sets bracketed-paste mode on the old renderer can block this raw-frame route."
+    ],
+    "coverage_checked": [
+      "Current SPEC_impl.md Grid streams:2939-3013 read in full. Its :2950-2957 accepts old-page reload, misdraw and malformed-input attachment loss; whether its broad opening sentence also accepts successful command reinterpretation is ambiguous. SPEC.md Terminal experience does not expressly accept that stronger consequence.",
+      "TODO Planned empty; BUGS unrelated. Searched all plans/queue for old-page/GridInput/paste/reload and read matching removal/docs-plan acceptance sections: removal of kind/stream notices is specified, but no unlanded cause-removing work or explicit valid-JSON command acceptance was found.",
+      "INDEX.md read fully and matching queue text searched for old-page/literal JSON/reinterpret/GridInput/unbracketed command. Auth-remount/shortcut/version items have different mechanisms; no exact existing item found. Active TRIAGE_OUTCOMES search found no exact decision.",
+      "FILTER.md rare/self-correcting and upgrade-plus-rare filters do not authorize dismissal: this route changes program input and can submit commands; security/trust-boundary consequences are excluded even from the upgrade filter. Rarity alone is insufficient."
+    ],
+    "exact_cover_quotes": [
+      "Potential but ambiguous basis, SPEC_impl.md:2949-2950: A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.",
+      "Same section: it draws grid messages as terminal output, and what is typed into it ends the attachment as malformed input.",
+      "Same section: Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy."
+    ],
+    "missing_premise": "No missing local source premise for the conditional reinterpretation chain. Actual execution/destruction was not reproduced. Parent should consolidate the supplied g196/l1, g082/c2 and g083/c5 records only after comparing their histories; they were not included in this batch and were not independently read here.",
+    "original_stronger_consequence": "Initial records proposed spec-covered high for old-page misdraw/malformed-input detach and no host-process loss. Lines 9-11 explicitly withdrew that broad no-highest conclusion for valid JSON, establishing potential unbracketed command submission/security or work loss. The original contained malformed-input consequence remains true but does not refute successful input.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Retain highest on the established unintended-command source route. Preserve the earlier proposed specification drop as unresolved and send it for an independent fresh-context drop check before any dismissal or consequence lowering. This consultation does not approve that drop."
+  },
+  {
+    "key": "g193/c1",
+    "latest_line": 1,
+    "recommendation": "refuted",
+    "bucket": "high",
+    "underlying_key": "retired-xterm-scrollbar-current-grid-dependency",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The active grid owns scroll position, slider painting, track press/drag and release cleanup. These do not depend on the removed xterm scrollbar machinery.",
+    "checks": [
+      "At f560058da19e02716e6f943883a9508b447aff4e, grid-terminal.js:530-594 implements scrolling, :950-1039 paints/operates the scrollbar, and :2106-2139 releases drag/fade state; terminal.js:4313 constructs that grid. No runtime rendering evidence."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md Terminal experience requires retained scrollback; SPEC_impl.md:1836-1886 describes grid-owned virtualized scrolling. No accepted complete browsing loss.",
+      "TODO Planned empty; BUGS unrelated; removal/docs plans retain the grid fit/scrolling behavior. No unlanded plan separately fixes this hypothesized dependency.",
+      "INDEX.md read fully; clipping and history-notice entries describe different bugs, not dependency on removed scrollbar classes. Active TRIAGE_OUTCOMES search found no exact decision. No FILTER applied."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No active dependency on the removed scrollbar classes was established; unrelated pre-existing scrollbar defects were not audited.",
+    "original_stronger_consequence": "Hypothetical inability to browse retained output, high; not established loss of retained history or other user-owned work.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Refute deletion-as-loss-of-browsing only. This overlaps the scrolling subset of g192/c3, whose resize scope is broader."
+  },
+  {
+    "key": "g193/c2",
+    "latest_line": 13,
+    "recommendation": "refuted",
+    "bucket": "high",
+    "underlying_key": "retired-xterm-current-grid-keyboard-mouse-dependency",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The current page and supervisor have live replacement keyboard/mouse admission and encoding paths. Preserving a small key as one frame does not establish unconditional physical PTY-write atomicity or program read boundaries.",
+    "checks": [
+      "At f560058da19e02716e6f943883a9508b447aff4e, grid-terminal.js:1514-1539 admits key/text input; terminal.js:4499-4507 encodes/sends grid input. grid_input.rs:298-418 encodes keys (exact Shift+Enter insertion at :309-311) and :688 onward handles mode-aware mouse input.",
+      "grid_stream.rs:1064-1091 decodes GridInput, reads modes/size, invokes InputEncoder and queues one-off input; :1245-1256 uses input_frames. grid_input.rs:265-270 keeps fitting input in one frame. These checks support framing/ownership only; no physical write or runtime read measurement."
+    ],
+    "coverage_checked": [
+      "Current SPEC_impl.md:1860-1870 assigns admission/encoding; SPEC.md:2869-2876 and SPEC_impl.md:1721-1726 make the stronger single-write statement. Successful replacement does not refute a documentation-contract defect in that statement.",
+      "TODO Planned empty; BUGS unrelated; matching removal/docs-plan sections retain input encoding and ports. No exact unlanded cause-removing work for the hypothesized total current-client input loss.",
+      "INDEX.md read fully; grid-input-omits-x10-only-mouse-reporting and grid-shift-enter-loses-independent-altgraph describe specific semantic differences, not complete deletion dependency. Active TRIAGE_OUTCOMES search found no exact decision. No FILTER applied."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No dependency on deleted keyboard/mouse services was found. Physical write atomicity/read-boundary guarantees remain outside this source refutation.",
+    "original_stronger_consequence": "Hypothetical lost typing/mouse behavior after deletion, high. Earlier framing language was narrowed at line 13: the separate g010/f1 single-write documentation concern remains intact, as does the separately mentioned highest legacy-input concern.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Refute only complete current-client input loss caused by deleting the vendor services. Preserve the explicit framing-versus-write distinction and do not use this result to drop g010/f1 or legacy-page reinterpretation."
+  }
+]

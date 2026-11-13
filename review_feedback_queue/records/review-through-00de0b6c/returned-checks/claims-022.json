@@ -1,0 +1,332 @@
+[
+  {
+    "bucket": "other",
+    "aliases": [],
+    "target_queue_file": null,
+    "coverage_checked": [
+      "Recording-time main 24bc058066fd57848e788b465719b0e6da2f98f7: TODO.md:25-26 Planned is empty.",
+      "BUGS.md searched for actual Restart, Deleting, marking, Replace-progress and notification claims; its sole SSH-helper install/update hang is unrelated.",
+      "plans/queue searched for retirement/stale/floor/success, Deleting/Rename/question, marking/cleanup, ReplaceProgressGuard and OldTerminalEnded. Matching session-action-leftovers, environment-agent-operations, tmux and nonblocking plans have landed per plans/REPORTS.md; none is an unlanded repair covering these claims.",
+      "review_feedback_queue/INDEX.md read in bounded chunks. Matching retained-restart-hides-reboot-card, suspended-sandbox-keeps-row-confirmations-enabled, frozen-sandbox-retains-header-lifecycle-answers and bulk-sandbox-delete-drops-eligible-peer files read; their trigger/consequence boundaries differ as noted per record.",
+      "TRIAGE_OUTCOMES.md searched for the actual retirement/stale-success, Deleting/Rename/question, marking cleanup, progress-guard and notification claims; no matching active disposition. Archive not read.",
+      "SPEC.md Session list:2189-2235 requires an accepted batch to clear its targets including refused rows unless a newer marking interaction occurred; it does not accept this omission. SPEC_impl.md:1125-1133 preserves ordinary completion ownership. Existing bulk-sandbox-delete-drops-eligible-peer clears both marks and concerns representative selection, not this omission."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": null,
+    "needs_independent_drop_check": false,
+    "key": "g036/l3",
+    "latest_line": 11,
+    "recommendation": "retain-verified",
+    "underlying_key": "bulk-cleanup-captures-targets-after-deleting-exclusion",
+    "why": "Confirmed targets refused because their environment entered Deleting are omitted from marking cleanup. The retained-row condition is explicit; no destructive request is sent.",
+    "checks": [
+      "At 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa, list/view.rs:4512-4538 shrink-admits drawn targets, excludes Deleting targets and returns if all are excluded, before capturing marking_targets at :4550-4554.",
+      "Same source :4590-4623 clears only marking_targets, protected by the unchanged user-interaction revision. :2248-2249 prunes questions/marks by authoritative listed identity, so a retained displayed row is not pruned merely for Deleting.",
+      "list/lifecycle.rs:74-87 explicitly applies the exclusion both at drawing and admission. Its availability refusal is correct; it does not supply missing cleanup identities.",
+      "The relevant change hash is inside the supplied exclusive-base/inclusive-tip range (git log with explicit range). No runtime test or reproduction."
+    ],
+    "proposed_basis": "Record the conditional retained-row cleanup defect as other. No FILTER boundary covers marks that remain through ordinary refreshes while the row stays listed; destruction can remain failed rather than creating a sub-second window."
+  },
+  {
+    "bucket": "other",
+    "aliases": [],
+    "target_queue_file": null,
+    "coverage_checked": [
+      "Recording-time main 24bc058066fd57848e788b465719b0e6da2f98f7: TODO.md:25-26 Planned is empty.",
+      "BUGS.md searched for actual Restart, Deleting, marking, Replace-progress and notification claims; its sole SSH-helper install/update hang is unrelated.",
+      "plans/queue searched for retirement/stale/floor/success, Deleting/Rename/question, marking/cleanup, ReplaceProgressGuard and OldTerminalEnded. Matching session-action-leftovers, environment-agent-operations, tmux and nonblocking plans have landed per plans/REPORTS.md; none is an unlanded repair covering these claims.",
+      "review_feedback_queue/INDEX.md read in bounded chunks. Matching retained-restart-hides-reboot-card, suspended-sandbox-keeps-row-confirmations-enabled, frozen-sandbox-retains-header-lifecycle-answers and bulk-sandbox-delete-drops-eligible-peer files read; their trigger/consequence boundaries differ as noted per record.",
+      "TRIAGE_OUTCOMES.md searched for the actual retirement/stale-success, Deleting/Rename/question, marking cleanup, progress-guard and notification claims; no matching active disposition. Archive not read.",
+      "SPEC.md Lifecycle operations and SPEC_impl.md:1134-1145 require shared progress/outcome lifetime; no accepted behavior or coverage item is needed to refute this specific mutable-entry premise. Landed session-action-leftovers.md:39-56,97-102 describes the guard, not an unlanded fix."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Replacing could remain visible indefinitely because provisioning stage mutation defeated the equality-checked cancellation guard.",
+    "needs_independent_drop_check": false,
+    "key": "g036/c3",
+    "latest_line": 12,
+    "recommendation": "refuted",
+    "underlying_key": "replace-progress-guard-compares-immutable-shared-entry",
+    "why": "The suspected progress mutation occurs in the form-local pending signal, not in the shared entry captured by the guard.",
+    "checks": [
+      "At db72347066bc4de3fa1a5f05d64bca91e571bc11, replace.rs:106-151 clones PendingLaunch into the shared map and guard, then Drop removes only an equal entry.",
+      "list/create_form.rs:3405-3437 updates pending_launch via observe_stage; shared_replace_progress is a separate context handle. Its searched references are pass-through/start/settlement uses, not in-place stage mutation.",
+      "list/create_form.rs:6991-6997 holds the guard across the request; :7113-7138 drops it before releasing the claim and on_settled, with no await in that handoff.",
+      "The reviewed guard change is in range. Source checks only."
+    ],
+    "proposed_basis": "Drop only this hypothesized shared-entry mutation mechanism as source-refuted. Arbitrary future shared-map writers and clock uniqueness are not established by this check."
+  },
+  {
+    "bucket": "other",
+    "aliases": [],
+    "target_queue_file": null,
+    "coverage_checked": [
+      "Recording-time main 24bc058066fd57848e788b465719b0e6da2f98f7: TODO.md:25-26 Planned is empty.",
+      "BUGS.md searched for actual Restart, Deleting, marking, Replace-progress and notification claims; its sole SSH-helper install/update hang is unrelated.",
+      "plans/queue searched for retirement/stale/floor/success, Deleting/Rename/question, marking/cleanup, ReplaceProgressGuard and OldTerminalEnded. Matching session-action-leftovers, environment-agent-operations, tmux and nonblocking plans have landed per plans/REPORTS.md; none is an unlanded repair covering these claims.",
+      "review_feedback_queue/INDEX.md read in bounded chunks. Matching retained-restart-hides-reboot-card, suspended-sandbox-keeps-row-confirmations-enabled, frozen-sandbox-retains-header-lifecycle-answers and bulk-sandbox-delete-drops-eligible-peer files read; their trigger/consequence boundaries differ as noted per record.",
+      "TRIAGE_OUTCOMES.md searched for the actual retirement/stale-success, Deleting/Rename/question, marking cleanup, progress-guard and notification claims; no matching active disposition. Archive not read.",
+      "SPEC.md Lifecycle operations says retired containerized sessions support only Delete. That contract does not itself make every availability test an exhaustive retired-session regression. No exact existing queue item or active decision found."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "A misleading test-oracle/docstring might imply retired-only Stop suppression was tested although only ordinary rows were supplied.",
+    "needs_independent_drop_check": false,
+    "key": "g036/c4",
+    "latest_line": 13,
+    "recommendation": "refuted",
+    "underlying_key": "deleting-availability-test-does-not-promise-retired-matrix",
+    "why": "The test does not exercise retired-only rows, but its stated subject is Deleting availability and its assertions do not falsely claim that fixture.",
+    "checks": [
+      "At 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa, list/marking.rs:677-711 documents all-Deleting and mixed eligibility, constructs ordinary specimens, and checks those three expected LifecycleOffer values.",
+      "The final retired-contract sentence does not name a retired fixture or an exhaustive branch matrix. Missing additional coverage alone is not a demonstrated bad oracle.",
+      "The reviewed test change is in range; no tests executed."
+    ],
+    "proposed_basis": "Do not record this exact asserted documentation/oracle defect. Preserve the limited coverage fact; production correctness alone is not the refutation."
+  },
+  {
+    "bucket": "other",
+    "aliases": [],
+    "target_queue_file": null,
+    "coverage_checked": [
+      "Recording-time main 24bc058066fd57848e788b465719b0e6da2f98f7: TODO.md:25-26 Planned is empty.",
+      "BUGS.md searched for actual Restart, Deleting, marking, Replace-progress and notification claims; its sole SSH-helper install/update hang is unrelated.",
+      "plans/queue searched for retirement/stale/floor/success, Deleting/Rename/question, marking/cleanup, ReplaceProgressGuard and OldTerminalEnded. Matching session-action-leftovers, environment-agent-operations, tmux and nonblocking plans have landed per plans/REPORTS.md; none is an unlanded repair covering these claims.",
+      "review_feedback_queue/INDEX.md read in bounded chunks. Matching retained-restart-hides-reboot-card, suspended-sandbox-keeps-row-confirmations-enabled, frozen-sandbox-retains-header-lifecycle-answers and bulk-sandbox-delete-drops-eligible-peer files read; their trigger/consequence boundaries differ as noted per record.",
+      "TRIAGE_OUTCOMES.md searched for the actual retirement/stale-success, Deleting/Rename/question, marking cleanup, progress-guard and notification claims; no matching active disposition. Archive not read.",
+      "SPEC.md Sandbox sessions:1525-1528 and SPEC_impl.md:6148-6157 explicitly require actions unavailable while deletion runs or has failed. Container sessions share that policy. No Rename metadata exception found. Existing frozen/suspended lifecycle-answer queue items concern other controls and phases."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "The earliest finding called this a working Rename editor and error state; its explicit caveat already excluded successful backend mutation. Latest wording correctly limits it to an offered editor and refused request.",
+    "needs_independent_drop_check": false,
+    "key": "g037/f1",
+    "latest_line": 11,
+    "recommendation": "retain-verified",
+    "underlying_key": "deleting-environment-row-rename-omits-phase-guard",
+    "why": "A retained ordinary session row in Deleting can open and submit Rename because presentation and admission omit the host phase. The helm refuses routing.",
+    "checks": [
+      "At 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa, list/row.rs:144-150 enables rename for ordinary rows; :1179-1184 computes environment_deleting, but Rename :2671-2716 checks busy alone.",
+      "list/view.rs:6312-6317 derives busy from page-owned pending/claims/questions. :3850-3888 opens Rename without a host-phase guard; :3909-3945 submits through begin_row_op without one.",
+      "list/view.rs:2248-2262 retires questions and updates rename unavailability from authoritative source presence, not host Deleting.",
+      "manager.rs:2210-2228 withholds every sealed host's client; sessions.rs:905-926 refuses a missing client with Conflict. This establishes refusal, not successful rename or lost work.",
+      "2ef10815 is in range. Source-conditional on the row remaining displayed; no runtime observation."
+    ],
+    "proposed_basis": "Retain as other. A failed destruction can hold the phase while a row remains displayed, so the whole claim is not a rare self-correcting display race. Do not make another-GUI-only consistency the trigger: the helm-owned finisher/host-level deletion also supplies the phase."
+  },
+  {
+    "bucket": "other",
+    "aliases": [],
+    "target_queue_file": null,
+    "coverage_checked": [
+      "Recording-time main 24bc058066fd57848e788b465719b0e6da2f98f7: TODO.md:25-26 Planned is empty.",
+      "BUGS.md searched for actual Restart, Deleting, marking, Replace-progress and notification claims; its sole SSH-helper install/update hang is unrelated.",
+      "plans/queue searched for retirement/stale/floor/success, Deleting/Rename/question, marking/cleanup, ReplaceProgressGuard and OldTerminalEnded. Matching session-action-leftovers, environment-agent-operations, tmux and nonblocking plans have landed per plans/REPORTS.md; none is an unlanded repair covering these claims.",
+      "review_feedback_queue/INDEX.md read in bounded chunks. Matching retained-restart-hides-reboot-card, suspended-sandbox-keeps-row-confirmations-enabled, frozen-sandbox-retains-header-lifecycle-answers and bulk-sandbox-delete-drops-eligible-peer files read; their trigger/consequence boundaries differ as noted per record.",
+      "TRIAGE_OUTCOMES.md searched for the actual retirement/stale-success, Deleting/Rename/question, marking cleanup, progress-guard and notification claims; no matching active disposition. Archive not read.",
+      "SPEC_impl.md:1069-1098 Answers bind to what was drawn and SPEC.md:1519-1550 require the warned scope. Source meets this requirement for the proposed connection-change widening route."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "An answered session-only Delete silently widens after connection loss and destroys other sessions, processes and files in the environment.",
+    "needs_independent_drop_check": true,
+    "key": "g037/f2",
+    "latest_line": 3,
+    "recommendation": "refuted",
+    "underlying_key": "row-delete-answer-scope-bound-to-question-key",
+    "why": "Connection changes cannot turn the drawn session-only answer into whole-environment consent; the token's key overwrites the current environment scope.",
+    "checks": [
+      "At 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa, row.rs:1227-1250 draws session versus whole-environment consequences from RowQuestion::Delete/DeleteWhole.",
+      "list/view.rs:3287-3300 consumes exactly that token then calls token.key().answered(environment). shared.rs:135-148 forces Delete to Session and DeleteWhole to Whole.",
+      "list/view.rs:3022-3055 opens a distinct DeleteWhole question after an Unasked result rather than dispatching whole deletion.",
+      "Relevant change is in range. No runtime evidence."
+    ],
+    "proposed_basis": "Proposed source refutation of this exact destructive-widening mechanism. Requires an independent drop check because the considered consequence is loss of user-owned work."
+  },
+  {
+    "bucket": "other",
+    "aliases": [
+      "g038/l1"
+    ],
+    "target_queue_file": null,
+    "coverage_checked": [
+      "Recording-time main 24bc058066fd57848e788b465719b0e6da2f98f7: TODO.md:25-26 Planned is empty.",
+      "BUGS.md searched for actual Restart, Deleting, marking, Replace-progress and notification claims; its sole SSH-helper install/update hang is unrelated.",
+      "plans/queue searched for retirement/stale/floor/success, Deleting/Rename/question, marking/cleanup, ReplaceProgressGuard and OldTerminalEnded. Matching session-action-leftovers, environment-agent-operations, tmux and nonblocking plans have landed per plans/REPORTS.md; none is an unlanded repair covering these claims.",
+      "review_feedback_queue/INDEX.md read in bounded chunks. Matching retained-restart-hides-reboot-card, suspended-sandbox-keeps-row-confirmations-enabled, frozen-sandbox-retains-header-lifecycle-answers and bulk-sandbox-delete-drops-eligible-peer files read; their trigger/consequence boundaries differ as noted per record.",
+      "TRIAGE_OUTCOMES.md searched for the actual retirement/stale-success, Deleting/Rename/question, marking cleanup, progress-guard and notification claims; no matching active disposition. Archive not read.",
+      "SPEC.md:1901-1904 and SPEC_impl.md:1134-1143 require completion observation/reattachment; no spec exception accepts this success-erasure interleaving. Existing retained-restart-hides-reboot-card concerns success retained too long after a later reboot, the opposite trigger. Landed session-action-leftovers is not unlanded coverage."
+    ],
+    "exact_cover_quotes": [
+      "FILTER.md, Rare, self-correcting glitches and imprecise diagnostics: \"The trigger is rare: a narrow timing window\".",
+      "Same filter: \"a display that is briefly wrong and corrects itself on the next refresh, retry or reconnect, or when the user leaves the view\"."
+    ],
+    "missing_premise": "Actual scheduling incidence and duration are unmeasured. No route to a persistent failure, wrong-target operation, loss of work or false successful Restart was established.",
+    "original_stronger_consequence": "Earlier record asserted a newly opened view and its connected detail could retain cached Interrupted. That detail-cache premise was explicitly retracted; a mounted pre-Restart Interrupted signal and a reopened still-Interrupted sidebar seed retain the temporary gap. No destructive second-Restart consequence was asserted.",
+    "needs_independent_drop_check": false,
+    "key": "g037/f3",
+    "latest_line": 10,
+    "recommendation": "filtered",
+    "underlying_key": "restart-success-retired-by-precompletion-stale-sidebar",
+    "why": "The conditional stale-sidebar retirement route is supported, but its whole asserted effect is a temporary interrupted card/attachment gap repaired by the next successful live detail.",
+    "checks": [
+      "At f560058da19e02716e6f943883a9508b447aff4e, aggregate.rs:547-580 snapshots host state before awaiting cached_slice. session_ops.rs:77-107 accepts stale rows without a read-age floor; :215-226 clears success when not pending.",
+      "list/view.rs:1935-1953 accepts by ReadGate ordering, :1985 retires success, and :3416-3419 finishes Restart, requests refresh and releases pending without fencing old listings. ops.rs:183-190 compares only applied generation; reader.rs:644-670 coalesces reads.",
+      "session_view.rs:549-564 preserves the numerical remount revision but sets relaunched only if success remains; :3701-3722 suppresses a terminal for nonstale Interrupted plus relaunched=false, and :1709-1710 emits []. :1243-1262 updates only followed title and requests detail.",
+      "sessions.rs:3162-3192 uses cache only without a client; :3194-3231 drains live supervisor sessions for connected detail. The earlier fresh-detail/cache premise is refuted. Lifecycle effect session_view.rs:1470-1490 requests correcting detail.",
+      "Cargo.lock at f560058 pins Dioxus 0.7.10. Installed matching hooks use_effect.rs:15-47 queues effects; core virtual_dom.rs:507-537 polls tasks before effects; scheduler.rs:61-78 gives effects lowest priority; desktop webview.rs:537-590 waits for mutation delivery. This permits the conditional ordering, without measuring incidence.",
+      "f560058 is in range; no runtime tests/reproductions."
+    ],
+    "proposed_basis": "Propose filtering the complete stated transient display/attachment gap under the rare self-correcting filter. Source establishes a real conditional mechanism; filtering is not refutation or product acceptance. g038/l1 is an exact alias. Do not collapse the distinct post-floor/terminal-kind mechanism named g036/l1 outside this batch."
+  },
+  {
+    "bucket": "other",
+    "aliases": [],
+    "target_queue_file": null,
+    "coverage_checked": [
+      "Recording-time main 24bc058066fd57848e788b465719b0e6da2f98f7: TODO.md:25-26 Planned is empty.",
+      "BUGS.md searched for actual Restart, Deleting, marking, Replace-progress and notification claims; its sole SSH-helper install/update hang is unrelated.",
+      "plans/queue searched for retirement/stale/floor/success, Deleting/Rename/question, marking/cleanup, ReplaceProgressGuard and OldTerminalEnded. Matching session-action-leftovers, environment-agent-operations, tmux and nonblocking plans have landed per plans/REPORTS.md; none is an unlanded repair covering these claims.",
+      "review_feedback_queue/INDEX.md read in bounded chunks. Matching retained-restart-hides-reboot-card, suspended-sandbox-keeps-row-confirmations-enabled, frozen-sandbox-retains-header-lifecycle-answers and bulk-sandbox-delete-drops-eligible-peer files read; their trigger/consequence boundaries differ as noted per record.",
+      "TRIAGE_OUTCOMES.md searched for the actual retirement/stale-success, Deleting/Rename/question, marking cleanup, progress-guard and notification claims; no matching active disposition. Archive not read.",
+      "Both specifications describe host/grid terminals. Historical SPEC_impl.md:2156-2163 explicitly supplies the single-path contract. No exact queue/active ledger cover is needed for the no-consumer source refutation."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Wrong terminal attachment transport after deleting RestartOutcome.agent_terminal. Earlier wording also broadly invoked remounts; the later record correctly narrows that to the durable numerical generation increment.",
+    "needs_independent_drop_check": false,
+    "key": "g037/f4",
+    "latest_line": 8,
+    "recommendation": "refuted",
+    "underlying_key": "removed-terminal-kind-has-no-current-ui-consumer",
+    "why": "The removed terminal-kind payload cannot select the wrong attachment transport when the GUI has one terminal path. The retained revision guarantees an increment, not that a surface exists.",
+    "checks": [
+      "At f560058da19e02716e6f943883a9508b447aff4e, git grep agent_terminal under crates/farhelm-ui/src returns no references.",
+      "session_view.rs:1688-1752 builds grid terminal specifications without terminal-kind branching. :549-564 increments generation independently of restart_succeeded.",
+      "session_view.rs:1709-1710 and :3701-3722 independently guard surface mounting, so this refutation does not rebut g037/f3 or g038/l1.",
+      "Historical SPEC_impl.md:2156-2163 says every create/tab open/Restart uses a host terminal. f560058 is in range; no runtime behavior observed."
+    ],
+    "proposed_basis": "Drop only terminal-kind transport loss and numerical-generation loss. Preserve the independent temporary no-surface claim."
+  },
+  {
+    "bucket": "other",
+    "aliases": [],
+    "target_queue_file": null,
+    "coverage_checked": [
+      "Recording-time main 24bc058066fd57848e788b465719b0e6da2f98f7: TODO.md:25-26 Planned is empty.",
+      "BUGS.md searched for actual Restart, Deleting, marking, Replace-progress and notification claims; its sole SSH-helper install/update hang is unrelated.",
+      "plans/queue searched for retirement/stale/floor/success, Deleting/Rename/question, marking/cleanup, ReplaceProgressGuard and OldTerminalEnded. Matching session-action-leftovers, environment-agent-operations, tmux and nonblocking plans have landed per plans/REPORTS.md; none is an unlanded repair covering these claims.",
+      "review_feedback_queue/INDEX.md read in bounded chunks. Matching retained-restart-hides-reboot-card, suspended-sandbox-keeps-row-confirmations-enabled, frozen-sandbox-retains-header-lifecycle-answers and bulk-sandbox-delete-drops-eligible-peer files read; their trigger/consequence boundaries differ as noted per record.",
+      "TRIAGE_OUTCOMES.md searched for the actual retirement/stale-success, Deleting/Rename/question, marking cleanup, progress-guard and notification claims; no matching active disposition. Archive not read.",
+      "Current SPEC.md:2804-2815 describes the same replacement notice. SPEC_impl.md:5686-5689 identifies OldTerminalEnded. No contradictory queue item or active decision found."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "No bug was asserted. The candidate checked whether changed notification comments misdescribed the notice or link boundary.",
+    "needs_independent_drop_check": true,
+    "key": "g037/f5",
+    "latest_line": 7,
+    "recommendation": "refuted",
+    "underlying_key": "bell-comment-matches-old-terminal-ended-notice",
+    "why": "The changed comments describe the shipped replacement notice correctly and do not change executable link admission or assertions.",
+    "checks": [
+      "At 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e, git show for list/bell.rs changes only module/test comments at :35-43 and :569-575, from old-terminal warning wording to the notice that startup ended the old terminal.",
+      "Historical SPEC.md:2804-2813 expressly describes that notice, its docs link and unresolved lifetime.",
+      "61e63232 is inside the range. No runtime checks run; none needed to distinguish comment-only changes."
+    ],
+    "proposed_basis": "Source/contract refutation limited to comment accuracy. Conservatively include in the independent drop register because the record discusses the supervisor-supplied link trust boundary; no approval to drop a separate link-validation concern is implied."
+  },
+  {
+    "bucket": "other",
+    "aliases": [],
+    "target_queue_file": "review_feedback_queue/suspended-sandbox-keeps-row-confirmations-enabled.md",
+    "coverage_checked": [
+      "Recording-time main 24bc058066fd57848e788b465719b0e6da2f98f7: TODO.md:25-26 Planned is empty.",
+      "BUGS.md searched for actual Restart, Deleting, marking, Replace-progress and notification claims; its sole SSH-helper install/update hang is unrelated.",
+      "plans/queue searched for retirement/stale/floor/success, Deleting/Rename/question, marking/cleanup, ReplaceProgressGuard and OldTerminalEnded. Matching session-action-leftovers, environment-agent-operations, tmux and nonblocking plans have landed per plans/REPORTS.md; none is an unlanded repair covering these claims.",
+      "review_feedback_queue/INDEX.md read in bounded chunks. Matching retained-restart-hides-reboot-card, suspended-sandbox-keeps-row-confirmations-enabled, frozen-sandbox-retains-header-lifecycle-answers and bulk-sandbox-delete-drops-eligible-peer files read; their trigger/consequence boundaries differ as noted per record.",
+      "TRIAGE_OUTCOMES.md searched for the actual retirement/stale-success, Deleting/Rename/question, marking cleanup, progress-guard and notification claims; no matching active disposition. Archive not read.",
+      "SPEC.md:1525-1528 and SPEC_impl.md:6148-6157 require unavailable Deleting actions. Existing suspended-sandbox-keeps-row-confirmations-enabled.md:19-29 covers the same retained-answer control/admission omission for suspension, not Deleting or container scope. Extend it with the new phase/provider evidence instead of treating its suspension text as exact coverage. frozen-sandbox-retains-header-lifecycle-answers is a different header surface."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "The lead suspected an enabled confirming answer during Deleting. Latest record proposes consolidating into f1 and preserves the avoidable refused operation, with no successful mutation or work loss.",
+    "needs_independent_drop_check": false,
+    "key": "g037/f6",
+    "latest_line": 13,
+    "recommendation": "retain-verified",
+    "underlying_key": "retained-row-lifecycle-answer-omits-host-phase",
+    "why": "Deleting supplies a verified additional phase for retained Stop/Replace answers. Existing suspension coverage does not exactly cover it; it is a useful extension. Rename is another control/admission surface, so consolidation with f1 is editorial grouping, not exact aliasing.",
+    "checks": [
+      "At 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa, row.rs:2435,2447,2589 disables retained Stop/Stop-and-suspend/Replace answers on local busy (plus launch-target exclusion for suspend), unlike Delete :2521 which checks environment_deleting.",
+      "list/view.rs:6314-6317 excludes a row's own question from busy. :2248 retains questions by listed identity, not phase, so a retained row's question survives a Deleting transition.",
+      "list/view.rs:2692-2734 stop admission and :3529-3542 Replace answer admission omit Deleting; manager.rs:2210-2228 plus sessions.rs:905-926 prevent routing to a sealed host.",
+      "2ef10815 is in range; conditional source assessment, not observed execution."
+    ],
+    "proposed_basis": "Retain the Deleting/provider extension as other; do not silently discard it as an f1 duplicate. Can be grouped with f1 when recording if the queue file explicitly preserves all controls and phase-specific admission paths. No narrow timing bound is required when deletion fails with a retained row."
+  },
+  {
+    "bucket": "other",
+    "aliases": [],
+    "target_queue_file": null,
+    "coverage_checked": [
+      "Recording-time main 24bc058066fd57848e788b465719b0e6da2f98f7: TODO.md:25-26 Planned is empty.",
+      "BUGS.md searched for actual Restart, Deleting, marking, Replace-progress and notification claims; its sole SSH-helper install/update hang is unrelated.",
+      "plans/queue searched for retirement/stale/floor/success, Deleting/Rename/question, marking/cleanup, ReplaceProgressGuard and OldTerminalEnded. Matching session-action-leftovers, environment-agent-operations, tmux and nonblocking plans have landed per plans/REPORTS.md; none is an unlanded repair covering these claims.",
+      "review_feedback_queue/INDEX.md read in bounded chunks. Matching retained-restart-hides-reboot-card, suspended-sandbox-keeps-row-confirmations-enabled, frozen-sandbox-retains-header-lifecycle-answers and bulk-sandbox-delete-drops-eligible-peer files read; their trigger/consequence boundaries differ as noted per record.",
+      "TRIAGE_OUTCOMES.md searched for the actual retirement/stale-success, Deleting/Rename/question, marking cleanup, progress-guard and notification claims; no matching active disposition. Archive not read.",
+      "SPEC.md:1901-1904/SPEC_impl.md:1134-1143 require completion retention. No acceptance text needed: the specific nonstale branch does not retire success. The stale branch is retained in named g037/f3 and g038/l1 before the separate filter proposal."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Initial candidate claimed any old Interrupted listing could not retire success and treated the temporary interrupted-card concern as refuted. Latest wording narrows that claim to nonstale Interrupted, leaving stale evidence explicitly open.",
+    "needs_independent_drop_check": false,
+    "key": "g038/c1",
+    "latest_line": 10,
+    "recommendation": "refuted",
+    "underlying_key": "nonstale-interrupted-cannot-retire-restart-success",
+    "why": "Only the nonstale Interrupted branch is refuted. The earlier blanket claim was false for stale=true and was explicitly corrected.",
+    "checks": [
+      "At f560058da19e02716e6f943883a9508b447aff4e, session_ops.rs:77-80 returns stale OR status-not-Interrupted. Nonstale Interrupted is false and cannot reach restarts_retired_by retirement; stale Interrupted is true.",
+      "session_view.rs:549-564 preserves changed completion revision but :3701-3722 independently gates mounting; preserved revision does not refute the stale branch.",
+      "f560058 is in range. No runtime observation."
+    ],
+    "proposed_basis": "Drop only the nonstale branch as source-refuted. Never use this candidate to drop the stale-sidebar or mounted-observer mechanism."
+  },
+  {
+    "bucket": "other",
+    "aliases": [
+      "g037/f3"
+    ],
+    "target_queue_file": null,
+    "coverage_checked": [
+      "Recording-time main 24bc058066fd57848e788b465719b0e6da2f98f7: TODO.md:25-26 Planned is empty.",
+      "BUGS.md searched for actual Restart, Deleting, marking, Replace-progress and notification claims; its sole SSH-helper install/update hang is unrelated.",
+      "plans/queue searched for retirement/stale/floor/success, Deleting/Rename/question, marking/cleanup, ReplaceProgressGuard and OldTerminalEnded. Matching session-action-leftovers, environment-agent-operations, tmux and nonblocking plans have landed per plans/REPORTS.md; none is an unlanded repair covering these claims.",
+      "review_feedback_queue/INDEX.md read in bounded chunks. Matching retained-restart-hides-reboot-card, suspended-sandbox-keeps-row-confirmations-enabled, frozen-sandbox-retains-header-lifecycle-answers and bulk-sandbox-delete-drops-eligible-peer files read; their trigger/consequence boundaries differ as noted per record.",
+      "TRIAGE_OUTCOMES.md searched for the actual retirement/stale-success, Deleting/Rename/question, marking cleanup, progress-guard and notification claims; no matching active disposition. Archive not read.",
+      "SPEC.md:1901-1904 and SPEC_impl.md:1134-1143 require successful completion observation; the input/focus exceptions in SPEC.md One GUI at a time do not establish acceptance. Current retained-restart-hides-reboot-card has a later reboot/over-retention trigger, not old stale evidence retiring success."
+    ],
+    "exact_cover_quotes": [
+      "FILTER.md, Rare, self-correcting glitches and imprecise diagnostics: \"The trigger is rare: a narrow timing window\".",
+      "Same filter: \"a display that is briefly wrong and corrects itself on the next refresh, retry or reconnect, or when the user leaves the view\"."
+    ],
+    "missing_premise": "Actual incidence/duration unmeasured. A destructive second-Restart or persistent fresh-detail failure is not established or asserted.",
+    "original_stronger_consequence": "Original record offered a newly opened wrong Restart surface and incorrectly implied connected detail inherits cached Interrupted. The cache/detail premise was retracted. Latest route uses mounted pre-Restart current until live detail repairs it; the original temporary card/terminal-access gap remains.",
+    "needs_independent_drop_check": false,
+    "key": "g038/l1",
+    "latest_line": 11,
+    "recommendation": "filtered",
+    "underlying_key": "restart-success-retired-by-precompletion-stale-sidebar",
+    "why": "Same root, trigger and bounded consequence as g037/f3. The mounted-view source route is supported; the complete stated consequence fits the rare self-correcting display filter.",
+    "checks": [
+      "At f560058da19e02716e6f943883a9508b447aff4e, aggregate.rs:547-580 captures host state before awaited cache read; list/view.rs:1935-1953,:1985 and :3416-3419 permit an older stale sidebar reply to clear success after pending release without a Restart age fence.",
+      "session_ops.rs:77-107,:215-226 accepts stale=true and clears success, while session_view.rs:549-564 still increments generation but may leave relaunched=false. :1709-1710,:3701-3722 then suppress the terminal for its pre-Restart nonstale Interrupted current signal.",
+      "Connected detail uses live manager::drain_sessions (sessions.rs:3194-3231); only no-client detail uses cache (:3162-3192). Independent title-following and lifecycle refresh at session_view.rs:1243-1262,:1470-1490 allow old current until a new detail arrives.",
+      "Matching pinned Dioxus 0.7.10 source checked: hooks use_effect.rs:15-47; core virtual_dom.rs:507-537 and scheduler.rs:61-78; desktop webview.rs:537-590. Tasks can retire success before the deferred observer. This is an admitted source interleaving, not measured behavior.",
+      "Historical change is in range. No tests, reproduction or runtime observation."
+    ],
+    "proposed_basis": "Propose the same filter disposition as g037/f3, preserving the confirmed conditional mechanism, explicit premise correction, unmeasured timing and no-loss caveat. Exact duplicate within this named batch; g089/l1 is mentioned by the histories but was not supplied and was not independently read."
+  }
+]

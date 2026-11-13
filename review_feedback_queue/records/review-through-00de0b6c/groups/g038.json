@@ -1,0 +1,1063 @@
+{
+  "group": {
+    "id": "g038",
+    "domain": "gui-session-lifecycle",
+    "purpose": "gui-session-lifecycle: crates/farhelm-ui/src/list/view.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g002",
+      "g009",
+      "g010",
+      "g011",
+      "g022",
+      "g023",
+      "g024",
+      "g025",
+      "g026",
+      "g027",
+      "g028",
+      "g029",
+      "g035",
+      "g036",
+      "g037",
+      "g088",
+      "g089"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00718-000.patch",
+        "ranges": [
+          [
+            1,
+            1134
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/list/view.rs",
+        "commit": "2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa",
+        "notes": "patch header; patch character offsets [0,56303)",
+        "lines": 1134,
+        "bytes": 56321,
+        "start": 0,
+        "end": 56303,
+        "original": "[private-run]/prep/originals/00718.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01114-000.patch",
+        "ranges": [
+          [
+            1,
+            107
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/list/view.rs",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,4927)",
+        "lines": 107,
+        "bytes": 4927,
+        "start": 0,
+        "end": 4927,
+        "original": "[private-run]/prep/originals/01114.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01502-000.patch",
+        "ranges": [
+          [
+            1,
+            36
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/list/view.rs",
+        "commit": "61e632323dbc6b4a35ed27bf5b9833102ffd5a4e",
+        "notes": "patch header; patch character offsets [0,2488)",
+        "lines": 36,
+        "bytes": 2488,
+        "start": 0,
+        "end": 2488,
+        "original": "[private-run]/prep/originals/01502.patch"
+      }
+    ],
+    "lines": 1277,
+    "bytes": 63736
+  },
+  "records": [
+    {
+      "key": "g038/c1",
+      "owner": "g038",
+      "id": "c1",
+      "domain": "gui-session-lifecycle",
+      "purpose": "gui-session-lifecycle: crates/farhelm-ui/src/list/view.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removing the restart read-generation floor does not by itself lose the interrupted-session override",
+            "location": "crates/farhelm-ui/src/list/view.rs:1985",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\nConsidered whether a listing started before Restart could retire its successful outcome too early and leave the user seeing an interrupted-session card for a running session.\n\n## Details\nThe patch removes the ReadGate generation argument from retire_confirmed_restarts. Source checks: session_ops.rs:63-81 defines read_confirms_run as stale or non-Interrupted, and explains that the retained success affects only Interrupted. The exact source rationale is: \"for an interrupted session it still says Interrupted, and for any other the outcome has nothing to stand in for.\" restarts_retired_by also excludes pending sessions (session_ops.rs:91-109). session_view.rs references relaunched only as an override of Interrupted; terminal-kind selection was removed by this same commit. The removed floor therefore no longer protects terminal-kind information, and an old Interrupted row cannot retire the status override. This narrow concern is source-refuted; no runtime execution occurred. Suggested bucket: other (not reported). Confidence: confirmed for this considered mechanism. proposed_drop: source refutation described above. possible_cover: none; coverage sources were not searched. Could-be-highest: no; the considered consequence concerns terminal presentation rather than loss of work. Caveat: this does not establish all restart races safe; remaining callers and the changed specification still require review."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Only a nonstale old Interrupted listing is unable to retire Restart success",
+            "location": "crates/farhelm-ui/src/list/view.rs:1985",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\nNarrowed the original refutation: an old nonstale Interrupted listing cannot erase the successful Restart override. A stale Interrupted listing can; that is retained separately as l1, not dropped by this candidate.\n\n## Details\nOriginal considered consequence: the interrupted card remains instead of a running terminal after a delayed list response retires success. session_ops.rs:77-80 defines read_confirms_run as session.stale OR status not Interrupted. Thus the first record wording that an old Interrupted row cannot retire the override was too broad: it is true only when stale=false. Such a nonstale Interrupted row fails the predicate and cannot retire success, irrespective of generation-floor removal. The stale=true branch is not refuted and is covered by the revised l1 source route. terminal-kind removal still removes the old floor consumers renderer-selection responsibility; this does not establish all status-completion races safe. Suggested bucket: other for original suspected transient presentation consequence. Confidence: confirmed source refutation of the nonstale branch only; no execution. proposed_drop: nonstale Interrupted fails read_confirms_run, so it cannot reach retirement. possible_cover: same local l1 explicitly retains the stale branch; no queue search. Could-be-highest: no established security or work-loss route. Caveats: c1 must never be interpreted as a drop of the stale-list or mounted-observer concerns; durable restart_revision preserves the numerical generation increment but does not itself guarantee keep_terminal_surface mounts a terminal."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Only a nonstale old Interrupted listing is unable to retire Restart success",
+          "location": "crates/farhelm-ui/src/list/view.rs:1985",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\nNarrowed the original refutation: an old nonstale Interrupted listing cannot erase the successful Restart override. A stale Interrupted listing can; that is retained separately as l1, not dropped by this candidate.\n\n## Details\nOriginal considered consequence: the interrupted card remains instead of a running terminal after a delayed list response retires success. session_ops.rs:77-80 defines read_confirms_run as session.stale OR status not Interrupted. Thus the first record wording that an old Interrupted row cannot retire the override was too broad: it is true only when stale=false. Such a nonstale Interrupted row fails the predicate and cannot retire success, irrespective of generation-floor removal. The stale=true branch is not refuted and is covered by the revised l1 source route. terminal-kind removal still removes the old floor consumers renderer-selection responsibility; this does not establish all status-completion races safe. Suggested bucket: other for original suspected transient presentation consequence. Confidence: confirmed source refutation of the nonstale branch only; no execution. proposed_drop: nonstale Interrupted fails read_confirms_run, so it cannot reach retirement. possible_cover: same local l1 explicitly retains the stale branch; no queue search. Could-be-highest: no established security or work-loss route. Caveats: c1 must never be interpreted as a drop of the stale-list or mounted-observer concerns; durable restart_revision preserves the numerical generation increment but does not itself guarantee keep_terminal_surface mounts a terminal."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g038/findings.jsonl",
+        "id": "c1",
+        "line": 10,
+        "disposition": "excluded",
+        "group": "nonstale-interrupted-cannot-retire-restart-success",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-022 after inspecting it. Only the nonstale Interrupted branch is refuted. The earlier blanket claim was false for stale=true and was explicitly corrected. Drop only the nonstale branch as source-refuted. Never use this candidate to drop the stale-sidebar or mounted-observer mechanism. Checked source/results: [\"At f560058da19e02716e6f943883a9508b447aff4e, session_ops.rs:77-80 returns stale OR status-not-Interrupted. Nonstale Interrupted is false and cannot reach restarts_retired_by retirement; stale Interrupted is true.\",\"session_view.rs:549-564 preserves changed completion revision but :3701-3722 independently gates mounting; preserved revision does not refute the stale branch.\",\"f560058 is in range. No runtime observation.\"] Current coverage/results: [\"Recording-time main 24bc058066fd57848e788b465719b0e6da2f98f7: TODO.md:25-26 Planned is empty.\",\"BUGS.md searched for actual Restart, Deleting, marking, Replace-progress and notification claims; its sole SSH-helper install/update hang is unrelated.\",\"plans/queue searched for retirement/stale/floor/success, Deleting/Rename/question, marking/cleanup, ReplaceProgressGuard and OldTerminalEnded. Matching session-action-leftovers, environment-agent-operations, tmux and nonblocking plans have landed per plans/REPORTS.md; none is an unlanded repair covering these claims.\",\"review_feedback_queue/INDEX.md read in bounded chunks. Matching retained-restart-hides-reboot-card, suspended-sandbox-keeps-row-confirmations-enabled, frozen-sandbox-retains-header-lifecycle-answers and bulk-sandbox-delete-drops-eligible-peer files read; their trigger/consequence boundaries differ as noted per record.\",\"TRIAGE_OUTCOMES.md searched for the actual retirement/stale-success, Deleting/Rename/question, marking cleanup, progress-guard and notification claims; no matching active disposition. Archive not read.\",\"SPEC.md:1901-1904/SPEC_impl.md:1134-1143 require completion retention. No acceptance text needed: the specific nonstale branch does not retire success. The stale branch is retained in named g037/f3 and g038/l1 before the separate filter proposal.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Initial candidate claimed any old Interrupted listing could not retire success and treated the temporary interrupted-card concern as refuted. Latest wording narrows that claim to nonstale Interrupted, leaving stale evidence explicitly open.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g038/c1",
+        "line": 10,
+        "disposition": "excluded",
+        "group": "nonstale-interrupted-cannot-retire-restart-success",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-022 after inspecting it. Only the nonstale Interrupted branch is refuted. The earlier blanket claim was false for stale=true and was explicitly corrected. Drop only the nonstale branch as source-refuted. Never use this candidate to drop the stale-sidebar or mounted-observer mechanism. Checked source/results: [\"At f560058da19e02716e6f943883a9508b447aff4e, session_ops.rs:77-80 returns stale OR status-not-Interrupted. Nonstale Interrupted is false and cannot reach restarts_retired_by retirement; stale Interrupted is true.\",\"session_view.rs:549-564 preserves changed completion revision but :3701-3722 independently gates mounting; preserved revision does not refute the stale branch.\",\"f560058 is in range. No runtime observation.\"] Current coverage/results: [\"Recording-time main 24bc058066fd57848e788b465719b0e6da2f98f7: TODO.md:25-26 Planned is empty.\",\"BUGS.md searched for actual Restart, Deleting, marking, Replace-progress and notification claims; its sole SSH-helper install/update hang is unrelated.\",\"plans/queue searched for retirement/stale/floor/success, Deleting/Rename/question, marking/cleanup, ReplaceProgressGuard and OldTerminalEnded. Matching session-action-leftovers, environment-agent-operations, tmux and nonblocking plans have landed per plans/REPORTS.md; none is an unlanded repair covering these claims.\",\"review_feedback_queue/INDEX.md read in bounded chunks. Matching retained-restart-hides-reboot-card, suspended-sandbox-keeps-row-confirmations-enabled, frozen-sandbox-retains-header-lifecycle-answers and bulk-sandbox-delete-drops-eligible-peer files read; their trigger/consequence boundaries differ as noted per record.\",\"TRIAGE_OUTCOMES.md searched for the actual retirement/stale-success, Deleting/Rename/question, marking cleanup, progress-guard and notification claims; no matching active disposition. Archive not read.\",\"SPEC.md:1901-1904/SPEC_impl.md:1134-1143 require completion retention. No acceptance text needed: the specific nonstale branch does not retire success. The stale branch is retained in named g037/f3 and g038/l1 before the separate filter proposal.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Initial candidate claimed any old Interrupted listing could not retire success and treated the temporary interrupted-card concern as refuted. Latest wording narrows that claim to nonstale Interrupted, leaving stale evidence explicitly open.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-022",
+          "bucket": "other",
+          "aliases": [],
+          "target_queue_file": null,
+          "coverage_checked": [
+            "Recording-time main 24bc058066fd57848e788b465719b0e6da2f98f7: TODO.md:25-26 Planned is empty.",
+            "BUGS.md searched for actual Restart, Deleting, marking, Replace-progress and notification claims; its sole SSH-helper install/update hang is unrelated.",
+            "plans/queue searched for retirement/stale/floor/success, Deleting/Rename/question, marking/cleanup, ReplaceProgressGuard and OldTerminalEnded. Matching session-action-leftovers, environment-agent-operations, tmux and nonblocking plans have landed per plans/REPORTS.md; none is an unlanded repair covering these claims.",
+            "review_feedback_queue/INDEX.md read in bounded chunks. Matching retained-restart-hides-reboot-card, suspended-sandbox-keeps-row-confirmations-enabled, frozen-sandbox-retains-header-lifecycle-answers and bulk-sandbox-delete-drops-eligible-peer files read; their trigger/consequence boundaries differ as noted per record.",
+            "TRIAGE_OUTCOMES.md searched for the actual retirement/stale-success, Deleting/Rename/question, marking cleanup, progress-guard and notification claims; no matching active disposition. Archive not read.",
+            "SPEC.md:1901-1904/SPEC_impl.md:1134-1143 require completion retention. No acceptance text needed: the specific nonstale branch does not retire success. The stale branch is retained in named g037/f3 and g038/l1 before the separate filter proposal."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Initial candidate claimed any old Interrupted listing could not retire success and treated the temporary interrupted-card concern as refuted. Latest wording narrows that claim to nonstale Interrupted, leaving stale evidence explicitly open.",
+          "needs_independent_drop_check": false,
+          "key": "g038/c1",
+          "latest_line": 10,
+          "recommendation": "refuted",
+          "underlying_key": "nonstale-interrupted-cannot-retire-restart-success",
+          "why": "Only the nonstale Interrupted branch is refuted. The earlier blanket claim was false for stale=true and was explicitly corrected.",
+          "checks": [
+            "At f560058da19e02716e6f943883a9508b447aff4e, session_ops.rs:77-80 returns stale OR status-not-Interrupted. Nonstale Interrupted is false and cannot reach restarts_retired_by retirement; stale Interrupted is true.",
+            "session_view.rs:549-564 preserves changed completion revision but :3701-3722 independently gates mounting; preserved revision does not refute the stale branch.",
+            "f560058 is in range. No runtime observation."
+          ],
+          "proposed_basis": "Drop only the nonstale branch as source-refuted. Never use this candidate to drop the stale-sidebar or mounted-observer mechanism."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "nonstale-interrupted-cannot-retire-restart-success",
+        "destination": null
+      }
+    },
+    {
+      "key": "g038/l1",
+      "owner": "g038",
+      "id": "l1",
+      "domain": "gui-session-lifecycle",
+      "purpose": "gui-session-lifecycle: crates/farhelm-ui/src/list/view.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "A pre-Restart stale listing may clear retained success before a reconnecting host reports the new run",
+            "location": "crates/farhelm-ui/src/list/view.rs:1985",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\nInvestigating whether opening a successfully restarted session can incorrectly show it as interrupted when an older stale listing retires the remembered restart.\n\n## Details\nSource basis: view.rs removes the listing generation floor; session_ops.rs:79-80 accepts session.stale as sufficient to retire a restart, even if its status is Interrupted. Unlike the narrow non-stale Interrupted case logged as c1, a read produced while the host was disconnected could be stale and arrive after a successful Restart. Need to inspect listing fences, host reconnection/cache publication and the order of retained success versus mounted view initialization. Suggested bucket: high if shipped route is established. Confidence: uninvestigated lead. proposed_drop: false. possible_cover: none. Could-be-highest: no established security or loss-of-work route; suspected consequence is a wrong unavailable card. No execution performed. Next check: determine whether a stale snapshot can overlap an admitted successful Restart and pass the listing gate."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "A delayed stale listing can erase a successful Restart before the new run is classified",
+            "location": "crates/farhelm-ui/src/list/view.rs:1985",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\nAfter restarting an interrupted session successfully, a delayed list response from its earlier disconnection can make a newly opened view offer Restart again instead of attaching to the running agent. It recovers when a later read reports the new run.\n\n## Details\nview.rs:1985 removes the read-generation argument to retire_confirmed_restarts, and view.rs:3417 records the successful outcome without fencing the list reads. session_ops.rs:79-80 returns true for every stale row, including stale Interrupted, and restarts_retired_by at :91-109 checks only that no operation is currently pending; it no longer excludes reads started before the successful Restart. ReadGate.accept_success in ops.rs:183-189 accepts such a delayed response if no newer response or fence has applied. The normal single-flight reader queues the explicit post-Restart refresh behind the old request (reader.rs module contract; view.rs:2478-2492 at the earlier reviewed revision uses the same reader). Thus an old stale response can commit after pending is released and clear restart_succeeded before the follow-up read.\n\nThe stale premise is shipped: aggregate.rs:357 derives staleness from its captured host snapshot, and aggregate.rs:547-580 snapshots host connection state before awaiting the cached slice. A snapshot from a temporary disconnect can therefore be delivered after reconnection and a successful Restart. This requires ordinary response delay/ordering, not an invented control or a reproduction. Restart records its Unknown reply before answering (sessions.rs:3451-3483), but session_cache.rs:143-148 preserves a cached Interrupted status until a supervisor listing classifies the new run. A view opened in this interval seeds relaunched=false from the erased outcome (session_view.rs:615-633), and terminal_absence at :3701-3705 shows the interrupted card on a fresh, still-Interrupted detail row. Fresh Interrupted rows cannot restore the lost success. The earlier revision avoided this specific retirement through generation > restart_listing_floor (parent session_ops.rs:102-116).\n\nContract: SPEC.md, Lifecycle operations, says \"A view opened during Stop or Restart observes that operation’s completion, including the terminal refresh or reattachment it needs\" (ASCII apostrophe in source), and SPEC_impl.md:1134-1143 retains the successful reply so a view opened before the listing catches up can use it. Preserve ordering for stale rows too, for example retain the generation floor or fence list reads at restart completion.\n\nSuggested bucket: other. The established consequence is a transient incorrect unavailable/restart surface; no loss of user work or destructive route is established. Confidence: likely, with the explicit timing premise that a stale list response captured before reconnection arrives after Restart completes and before the fresh listing/detail classifies its new run. All checks were source/contract analysis; no behavior was observed during execution and no reproduction was written. proposed_drop: false. possible_cover: none; coverage sources were not searched. Could-be-highest: no established security or loss-of-work route. Caveats: the pending check protects responses delivered before completion, and a later non-Interrupted read heals this; this finding does not claim a permanent failure or that clicking Restart twice necessarily loses work."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Recheck stale-list Restart race against live detail provenance",
+            "location": "crates/farhelm-ui/src/list/view.rs:1985",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\nThe delayed stale sidebar response can retire retained Restart success, but the earlier claim that a newly issued connected detail can inherit the helm cached Interrupted state needs correction. Investigating the narrower mounted-view window before detail repairs it.\n\n## Details\nNew source check: sessions.rs:3052-3091 explicitly specifies connected GET session detail drains the live supervisor list and never serves the helm cache; nonconnected detail alone uses cached rows. Thus my prior statement that a fresh connected detail can still report Interrupted because session_cache merged_status preserves the old status is not supported by this route. g037/f3 shares that cache/detail assumption and must not be used as independent confirmation. Preserve original consequence: interrupted card after successful Restart until a later read, rather than a terminal attachment. The still-supported sidebar mechanism remains view.rs:1985 -> session_ops.rs read_confirms_run(stale) -> retirement after pending release, with no Restart read fence. Need finish actual detail branch, supervisor live listing and pinned Dioxus scheduling checks before deciding whether a mounted-view consequence is established. Interface g036/l1 concerns an earlier eligible-list/payload observer route; g089/l1 supplies a narrower mounted observer sequence; g088/l1 establishes that revision/generation increment survives payload retirement, which is distinct from whether a terminal surface exists. Suggested bucket: other, unchanged. Confidence: under investigation; the fresh-detail cache premise is contradicted by documented source and not yet replaced with a complete route. proposed_drop: false. possible_cover: known interface claims g037/f3 and g089/l1 may duplicate this exact old-stale-list mechanism; g036/l1 has a different earlier trigger. Could-be-highest: no established route. No runtime behavior observed or reproduction written. Next checks: live detail implementation/status, current initialization and selected snapshot bridge, Dioxus effect/task and desktop delivery ordering."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "An old stale sidebar response can erase Restart success before the mounted view consumes it",
+            "location": "crates/farhelm-ui/src/list/view.rs:1985",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\nAfter a successful Restart of an interrupted session, its open view can keep showing the interrupted-session card until its next detail read succeeds, instead of attaching immediately. An earlier sidebar response can erase the successful completion before the view sees it.\n\n## Details\nSynthesis correction: my original sequence incorrectly implied that a fresh connected detail GET uses the helm cached Interrupted status. It does not. sessions.rs:3052-3091 and :3194-3231 use manager::drain_sessions on the connected supervisor; only the no-client branch at :3160-3192 uses cache. session_cache::merged_status is relevant to the sidebar only. The established narrower route requires no fresh detail to remain Interrupted: it uses the already-mounted views pre-Restart current signal while the next detail is still pending. Preserve the original consequence (temporary wrong interrupted card instead of terminal); do not infer a persistent failure from cache.\n\nComplete shipped source sequence: (1) A sidebar list request captures host-disconnected state and Interrupted metadata. aggregate.rs:547 captures manager snapshots before awaited cached_slice at :580; row_of at :357 derives stale from that captured host state. (2) The host reconnects; this independently reading mounted view has a live, nonstale Interrupted detail and can admit Restart. current is initialized from its selected Session at session_view.rs:603-607 and thereafter updated by accepted detail at :1032. The sidebar reader remains independent (:913-920); later parent selection updates follow only title and request detail (:1250-1273), not wholesale status replacement. Thus the old sidebar response need not match the mounted current state. (3) Restart succeeds. list/view.rs:3416-3419 records success, requests a sidebar refresh and releases its pending claim. Restart does not fence listing_reads. The explicit refresh coalesces behind the already-running sidebar request (reader.rs request discipline and list/view.rs:2473-2474), so the old response can still be first to commit. (4) The delayed old response completes after pending release but before the Restart observer consumes success. ReadGate accepts a generation newer than applied (ops.rs:183-190), not newer than Restart. view.rs:1985 calls retirement; session_ops.rs:77-80 treats stale Interrupted as confirmation, and :215-226 clears restart_succeeded. The removed parent floor excluded this read. (5) The observer sees the changed durable restart_revision but false success (session_view.rs:549-564): it increments mount_generation without setting relaunched. That increment is real, but keep_terminal_surface at :3714-3722 returns false for current nonstale Interrupted with relaunched false, so no terminal island exists to remount. The ordinary lifecycle effect at :1470-1490 requests fresh detail. Detail spanning an operation boundary is rejected by its sampled lifecycle revision (:927-975); a genuinely post-completion live detail subsequently repairs current and mounts the surface. No claim is made that such a new detail remains cached Interrupted.\n\nPinned scheduling check, not execution evidence: Cargo.lock pins dioxus core/hooks/desktop 0.7.10. Installed primary dependency source use_effect.rs:15-47 queues effects and reads shared state when they run; virtual_dom.rs:507-537 drains ready tasks before effects, with scopes rerendered first; scheduler.rs:61-78 explicitly ranks effects last. desktop webview.rs:537-590 waits for mutation delivery before continuing virtual-DOM work. A delayed sidebar task therefore can become ready and clear success after the completion render but before its deferred observer; no shipped ordering guarantees observer-first. This is an admitted source-level interleaving, not an observed schedule or a claim that it occurs every Restart. It does not need multiple GUIs, a new post-completion input, a lost reply or a second fault.\n\nContracts checked in full relevant clauses: SPEC_impl.md:1134-1143 says completion reattaches and mounted views observe it; SPEC.md Lifecycle operations retains action outcomes across view changes. SPEC.md Errors and diagnostics and One GUI at a time do not waive this successful single-GUI completion route. The sub-second input allowance says an action may be carried out as delivered; the pointer/key race acceptance concerns focus/selection. Neither establishes acceptance of erasing the completion before a mounted observer uses it. A transient detail error can lengthen recovery but is not required by the finding.\n\nSuggested fix: retain ordering against pre-Restart sidebar responses or keep successful-completion knowledge durable separately from the seed retired for new views. Suggested bucket: other, unchanged. Confidence: confirmed source/contract interleaving for the mounted-view route; never observed in execution. proposed_drop: false. possible_cover: duplicate known claims g037/f3 and g089/l1 at this same revision; g037s cache/detail wording requires the correction above. g036/l1 at b3d6b3eff6b7508e0b1fb6ec5b5cde31d27ebabe instead uses an eligible post-floor listing and optional terminal-kind payload, so its precise trigger/earlier terminal-kind consequence differs. g088/l1 correctly refutes losing the generation increment but does not refute keep_terminal_surface refusing to mount when the successful flag is gone. Could-be-highest: no established security or work-loss route. Caveats: later live detail normally heals the view; no lasting outage, fresh-detail cache staleness, or destructive second-Restart consequence is asserted. No runtime tests or reproductions run. No remaining missing source premise for this narrower route; actual incidence is unmeasured."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "An old stale sidebar response can erase Restart success before the mounted view consumes it",
+            "location": "crates/farhelm-ui/src/list/view.rs:1985",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\nAfter successfully restarting an interrupted session, its open view can keep showing the interrupted-session card until its next detail read succeeds. An earlier sidebar response can erase the successful completion before the view consumes it.\n\n## Details\nComplete source route: a host reboot/disconnect leaves a stale sidebar request in flight. Its captured status can be Running, Interrupted or any other state; staleness alone suffices, so no extra outage is needed to make an old stale Interrupted cache. aggregate.rs:547-580 captures the host snapshot before awaited cache reads, and :357 derives stale from that snapshot. Meanwhile the host reconnects. The mounted session views independent live detail now reports nonstale Interrupted for the rebooted session and enables Restart. The user restarts it successfully while the old sidebar reply remains pending.\n\nThe view owns current, initialized from its selected Session at session_view.rs:603-607 and then replaced by accepted detail at :1032. Its reader is independent of the sidebar (:913-920). Parent selection updates follow title and request detail (:1250-1273), rather than replacing this current status. list/view.rs:3416-3419 records successful Restart, requests sidebar refresh, then releases pending. It does not fence listing_reads. reader.rs:644-670 coalesces that refresh behind an existing read. An old sidebar response arriving after pending release can pass ReadGate because accept_success compares generation only against the last applied read (ops.rs:183-190). view.rs:1985 then calls retirement; session_ops.rs:77-80 accepts stale=true regardless of status, and :215-226 clears restart_succeeded. The removed parent restart_listing_floor would have excluded this pre-completion read.\n\nPinned scheduling establishes an allowed completion-before-retirement-before-observer interleaving: Cargo.lock pins dioxus core/hooks/desktop 0.7.10; use_effect.rs:15-47 queues an effect that reads shared state on execution; virtual_dom.rs:507-537 polls ready tasks before effects and yields to dirty scopes; scheduler.rs:61-78 ranks effects last. desktop webview.rs:537-590 waits for mutations to flush before polling again, during which the old HTTP task can become ready. No guarantee orders the Restart observer before that task. This is source ordering evidence, never an observed schedule.\n\nThe mounted observer at session_view.rs:549-564 still sees changed restart_revision and increments mount_generation, but with success erased it does not set relaunched. Current remains its pre-Restart nonstale Interrupted state until a post-completion detail commits. keep_terminal_surface at :3714-3722 returns false for that state when relaunched=false, so the generation increment has no terminal island to remount. The lifecycle effect at :1470-1490 requests detail; detail begun before or during Restart is fenced by lifecycle revision (:927-1000). A later successful live detail changes current and repairs the surface.\n\nCorrection to the initial record: connected GET session detail never serves the helm cache. sessions.rs:3052-3091 and :3194-3231 use live manager::drain_sessions; only the no-client branch at :3160-3192 serves cached metadata. Therefore session_cache::merged_status cannot make a newly issued connected detail inherit cached Interrupted, and this finding does not depend on that claim. The relevant Interrupted state is the mounted views existing accepted detail. Fresh detail normally repairs it. Likewise no claim is made that the durable numerical remount revision is lost. The original consequence remains temporary interrupted-card presentation instead of terminal access; no persistent failure is inferred.\n\nContract: SPEC_impl.md:1134-1143 requires completion reattachment and mounted observation of Restart. Relevant SPEC.md Errors and diagnostics, Keyboard focus input-race clauses and One GUI at a time were read: their brief input delivery/focus exceptions do not establish acceptance of erasing a successful single-GUI completion before its mounted consumer. No new input, multiple GUIs, lost reply or additional error is required after completion. Detail errors can lengthen recovery but are not the trigger. Restore ordering against pre-Restart sidebar replies or retain durable successful-completion knowledge separately from a retireable new-view seed.\n\nSuggested bucket: other, unchanged. Confidence: confirmed source/contract interleaving for this narrowed mounted-view route, not observed execution. proposed_drop: false. possible_cover: duplicate known interface claims g037/f3 and g089/l1 at this revision; g037s fresh-detail cache premise needs the correction above. Earlier g036/l1 at b3d6b3eff6b7508e0b1fb6ec5b5cde31d27ebabe instead uses an eligible post-floor listing and optional terminal-kind payload, so its trigger and renderer consequence differ. g088/l1 correctly preserves generation increment; it does not establish a mounted surface when current is Interrupted and relaunched is false. Could-be-highest: no established security or work-loss route. Caveats: frequency is unmeasured; a later live detail normally heals it. No destructive second-Restart consequence is asserted. No remaining missing source premise for the narrowed route. No tests or reproductions run."
+          }
+        }
+      ],
+      "latest": {
+        "line": 11,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l1",
+          "state": "open",
+          "summary": "An old stale sidebar response can erase Restart success before the mounted view consumes it",
+          "location": "crates/farhelm-ui/src/list/view.rs:1985",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\nAfter successfully restarting an interrupted session, its open view can keep showing the interrupted-session card until its next detail read succeeds. An earlier sidebar response can erase the successful completion before the view consumes it.\n\n## Details\nComplete source route: a host reboot/disconnect leaves a stale sidebar request in flight. Its captured status can be Running, Interrupted or any other state; staleness alone suffices, so no extra outage is needed to make an old stale Interrupted cache. aggregate.rs:547-580 captures the host snapshot before awaited cache reads, and :357 derives stale from that snapshot. Meanwhile the host reconnects. The mounted session views independent live detail now reports nonstale Interrupted for the rebooted session and enables Restart. The user restarts it successfully while the old sidebar reply remains pending.\n\nThe view owns current, initialized from its selected Session at session_view.rs:603-607 and then replaced by accepted detail at :1032. Its reader is independent of the sidebar (:913-920). Parent selection updates follow title and request detail (:1250-1273), rather than replacing this current status. list/view.rs:3416-3419 records successful Restart, requests sidebar refresh, then releases pending. It does not fence listing_reads. reader.rs:644-670 coalesces that refresh behind an existing read. An old sidebar response arriving after pending release can pass ReadGate because accept_success compares generation only against the last applied read (ops.rs:183-190). view.rs:1985 then calls retirement; session_ops.rs:77-80 accepts stale=true regardless of status, and :215-226 clears restart_succeeded. The removed parent restart_listing_floor would have excluded this pre-completion read.\n\nPinned scheduling establishes an allowed completion-before-retirement-before-observer interleaving: Cargo.lock pins dioxus core/hooks/desktop 0.7.10; use_effect.rs:15-47 queues an effect that reads shared state on execution; virtual_dom.rs:507-537 polls ready tasks before effects and yields to dirty scopes; scheduler.rs:61-78 ranks effects last. desktop webview.rs:537-590 waits for mutations to flush before polling again, during which the old HTTP task can become ready. No guarantee orders the Restart observer before that task. This is source ordering evidence, never an observed schedule.\n\nThe mounted observer at session_view.rs:549-564 still sees changed restart_revision and increments mount_generation, but with success erased it does not set relaunched. Current remains its pre-Restart nonstale Interrupted state until a post-completion detail commits. keep_terminal_surface at :3714-3722 returns false for that state when relaunched=false, so the generation increment has no terminal island to remount. The lifecycle effect at :1470-1490 requests detail; detail begun before or during Restart is fenced by lifecycle revision (:927-1000). A later successful live detail changes current and repairs the surface.\n\nCorrection to the initial record: connected GET session detail never serves the helm cache. sessions.rs:3052-3091 and :3194-3231 use live manager::drain_sessions; only the no-client branch at :3160-3192 serves cached metadata. Therefore session_cache::merged_status cannot make a newly issued connected detail inherit cached Interrupted, and this finding does not depend on that claim. The relevant Interrupted state is the mounted views existing accepted detail. Fresh detail normally repairs it. Likewise no claim is made that the durable numerical remount revision is lost. The original consequence remains temporary interrupted-card presentation instead of terminal access; no persistent failure is inferred.\n\nContract: SPEC_impl.md:1134-1143 requires completion reattachment and mounted observation of Restart. Relevant SPEC.md Errors and diagnostics, Keyboard focus input-race clauses and One GUI at a time were read: their brief input delivery/focus exceptions do not establish acceptance of erasing a successful single-GUI completion before its mounted consumer. No new input, multiple GUIs, lost reply or additional error is required after completion. Detail errors can lengthen recovery but are not the trigger. Restore ordering against pre-Restart sidebar replies or retain durable successful-completion knowledge separately from a retireable new-view seed.\n\nSuggested bucket: other, unchanged. Confidence: confirmed source/contract interleaving for this narrowed mounted-view route, not observed execution. proposed_drop: false. possible_cover: duplicate known interface claims g037/f3 and g089/l1 at this revision; g037s fresh-detail cache premise needs the correction above. Earlier g036/l1 at b3d6b3eff6b7508e0b1fb6ec5b5cde31d27ebabe instead uses an eligible post-floor listing and optional terminal-kind payload, so its trigger and renderer consequence differ. g088/l1 correctly preserves generation increment; it does not establish a mounted surface when current is Interrupted and relaunched is false. Could-be-highest: no established security or work-loss route. Caveats: frequency is unmeasured; a later live detail normally heals it. No destructive second-Restart consequence is asserted. No remaining missing source premise for the narrowed route. No tests or reproductions run."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g038/findings.jsonl",
+        "id": "l1",
+        "line": 11,
+        "disposition": "duplicate",
+        "group": "restart-success-retired-by-precompletion-stale-listing",
+        "reason": "Parent read full claims-022 g038/l1 and g037/f3 and reconciles both with g032/c4: same stale sidebar snapshot, success retirement after pending release, mounted pre-Restart Interrupted current until live detail arrives. The corrected live-versus-cached detail premise and Dioxus0.7.10 tasks-before-effects evidence are preserved. No permanent outage, lost work, false successful Restart or destructive second-Restart route was established. Only the complete narrow self-correcting display consequence receives the canonical filter decision; all original events, locations and qualifications remain in the record. This does not absorb g036/l1's different eligible-listing trigger."
+      },
+      "accepted_parent_decision": {
+        "key": "g038/l1",
+        "line": 11,
+        "disposition": "duplicate",
+        "group": "restart-success-retired-by-precompletion-stale-listing",
+        "bucket": "other",
+        "recording": "same-filtered-transient-route",
+        "needs_independent_drop_check": false,
+        "reason": "Parent read full claims-022 g038/l1 and g037/f3 and reconciles both with g032/c4: same stale sidebar snapshot, success retirement after pending release, mounted pre-Restart Interrupted current until live detail arrives. The corrected live-versus-cached detail premise and Dioxus0.7.10 tasks-before-effects evidence are preserved. No permanent outage, lost work, false successful Restart or destructive second-Restart route was established. Only the complete narrow self-correcting display consequence receives the canonical filter decision; all original events, locations and qualifications remain in the record. This does not absorb g036/l1's different eligible-listing trigger."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-022",
+          "bucket": "other",
+          "aliases": [
+            "g037/f3"
+          ],
+          "target_queue_file": null,
+          "coverage_checked": [
+            "Recording-time main 24bc058066fd57848e788b465719b0e6da2f98f7: TODO.md:25-26 Planned is empty.",
+            "BUGS.md searched for actual Restart, Deleting, marking, Replace-progress and notification claims; its sole SSH-helper install/update hang is unrelated.",
+            "plans/queue searched for retirement/stale/floor/success, Deleting/Rename/question, marking/cleanup, ReplaceProgressGuard and OldTerminalEnded. Matching session-action-leftovers, environment-agent-operations, tmux and nonblocking plans have landed per plans/REPORTS.md; none is an unlanded repair covering these claims.",
+            "review_feedback_queue/INDEX.md read in bounded chunks. Matching retained-restart-hides-reboot-card, suspended-sandbox-keeps-row-confirmations-enabled, frozen-sandbox-retains-header-lifecycle-answers and bulk-sandbox-delete-drops-eligible-peer files read; their trigger/consequence boundaries differ as noted per record.",
+            "TRIAGE_OUTCOMES.md searched for the actual retirement/stale-success, Deleting/Rename/question, marking cleanup, progress-guard and notification claims; no matching active disposition. Archive not read.",
+            "SPEC.md:1901-1904 and SPEC_impl.md:1134-1143 require successful completion observation; the input/focus exceptions in SPEC.md One GUI at a time do not establish acceptance. Current retained-restart-hides-reboot-card has a later reboot/over-retention trigger, not old stale evidence retiring success."
+          ],
+          "exact_cover_quotes": [
+            "FILTER.md, Rare, self-correcting glitches and imprecise diagnostics: \"The trigger is rare: a narrow timing window\".",
+            "Same filter: \"a display that is briefly wrong and corrects itself on the next refresh, retry or reconnect, or when the user leaves the view\"."
+          ],
+          "missing_premise": "Actual incidence/duration unmeasured. A destructive second-Restart or persistent fresh-detail failure is not established or asserted.",
+          "original_stronger_consequence": "Original record offered a newly opened wrong Restart surface and incorrectly implied connected detail inherits cached Interrupted. The cache/detail premise was retracted. Latest route uses mounted pre-Restart current until live detail repairs it; the original temporary card/terminal-access gap remains.",
+          "needs_independent_drop_check": false,
+          "key": "g038/l1",
+          "latest_line": 11,
+          "recommendation": "filtered",
+          "underlying_key": "restart-success-retired-by-precompletion-stale-sidebar",
+          "why": "Same root, trigger and bounded consequence as g037/f3. The mounted-view source route is supported; the complete stated consequence fits the rare self-correcting display filter.",
+          "checks": [
+            "At f560058da19e02716e6f943883a9508b447aff4e, aggregate.rs:547-580 captures host state before awaited cache read; list/view.rs:1935-1953,:1985 and :3416-3419 permit an older stale sidebar reply to clear success after pending release without a Restart age fence.",
+            "session_ops.rs:77-107,:215-226 accepts stale=true and clears success, while session_view.rs:549-564 still increments generation but may leave relaunched=false. :1709-1710,:3701-3722 then suppress the terminal for its pre-Restart nonstale Interrupted current signal.",
+            "Connected detail uses live manager::drain_sessions (sessions.rs:3194-3231); only no-client detail uses cache (:3162-3192). Independent title-following and lifecycle refresh at session_view.rs:1243-1262,:1470-1490 allow old current until a new detail arrives.",
+            "Matching pinned Dioxus 0.7.10 source checked: hooks use_effect.rs:15-47; core virtual_dom.rs:507-537 and scheduler.rs:61-78; desktop webview.rs:537-590. Tasks can retire success before the deferred observer. This is an admitted source interleaving, not measured behavior.",
+            "Historical change is in range. No tests, reproduction or runtime observation."
+          ],
+          "proposed_basis": "Propose the same filter disposition as g037/f3, preserving the confirmed conditional mechanism, explicit premise correction, unmeasured timing and no-loss caveat. Exact duplicate within this named batch; g089/l1 is mentioned by the histories but was not supplied and was not independently read."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "restart-success-retired-by-precompletion-stale-listing",
+        "destination": "trailing-restart-success-retired-by-precompletion-stale-listing.md"
+      }
+    },
+    {
+      "key": "g038/c2",
+      "owner": "g038",
+      "id": "c2",
+      "domain": "gui-session-lifecycle",
+      "purpose": "gui-session-lifecycle: crates/farhelm-ui/src/list/view.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Environment-delete replies and refreshed host state do not widen confirmed deletion scope",
+            "location": "crates/farhelm-ui/src/list/view.rs:3286",
+            "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa\n\n## TLDR\nConsidered whether refreshing a host or receiving no answer could turn an agreed session-only deletion into deletion of the entire environment without a new warning. The reviewed paths do not do that.\n\n## Details\nview.rs:3286-3301 consumes the drawn ConfirmToken and takes scope from token.key().answered(environment). shared.rs:124-148 preserves the question lane, and row.rs:2512-2539 sends the environment facts captured by that render. Bulk admission uses DeleteSnapshot.environment_delete from the modal snapshot at view.rs:4555-4583, not a new host lookup; live availability checks can only exclude targets. view.rs:3022-3059 turns Unasked into a new warned row/header question, or a row error for bulk; it never dispatches Whole automatically. api/sandbox_sessions.rs:192-238 maps the captured scope to distinct opt-in query parameters. The contract is SPEC_impl.md:1071, \"A handler for something the user answered or confirmed acts on what the render that drew the control showed, never on state it reads when it runs.\" These source checks refute this scope-widening concern. Suggested bucket: highest if the suspected unconfirmed destructive route existed; it does not in the inspected paths. Confidence: confirmed source refutation. proposed_drop: captured scope and token checks described above. possible_cover: none. Could-be-highest: yes, because a scope-widening route would destroy unconfirmed processes and files; this record preserves it for independent drop review. Caveat: source-only conclusion, no runtime reproduction; server-side deletion internals outside this functional group were consulted only through their contract."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "All three environment Delete entry paths preserve the drawn scope",
+            "location": "crates/farhelm-ui/src/list/view.rs:3286",
+            "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa\n\n## TLDR\nRechecked the shared scope input across row, header and bulk Delete. The inspected paths preserve the confirmed Session versus Whole choice instead of widening it after a host refresh.\n\n## Details\nRow: shared.rs:23-82 builds DeleteTarget with environment facts and always confirms environment Delete even when session questions are skipped; question() selects Delete versus DeleteWhole from the rendered scope. RowQuestion::answered at :134-149 overrides the drawn EnvironmentDelete scope with the consumed question lane. view.rs:3286-3301 takes only the rendered token and passes that value to do_delete. Header: session_view.rs:745-755 stores DeleteScope in the question key; its confirming handler at :2789-2799 consumes shown_delete and calls environment_delete.map(with_scope(*shown_delete.key())). view.rs:3403-3412 forwards the HeaderAction environment unchanged after synchronous claim transfer. Bulk: lifecycle.rs:208-237 stores whole/provider in DeleteSnapshot; :367-388 reconciliation preserves sandbox, whole and provider across subsequent listings. admitted_targets (:397-411) only filters snapshots, never reconstructs them from live rows. view.rs:4555-4584 maps captured snapshot environments before deduplicating Whole targets; admit_batch (:96-117) and run_paced (:123-142) retain each captured completion across waits. The common admit_delete at view.rs:2923-2997 captures environment into its owned async future and calls delete_in_environment with environment.scope, without recomputing it on send. Live Deleting exclusions only shrink the batch. Unasked opens a separate warning and never sends Whole automatically.\n\nExact contract: SPEC_impl.md:1071, \"A handler for something the user answered or confirmed acts on what the render that drew the control showed, never on state it reads when it runs.\" The implementation follows this scope contract in all three checked entries. Suggested bucket: highest if the considered unconfirmed Whole route existed. Confidence: confirmed source refutation; no execution. proposed_drop: captured scopes, token checks and unchanged common-core capture refute the suspected widening, subject to the callers independent drop review. possible_cover: interface g089/c1 confirms the header independently; no queue coverage searched. Could-be-highest: yes; original suspected consequence was destruction of unconfirmed sessions, processes and files, preserved here. Caveat: this does not generalize to unexamined server defects or every unrelated GUI lifecycle action. No new finding claimed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 8,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "All three environment Delete entry paths preserve the drawn scope",
+          "location": "crates/farhelm-ui/src/list/view.rs:3286",
+          "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa\n\n## TLDR\nRechecked the shared scope input across row, header and bulk Delete. The inspected paths preserve the confirmed Session versus Whole choice instead of widening it after a host refresh.\n\n## Details\nRow: shared.rs:23-82 builds DeleteTarget with environment facts and always confirms environment Delete even when session questions are skipped; question() selects Delete versus DeleteWhole from the rendered scope. RowQuestion::answered at :134-149 overrides the drawn EnvironmentDelete scope with the consumed question lane. view.rs:3286-3301 takes only the rendered token and passes that value to do_delete. Header: session_view.rs:745-755 stores DeleteScope in the question key; its confirming handler at :2789-2799 consumes shown_delete and calls environment_delete.map(with_scope(*shown_delete.key())). view.rs:3403-3412 forwards the HeaderAction environment unchanged after synchronous claim transfer. Bulk: lifecycle.rs:208-237 stores whole/provider in DeleteSnapshot; :367-388 reconciliation preserves sandbox, whole and provider across subsequent listings. admitted_targets (:397-411) only filters snapshots, never reconstructs them from live rows. view.rs:4555-4584 maps captured snapshot environments before deduplicating Whole targets; admit_batch (:96-117) and run_paced (:123-142) retain each captured completion across waits. The common admit_delete at view.rs:2923-2997 captures environment into its owned async future and calls delete_in_environment with environment.scope, without recomputing it on send. Live Deleting exclusions only shrink the batch. Unasked opens a separate warning and never sends Whole automatically.\n\nExact contract: SPEC_impl.md:1071, \"A handler for something the user answered or confirmed acts on what the render that drew the control showed, never on state it reads when it runs.\" The implementation follows this scope contract in all three checked entries. Suggested bucket: highest if the considered unconfirmed Whole route existed. Confidence: confirmed source refutation; no execution. proposed_drop: captured scopes, token checks and unchanged common-core capture refute the suspected widening, subject to the callers independent drop review. possible_cover: interface g089/c1 confirms the header independently; no queue coverage searched. Could-be-highest: yes; original suspected consequence was destruction of unconfirmed sessions, processes and files, preserved here. Caveat: this does not generalize to unexamined server defects or every unrelated GUI lifecycle action. No new finding claimed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g038/findings.jsonl",
+        "id": "c2",
+        "line": 8,
+        "disposition": "under-investigation",
+        "group": "g038-c2",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-023",
+          "key": "g038/c2",
+          "latest_line": 8,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "environment-delete-drawn-scope-preservation",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The checked row, header and bulk paths retain the answered Session/Whole scope through request dispatch. A late Unasked response only opens another warned question. This refutes the named scope-widening mechanism, not every possible server-side deletion defect.",
+          "checks": [
+            "At 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa, list/shared.rs:63-82 always confirms environment Delete and chooses its question lane; :134-149 derives scope from the answered lane. list/row.rs:2512-2539 passes rendered environment facts and token. list/view.rs:3286-3301 consumes that token before dispatch.",
+            "At the same revision, session_view.rs:2789-2799 consumes shown_delete and applies its key to the captured environment; list/view.rs:3403-3412 forwards that value unchanged.",
+            "At the same revision, list/lifecycle.rs:208-237 captures scope; :367-411 preserves it across reconciliation and only filters admission. list/view.rs:4555-4584 builds environment requests from those snapshots. :2923-2997 captures environment in the owned future and uses environment.scope for the API call.",
+            "At the same revision, list/view.rs:3022-3059 handles Unasked by opening a separate warned question or storing an error. api/sandbox_sessions.rs:192-244 maps Session and Whole to distinct opt-in query parameters.",
+            "2ef10815 is inside the supplied review range; the full list/view.rs diff through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db leaves these Delete paths unchanged. Source-only check; no runtime observation."
+          ],
+          "coverage_checked": [
+            "Current SPEC_impl.md:1069 onward, Answers bind to what was drawn, requires captured consent; current SPEC.md:1509-1547 requires both-outcome Session confirmation and separately warned Whole confirmation. These contracts support the refutation rather than accepting unconfirmed widening.",
+            "TODO.md:25-26 Planned is empty. Searches of plans/queue for scope changes, environment Delete, Unasked and count/result handling found the existing environment-agent-operations.md:493-565 design, not future work fixing this alleged route.",
+            "BUGS.md contains only the unrelated local-SSH-helper install/update hang. INDEX.md and matching queue-file searches found no exact alias. Read sandbox-lifecycle-questions-lack-opening-guards.md, frozen-sandbox-retains-header-lifecycle-answers.md and bulk-sandbox-delete-drops-eligible-peer.md: different controls, causes and consequences. Active TRIAGE_OUTCOMES.md searches found no matching decision. Archive not read.",
+            "FILTER.md supplies no basis for dropping hypothetical unconfirmed destruction; its destructive-scope and work-loss exclusions would apply."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No shipped step was found that replaces the answered scope with refreshed availability or automatically answers the new Whole question.",
+          "original_stronger_consequence": "An agreed session-only Delete could widen after a host refresh or missing answer and destroy unconfirmed peer sessions, processes and files; that route would be highest.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Source refutation of the explicitly named GUI scope-widening route. Preserve the hypothetical work-loss consequence in the independent drop register."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-023.json",
+          "key": "g038/c2",
+          "proposal": "claim-checks/claims-023/result.json",
+          "parent_proposal": "source-refuted-drawn-delete-scope-preservation",
+          "final_independent_gate": "required-before-highest-drop",
+          "reason": "Parent read full023 row/headerexactquestiontokenandbulksnapshotsscopeforwardunchangedthroughAPIseparateoptins; reconciliationfiltersadmissionnotwidens. Unaskedopensnewwarnedquestion/erroronly. SameboundedGUIwideningfamily028c4/037f2withbulkadditionalrefs. Preservealloriginalunconfirmedpeerprocess/filelossforfreshgate, notallserverdeletecorrectness. ScopewordingrequiredbySPECnotblanketacceptance."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "environment-delete-drawn-scope-preservation",
+        "destination": null
+      }
+    },
+    {
+      "key": "g038/c3",
+      "owner": "g038",
+      "id": "c3",
+      "domain": "gui-session-lifecycle",
+      "purpose": "gui-session-lifecycle: crates/farhelm-ui/src/list/view.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "An unreadable or bare session-delete success does not remove still-existing peer views",
+            "location": "crates/farhelm-ui/src/list/view.rs:965",
+            "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa\n\n## TLDR\nConsidered whether a successful environment-session deletion with a missing count could close another session that still exists. The changed local-removal rule avoids that.\n\n## Details\nlocally_removed at view.rs:965-978 takes cached peers only for an affirmative Whole-environment reply. A Session reply or Gone removes only the selected ID, regardless of environment_remaining. api.rs:4175-4193 confirms that unreadable successes contain no count and a notice, so missing count is not destruction evidence. SPEC_impl.md, Environment Delete and the seal, explicitly says an unsealed supervisor that does not find the session answers NotFound, which the helm reads as an earlier attempt having deleted only that session. The refresh at view.rs:3124-3132 subsequently reconciles real removals. The changed tests exercise bare success, unreadable decoder output, ordinary deletion and Whole peers without modifying process environment variables. Suggested bucket: other for the considered view-closure consequence. Confidence: confirmed source refutation. proposed_drop: peers require affirmative Whole scope; lack of count never authorizes peer removal. possible_cover: none. Could-be-highest: no; this examined local cleanup changes presentation and selection, not surviving remote session state. No execution performed. Caveat: a successfully destroyed environment can retain a cached peer briefly until the list refresh; that conservative delay does not prove a deletion failure."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "The same captured Delete scope controls request dispatch and peer-view cleanup",
+            "location": "crates/farhelm-ui/src/list/view.rs:965",
+            "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa\n\n## TLDR\nThe caller recheck leaves this concern refuted: a missing count after session deletion cannot close surviving peer views by being mistaken for whole-environment destruction. This is distinct from c2s unconfirmed-destruction concern.\n\n## Details\nThe row/header/bulk scope paths checked under c2 all feed admit_delete view.rs:2923-2997. The core captures one EnvironmentDelete before any request/queue await; the async request uses that value and its scope, and successful local cleanup at :3059-3061 passes that same captured environment to locally_removed. It does not derive cleanup scope from a refreshed host or environment_remaining. locally_removed (:965-978) requires both reply.is_some and scope Whole before using the cached peers; Session and Gone remove only the selected ID. api.rs:4175-4193 produces no count on an unreadable success, consistent with conservative cleanup. Contract: SPEC_impl.md Environment Delete and the seal states an unsealed supervisor may return NotFound after an earlier attempt deleted only the named session; a bare success therefore cannot establish destruction of peers. Suggested bucket: other for original suspected local view closure. Confidence: confirmed source refutation, no execution. proposed_drop: common immutable scope capture and affirmative Whole gate refute the peer-removal mechanism. possible_cover: none; queue coverage sources not read. Could-be-highest: no established route; this concern is about local visibility/selection of surviving peers, not a command destroying their remote state. Caveats: peers already absent after a real Session seal wait for refresh; that conservative display delay is preserved rather than treated as an error. c2 remains separately recorded because actual Whole scope has irreversible consequences. No new finding claimed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 9,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "The same captured Delete scope controls request dispatch and peer-view cleanup",
+          "location": "crates/farhelm-ui/src/list/view.rs:965",
+          "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa\n\n## TLDR\nThe caller recheck leaves this concern refuted: a missing count after session deletion cannot close surviving peer views by being mistaken for whole-environment destruction. This is distinct from c2s unconfirmed-destruction concern.\n\n## Details\nThe row/header/bulk scope paths checked under c2 all feed admit_delete view.rs:2923-2997. The core captures one EnvironmentDelete before any request/queue await; the async request uses that value and its scope, and successful local cleanup at :3059-3061 passes that same captured environment to locally_removed. It does not derive cleanup scope from a refreshed host or environment_remaining. locally_removed (:965-978) requires both reply.is_some and scope Whole before using the cached peers; Session and Gone remove only the selected ID. api.rs:4175-4193 produces no count on an unreadable success, consistent with conservative cleanup. Contract: SPEC_impl.md Environment Delete and the seal states an unsealed supervisor may return NotFound after an earlier attempt deleted only the named session; a bare success therefore cannot establish destruction of peers. Suggested bucket: other for original suspected local view closure. Confidence: confirmed source refutation, no execution. proposed_drop: common immutable scope capture and affirmative Whole gate refute the peer-removal mechanism. possible_cover: none; queue coverage sources not read. Could-be-highest: no established route; this concern is about local visibility/selection of surviving peers, not a command destroying their remote state. Caveats: peers already absent after a real Session seal wait for refresh; that conservative display delay is preserved rather than treated as an error. c2 remains separately recorded because actual Whole scope has irreversible consequences. No new finding claimed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g038/findings.jsonl",
+        "id": "c3",
+        "line": 9,
+        "disposition": "excluded",
+        "group": "environment-delete-peer-cleanup-requires-whole-scope",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-023 after inspecting it. Missing remaining-count data does not authorize local removal of peer sessions. Only an affirmative Whole reply uses captured peers; Session and Gone remove the selected ID alone. The exact peer-removal predicate and immutable shared scope refute the suspected local cleanup route. c2 remains a separate destructive-consent question. Checked source/results: [\"At 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa, list/view.rs:965-978 requires reply.is_some() and scope Whole before taking peers. :2923-2997 captures one environment value for dispatch; :3068 passes that same value to locally_removed.\",\"At the same revision, api.rs:4175-4193 decodes an unreadable success with environment_remaining: None and a notice. api/sandbox_sessions.rs:239-244 sends Session replies through this decoder rather than turning missing data into Whole scope.\",\"At the same revision, SPEC_impl.md:6600-6606 permits an unsealed supervisor to return NotFound after an earlier attempt deleted only the selected session; list/view.rs:3120-3132 requests an authoritative listing afterward. Historical source supports conservative delayed peer cleanup, not premature closure.\",\"The introducing commit is in range and the inspected full view.rs diff to the reviewed tip leaves this rule unchanged. No execution or runtime reproduction.\"] Current coverage/results: [\"Current SPEC_impl.md:6106-6125 retains the NotFound/session-only distinction; current SPEC.md:1519-1547 specifies the two scopes and refresh-visible truth. Neither accepts premature local peer removal.\",\"Current Planned bucket is empty. Targeted plans/queue searches found the existing environment Delete design in environment-agent-operations.md:493-565, not a separate pending remedy.\",\"BUGS.md is unrelated. INDEX.md and queue searches for peer views, locally_removed, missing/unreadable counts and environment-delete scope found no exact same-root item. bulk-sandbox-delete-drops-eligible-peer.md concerns admission coalescing, not successful cleanup. Active TRIAGE_OUTCOMES.md has no matching decision; archive not read.\",\"No filter needed: the named mechanism is source-refuted.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A bare or unreadable successful Session Delete might close a surviving peer's open view and never reopen it on later listings. The original record distinguished this presentation/selection loss from destruction of remote user work.\"; \"No path was found that infers Whole cleanup scope from a missing count. No remote state mutation follows from this local peer-removal helper.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g038/c3",
+        "line": 9,
+        "disposition": "excluded",
+        "group": "environment-delete-peer-cleanup-requires-whole-scope",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-023 after inspecting it. Missing remaining-count data does not authorize local removal of peer sessions. Only an affirmative Whole reply uses captured peers; Session and Gone remove the selected ID alone. The exact peer-removal predicate and immutable shared scope refute the suspected local cleanup route. c2 remains a separate destructive-consent question. Checked source/results: [\"At 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa, list/view.rs:965-978 requires reply.is_some() and scope Whole before taking peers. :2923-2997 captures one environment value for dispatch; :3068 passes that same value to locally_removed.\",\"At the same revision, api.rs:4175-4193 decodes an unreadable success with environment_remaining: None and a notice. api/sandbox_sessions.rs:239-244 sends Session replies through this decoder rather than turning missing data into Whole scope.\",\"At the same revision, SPEC_impl.md:6600-6606 permits an unsealed supervisor to return NotFound after an earlier attempt deleted only the selected session; list/view.rs:3120-3132 requests an authoritative listing afterward. Historical source supports conservative delayed peer cleanup, not premature closure.\",\"The introducing commit is in range and the inspected full view.rs diff to the reviewed tip leaves this rule unchanged. No execution or runtime reproduction.\"] Current coverage/results: [\"Current SPEC_impl.md:6106-6125 retains the NotFound/session-only distinction; current SPEC.md:1519-1547 specifies the two scopes and refresh-visible truth. Neither accepts premature local peer removal.\",\"Current Planned bucket is empty. Targeted plans/queue searches found the existing environment Delete design in environment-agent-operations.md:493-565, not a separate pending remedy.\",\"BUGS.md is unrelated. INDEX.md and queue searches for peer views, locally_removed, missing/unreadable counts and environment-delete scope found no exact same-root item. bulk-sandbox-delete-drops-eligible-peer.md concerns admission coalescing, not successful cleanup. Active TRIAGE_OUTCOMES.md has no matching decision; archive not read.\",\"No filter needed: the named mechanism is source-refuted.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A bare or unreadable successful Session Delete might close a surviving peer's open view and never reopen it on later listings. The original record distinguished this presentation/selection loss from destruction of remote user work.\"; \"No path was found that infers Whole cleanup scope from a missing count. No remote state mutation follows from this local peer-removal helper.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-023",
+          "key": "g038/c3",
+          "latest_line": 9,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "environment-delete-peer-cleanup-requires-whole-scope",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Missing remaining-count data does not authorize local removal of peer sessions. Only an affirmative Whole reply uses captured peers; Session and Gone remove the selected ID alone.",
+          "checks": [
+            "At 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa, list/view.rs:965-978 requires reply.is_some() and scope Whole before taking peers. :2923-2997 captures one environment value for dispatch; :3068 passes that same value to locally_removed.",
+            "At the same revision, api.rs:4175-4193 decodes an unreadable success with environment_remaining: None and a notice. api/sandbox_sessions.rs:239-244 sends Session replies through this decoder rather than turning missing data into Whole scope.",
+            "At the same revision, SPEC_impl.md:6600-6606 permits an unsealed supervisor to return NotFound after an earlier attempt deleted only the selected session; list/view.rs:3120-3132 requests an authoritative listing afterward. Historical source supports conservative delayed peer cleanup, not premature closure.",
+            "The introducing commit is in range and the inspected full view.rs diff to the reviewed tip leaves this rule unchanged. No execution or runtime reproduction."
+          ],
+          "coverage_checked": [
+            "Current SPEC_impl.md:6106-6125 retains the NotFound/session-only distinction; current SPEC.md:1519-1547 specifies the two scopes and refresh-visible truth. Neither accepts premature local peer removal.",
+            "Current Planned bucket is empty. Targeted plans/queue searches found the existing environment Delete design in environment-agent-operations.md:493-565, not a separate pending remedy.",
+            "BUGS.md is unrelated. INDEX.md and queue searches for peer views, locally_removed, missing/unreadable counts and environment-delete scope found no exact same-root item. bulk-sandbox-delete-drops-eligible-peer.md concerns admission coalescing, not successful cleanup. Active TRIAGE_OUTCOMES.md has no matching decision; archive not read.",
+            "No filter needed: the named mechanism is source-refuted."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No path was found that infers Whole cleanup scope from a missing count. No remote state mutation follows from this local peer-removal helper.",
+          "original_stronger_consequence": "A bare or unreadable successful Session Delete might close a surviving peer's open view and never reopen it on later listings. The original record distinguished this presentation/selection loss from destruction of remote user work.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "The exact peer-removal predicate and immutable shared scope refute the suspected local cleanup route. c2 remains a separate destructive-consent question."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "environment-delete-peer-cleanup-requires-whole-scope",
+        "destination": null
+      }
+    },
+    {
+      "key": "g038/c4",
+      "owner": "g038",
+      "id": "c4",
+      "domain": "gui-session-lifecycle",
+      "purpose": "gui-session-lifecycle: crates/farhelm-ui/src/list/view.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Kept-environment notice tags are not recreated on list rerender",
+            "location": "crates/farhelm-ui/src/list/view.rs:577",
+            "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa\n\n## TLDR\nConsidered whether allocating the kept-environment tag inside DeleteNotice::new loses the tag on ordinary rerenders and leaves an obsolete stays count forever. The production owner initializes the notice through a context-provider hook rather than recreating it in ListView.\n\n## Details\nview.rs:577 adds Signal::new(None) as the third DeleteNotice field. The only production constructor is lib.rs:2333, use_context_provider(|| list::DeleteNotice::new(Signal::new(None), popovers)); ListView reads that shared context at view.rs:1363. The test constructor at :7377 is likewise inside use_hook. Therefore a list rerender does not mint a replacement tag and the hypothesized loss of association is refuted. The inspected added tests at :6532-6785 separately check retirement for a successful absent/deleting host read and retention for pending/failed reads, including a failed read over an absent retained snapshot. Suggested bucket: other for the considered stale diagnostic. Confidence: confirmed source refutation of rerender recreation; no execution. proposed_drop: hook-owned production context preserves the new tag across list renders. possible_cover: none; supplied neighbour claims do not concern this owner lifetime. Could-be-highest: no established security or work-loss route. Caveat: this record only rules out tag recreation, not every ordering between publishing a Delete result and host reads; those remain within the discovery search."
+          }
+        }
+      ],
+      "latest": {
+        "line": 12,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c4",
+          "state": "open",
+          "summary": "Kept-environment notice tags are not recreated on list rerender",
+          "location": "crates/farhelm-ui/src/list/view.rs:577",
+          "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa\n\n## TLDR\nConsidered whether allocating the kept-environment tag inside DeleteNotice::new loses the tag on ordinary rerenders and leaves an obsolete stays count forever. The production owner initializes the notice through a context-provider hook rather than recreating it in ListView.\n\n## Details\nview.rs:577 adds Signal::new(None) as the third DeleteNotice field. The only production constructor is lib.rs:2333, use_context_provider(|| list::DeleteNotice::new(Signal::new(None), popovers)); ListView reads that shared context at view.rs:1363. The test constructor at :7377 is likewise inside use_hook. Therefore a list rerender does not mint a replacement tag and the hypothesized loss of association is refuted. The inspected added tests at :6532-6785 separately check retirement for a successful absent/deleting host read and retention for pending/failed reads, including a failed read over an absent retained snapshot. Suggested bucket: other for the considered stale diagnostic. Confidence: confirmed source refutation of rerender recreation; no execution. proposed_drop: hook-owned production context preserves the new tag across list renders. possible_cover: none; supplied neighbour claims do not concern this owner lifetime. Could-be-highest: no established security or work-loss route. Caveat: this record only rules out tag recreation, not every ordering between publishing a Delete result and host reads; those remain within the discovery search."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g038/findings.jsonl",
+        "id": "c4",
+        "line": 12,
+        "disposition": "excluded",
+        "group": "delete-notice-context-hook-preserves-kept-tag",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-023 after inspecting it. The production constructor is owned by a context-provider hook. Ordinary list rerenders read that context and do not replace the kept-environment tag. Hook-owned production construction refutes this specific lifetime concern. Keep l2 independent because it uses the preserved tag and a later stale publication. Checked source/results: [\"At 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa, lib.rs:2333 calls use_context_provider(|| DeleteNotice::new(...)); list/view.rs:1363 only reads the shared context. The other constructor at view.rs:7377 is test-only and inside use_hook.\",\"At the same revision, list/view.rs:577 allocates the tag during construction; :590-615 publishes/reconciles it. git grep of the historical lib.rs and view.rs found only the production hook and test hook constructor calls.\",\"The introducing commit is in range. The complete view.rs diff from it through the reviewed tip leaves the tag lifetime and reconciliation unchanged. This rules out reconstruction on ordinary rerender only; it does not refute l2's different publication/read ordering.\"] Current coverage/results: [\"Current SPEC.md:1519-1529 and SPEC_impl.md:6106-6159 govern kept results and eventual truth; they do not document a rerender-reset exception.\",\"Planned is empty; targeted unlanded-plan searches found no pending rerender-tag repair. BUGS.md is unrelated. INDEX.md/queue searches for KeptNotice, kept-environment and count notices found no matching item. Active TRIAGE_OUTCOMES.md has no matching decision; archive not read.\",\"No filter needed: source refutes the tag-recreation premise.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A rerender might lose the kept-notice association and leave an obsolete stays/count diagnostic forever. No security or user-work consequence was alleged.\"; \"The production owner would have to reconstruct DeleteNotice on each list render; it does not.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g038/c4",
+        "line": 12,
+        "disposition": "excluded",
+        "group": "delete-notice-context-hook-preserves-kept-tag",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-023 after inspecting it. The production constructor is owned by a context-provider hook. Ordinary list rerenders read that context and do not replace the kept-environment tag. Hook-owned production construction refutes this specific lifetime concern. Keep l2 independent because it uses the preserved tag and a later stale publication. Checked source/results: [\"At 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa, lib.rs:2333 calls use_context_provider(|| DeleteNotice::new(...)); list/view.rs:1363 only reads the shared context. The other constructor at view.rs:7377 is test-only and inside use_hook.\",\"At the same revision, list/view.rs:577 allocates the tag during construction; :590-615 publishes/reconciles it. git grep of the historical lib.rs and view.rs found only the production hook and test hook constructor calls.\",\"The introducing commit is in range. The complete view.rs diff from it through the reviewed tip leaves the tag lifetime and reconciliation unchanged. This rules out reconstruction on ordinary rerender only; it does not refute l2's different publication/read ordering.\"] Current coverage/results: [\"Current SPEC.md:1519-1529 and SPEC_impl.md:6106-6159 govern kept results and eventual truth; they do not document a rerender-reset exception.\",\"Planned is empty; targeted unlanded-plan searches found no pending rerender-tag repair. BUGS.md is unrelated. INDEX.md/queue searches for KeptNotice, kept-environment and count notices found no matching item. Active TRIAGE_OUTCOMES.md has no matching decision; archive not read.\",\"No filter needed: source refutes the tag-recreation premise.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A rerender might lose the kept-notice association and leave an obsolete stays/count diagnostic forever. No security or user-work consequence was alleged.\"; \"The production owner would have to reconstruct DeleteNotice on each list render; it does not.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-023",
+          "key": "g038/c4",
+          "latest_line": 12,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "delete-notice-context-hook-preserves-kept-tag",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The production constructor is owned by a context-provider hook. Ordinary list rerenders read that context and do not replace the kept-environment tag.",
+          "checks": [
+            "At 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa, lib.rs:2333 calls use_context_provider(|| DeleteNotice::new(...)); list/view.rs:1363 only reads the shared context. The other constructor at view.rs:7377 is test-only and inside use_hook.",
+            "At the same revision, list/view.rs:577 allocates the tag during construction; :590-615 publishes/reconciles it. git grep of the historical lib.rs and view.rs found only the production hook and test hook constructor calls.",
+            "The introducing commit is in range. The complete view.rs diff from it through the reviewed tip leaves the tag lifetime and reconciliation unchanged. This rules out reconstruction on ordinary rerender only; it does not refute l2's different publication/read ordering."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:1519-1529 and SPEC_impl.md:6106-6159 govern kept results and eventual truth; they do not document a rerender-reset exception.",
+            "Planned is empty; targeted unlanded-plan searches found no pending rerender-tag repair. BUGS.md is unrelated. INDEX.md/queue searches for KeptNotice, kept-environment and count notices found no matching item. Active TRIAGE_OUTCOMES.md has no matching decision; archive not read.",
+            "No filter needed: source refutes the tag-recreation premise."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "The production owner would have to reconstruct DeleteNotice on each list render; it does not.",
+          "original_stronger_consequence": "A rerender might lose the kept-notice association and leave an obsolete stays/count diagnostic forever. No security or user-work consequence was alleged.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Hook-owned production construction refutes this specific lifetime concern. Keep l2 independent because it uses the preserved tag and a later stale publication."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "delete-notice-context-hook-preserves-kept-tag",
+        "destination": null
+      }
+    },
+    {
+      "key": "g038/l2",
+      "owner": "g038",
+      "id": "l2",
+      "domain": "gui-session-lifecycle",
+      "purpose": "gui-session-lifecycle: crates/farhelm-ui/src/list/view.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l2",
+            "state": "open",
+            "summary": "A late kept-count reply may republish stays after the deleting-host read already retired it",
+            "location": "crates/farhelm-ui/src/list/view.rs:599",
+            "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa\n\n## TLDR\nInvestigating whether a delayed successful session Delete can display an obsolete environment-stays message after this window has already learned that the environment is being deleted, with no later host read guaranteed to remove it.\n\n## Details\nSource basis: publish_environment_delete installs its new KeptNotice without consulting current HostsRead (view.rs:590-607); reconcile_hosts is called only on accepted host-read completion (:2476). The successful Delete completion publishes count at :3005-3010 and requests only delete_refresh/request_listing (:2910 and :3120-3132). A possible route is two session Deletes: A reports remaining=1, B seals/destruction fails, the A window consumes the Deleting/failure host read, then A delayed count arrives. Need check server per-host lock/reply boundary, event/host-reader repair guarantees and exact retained-host projection before substantiating. Suggested bucket: other if only stale notice established. Confidence: uninvestigated lead. proposed_drop: false. possible_cover: none in supplied neighbour context. Could-be-highest: no established route; suspected effect is contradictory diagnostic, not unauthorized deletion. No execution or reproduction. Next checks: whether A reply can be delayed after releasing the deletion lock, whether the host phase/read can precede it, and whether any mandatory post-A completion host refresh repairs the tag."
+          }
+        },
+        {
+          "line": 14,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l2",
+            "state": "open",
+            "summary": "A delayed Delete result can leave a destroyed environment described as staying",
+            "location": "crates/farhelm-ui/src/list/view.rs:599",
+            "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa\n\n## TLDR\nDeleting the final two sessions can leave a permanent stays/count notice for an environment this same window already knows has been destroyed. The rows can be gone while the success band still says the container or sandbox stays.\n\n## Details\nThe new publication and retirement paths are ordered independently. publish_environment_delete at view.rs:590-607 installs kept text and its tag without consulting the current HostsRead. The only reconcile_hosts caller is accepted hosts-read completion at :2473-2476. A successful read showing the host absent/deleting retires a tag that already exists, but kept_band_after_hosts_read(None, read) does nothing; it cannot fence a later count publication.\n\nConcrete shipped sequence within one GUI: confirm Session-scope Delete for session A and for its remaining peer B. Different-session actions are supported while A is pending. On the helm, sessions/sandbox.rs:176-265 serializes them using environment_delete_turn and the provisioning lock. A first receives Deleted { remaining: 1 }, forgets its own row and returns that count (:250-257); its lock/turn are released on function return, not on client consumption of the HTTP body. B can then delete the last session and finish_seal_locked destroys the resource (:259-263). Delay only As HTTP response/body delivery to this window. B and the resulting fleet/host reads can complete first. A successful hosts read now omits that destroyed host and reconciles the then-empty count tag. When As earlier successful body is finally consumed, view.rs:3005-3010 publishes its old remaining=1 message unconditionally, despite the retained HostsRead already proving the host absent. B need not fail, and no multiple-GUI allowance is required.\n\nWhy it can stay: the A completion refreshes only request_listing, through delete_refresh (:2910 and :3120-3132); its host-side forget and events already happened before B ran. request_listing and request_hosts are separate owners (:2510-2513). Feed notices read both (:2567-2574), but in this interleaving all destruction notices and their host reads may already be consumed before the delayed A response arrives. Ordinary successful list commits never call reconcile_hosts; a rerender does not either. The only automatic timer requests hosts when fallback_polls_now is true (:2580-2606), and feed.rs:233-234 returns false under a healthy feed. Other host-read triggers are explicit host mutation/creation, not this session Delete. Notice markup at view.rs:6110-6128 renders independently of remaining session rows. Hence no later host event/read is guaranteed to remove the new obsolete count in an otherwise idle healthy window. A dismissal, remount or unrelated later host read can repair it.\n\nContract: SPEC.md Sandbox sessions (:1512-1525) requires the result to report a kept resource and accepts only a brief discrepancy when concurrent Deletes seal it, followed by the list showing the truth. The new helper documentation and test (:6700-6785) explicitly require retiring a stays count after a successful current host read proves absent/deleting; that prerequisite has already occurred in this order, yet publication resurrects the count. Container sessions inherits the same contract. Fix by reconciling the newly published tag against already accepted host state, or always requesting the hosts read after publishing; retain the separate checkout warning when retiring the count.\n\nAttribution: this commit introduces the count band/tag and unconditional publication. Complete view.rs diff from this commit through inclusive 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db contains only Restart and terminal-wording changes, leaving these methods and callers unchanged. This is distinct from l1 Restart retention and from neighbours g036/l2/g088/l3 (lost header failure handoff), g027/l4 and g028/l3 (sealed deletion failure bookkeeping). Suggested bucket: other; the established consequence is a contradictory lingering success notice, not resource preservation, destroyed unconsented work or lost files. Confidence: confirmed source-level permitted response/read ordering, not observed execution; actual incidence is unmeasured. proposed_drop: false. possible_cover: none in supplied exact neighbour findings, no prohibited coverage sources searched. Could-be-highest: no established security or loss-of-work route. Caveats: only the count/message is incorrect; B destroys an environment the user separately authorized for deletion. Bulk requests on one host are paced by client completion and do not produce this exact same-window trigger; independent single-session Deletes can. The response must arrive after the final host read, and healthy idle feed is the persistence premise. No runtime tests, reproductions or live-install actions. No remaining missing source premise for this ordering."
+          }
+        },
+        {
+          "line": 15,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l2",
+            "state": "open",
+            "summary": "A delayed Delete result can leave a destroyed environment described as staying",
+            "location": "crates/farhelm-ui/src/list/view.rs:599",
+            "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa\n\n## TLDR\nDeleting the final two sessions can leave a stays/count notice indefinitely for a sandbox or container this same window already knows was destroyed. The session rows can be gone while the success band still says the environment stays, until dismissal or an unrelated host read.\n\n## Details\nThe count is published without checking already accepted host evidence: publish_environment_delete (:590-607) installs the kept text/tag; its only reconcile_hosts caller is accepted host-read completion (:2473-2476). kept_band_after_hosts_read(None, read) does nothing, so an earlier successful absent/deleting read does not prevent later publication.\n\nOne-GUI shipped sequence: confirm Session-scope Delete for A and its remaining peer B while A is pending. Each has its own row claim; view.rs:1364-1408 explicitly permits unrelated sessions during requests. The helm serializes environment Deletes using environment_delete_turn and provisioning (:176-265 in sessions/sandbox.rs). A receives Deleted { remaining: 1 }, forgets A and returns the count at :250-257, releasing its function-local locks before client consumption. Its HTTP body delivery can be delayed independently. B then deletes the last session and destroys the resource at :259-263. The B completion and successful fleet-triggered hosts read can finish before As body reaches the page. That read now proves host absence and reconciles the still-empty tag. A then publishes the old count via view.rs:3005-3010, ignoring the current absent host. No deletion failure or multiple GUI is required.\n\nFinal source checks establish the response boundary: sessions.rs:3651-3654 awaits delete_environment_session, then constructs the Axum JSON response, after the callee local lock/turn lifetimes. api/sandbox_sessions.rs:224-244 awaits response headers and then response.text before returning the Session result; the count cannot reach the UI before that separate body await finishes. No ordering binds that consumption to B or the separate WebSocket/hosts requests.\n\nPersistence is bounded by repair triggers, not a guaranteed timer: A refreshes request_listing only, through delete_refresh and :3120-3132. request_listing/request_hosts are distinct (:2510-2513); feed notices read both (:2567-2574), but all server-side events from A and B may be consumed before delayed A publication. A already forgot its server row before B, so receiving its response creates no new server event. No session-list commit or render calls reconcile_hosts. Remaining automatic hosts reads use fallback_polls_now (:2580-2606), disabled by healthy feed (feed.rs:233-234). Enumerated additional request_hosts consumers are explicit host mutation (:2628-2633) and launch completion (:4890-4894), neither implicit in this session Delete. Notice markup (:6110-6128) is outside the session-list match, so it survives an empty list. HostsRead::lookup (:1612-1627 in hosts.rs) retains successful absence as Absent; a failed/pending lookup is not required for this route. An unrelated later host read, dismissal or remount removes it, but an idle healthy page need do none.\n\nContract: SPEC.md Sandbox sessions (:1512-1525) requires a kept-resource result and accepts only a brief concurrent-delete discrepancy followed by truth. The added absent/deleting retirement helper and test (:6700-6785) expressly aim to remove a count once a current hosts read proves the resource going/gone. This ordering resurrects it after that evidence, rather than waiting for evidence. Container sessions inherits the contract. Reconcile the new publication with current accepted HostsRead or request hosts after publishing; preserve any checkout warning when removing the count.\n\nAttribution/novelty: count/tag publication is introduced by this assigned commit; the complete view.rs diff to inclusive 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db leaves it unchanged. Distinct from own l1 Restart retention, g036/l2 and g088/l3 header-failure handoff, and g027/l4/g028/l3 sealed-failure bookkeeping. Suggested bucket: other, unchanged; only contradictory lingering diagnostic is established. Confidence: confirmed source-permitted response/read interleaving, never observed execution; incidence unmeasured. proposed_drop: false. possible_cover: none in supplied exact neighbour records, no prohibited coverage search. Could-be-highest: no established security or work-loss route. Caveats: B separately authorizes real destruction, and this bug never preserves or destroys extra resource state. Client-paced bulk requests on one host do not produce this exact trigger; independent single-row/header Deletes do. The old response must arrive after final host evidence, with no subsequent host read. No remaining missing code premise. No tests, builds, runtime reproductions or live-install action."
+          }
+        }
+      ],
+      "latest": {
+        "line": 15,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l2",
+          "state": "open",
+          "summary": "A delayed Delete result can leave a destroyed environment described as staying",
+          "location": "crates/farhelm-ui/src/list/view.rs:599",
+          "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa\n\n## TLDR\nDeleting the final two sessions can leave a stays/count notice indefinitely for a sandbox or container this same window already knows was destroyed. The session rows can be gone while the success band still says the environment stays, until dismissal or an unrelated host read.\n\n## Details\nThe count is published without checking already accepted host evidence: publish_environment_delete (:590-607) installs the kept text/tag; its only reconcile_hosts caller is accepted host-read completion (:2473-2476). kept_band_after_hosts_read(None, read) does nothing, so an earlier successful absent/deleting read does not prevent later publication.\n\nOne-GUI shipped sequence: confirm Session-scope Delete for A and its remaining peer B while A is pending. Each has its own row claim; view.rs:1364-1408 explicitly permits unrelated sessions during requests. The helm serializes environment Deletes using environment_delete_turn and provisioning (:176-265 in sessions/sandbox.rs). A receives Deleted { remaining: 1 }, forgets A and returns the count at :250-257, releasing its function-local locks before client consumption. Its HTTP body delivery can be delayed independently. B then deletes the last session and destroys the resource at :259-263. The B completion and successful fleet-triggered hosts read can finish before As body reaches the page. That read now proves host absence and reconciles the still-empty tag. A then publishes the old count via view.rs:3005-3010, ignoring the current absent host. No deletion failure or multiple GUI is required.\n\nFinal source checks establish the response boundary: sessions.rs:3651-3654 awaits delete_environment_session, then constructs the Axum JSON response, after the callee local lock/turn lifetimes. api/sandbox_sessions.rs:224-244 awaits response headers and then response.text before returning the Session result; the count cannot reach the UI before that separate body await finishes. No ordering binds that consumption to B or the separate WebSocket/hosts requests.\n\nPersistence is bounded by repair triggers, not a guaranteed timer: A refreshes request_listing only, through delete_refresh and :3120-3132. request_listing/request_hosts are distinct (:2510-2513); feed notices read both (:2567-2574), but all server-side events from A and B may be consumed before delayed A publication. A already forgot its server row before B, so receiving its response creates no new server event. No session-list commit or render calls reconcile_hosts. Remaining automatic hosts reads use fallback_polls_now (:2580-2606), disabled by healthy feed (feed.rs:233-234). Enumerated additional request_hosts consumers are explicit host mutation (:2628-2633) and launch completion (:4890-4894), neither implicit in this session Delete. Notice markup (:6110-6128) is outside the session-list match, so it survives an empty list. HostsRead::lookup (:1612-1627 in hosts.rs) retains successful absence as Absent; a failed/pending lookup is not required for this route. An unrelated later host read, dismissal or remount removes it, but an idle healthy page need do none.\n\nContract: SPEC.md Sandbox sessions (:1512-1525) requires a kept-resource result and accepts only a brief concurrent-delete discrepancy followed by truth. The added absent/deleting retirement helper and test (:6700-6785) expressly aim to remove a count once a current hosts read proves the resource going/gone. This ordering resurrects it after that evidence, rather than waiting for evidence. Container sessions inherits the contract. Reconcile the new publication with current accepted HostsRead or request hosts after publishing; preserve any checkout warning when removing the count.\n\nAttribution/novelty: count/tag publication is introduced by this assigned commit; the complete view.rs diff to inclusive 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db leaves it unchanged. Distinct from own l1 Restart retention, g036/l2 and g088/l3 header-failure handoff, and g027/l4/g028/l3 sealed-failure bookkeeping. Suggested bucket: other, unchanged; only contradictory lingering diagnostic is established. Confidence: confirmed source-permitted response/read interleaving, never observed execution; incidence unmeasured. proposed_drop: false. possible_cover: none in supplied exact neighbour records, no prohibited coverage search. Could-be-highest: no established security or work-loss route. Caveats: B separately authorizes real destruction, and this bug never preserves or destroys extra resource state. Client-paced bulk requests on one host do not produce this exact trigger; independent single-row/header Deletes do. The old response must arrive after final host evidence, with no subsequent host read. No remaining missing code premise. No tests, builds, runtime reproductions or live-install action."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g038/findings.jsonl",
+        "id": "l2",
+        "line": 15,
+        "disposition": "verified",
+        "group": "late-environment-delete-count-republished-after-host-absence",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-023 after inspecting it. Source permits a delayed non-final Delete body to publish a kept count after a later Delete destroyed the resource and the accepted hosts read already proved absence. No subsequent hosts read is guaranteed on an idle healthy feed. The consequence is a stale result band, not unauthorized destruction. Retain the established publication/read ordering defect as other, preserving source-only confidence and the filter ambiguity. No exact existing cover or same-root alias was found among the named claims or searched queue items. Checked source/results: [\"At 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa, list/view.rs:479-507 retires only an existing tag; :590-607 publishes a new tag without HostsRead. The only reconcile_hosts call is accepted host-read completion at :2476. :3005-3010 unconditionally publishes a successful old count.\",\"At the same revision, list/view.rs:1364-1408 uses per-session claims and explicitly permits unrelated sessions. Thus separate A/B Session Deletes can coexist; this is not the same-host paced bulk path.\",\"At the same revision, helm sessions/sandbox.rs:176-265 serializes each host's Delete with local turn/provisioning guards. A's Deleted { remaining: 1 } return releases those guards before the client consumes HTTP output. sessions.rs:3651-3654 constructs the response after awaiting the callee. UI api/sandbox_sessions.rs:224-244 separately awaits headers and text, permitting B and host reads to finish before A's body is consumed.\",\"At the same revision, view.rs:2910 and :3120-3132 refresh only request_listing; :2510-2513 has distinct list/hosts readers. :2567-2574 reads both on fleet events, which can all settle before A's body. :2580-2606 gates future host polls on fallback_polls_now; feed.rs:233-234 disables them while healthy. Historical git grep enumerated remaining request_hosts consumers as mount, host mutation and launch completion, not implicit post-Delete refresh.\",\"At the same revision, hosts.rs:1612-1627 represents a successful missing host as Absent. view.rs:6110-6128 renders the band before the listing match, including an empty list, and exposes Dismiss. The full view.rs diff through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db leaves this code unchanged.\",\"This establishes a source-permitted ordering only. No runtime reproduction, incidence measurement, real resource destruction or live-install action occurred.\"] Current coverage/results: [\"Current SPEC.md:1519-1529 accepts only a brief concurrent-Delete discrepancy followed by truth; it does not clearly accept republishing a count after already accepted absence. Container sessions at :4831-4848 inherits this rule. SPEC_impl.md:6106-6159 describes the same seal protocol and no stale-band exception.\",\"TODO.md:25-26 Planned is empty. Searches of plans/queue found environment-agent-operations.md:493-565's implemented design, including a brief stays message followed by truth, but no pending work ordering publication against current host evidence. Other environment plans share the subsystem, not this trigger/remedy.\",\"BUGS.md is unrelated. INDEX.md and queue searches for kept/stays counts, late environment Delete results, KeptNotice and publish_environment_delete found no same-root alias. bulk-sandbox-delete-drops-eligible-peer.md is admission/coalescing; frozen-sandbox-retains-header-lifecycle-answers.md and sandbox-lifecycle-questions-lack-opening-guards.md concern different answer owners. Active TRIAGE_OUTCOMES.md has no matching result-count decision; archive not read.\",\"FILTER.md ambiguity: rare response/read timing is established and the result band could count as a misleading diagnostic. Its display branch requires a display that is briefly wrong; here it can remain indefinitely on the idle page and an explicit session refresh does not retire it. Ordinary Dismiss, remount or a later hosts read repairs it, so there is no durable corruption or restart-only repair. Recommend retention unless the parent establishes that the independent diagnostic branch fully covers this success-result band. Rarity alone is not the basis for omission.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Earlier wording called the stale stays/count notice permanent. Latest wording correctly bounds it by dismissal, remount or an unrelated subsequent host read. The original and latest records both classify only a contradictory diagnostic as other, with no work-loss route. Initial lead included B's destruction failure; the established route also permits successful destruction.\"; \"No missing source premise for the ordering. Actual runtime occurrence is unmeasured. No route to extra destruction, security impact or loss of user work is shown; B's destruction is separately consented.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g038/l2",
+        "line": 15,
+        "disposition": "verified",
+        "group": "late-environment-delete-count-republished-after-host-absence",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-023 after inspecting it. Source permits a delayed non-final Delete body to publish a kept count after a later Delete destroyed the resource and the accepted hosts read already proved absence. No subsequent hosts read is guaranteed on an idle healthy feed. The consequence is a stale result band, not unauthorized destruction. Retain the established publication/read ordering defect as other, preserving source-only confidence and the filter ambiguity. No exact existing cover or same-root alias was found among the named claims or searched queue items. Checked source/results: [\"At 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa, list/view.rs:479-507 retires only an existing tag; :590-607 publishes a new tag without HostsRead. The only reconcile_hosts call is accepted host-read completion at :2476. :3005-3010 unconditionally publishes a successful old count.\",\"At the same revision, list/view.rs:1364-1408 uses per-session claims and explicitly permits unrelated sessions. Thus separate A/B Session Deletes can coexist; this is not the same-host paced bulk path.\",\"At the same revision, helm sessions/sandbox.rs:176-265 serializes each host's Delete with local turn/provisioning guards. A's Deleted { remaining: 1 } return releases those guards before the client consumes HTTP output. sessions.rs:3651-3654 constructs the response after awaiting the callee. UI api/sandbox_sessions.rs:224-244 separately awaits headers and text, permitting B and host reads to finish before A's body is consumed.\",\"At the same revision, view.rs:2910 and :3120-3132 refresh only request_listing; :2510-2513 has distinct list/hosts readers. :2567-2574 reads both on fleet events, which can all settle before A's body. :2580-2606 gates future host polls on fallback_polls_now; feed.rs:233-234 disables them while healthy. Historical git grep enumerated remaining request_hosts consumers as mount, host mutation and launch completion, not implicit post-Delete refresh.\",\"At the same revision, hosts.rs:1612-1627 represents a successful missing host as Absent. view.rs:6110-6128 renders the band before the listing match, including an empty list, and exposes Dismiss. The full view.rs diff through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db leaves this code unchanged.\",\"This establishes a source-permitted ordering only. No runtime reproduction, incidence measurement, real resource destruction or live-install action occurred.\"] Current coverage/results: [\"Current SPEC.md:1519-1529 accepts only a brief concurrent-Delete discrepancy followed by truth; it does not clearly accept republishing a count after already accepted absence. Container sessions at :4831-4848 inherits this rule. SPEC_impl.md:6106-6159 describes the same seal protocol and no stale-band exception.\",\"TODO.md:25-26 Planned is empty. Searches of plans/queue found environment-agent-operations.md:493-565's implemented design, including a brief stays message followed by truth, but no pending work ordering publication against current host evidence. Other environment plans share the subsystem, not this trigger/remedy.\",\"BUGS.md is unrelated. INDEX.md and queue searches for kept/stays counts, late environment Delete results, KeptNotice and publish_environment_delete found no same-root alias. bulk-sandbox-delete-drops-eligible-peer.md is admission/coalescing; frozen-sandbox-retains-header-lifecycle-answers.md and sandbox-lifecycle-questions-lack-opening-guards.md concern different answer owners. Active TRIAGE_OUTCOMES.md has no matching result-count decision; archive not read.\",\"FILTER.md ambiguity: rare response/read timing is established and the result band could count as a misleading diagnostic. Its display branch requires a display that is briefly wrong; here it can remain indefinitely on the idle page and an explicit session refresh does not retire it. Ordinary Dismiss, remount or a later hosts read repairs it, so there is no durable corruption or restart-only repair. Recommend retention unless the parent establishes that the independent diagnostic branch fully covers this success-result band. Rarity alone is not the basis for omission.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Earlier wording called the stale stays/count notice permanent. Latest wording correctly bounds it by dismissal, remount or an unrelated subsequent host read. The original and latest records both classify only a contradictory diagnostic as other, with no work-loss route. Initial lead included B's destruction failure; the established route also permits successful destruction.\"; \"No missing source premise for the ordering. Actual runtime occurrence is unmeasured. No route to extra destruction, security impact or loss of user work is shown; B's destruction is separately consented.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-023",
+          "key": "g038/l2",
+          "latest_line": 15,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "late-environment-delete-count-republished-after-host-absence",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Source permits a delayed non-final Delete body to publish a kept count after a later Delete destroyed the resource and the accepted hosts read already proved absence. No subsequent hosts read is guaranteed on an idle healthy feed. The consequence is a stale result band, not unauthorized destruction.",
+          "checks": [
+            "At 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa, list/view.rs:479-507 retires only an existing tag; :590-607 publishes a new tag without HostsRead. The only reconcile_hosts call is accepted host-read completion at :2476. :3005-3010 unconditionally publishes a successful old count.",
+            "At the same revision, list/view.rs:1364-1408 uses per-session claims and explicitly permits unrelated sessions. Thus separate A/B Session Deletes can coexist; this is not the same-host paced bulk path.",
+            "At the same revision, helm sessions/sandbox.rs:176-265 serializes each host's Delete with local turn/provisioning guards. A's Deleted { remaining: 1 } return releases those guards before the client consumes HTTP output. sessions.rs:3651-3654 constructs the response after awaiting the callee. UI api/sandbox_sessions.rs:224-244 separately awaits headers and text, permitting B and host reads to finish before A's body is consumed.",
+            "At the same revision, view.rs:2910 and :3120-3132 refresh only request_listing; :2510-2513 has distinct list/hosts readers. :2567-2574 reads both on fleet events, which can all settle before A's body. :2580-2606 gates future host polls on fallback_polls_now; feed.rs:233-234 disables them while healthy. Historical git grep enumerated remaining request_hosts consumers as mount, host mutation and launch completion, not implicit post-Delete refresh.",
+            "At the same revision, hosts.rs:1612-1627 represents a successful missing host as Absent. view.rs:6110-6128 renders the band before the listing match, including an empty list, and exposes Dismiss. The full view.rs diff through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db leaves this code unchanged.",
+            "This establishes a source-permitted ordering only. No runtime reproduction, incidence measurement, real resource destruction or live-install action occurred."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:1519-1529 accepts only a brief concurrent-Delete discrepancy followed by truth; it does not clearly accept republishing a count after already accepted absence. Container sessions at :4831-4848 inherits this rule. SPEC_impl.md:6106-6159 describes the same seal protocol and no stale-band exception.",
+            "TODO.md:25-26 Planned is empty. Searches of plans/queue found environment-agent-operations.md:493-565's implemented design, including a brief stays message followed by truth, but no pending work ordering publication against current host evidence. Other environment plans share the subsystem, not this trigger/remedy.",
+            "BUGS.md is unrelated. INDEX.md and queue searches for kept/stays counts, late environment Delete results, KeptNotice and publish_environment_delete found no same-root alias. bulk-sandbox-delete-drops-eligible-peer.md is admission/coalescing; frozen-sandbox-retains-header-lifecycle-answers.md and sandbox-lifecycle-questions-lack-opening-guards.md concern different answer owners. Active TRIAGE_OUTCOMES.md has no matching result-count decision; archive not read.",
+            "FILTER.md ambiguity: rare response/read timing is established and the result band could count as a misleading diagnostic. Its display branch requires a display that is briefly wrong; here it can remain indefinitely on the idle page and an explicit session refresh does not retire it. Ordinary Dismiss, remount or a later hosts read repairs it, so there is no durable corruption or restart-only repair. Recommend retention unless the parent establishes that the independent diagnostic branch fully covers this success-result band. Rarity alone is not the basis for omission."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No missing source premise for the ordering. Actual runtime occurrence is unmeasured. No route to extra destruction, security impact or loss of user work is shown; B's destruction is separately consented.",
+          "original_stronger_consequence": "Earlier wording called the stale stays/count notice permanent. Latest wording correctly bounds it by dismissal, remount or an unrelated subsequent host read. The original and latest records both classify only a contradictory diagnostic as other, with no work-loss route. Initial lead included B's destruction failure; the established route also permits successful destruction.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain the established publication/read ordering defect as other, preserving source-only confidence and the filter ambiguity. No exact existing cover or same-root alias was found among the named claims or searched queue items."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "late-environment-delete-count-republished-after-host-absence",
+        "destination": "trailing-late-environment-delete-count-republished-after-host-absence.md"
+      }
+    },
+    {
+      "key": "g038/l3",
+      "owner": "g038",
+      "id": "l3",
+      "domain": "gui-session-lifecycle",
+      "purpose": "gui-session-lifecycle: crates/farhelm-ui/src/list/view.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 16,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l3",
+            "state": "open",
+            "summary": "Check the new Unasked comments against the unanswered-request uncertainty contract",
+            "location": "crates/farhelm-ui/src/list/view.rs:891",
+            "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa\n\n## TLDR\nChecking whether new comments teach that an unanswered environment Delete definitely made no change, although the supervisor may already have acted before its reply was lost. This is a possible documentation issue, not a new observed deletion bug.\n\n## Details\nNew UnaskedOffer docs at view.rs:890-892 describe an unasked answer as unable to ask and nothing decided; new outcome-fold commentary at :2987-2992 repeats that characterization. The UI maps all EnvironmentDeleteRefusal::Unasked values to the same boolean. Prior source checks showed sessions/sandbox.rs distinguishes not-connected from sent-without-answer and retains the latter as unknown. Need compare the full specification clauses, API header classification and exact same-commit doc addition to determine whether this wording asserts false no-change certainty or is explicitly accepted terminology for lack of a definitive decision. Suggested bucket: other if an inaccurate internal explanation is established. Confidence: uninvestigated documentation lead. proposed_drop: false pending those checks. possible_cover: none in supplied exact neighbour findings. Could-be-highest: no established route; current UI destructive consent remains separately warned and no runtime loss is alleged. No runtime test, reproduction or execution observation. Next checks: exact user/implementation no-answer clauses, lost supervisor reply versus lost helm reply classification, and in-range attribution."
+          }
+        },
+        {
+          "line": 17,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l3",
+            "state": "open",
+            "summary": "Unasked wording denotes no definitive decision, not a no-mutation guarantee",
+            "location": "crates/farhelm-ui/src/list/view.rs:891",
+            "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa\n\n## TLDR\nInvestigated whether the new Unasked comments promise that an unanswered Delete cannot already have changed the session. The shared terminology does not establish that no-mutation promise; the contracts explicitly allow a lost reply after the supervisor acted. No distinct runtime or documentation-contract defect is established by this interpretation.\n\n## Details\nOriginal concern preserved: future readers might interpret view.rs:890-892 and :2987-2992s nothing-decided shorthand as guaranteed no deletion, and misunderstand the reason for the required refresh. Source checks confirmed two boundaries: the helm can send DeleteSessionOrSeal and then return marked EnvironmentUnasked on timeout or a non-supervisor transport error (sessions/sandbox.rs:220-242); the API maps that explicit marker to Unasked, whereas losing the helm-to-page reply is Refused (api/sandbox_sessions.rs:143-177, :224-236). Thus lost-supervisor-answer and lost-helm-answer are different cases. The helper comment listing a lost reply among ordinary errors is consistent with the latter; it is not a claim that every lost answer from every level is Refused.\n\nThe exact authoritative terminology is SPEC.md Sandbox sessions: \"When the helm cannot ask the sandbox’s Farhelm ... or the request gets no answer, nothing is decided\" (source uses an ASCII apostrophe; ellipsis omits only the parenthetical unavailable-version explanation). SPEC_impl.md:6634-6636 expressly says \"Not connected, not sent, sent without an answer, or past the deadline: the helm answers with a marker that nothing was decided\". The same governing subsection at :6626-6640 requires the helm to observe seals through later listings, including after ambiguous outcomes. The same-commit EnvironmentUnasked docs at sessions/sandbox.rs:113-124 explicitly clarify: \"an unanswered request may still have been acted on, which the next listing shows\". View completion always requests the listing again (:3060-3065). The pure helper controls only the next question; it neither makes a state-preservation decision nor suppresses reconciliation.\n\nDisposition: proposed_drop is the exact specification adoption of this no-definitive-decision terminology and its explicit uncertainty clarification above, not the argument that currently correct production behavior excuses a separately proved inaccurate comment. There remains an optional clarity improvement to distinguish transport layers and say no definitive answer, but this search did not establish a new contract being falsely promised. Suggested bucket: other for the original possible internal explanation defect. Confidence: confirmed contract/source interpretation, no execution. possible_cover: none in supplied neighbour context; no prohibited coverage sources searched. Could-be-highest: no established security/work-loss route, and no caller is shown authorizing extra destruction on this wording. Caveats: this candidate does not claim that Unasked guarantees no change; that stronger interpretation is explicitly rejected. Attribution: exact comment additions were checked in the assigned 2ef10815 diff. No runtime tests or reproductions. Lead l3 closed as candidate for the callers independent disposition; no missing source premise remains."
+          }
+        },
+        {
+          "line": 20,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l3",
+            "state": "open",
+            "summary": "The nothing-decided terminology refutation does not cover the stronger no-change comment",
+            "location": "crates/farhelm-ui/src/list/view.rs:891",
+            "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa\n\n## TLDR\nPreserve the earlier candidate for no-definitive-decision terminology, but explicitly limit it to that wording. A separate moved statement claiming no host change or fleet event is now reported as l4; this candidate does not refute it.\n\n## Details\nOriginal suspected consequence remains future maintainers mistaking nothing-decided shorthand for a no-deletion guarantee and misunderstanding why refresh is required. Exact proposed-drop basis retained: SPEC_impl.md Environment Delete and the seal says \"Not connected, not sent, sent without an answer, or past the deadline: the helm answers with a marker that nothing was decided\". SPEC.md Sandbox sessions likewise includes an unanswered request in its nothing-decided wording. sessions/sandbox.rs:120-122 explicitly clarifies that \"an unanswered request may still have been acted on, which the next listing shows\". The terminology therefore names lack of a definitive answer rather than a state-preservation contract. API source separately classifies a lost supervisor answer marked by the helm as Unasked, and a lost page-to-helm reply as Refused (api/sandbox_sessions.rs:143-177,224-236); the helper lost-reply wording does not prove those boundaries are conflated.\n\nSynthesis limit/correction: my prior reference to current code refreshing and the pure helper controlling only a question does not establish all nearby documentation accurate. It is not a production-correctness dismissal. The newly supplied stronger comment at view.rs:3060-3064 says the refusal changed nothing on the host and no fleet event will correct a stale row. That categorical claim cannot inherit this proposed terminology drop. Direct same-revision unknown-outcome and supervisor hint checks substantiate the separate l4 documentation record. Keeping this candidate preserves its exact earlier rationale and consequence without merging away the stronger concern.\n\nSuggested bucket: other for the original possible terminology explanation defect. Confidence: confirmed source/contract interpretation of the scoped wording only, not executed. proposed_drop: exact specification adoption of no-definitive-decision terminology plus its explicit uncertainty clarification quoted above, subject to caller disposition; no parent drop accepted. possible_cover: focused claims-023/parent late input led to l4; no prohibited coverage search. Could-be-highest: no established security or work-loss route from this wording, unchanged from original history. Caveats: Unasked never guarantees no state change; do not extend this candidate to the moved no-change/no-event rationale or to a hypothetical newly proved reader-harm route. No runtime tests, builds, reproduction or live action. No unresolved source premise for this scoped candidate."
+          }
+        }
+      ],
+      "latest": {
+        "line": 20,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l3",
+          "state": "open",
+          "summary": "The nothing-decided terminology refutation does not cover the stronger no-change comment",
+          "location": "crates/farhelm-ui/src/list/view.rs:891",
+          "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa\n\n## TLDR\nPreserve the earlier candidate for no-definitive-decision terminology, but explicitly limit it to that wording. A separate moved statement claiming no host change or fleet event is now reported as l4; this candidate does not refute it.\n\n## Details\nOriginal suspected consequence remains future maintainers mistaking nothing-decided shorthand for a no-deletion guarantee and misunderstanding why refresh is required. Exact proposed-drop basis retained: SPEC_impl.md Environment Delete and the seal says \"Not connected, not sent, sent without an answer, or past the deadline: the helm answers with a marker that nothing was decided\". SPEC.md Sandbox sessions likewise includes an unanswered request in its nothing-decided wording. sessions/sandbox.rs:120-122 explicitly clarifies that \"an unanswered request may still have been acted on, which the next listing shows\". The terminology therefore names lack of a definitive answer rather than a state-preservation contract. API source separately classifies a lost supervisor answer marked by the helm as Unasked, and a lost page-to-helm reply as Refused (api/sandbox_sessions.rs:143-177,224-236); the helper lost-reply wording does not prove those boundaries are conflated.\n\nSynthesis limit/correction: my prior reference to current code refreshing and the pure helper controlling only a question does not establish all nearby documentation accurate. It is not a production-correctness dismissal. The newly supplied stronger comment at view.rs:3060-3064 says the refusal changed nothing on the host and no fleet event will correct a stale row. That categorical claim cannot inherit this proposed terminology drop. Direct same-revision unknown-outcome and supervisor hint checks substantiate the separate l4 documentation record. Keeping this candidate preserves its exact earlier rationale and consequence without merging away the stronger concern.\n\nSuggested bucket: other for the original possible terminology explanation defect. Confidence: confirmed source/contract interpretation of the scoped wording only, not executed. proposed_drop: exact specification adoption of no-definitive-decision terminology plus its explicit uncertainty clarification quoted above, subject to caller disposition; no parent drop accepted. possible_cover: focused claims-023/parent late input led to l4; no prohibited coverage search. Could-be-highest: no established security or work-loss route from this wording, unchanged from original history. Caveats: Unasked never guarantees no state change; do not extend this candidate to the moved no-change/no-event rationale or to a hypothetical newly proved reader-harm route. No runtime tests, builds, reproduction or live action. No unresolved source premise for this scoped candidate."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g038/findings.jsonl",
+        "id": "l3",
+        "line": 17,
+        "disposition": "under-investigation",
+        "group": "g038-l3",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-023",
+          "key": "g038/l3",
+          "latest_line": 17,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "environment-unasked-no-definitive-answer-terminology",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The named nothing-decided wording adopts the specifications' terminology for no definitive answer. Neither that terminology nor the checked helper establishes a no-mutation guarantee. The helm's own nearby contract explicitly warns that an unanswered request may already have acted.",
+          "checks": [
+            "At 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa, list/view.rs:890-892 and :2987-2992 use the nothing-decided shorthand. unasked_follow_up at :929-948 opens a fresh warned question or returns an error; it never sends Whole itself.",
+            "At the same revision, helm sessions/sandbox.rs:113-124 expressly says an unanswered request may still have been acted on. :220-242 returns EnvironmentUnasked for timeout or transport failure after send, with user text saying the helm cannot tell whether deletion occurred.",
+            "At the same revision, UI api/sandbox_sessions.rs:143-177 classifies only the explicit helm header as Unasked; :224-236 maps loss of the helm-to-page request to Refused. Thus the helper's ordinary lost-reply case and the helm's missing-supervisor-answer case concern different transport boundaries.",
+            "At the same revision, SPEC.md:1527-1547 and SPEC_impl.md:6626-6640 use the same no-definitive-decision terminology and require seals to be learned through later listings. view.rs:3060-3065 requests a listing after refusal. Source/contract interpretation only, no execution."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:1531-1547 and SPEC_impl.md:6137-6159 retain the same explicit unanswered-request terminology and subsequent seal discovery. These directly answer the named interpretation.",
+            "Planned is empty. plans/queue/environment-agent-operations.md:549-565 also explicitly covers an unanswered request and observing a seal afterward; no separate future wording fix was found. BUGS.md is unrelated.",
+            "INDEX.md and matching queue searches for Unasked, uncertainty comments and environment-delete scope/count handling found no same-root item. Active TRIAGE_OUTCOMES.md has no matching decision. Archive not read. No filter is needed for this source/contract refutation."
+          ],
+          "exact_cover_quotes": [
+            "SPEC.md:1531-1532: When the helm cannot ask the sandbox's Farhelm (the sandbox is suspended or unreachable, or its Farhelm is a version this helm cannot talk to until it is updated), or the request gets no answer, nothing is decided.",
+            "SPEC_impl.md:6143-6145: Not connected, not sent, sent without an answer, or past the deadline: the helm answers with a marker that nothing was decided, and the page offers the warned whole-environment Delete.",
+            "2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa:crates/farhelm-helm/src/sessions/sandbox.rs:121-124: The text says what is known: an unanswered request may still have been acted on, which the next listing shows (a seal included, which the helm then finishes)."
+          ],
+          "missing_premise": "No claim that nothing was mutated follows from the named wording under the explicit governing uncertainty contract; no caller was shown authorizing extra destruction based on that interpretation.",
+          "original_stronger_consequence": "The original lead suspected that future readers would understand Unasked as guaranteed no deletion and misunderstand why refresh is required. It alleged an internal explanation defect, not observed data loss; the latest candidate withdrew that interpretation in favor of no definitive decision.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Refute only the asserted no-mutation guarantee in the named comments, based on exact shared specification wording and the explicit uncertainty contract. Route through independent drop checking conservatively because the misunderstood contract concerns destructive user work.",
+          "new_interface_evidence": "While reading the same completion for this claim, view.rs:3060-3065 was seen to say 'A refusal changed nothing on the host' immediately after handling all Unasked errors. That stronger nearby sentence is unlike the named nothing-decided shorthand and conflicts with sessions/sandbox.rs:121-124's may-have-acted warning. No separate search, attribution check or defect finding was performed; return it to the owning reviewer before generalizing the l3 refutation to every nearby comment."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-023.json",
+          "key": "g038/l3",
+          "proposal": "claim-checks/claims-023/result.json",
+          "parent_proposal": "source-contract-refuted-nothing-decided-as-no-mutation-guarantee",
+          "final_independent_gate": "required-by-conservative-destructive-contract-flag",
+          "reason": "Full023 sharedSPEC noanswer/nothingdecidedterminologymeansnodefinitiveanswer, helmnearbyexplicitunansweredmayhaveacted andlaterlistingseal; helperoffersseparatequestionnotautomaticWhole. Distinctsupervisor-tohelmUnaskedvslosthelm-to-pageRefusedboundaries. Proposednarrowrefutationofno-mutationreadinginoriginalnamedshorthandonly, notallnearbycomments. Newstronger'Are fusalchangednothing'commentwasalreadyreturnedoriginal038andretainedasdistinctl4 (parentnonflaggedrecord); freshgateandqueuepreserveit, noterasedbyl3drop. Noactualuserlossallegedbutconservativeflagstays."
+        }
+      ],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "g038/l3",
+        "destination": "trailing-the-nothing-decided-terminology-refutation-does-not-cover-the-stronger-no-change-comment.md"
+      }
+    },
+    {
+      "key": "g038/l4",
+      "owner": "g038",
+      "id": "l4",
+      "domain": "gui-session-lifecycle",
+      "purpose": "gui-session-lifecycle: crates/farhelm-ui/src/list/view.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 18,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l4",
+            "state": "open",
+            "summary": "Check the moved no-change/no-event comment under expanded environment Delete errors",
+            "location": "crates/farhelm-ui/src/list/view.rs:3060",
+            "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa\n\n## TLDR\nNamed late interface evidence challenges a stronger nearby comment: it says every refusal changed nothing and no fleet event will correct the row, although the expanded branch includes an unanswered supervisor request that may have acted. This is distinct from l3s no-definitive-decision terminology.\n\n## Details\nCaller supplied precise view.rs:3060-3065 and sessions/sandbox.rs:113-124,220-242 references plus an attribution premise: the assigned patch moved the old ordinary-refusal explanation under newly expanded Unasked handling. Need compare exclusive range base, immediate parent and reviewed commit to establish whether the changed domain makes the retained comment newly inaccurate; inspect relevant uncertainty and invalidation contracts. Original possible consequence is future maintainers learning a false no-state-change/no-event invariant, not an observed runtime bug. Suggested bucket: other if established. Confidence: source/documentation lead pending direct attribution and branch checks. proposed_drop: false. possible_cover: named focused claims-023/parent evidence for synthesis, not accepted finding or prohibited coverage search. Could-be-highest: no established security or work-loss route; current refresh may be correct independently. Preserve l3 original candidate/refutation and exact proposed-drop bases; this ID addresses the stronger categorical statement only. No runtime tests, builds, reproductions or live action. Next: read compact full base/parent/review source contexts and moved-comment diff; settle shipped Unasked ingress and contract."
+          }
+        },
+        {
+          "line": 19,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l4",
+            "state": "open",
+            "summary": "Expanded Delete error handling retains a false no-change explanation",
+            "location": "crates/farhelm-ui/src/list/view.rs:3060",
+            "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa\n\n## TLDR\nThe updated Delete handler tells future maintainers that an unsuccessful result changed nothing on the host and cannot produce a fleet event. Its newly handled unanswered supervisor requests can already have deleted the session or sealed the environment. The explanation teaches the wrong reason for refreshing, even though the refresh itself is still performed.\n\n## Details\nThe exact stronger comment at view.rs:3060-3064 says: \"A refusal changed nothing on the host, so no fleet event will correct a stale row\" and explains refreshing so a supervisor-found-live row and next confirmation become current. It sits after every UnaskedFollowUp branch inside Err((e, unasked)), not inside a definite-refusal-only branch. New view.rs:2995 converts EnvironmentDeleteRefusal::Unasked to Err((text,true)); api/sandbox_sessions.rs:162-173,224-234 classifies a received Conflict with the helm marker as Unasked. This is distinct from losing the page-to-helm reply, so the two-transport-boundary refutation under l3 cannot remove it.\n\nThe marked ingress includes a request actually sent before its result became unknown: sessions/sandbox.rs:220-239 awaits client.delete_session_or_seal and maps timeout or non-supervisor transport failure to EnvironmentUnasked. Its full same-revision contract at :120-122 explicitly says \"an unanswered request may still have been acted on, which the next listing shows (a seal included, which the helm then finishes)\". SPEC_impl.md Environment Delete and the seal states the supervisor persists the seal and hints a listing change before finishing teardown, and the helm later observes sealed listings to finish destruction. Therefore both factual premises in the moved rationale are too strong for the newly expanded domain: an unsuccessful UI result need not imply no host change, and that path may have generated a change event. The right distinction is no definitive answer versus a definite refusal, not all error variants being state-preserving. The explicit listing refresh is still appropriate in either case.\n\nWhole-range attribution checked: excluded base 6e423e30068b62c6cfa276c6d720ee35bb70387a already contains this exact comment at view.rs:2750-2754, and the immediate parent contains it under the older outcome.err path after delete_sandbox_session or ordinary delete_session. The base environment API at api/sandbox_sessions.rs:132-148 sends only whole-resource delete_sandbox=true and returns untyped String errors. This review does not claim the prose was first written here or that every older transport-error use was accurate. The assigned 2ef10815 diff introduces the distinct Session-scope request and typed marked Unasked handling, then moves the retained no-change rationale beneath all new branches. The new source domain explicitly includes sent-without-answer requests. That is the in-range documentation drift being reported; historical existence of the sentence does not make its new application correct.\n\nContract: root AGENTS.md requires comments to explain surrounding constraints accurately and to be updated for changed async/cross-phase invariants; the new EnvironmentUnasked contract expressly preserves uncertain acted-on outcomes. Suggested correction: explain that definite refusals may not wake the feed, while unknown outcomes may already have changed the host, so every such completion explicitly reads current state without assuming rollback or silence. No production behavior change is needed to establish this separate documentation defect.\n\nSuggested bucket: other (internal maintenance guidance). Confidence: confirmed source/comment contradiction in the newly expanded error domain, not observed execution. proposed_drop: false. possible_cover: concrete focused claims-023/parent input supplied for this synthesis; no prohibited coverage sources searched. Could-be-highest: no established security, process-loss or data-loss route caused by this explanation; current code still refreshes and separately confirms wider deletion. Original concern and consequence preserved: false no-state-change/no-event invariant for future readers. l3 remains a distinct candidate about shared nothing-decided terminology, with its exact proposed-drop basis unchanged; that vocabulary acceptance does not accept this categorical changed-nothing claim. Caveats: old code already had generic-error uses of this rationale, so this is not a claim that all historical false applications originated in this commit. No tests, builds, runtime reproduction, live action or checkout edit. Remaining readily checkable step: confirm exact retained statement at pinned endpoint; no other missing premise for reviewed-revision documentation mismatch."
+          }
+        },
+        {
+          "line": 21,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l4",
+            "state": "open",
+            "summary": "Expanded Delete error handling retains a false no-change explanation",
+            "location": "crates/farhelm-ui/src/list/view.rs:3060",
+            "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa\n\n## TLDR\nThe expanded Delete error handler tells future maintainers that an unsuccessful result changed nothing on the host and cannot produce a fleet event. Newly handled unanswered supervisor requests can already have removed the session or sealed the environment. The current refresh is appropriate; its explanatory invariant is wrong.\n\n## Details\nAt view.rs:3060-3064 the moved comment says \"A refusal changed nothing on the host, so no fleet event will correct a stale row\" and justifies refresh as correcting a row the supervisor found alive. It is after all UnaskedFollowUp alternatives inside Err((e, unasked)), not in a definite-refusal-only branch. The assigned patch adds Unasked ingress at :2995. API api/sandbox_sessions.rs:162-173,224-234 recognizes a received Conflict with the helm marker as Unasked. sessions/sandbox.rs:220-239 sets that outcome after client.delete_session_or_seal was sent but timed out or lost a supervisor transport answer; :120-122 expressly states such a request may already have been acted on. Thus this is not merely the ambiguity of the nothing-decided label or confusion between losing a supervisor answer and losing the helm-to-page reply.\n\nDirect event/source premise settled: supervisor service/handlers.rs:1443-1445 starts the mutation separately; :1515-1518 records the count/seal. The Sealed branch stores its in-memory seal and calls hint_sessions_changed at :1547-1553 before awaiting finish_teardown (:1554-1562). The nonfinal path awaits ordinary finish_teardown at :1529-1541; service/teardown.rs:1227-1230 removes the session and hints the change on the mutation task, with an explicit comment that its reply waiter may be abandoned before that point. The same-revision test description at teardown.rs:2579-2585 independently states that the supervisor-owned teardown can finish and hint after a connection-owned reply waiter is aborted; it was read, not executed. An Unasked UI result therefore does not establish no host change, and a related invalidation is allowed. Even the new contract distinguishes a pre-decision busy refusal, which really changes nothing, from a sent request whose result is unknown (SPEC_impl.md Environment Delete and the seal).\n\nFull-range attribution: the exact sentence is already present at exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a view.rs:2750-2754 and at the immediate parent. The base error path handles untyped String errors from ordinary delete_session or whole-resource delete_sandbox_session; base api/sandbox_sessions.rs:132-148 has only delete_sandbox=true. This record does not claim the words were first authored here or that their older generic transport-error applications were universally correct. The assigned 2ef10815 diff introduces Session-scope environment Delete and typed marked Unasked handling, and moves the old rationale below all newly expanded alternatives. This new documented application to explicitly sent-without-answer operations is inaccurate within the assigned change. At inclusive tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db view.rs:3023-3028 retains the comment after the same Unasked branches (:2985-3022). The API and helm environment-delete files have an empty reviewed-to-tip diff. No later repair changes the documented domain.\n\nContract/fix: root AGENTS.md requires nearby explanations to track changed async and cross-phase invariants. SPEC_impl.md Environment Delete and the seal requires the supervisor to hint seals and the helm to finish those learned through listings, including when the request answer is unknown. Explain the refresh for both cases: a definite refusal may not generate any event, while an unknown result may already have changed host state, so explicitly reread without assuming rollback or future event delivery. No production behavior change is required for this independent documentation defect.\n\nSuggested bucket: other, internal maintenance guidance only. Confidence: confirmed source/comment contradiction for the expanded error domain, not runtime observed. proposed_drop: false. possible_cover: named focused claims-023/parent late input, not an accepted finding or coverage search. Could-be-highest: no established security, process-loss or data-loss route from the prose; current code still refreshes and separately confirms wider destruction. Original consequence preserved: future readers receive a false no-state-change/no-event invariant. l3 retains its exact scoped terminology proposed-drop bases and refutation history; they do not accept this stronger claim. Caveats: this is newly expanded misuse of an inherited explanation, not first-ever creation of all possible historical no-change misstatements. No broader runtime defect or actual reader-caused harm alleged. No tests, builds, reproductions, installs, live actions or checkout writes. No remaining readily checkable premise or open lead for this finding."
+          }
+        }
+      ],
+      "latest": {
+        "line": 21,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l4",
+          "state": "open",
+          "summary": "Expanded Delete error handling retains a false no-change explanation",
+          "location": "crates/farhelm-ui/src/list/view.rs:3060",
+          "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa\n\n## TLDR\nThe expanded Delete error handler tells future maintainers that an unsuccessful result changed nothing on the host and cannot produce a fleet event. Newly handled unanswered supervisor requests can already have removed the session or sealed the environment. The current refresh is appropriate; its explanatory invariant is wrong.\n\n## Details\nAt view.rs:3060-3064 the moved comment says \"A refusal changed nothing on the host, so no fleet event will correct a stale row\" and justifies refresh as correcting a row the supervisor found alive. It is after all UnaskedFollowUp alternatives inside Err((e, unasked)), not in a definite-refusal-only branch. The assigned patch adds Unasked ingress at :2995. API api/sandbox_sessions.rs:162-173,224-234 recognizes a received Conflict with the helm marker as Unasked. sessions/sandbox.rs:220-239 sets that outcome after client.delete_session_or_seal was sent but timed out or lost a supervisor transport answer; :120-122 expressly states such a request may already have been acted on. Thus this is not merely the ambiguity of the nothing-decided label or confusion between losing a supervisor answer and losing the helm-to-page reply.\n\nDirect event/source premise settled: supervisor service/handlers.rs:1443-1445 starts the mutation separately; :1515-1518 records the count/seal. The Sealed branch stores its in-memory seal and calls hint_sessions_changed at :1547-1553 before awaiting finish_teardown (:1554-1562). The nonfinal path awaits ordinary finish_teardown at :1529-1541; service/teardown.rs:1227-1230 removes the session and hints the change on the mutation task, with an explicit comment that its reply waiter may be abandoned before that point. The same-revision test description at teardown.rs:2579-2585 independently states that the supervisor-owned teardown can finish and hint after a connection-owned reply waiter is aborted; it was read, not executed. An Unasked UI result therefore does not establish no host change, and a related invalidation is allowed. Even the new contract distinguishes a pre-decision busy refusal, which really changes nothing, from a sent request whose result is unknown (SPEC_impl.md Environment Delete and the seal).\n\nFull-range attribution: the exact sentence is already present at exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a view.rs:2750-2754 and at the immediate parent. The base error path handles untyped String errors from ordinary delete_session or whole-resource delete_sandbox_session; base api/sandbox_sessions.rs:132-148 has only delete_sandbox=true. This record does not claim the words were first authored here or that their older generic transport-error applications were universally correct. The assigned 2ef10815 diff introduces Session-scope environment Delete and typed marked Unasked handling, and moves the old rationale below all newly expanded alternatives. This new documented application to explicitly sent-without-answer operations is inaccurate within the assigned change. At inclusive tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db view.rs:3023-3028 retains the comment after the same Unasked branches (:2985-3022). The API and helm environment-delete files have an empty reviewed-to-tip diff. No later repair changes the documented domain.\n\nContract/fix: root AGENTS.md requires nearby explanations to track changed async and cross-phase invariants. SPEC_impl.md Environment Delete and the seal requires the supervisor to hint seals and the helm to finish those learned through listings, including when the request answer is unknown. Explain the refresh for both cases: a definite refusal may not generate any event, while an unknown result may already have changed host state, so explicitly reread without assuming rollback or future event delivery. No production behavior change is required for this independent documentation defect.\n\nSuggested bucket: other, internal maintenance guidance only. Confidence: confirmed source/comment contradiction for the expanded error domain, not runtime observed. proposed_drop: false. possible_cover: named focused claims-023/parent late input, not an accepted finding or coverage search. Could-be-highest: no established security, process-loss or data-loss route from the prose; current code still refreshes and separately confirms wider destruction. Original consequence preserved: future readers receive a false no-state-change/no-event invariant. l3 retains its exact scoped terminology proposed-drop bases and refutation history; they do not accept this stronger claim. Caveats: this is newly expanded misuse of an inherited explanation, not first-ever creation of all possible historical no-change misstatements. No broader runtime defect or actual reader-caused harm alleged. No tests, builds, reproductions, installs, live actions or checkout writes. No remaining readily checkable premise or open lead for this finding."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g038/findings.jsonl",
+        "id": "l4",
+        "line": 21,
+        "disposition": "verified",
+        "group": "environment-delete-expanded-error-false-no-change-comment",
+        "reason": "Parent read complete new events18-21, exact reviewed view.rs:3038-3072 and its2ef10815 diff, and current full Environment Delete/seal contracts. The inherited categorical no-host-change/no-fleet-event comment now sits below newly typed Unasked errors, including a sent request whose answer is unknown. Supervisor-owned mutation/hint source at handlers.rs:1443-1562 and teardown.rs:1227-1230 establishes why that is false, independently of current refresh correctness. The words and some generic-error applications predate base; the new explicit sent-without-answer domain is introduced in this interval, and tip retains it. Record that attribution narrowly, without claiming all historic false uses originated here. Coverage searches across current specifications/Planned/BUGS/unlanded-plan index/queue index/files/activeoutcomes found only the governing uncertainty/seal rules and no exact accepted explanation or existing item. FILTER has no persistent-source-comment exception. This is other maintenance guidance, not observed bad deletion or user-work loss; original l3 shorthand refutation remains separate."
+      },
+      "accepted_parent_decision": {
+        "key": "g038/l4",
+        "line": 21,
+        "disposition": "verified",
+        "group": "environment-delete-expanded-error-false-no-change-comment",
+        "bucket": "other",
+        "recording": "new-documentation-finding",
+        "needs_independent_drop_check": false,
+        "reason": "Parent read complete new events18-21, exact reviewed view.rs:3038-3072 and its2ef10815 diff, and current full Environment Delete/seal contracts. The inherited categorical no-host-change/no-fleet-event comment now sits below newly typed Unasked errors, including a sent request whose answer is unknown. Supervisor-owned mutation/hint source at handlers.rs:1443-1562 and teardown.rs:1227-1230 establishes why that is false, independently of current refresh correctness. The words and some generic-error applications predate base; the new explicit sent-without-answer domain is introduced in this interval, and tip retains it. Record that attribution narrowly, without claiming all historic false uses originated here. Coverage searches across current specifications/Planned/BUGS/unlanded-plan index/queue index/files/activeoutcomes found only the governing uncertainty/seal rules and no exact accepted explanation or existing item. FILTER has no persistent-source-comment exception. This is other maintenance guidance, not observed bad deletion or user-work loss; original l3 shorthand refutation remains separate."
+      },
+      "returned_claim_checks": [],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "environment-delete-expanded-error-false-no-change-comment",
+        "destination": "trailing-environment-delete-expanded-error-false-no-change-comment.md"
+      }
+    },
+    {
+      "key": "g038/c5",
+      "owner": "g038",
+      "id": "c5",
+      "domain": "gui-session-lifecycle",
+      "purpose": "gui-session-lifecycle: crates/farhelm-ui/src/list/view.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 22,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c5",
+            "state": "open",
+            "summary": "Existing notice publishers do not bypass the new kept-environment tag updates",
+            "location": "crates/farhelm-ui/src/list/view.rs:461",
+            "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa\n\n## TLDR\nConsidered whether an existing caller could replace the visible Delete notice directly while leaving the newly added environment tag behind, allowing a later host read to erase an unrelated warning. The checked production publishers all use the shared methods, so that bypass route is refuted.\n\n## Details\nThe new tag is the third field of DeleteNotice (view.rs:461-465). publish(Some) clears it after updating visible text; publish(None) preserves both; dismiss clears both; publish_environment_delete writes the text and tag returned by environment_band; reconcile_hosts clears them only when the helper returns a retirement (:580-620). A full pinned UI-source search for DeleteNotice/delete_notice found the production owner in lib.rs:2333, the export in list.rs:75, the ListView context and launcher context, and no direct production writer to delete_notice.0. The public signal field is read for rendering at view.rs:6110 and inspected by tests. Replace publication uses publish at view.rs:3348; both launcher result paths at create_form.rs:7089-7092 and :7148-7151 also call publish. Session Delete publication uses the scoped methods at view.rs:3005-3013. The existing setter regression test (:7368 onward) inspects publication ordering and same-display/None behavior, not a separate raw setter.\n\nSuggested bucket: other for original suspected lost warning/presentation consequence. Confidence: confirmed source refutation of the checked bypass route, not execution. proposed_drop: no production raw-signal publisher exists in the pinned source, and the shared publication/dismissal methods update or preserve the tag with its text. possible_cover: none in supplied exact neighbour records; no prohibited coverage search. Could-be-highest: no established security or work-loss route; this considered mechanism concerns erroneous notice clearing, not remote deletion or lost files. Caveats: this does not refute l2s independent late-reply versus host-read ordering; all correct callers can still produce that race. It does not infer that the public field cannot be misused by future code. No runtime test, reproduction, build, live action or checkout modification. No unresolved premise for this candidate."
+          }
+        }
+      ],
+      "latest": {
+        "line": 22,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c5",
+          "state": "open",
+          "summary": "Existing notice publishers do not bypass the new kept-environment tag updates",
+          "location": "crates/farhelm-ui/src/list/view.rs:461",
+          "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa\n\n## TLDR\nConsidered whether an existing caller could replace the visible Delete notice directly while leaving the newly added environment tag behind, allowing a later host read to erase an unrelated warning. The checked production publishers all use the shared methods, so that bypass route is refuted.\n\n## Details\nThe new tag is the third field of DeleteNotice (view.rs:461-465). publish(Some) clears it after updating visible text; publish(None) preserves both; dismiss clears both; publish_environment_delete writes the text and tag returned by environment_band; reconcile_hosts clears them only when the helper returns a retirement (:580-620). A full pinned UI-source search for DeleteNotice/delete_notice found the production owner in lib.rs:2333, the export in list.rs:75, the ListView context and launcher context, and no direct production writer to delete_notice.0. The public signal field is read for rendering at view.rs:6110 and inspected by tests. Replace publication uses publish at view.rs:3348; both launcher result paths at create_form.rs:7089-7092 and :7148-7151 also call publish. Session Delete publication uses the scoped methods at view.rs:3005-3013. The existing setter regression test (:7368 onward) inspects publication ordering and same-display/None behavior, not a separate raw setter.\n\nSuggested bucket: other for original suspected lost warning/presentation consequence. Confidence: confirmed source refutation of the checked bypass route, not execution. proposed_drop: no production raw-signal publisher exists in the pinned source, and the shared publication/dismissal methods update or preserve the tag with its text. possible_cover: none in supplied exact neighbour records; no prohibited coverage search. Could-be-highest: no established security or work-loss route; this considered mechanism concerns erroneous notice clearing, not remote deletion or lost files. Caveats: this does not refute l2s independent late-reply versus host-read ordering; all correct callers can still produce that race. It does not infer that the public field cannot be misused by future code. No runtime test, reproduction, build, live action or checkout modification. No unresolved premise for this candidate."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g038/findings.jsonl",
+        "id": "c5",
+        "line": 22,
+        "disposition": "excluded",
+        "group": "delete-notice-kept-tag-production-publication-paths",
+        "reason": "Parent read complete event22 and final discovery reply. At reviewed2ef10815 all production DeleteNotice publishers use publish/dismiss/publish_environment_delete/reconcile_hosts, which update/preserve the visible text and kept tag together; pinned source search found no production writer bypassing them through the public signal. This refutes the named stale-tag/raw-writer warning-loss hypothesis only. It does not refute l2's late-reply-versus-host-read ordering, prevent hypothetical future misuse or certify every notice path. No runtime test, security or work-loss consequence was alleged."
+      },
+      "accepted_parent_decision": {
+        "key": "g038/c5",
+        "line": 22,
+        "disposition": "excluded",
+        "group": "delete-notice-kept-tag-production-publication-paths",
+        "bucket": "other",
+        "recording": "refuted-raw-publisher-bypass",
+        "needs_independent_drop_check": false,
+        "reason": "Parent read complete event22 and final discovery reply. At reviewed2ef10815 all production DeleteNotice publishers use publish/dismiss/publish_environment_delete/reconcile_hosts, which update/preserve the visible text and kept tag together; pinned source search found no production writer bypassing them through the public signal. This refutes the named stale-tag/raw-writer warning-loss hypothesis only. It does not refute l2's late-reply-versus-host-read ordering, prevent hypothetical future misuse or certify every notice path. No runtime test, security or work-loss consequence was alleged."
+      },
+      "returned_claim_checks": [],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "delete-notice-kept-tag-production-publication-paths",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial pass complete: all 1,277 assigned patch lines reviewed.\n\nRecorded `l1`: a likely transient restart-display race, bucket `other`. Logged source-refuted candidates `c1`–`c3`. No open leads.\n\nFindings and progress are saved in the assigned artifacts. No tests, reproductions, or checkout edits."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised `l1`: confirmed a narrower mounted-view race through pinned Dioxus scheduling; corrected the unsupported fresh-detail cache premise. Bucket remains `other`; duplicates g037/f3 and g089/l1.\n\nNarrowed `c1` to nonstale Interrupted rows. Strengthened `c2`/`c3` with row/header/bulk scope tracing.\n\nAll revisions logged. Unresolved lead IDs: none."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 found new issue `l2`: a delayed Delete reply can restore “environment stays” after an accepted host read proved destruction, leaving the notice indefinitely stale.\n\nChecked notice ownership, host-refresh triggers, deletion locks, HTTP body delivery, added test oracles, and endpoint persistence. Logged refuted candidate `c4`.\n\nNew verified: `l2`. New unverified-after-investigation: none. Open leads: none. Source-only; no execution."
+    },
+    {
+      "turn": 4,
+      "reply": "Discovery pass 2 found no new reportable defect.\n\nChecked outcome branches, notice updates, test assertions, refusal classification, restart completion, and comments. Investigated `l3` and closed it as a candidate with its basis logged.\n\nNew verified findings: none. New unverified-after-investigation findings: none. Open leads: none. No execution performed."
+    },
+    {
+      "turn": 5,
+      "reply": "Recorded `l4`: confirmed documentation defect—the expanded error branch retains a false no-change/no-event explanation. Checked base, parent, supervisor hints, and endpoint persistence.\n\nRevised `l3` to explicitly exclude that stronger claim from its terminology refutation.\n\nUnresolved lead IDs: none."
+    },
+    {
+      "turn": 6,
+      "reply": "Discovery pass 3 found no new reportable defect.\n\nChecked completion cleanup, outcome-test assertions, notice publishers, provider wording, and restart bridge calls. Logged source-refuted candidate `c5`.\n\nNew verified findings: none. New unverified findings: none. Open leads: none. No execution performed."
+    }
+  ],
+  "progress": "# g038: gui-session-lifecycle\n\nTurn: initial review (1), complete. Discovery passes: 0.\nAssigned scope: all 1,277 patch lines delivered through evidence read; no unread assigned material.\nReviewed revisions: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa, f560058da19e02716e6f943883a9508b447aff4e, 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e.\nComplete inventory commits field read; excluded coverage metadata and prohibited coverage sources were not read.\n\nRecords: l1 revised from lead to finding (likely, other); c1-c3 are source-refuted candidates. No open leads.\nNew verified finding IDs this pass: none. New timing-dependent likely finding IDs: l1. Candidate IDs: c1, c2, c3.\n\nInterface assumptions: environment Delete consent travels from drawn row/header/modal snapshots through the persistent list owner; only a successful Whole response authorizes local peer removal. Restart success survives keyed-view lifetimes through SessionOps. The removed listing floor leaves delayed stale responses able to retire that success. l1 requires the explicitly recorded response ordering and a still-Interrupted new-run cache; no execution was observed.\nChecks: per-commit patch review, pinned SPEC.md lifecycle/sandbox/container contracts and SPEC_impl GUI consent/lifecycle and environment-seal contracts; caller checks in row/shared/lifecycle, API decoding, restart composer/session view/SessionOps, reader/ReadGate, helm aggregate/restart cache publication.\nTests/builds/reproductions: none requested or run. Checkout edits: none.\n\nNext action: return to caller for a later synthesis turn. Independently assess l1 timing premise and impact; c2 preserves a could-be-highest proposed drop for caller review. Do not repeat the initial pass within this turn.\n\nTurn 2: later-turn synthesis in progress. New discovery passes: 0.\nNext: settle l1 cache/detail and effect-order premises against shipped code and pinned Dioxus; compare interface claims without treating them as evidence of execution. Recheck c2/c3 common scope on row/header/bulk entry.\n\nTurn 2: later-turn synthesis complete. Discovery-pass count: 0 (synthesis only).\nRevised IDs: l1, c1, c2, c3. No new IDs.\nl1 now records a confirmed source-level mounted-view interleaving and corrects the false connected-detail cache premise. An old stale sidebar response of ANY status suffices; the mounted current remains nonstale Interrupted from its independent pre-Restart live detail. Pinned Dioxus 0.7.10 effect/task/desktop ordering admits retirement before observation; generation still increments but keep_terminal_surface refuses the island. Post-completion live detail normally repairs it.\nc1 now explicitly refutes only nonstale Interrupted retirement. c2 verifies row/header/bulk scope capture through common admission and queue; c3 verifies the same immutable scope controls request and cleanup. Candidate decisions remain subject to callers drop review; no parent priority or drop decision is inferred.\nInterface reconciliation: g037/f3 and g089/l1 duplicate the old-stale-list mechanism. g037 fresh-detail/cache wording is contradicted by live GET routing. g036 earlier eligible-list optional-payload mechanism remains distinct by revision and trigger. g088 preserved generation is compatible with absent terminal surface.\nChecks added: connected and disconnected GET session branches, mounted current and title-only selection ownership, operation revision fences, exact ReadGate and single-flight callbacks, pinned core/hooks/desktop source, full relevant product error/input-race and retained-completion clauses; all source-only.\nNew verified IDs in this turn: l1 (confidence strengthened, scope narrowed). New unverified IDs: none. Open lead IDs: none. Unread assigned scope: none; original audited coverage unchanged.\nNext action: return delta to caller; later discovery/synthesis only on caller prompt. No runtime tests, builds, reproductions or checkout edits.\n\nTurn 3: discovery pass 1 in progress. Read discovery-neighbours.json completely in bounded chunks (1-255). No pending interface questions; existing neighbour claims used only for novelty.\nSearch focus: notice identity/retirement lifecycle, common Delete admission state and cancellation, added outcome tests and documentation accuracy beyond known restart/scope concerns.\n\nTurn 3: discovery pass 1 complete; something new found.\nNew verified finding IDs: l2 (delayed kept-count publication after already accepted absent-host read; other). New unverified-after-investigation IDs: none. New candidate IDs: c4 (tag initialization persists through context-provider hook). Open lead IDs: none; l2 revised from lead to finding with final source checks.\nUseful checks: all supplied neighbours read for novelty; notice construction/context ownership checked, including pinned use_context_provider delegating to use_hook; added unasked/local-removal/count/host-retirement tests inspected for fixture and oracle contracts; common error/completion/row claim lifetime rechecked; host read trigger inventory, healthy-feed fallback, independent notice markup and HostsRead lookup checked. For l2 inspected only directly relevant deletion lock and HTTP-return/body boundaries; no unrelated server defects searched. Complete view.rs diff to reviewed endpoint leaves new notice behavior unchanged. Remaining Restart bridge and final wording patch re-read for distinct defects; none beyond known issues.\nResult: l2 is a new source-supported finding; c4 is a source-refuted candidate. No runtime observation, tests, build, reproduction, live-install action or checkout modification. Assigned source coverage remains complete; no unread scope.\nNext action: return discovery delta to caller. A substantive new discovery requires a later pass on a later caller turn, not an extra pass within this turn.\n\nTurn 4: discovery pass 2 in progress. Refreshed discovery-neighbours.json read fully in bounded chunks (1-412); no named pending questions.\nSearch focus: outcome-helper branch contracts and assertions, paired notice text/tag updates, refusal bookkeeping, and remaining Restart bridge/comment changes. Known neighbours used for novelty only; no new claim from their records.\n\nTurn 4: discovery pass 2 complete; no additional reportable defect found.\nNew verified finding IDs: none. New unverified-after-investigation IDs: none. Candidate revision: l3 (new lead investigated and closed as candidate; exact specification terminology and transport-boundary distinctions recorded). Remaining open lead IDs: none.\nChecks/results: refreshed neighbours read completely in bounded chunks for novelty; rechecked environment outcome helper branches against API classification, provider count wording and added pure-test assertions; compared paired notice text/tag updates; traced Restart-with bool completion call and persistent bridge; rechecked bulk admission/scope and remaining comment-only patch. Potential Unasked no-mutation interpretation investigated through full no-answer product/implementation clauses, sent-without-answer helm branches, explicit header versus lost-page-reply classification and exact added comment patch. Its no-definitive-answer terminology is explicitly shared with the contracts; no stronger source guarantee or new runtime behavior established. This is a proposed candidate disposition only; no parent drop is inferred.\nCoverage unchanged: all assigned patches remain read; no unread assigned material. No tests, builds, reproductions, runtime observation, live-install actions or checkout edits.\nNext action: return empty discovery result and candidate delta to caller; no further pass within this turn.\n\nTurn 5: reopened synthesis in progress (no discovery pass; count remains 2).\nRead complete findings history (17 prior events) before revision. Named late input recorded under separate l4 lead; l3 terminology candidate remains preserved.\nNext: settle stronger no-change/no-event statement, branch expansion and full-range attribution using source/contracts only.\n\nTurn 5: reopened synthesis complete. Discovery count remains 2; no discovery pass performed.\nNew verified finding ID: l4 (documentation invariant drift under expanded typed Unasked handling; other). New unverified-after-investigation IDs: none. Revised existing candidate ID: l3 (explicitly scoped terminology refutation; does not cover l4). Open lead IDs: none.\nChecks/results: complete 17-event prior history read before revising; exclusive base, immediate parent, exact reviewed move/branch diff, API marked-Conflict ingress and timeout/lost-supervisor-answer branches checked. Direct supervisor source confirms seal persistence/hint before teardown and session-removal hint independent of reply waiter. Pinned endpoint retains the inaccurate comment after Unasked handling; API and helm environment-delete path diff to tip is empty.\nAttribution caveat preserved in l4: same sentence already existed at the excluded base and may already have overstated older generic errors; report is its new application beneath explicitly expanded environment Unasked cases, not first authorship of the sentence. l3 original consequences/refutation/proposed-drop bases remain, with no parent drop inferred. Current refresh correctness is not treated as refuting documentation drift.\nNo unread assigned scope or named unresolved input. No runtime tests/builds, reproductions, installs, nested agents, live actions, prohibited coverage search or checkout writes.\nNext: return only synthesis delta; separate post-audit discovery requires a later caller prompt.\n\nTurn 6: discovery pass 3 in progress. Latest discovery-neighbours.json read fully in bounded chunks (1-421). No named pending inputs.\nSearch focus: completion cleanup on all outcome branches, notice text/tag consistency, added pure-test specification/oracles, and bool Restart bridge contract beyond recorded findings and supplied neighbours.\n\nTurn 6: discovery pass 3 complete; no new reportable defect found.\nNew verified finding IDs: none. New unverified-after-investigation IDs: none. New candidate ID: c5 (no raw production notice setter bypasses paired text/tag methods). Open lead IDs: none.\nUseful checks/results: all latest neighbour records read fully for novelty (1-421); reviewed completion cleanup for success/Gone/refused/Unasked outcomes and synchronous claim handoff; checked added unasked/local-removal pure-test assertions and their fixture premises; checked kept-message source and provider wording; matched bool Restart bridge input/completion calls; full pinned UI-source notice-publisher inventory shows only paired methods, with render/test reads of the public field and launcher publication also using publish. Existing known issues and neighbour claims were not counted as new. No separate test-oracle contradiction was established by these additional checks.\nRecords unchanged except new c5 candidate. No parent drop/lowering inferred. No unread assigned scope, unresolved lead, runtime observation, test/build, reproduction, live action, prohibited coverage search or checkout edit.\nNext: return empty discovery finding result and c5 candidate delta; no additional pass within this turn.\n"
+}

@@ -1,0 +1,337 @@
+{
+  "group": {
+    "id": "g116",
+    "domain": "supervisor-core-integration",
+    "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g097",
+      "g098",
+      "g099",
+      "g100",
+      "g101",
+      "g102",
+      "g103",
+      "g104",
+      "g105",
+      "g106",
+      "g107",
+      "g108",
+      "g109",
+      "g110",
+      "g111",
+      "g112",
+      "g113",
+      "g114",
+      "g115",
+      "g117",
+      "g118",
+      "g119",
+      "g120",
+      "g121",
+      "g122",
+      "g123",
+      "g124",
+      "g125",
+      "g126",
+      "g127",
+      "g128",
+      "g129",
+      "g130",
+      "g131",
+      "g132",
+      "g133",
+      "g134",
+      "g149",
+      "g150",
+      "g159",
+      "g160",
+      "g161",
+      "g162",
+      "g163",
+      "g164",
+      "g165",
+      "g166",
+      "g167",
+      "g168",
+      "g169",
+      "g170",
+      "g171",
+      "g172",
+      "g173"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/01542-000.patch",
+        "ranges": [
+          [
+            1,
+            200
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/core.rs",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,12545)",
+        "lines": 200,
+        "bytes": 12551,
+        "start": 0,
+        "end": 12545,
+        "original": "[private-run]/prep/originals/01542.patch"
+      }
+    ],
+    "lines": 200,
+    "bytes": 12551
+  },
+  "records": [
+    {
+      "key": "g116/c1",
+      "owner": "g116",
+      "id": "c1",
+      "domain": "supervisor-core-integration",
+      "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "The retried tmux-create refusal remains descriptive",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:14661",
+            "detail": "Reviewed commit: 08399d092d20815ced6619c26df2391944ae2b4a\n\nTLDR: The revised refusal still explains why an interrupted session create cannot be retried and tells the user to create the session again. No reportable behavior change established.\n\nDetails: The assigned patch changes only the explanation inside the existing ErrorKind::Conflict message at core.rs:14661-14667; it retains the session identity, interrupted tmux launch, refusal, and recovery instruction. The surrounding refuse_retried_tmux_launch implementation at 14641-14705 retains settlement and row/checkout preservation. Pinned SPEC_impl.md:2178-2185 (Creating agents in hosts) explicitly requires an interrupted tmux create claimed by takeover to be refused before anything starts and settled against its intent key. Exact contract: 'the evidence that allowed the retry was gathered for tmux, so starting it in a host instead would be a guess, and this supervisor creates no tmux terminal.' A pinned git grep across supervisor source, CLI tests and e2e for both full changed phrases found only the message definition; no exact-wording consumer was found. Source-only assessment; no execution.\n\nSuggested bucket: other. Confidence: confirmed for this wording-only change. proposed_drop: source refutation; no executable behavior or refusal contract changed, and no consumer of the replaced phrase was found. Could-be-highest: no; this wording change establishes no security or loss-of-work route. possible_cover: none. Caveat: caller ordering and retained-checkout behavior will also be inspected before completing this initial pass."
+          }
+        },
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "The retried tmux-create refusal remains descriptive",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:14661",
+            "detail": "Reviewed commit: 08399d092d20815ced6619c26df2391944ae2b4a\n\nTLDR: The revised refusal still explains why an interrupted session create cannot be retried and tells the user to create the session again. No reportable behavior change established.\n\nDetails: The assigned patch changes only the explanation inside the existing ErrorKind::Conflict message at core.rs:14661-14667; it retains the session identity, interrupted tmux launch, refusal, and recovery instruction. The surrounding refuse_retried_tmux_launch implementation at 14641-14711 retains settlement and row/checkout preservation. Pinned SPEC_impl.md:2178-2185 (Creating agents in hosts) explicitly requires an interrupted tmux create claimed by takeover to be refused before anything starts and settled against its intent key. Exact contract: 'the evidence that allowed the retry was gathered for tmux, so starting it in a host instead would be a guess, and this supervisor creates no tmux terminal.' A pinned git grep across supervisor source, CLI tests and e2e for both full changed phrases found only the message definition; no exact-wording consumer was found. Additional source checks: core.rs:10801-10816 calls the refusal immediately after retry takeover, before allocation or the launch-side effects below it. At 14692-14710 a planned checkout rolls back, while an allocated or unreadable checkout retains the ownership record and adds an inspection/deletion explanation. The existing test at 35940-36049 asserts only the retained 'old terminal (tmux)' part of the message, then checks absence of the planned directory and settlement of its row, plan and intent. This was source inspection, not a test execution.\n\nSuggested bucket: other. Confidence: confirmed for this wording-only change. proposed_drop: source refutation; no executable behavior or refusal contract changed, and no consumer of the replaced phrase was found. Could-be-highest: no; this wording change establishes no security or loss-of-work route. possible_cover: none. Caveat: no runtime tests or reproductions were run, as required for this source-only initial review."
+          }
+        },
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "The changed tmux refusal wording preserves its local contract",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:14661",
+            "detail": "Reviewed commit: 08399d092d20815ced6619c26df2391944ae2b4a\n\nTLDR: Changing the explanation of why an interrupted tmux create cannot be retried does not change which create attempts are admitted or which checkout records remain. The earlier conclusion applies to this string change, not to the correctness of the entire retry flow.\n\nDetails: The assigned patch changes only the explanation inside the existing ErrorKind::Conflict message at core.rs:14661-14667; session identity, interrupted tmux launch, refusal and recovery instruction remain. Earlier checks found no consumer of the replaced phrase, and the existing test checks the unchanged 'old terminal (tmux)' substring. SPEC_impl.md, Creating agents in hosts, states: 'the evidence that allowed the retry was gathered for tmux, so starting it in a host instead would be a guess, and this supervisor creates no tmux terminal.'\n\nSynthesis correction to the earlier event: 'planned checkout rolls back' is conditional on reaching this helper, not a statement about all Planned retries. Inspection of validate_retry at core.rs:9548-9740 shows an occupied Planned target or an inspection error returns RetainedCreateRefusal before launch_session. Its caller at 8765-8795 publishes and settles that refusal through retain_create_refusal. Such an attempt does not reach the changed tmux-refusal message. A Planned target found absent may proceed to retry takeover and the tmux check at 10801-10816. Inside refuse_retried_tmux_launch at 14653-14711, a still-Planned origin takes abandon_fresh_pre_mkdir; an allocated, missing or unreadable origin takes retain_create_refusal and keeps records with the added inspection/deletion explanation. This preserves the caller-reported g107/l1 concern about the earlier admission boundary as a separate issue; this group does not resolve or dismiss it.\n\nSource at 14719-14818 also distinguishes successful settlement from failed persistence: rollback or retained-refusal transaction failure republishes prior evidence and returns an unrecorded outcome; it does not establish a durable Failed settlement. Therefore the earlier event's settlement statements are conditional on those writes succeeding. Readiness of the Planned path at validation is not a proof that it remains absent later; this comment/string-only patch changes no recheck or ownership rule. Further store-contract inspection is pending in this synthesis turn.\n\nSuggested bucket: other. Confidence: confirmed for the limited wording-only assessment. proposed_drop: source refutation limited to an issue introduced by the changed wording; not parent-accepted, and not a drop of g107/l1 or any underlying retry/ownership issue. Could-be-highest: no established route from this wording change; checkout ownership errors elsewhere could lose user work, but are not certified by this candidate. possible_cover: g107/l1 is a parent-supplied related lead, not independently read coverage. Original consequence considered: a misleading recovery instruction or changed-string consumer could misdirect a refused create; no such new consequence is established by this patch. Caveats: source analysis only, no execution or reproductions; remaining store checks will be recorded under this ID."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "The changed tmux refusal wording preserves its local contract",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:14661",
+            "detail": "Reviewed commit: 08399d092d20815ced6619c26df2391944ae2b4a\n\nTLDR: The revised explanation of why an interrupted tmux create cannot be retried introduces no established failure. This conclusion covers the changed message, not the entire create-recovery flow.\n\nDetails: The original consequence considered was a misleading recovery instruction or a changed-string consumer misdirecting a refused create. The assigned patch changes only the explanatory clause inside the existing Conflict at core.rs:14661-14667. It preserves the interrupted tmux launch, refusal and instruction to create again. Earlier pinned searches found no exact-wording consumer; the existing test at 35940-36049 checks the unchanged 'old terminal (tmux)' substring. The pinned SPEC_impl.md Creating agents in hosts contract says: 'the evidence that allowed the retry was gathered for tmux, so starting it in a host instead would be a guess, and this supervisor creates no tmux terminal.'\n\nSynthesis checks qualify the initial event's Planned-rollback and settlement claims. At core.rs:9548-9740, validate_retry returns RetainedCreateRefusal for an occupied Planned path or inspection failure before takeover, so that path does not reach this changed message. The caller at 8765-8795 takes the lifecycle claim and retains the row through retain_create_refusal. An absent Planned path can proceed through destination recovery; recover_checkout_destination at 9794-9874 additionally checks root/resolution/preparation evidence and verifies identity for Allocated origins. This source supports the parent-supplied observation associated with g107/l1 that the earlier admission boundary matters; it does not decide or dismiss that group's separate issue.\n\nFor attempts that reach the message, core.rs:10558-10596 reuses the original registry plan, and 10801-10816 refuses tmux immediately after takeover and before allocation. At 14653-14711, no-origin attempts delete their session with settlement; still-Planned origins take pre-mkdir rollback; Allocated, missing or unreadable origins retain records with the inspection/deletion context. Thus 'Planned rolls back' is a conditional local branch, not an assertion about every Planned retry. Admission is held by CreateGuards (2110-2118), acquired intent then directory at 8243-8276 and carried through create_session_admitted and launch_reserved. It serializes Farhelm operations; it is not proof that an external process cannot change a path after validation. No such recheck or ownership rule changes in this patch.\n\nStore checks completed: store.rs:3613-3654 removes membership, the Planned registry row and the session and settles the intent in one transaction; it performs no filesystem deletion. store.rs:4022-4074 updates the retained session and settles the intent in one transaction without removing registry rows or memberships. core.rs:14719-14818 republishes prior evidence and reports an unrecorded outcome if either transaction fails. A durable Failed settlement is therefore conditional on successful commit. core.rs:9883-9967 replays settled outcomes before retry validation, subject to its existing reservation lifetime rules; the unchanged instruction to create again is not a promise that the same settled key launches anew.\n\nSuggested bucket: other. Confidence: confirmed for this limited source assessment. proposed_drop: source refutation limited to a defect introduced by the changed message; the parent has not accepted this drop. Could-be-highest: no established security or loss-of-work route from this wording change. Underlying checkout ownership defects could lose user work, and this candidate does not certify their absence. possible_cover: parent-supplied related g107/l1, not independently read queue coverage. Caveats: no tests, builds or reproductions ran; conclusions are source-supported, not execution observations. No readily checkable premise remains open for this assigned message change."
+          }
+        }
+      ],
+      "latest": {
+        "line": 4,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "The changed tmux refusal wording preserves its local contract",
+          "location": "crates/farhelm-supervisor/src/service/core.rs:14661",
+          "detail": "Reviewed commit: 08399d092d20815ced6619c26df2391944ae2b4a\n\nTLDR: The revised explanation of why an interrupted tmux create cannot be retried introduces no established failure. This conclusion covers the changed message, not the entire create-recovery flow.\n\nDetails: The original consequence considered was a misleading recovery instruction or a changed-string consumer misdirecting a refused create. The assigned patch changes only the explanatory clause inside the existing Conflict at core.rs:14661-14667. It preserves the interrupted tmux launch, refusal and instruction to create again. Earlier pinned searches found no exact-wording consumer; the existing test at 35940-36049 checks the unchanged 'old terminal (tmux)' substring. The pinned SPEC_impl.md Creating agents in hosts contract says: 'the evidence that allowed the retry was gathered for tmux, so starting it in a host instead would be a guess, and this supervisor creates no tmux terminal.'\n\nSynthesis checks qualify the initial event's Planned-rollback and settlement claims. At core.rs:9548-9740, validate_retry returns RetainedCreateRefusal for an occupied Planned path or inspection failure before takeover, so that path does not reach this changed message. The caller at 8765-8795 takes the lifecycle claim and retains the row through retain_create_refusal. An absent Planned path can proceed through destination recovery; recover_checkout_destination at 9794-9874 additionally checks root/resolution/preparation evidence and verifies identity for Allocated origins. This source supports the parent-supplied observation associated with g107/l1 that the earlier admission boundary matters; it does not decide or dismiss that group's separate issue.\n\nFor attempts that reach the message, core.rs:10558-10596 reuses the original registry plan, and 10801-10816 refuses tmux immediately after takeover and before allocation. At 14653-14711, no-origin attempts delete their session with settlement; still-Planned origins take pre-mkdir rollback; Allocated, missing or unreadable origins retain records with the inspection/deletion context. Thus 'Planned rolls back' is a conditional local branch, not an assertion about every Planned retry. Admission is held by CreateGuards (2110-2118), acquired intent then directory at 8243-8276 and carried through create_session_admitted and launch_reserved. It serializes Farhelm operations; it is not proof that an external process cannot change a path after validation. No such recheck or ownership rule changes in this patch.\n\nStore checks completed: store.rs:3613-3654 removes membership, the Planned registry row and the session and settles the intent in one transaction; it performs no filesystem deletion. store.rs:4022-4074 updates the retained session and settles the intent in one transaction without removing registry rows or memberships. core.rs:14719-14818 republishes prior evidence and reports an unrecorded outcome if either transaction fails. A durable Failed settlement is therefore conditional on successful commit. core.rs:9883-9967 replays settled outcomes before retry validation, subject to its existing reservation lifetime rules; the unchanged instruction to create again is not a promise that the same settled key launches anew.\n\nSuggested bucket: other. Confidence: confirmed for this limited source assessment. proposed_drop: source refutation limited to a defect introduced by the changed message; the parent has not accepted this drop. Could-be-highest: no established security or loss-of-work route from this wording change. Underlying checkout ownership defects could lose user work, and this candidate does not certify their absence. possible_cover: parent-supplied related g107/l1, not independently read queue coverage. Caveats: no tests, builds or reproductions ran; conclusions are source-supported, not execution observations. No readily checkable premise remains open for this assigned message change."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g116/findings.jsonl",
+        "id": "c1",
+        "line": 4,
+        "disposition": "under-investigation",
+        "group": "g116-c1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-075",
+          "key": "g116/c1",
+          "latest_line": 4,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "tmux-retried-create-refusal-explanation-wording",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The assigned message change establishes no defect. This is limited to the changed explanatory clause; it does not certify the entire create-recovery or checkout-ownership flow. The earlier blanket rollback and settlement descriptions need the qualifications preserved below.",
+          "checks": [
+            "08399d092d20815ced6619c26df2391944ae2b4a diff, crates/farhelm-supervisor/src/service/core.rs:14661-14667: only the explanatory clause changes from creating only new terminals to starting every terminal in a terminal host. Conflict, old-terminal identity, refusal, and create-again instruction remain.",
+            "At that revision core.rs:10801-10816 refuses a taken-over tmux row before checkout allocation. core.rs:14641-14711 deletes a no-origin row, rolls back a still-Planned origin through abandon_fresh_pre_mkdir, and retains allocated/missing/unreadable provenance. These branches were not changed by the wording patch.",
+            "At that revision core.rs:9548-9740, occupied Planned targets and inspection errors yield RetainedCreateRefusal during validation, before the changed message. Therefore the helper's Planned rollback branch is not a description of every Planned retry. External path changes after validation are not refuted by Farhelm's operation serialization.",
+            "At that revision store.rs:3613-3654 atomically removes membership, Planned registry row and session and settles the intent; there is no filesystem deletion in this transaction. store.rs:4022-4074 retains session/registry evidence and settles within one transaction. core.rs:14719-14818 republishes prior evidence and reports an unrecorded outcome if persistence fails. Durable Failed settlement is conditional on successful commit.",
+            "At that revision core.rs:35940-36049, the existing regression checks the unchanged old terminal (tmux) substring, directory absence, removed session/plan and Failed intent. This was inspected, not executed.",
+            "Pinned git grep across crates and e2e found the new phrase only at core.rs:14664 and no old explanatory phrase at the reviewed revision. This provides no changed-string consumer route.",
+            "Read every supplied history event. No runtime test, build or reproduction ran; all conclusions are source-only. No broader conclusion about g107/l1 was made."
+          ],
+          "coverage_checked": [
+            "SPEC.md:2998-3013 describes ending old tmux terminals and subsequent host-backed starts; it does not establish a harmful consequence of this wording.",
+            "SPEC_impl.md:2178-2235, Creating agents in hosts, explicitly requires refusal of taken-over tmux creates before anything starts and settlement against the key; both reviewed and current text carry this contract. It supports the local explanation, not a blanket correctness verdict for retry ownership.",
+            "TODO.md:23-27: Planned is empty. No exact wording defect is scheduled there.",
+            "plans/queue searched for the actual retry, refusal and helper terms. tmux-drop-from-docs.md:48-103 schedules broad comment cleanup and a tmux audit; tmux-end-old-terminals.md:254-290 discusses host testing and migration. Neither states work fixing this claimed message consequence. No plan coverage relied upon, regardless of landing state.",
+            "BUGS.md read in full: its SSH transfer-output hang is unrelated.",
+            "review_feedback_queue/INDEX.md and queue Markdown searched for tmux refusal, retry/checkout, both helper names, the changed phrase and old terminal (tmux). No exact same-root item found. TRIAGE_OUTCOMES.md:569-580 concerns a retained-refusal UPDATE during concurrent Restart, not the changed string or its local branch; it is not exact coverage.",
+            "FILTER.md read in full. The rare-diagnostic filter could apply only to a demonstrated diagnostic-only flaw with its whole boundary met. This result instead refutes the named wording defect; it does not filter checkout ownership or user-work consequences. The archive was not read."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No source premise remains for the narrowly assigned wording claim. A different checkout ownership defect or user-work consequence would require its own established route and is not refuted here.",
+          "original_stronger_consequence": "A misleading recovery instruction or changed-string consumer could misdirect a refused create. Early events also described Planned rollback and settlement too broadly: rollback only describes attempts reaching this helper, and durable settlement requires successful persistence. Later events expressly preserve possible underlying checkout ownership defects and the separate parent-supplied g107/l1 lead.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Source refutation limited to a defect introduced by the message replacement. Preserve the earlier ownership/settlement caveats and do not treat this as a dismissal of g107/l1. Independent checking is warranted before any parent dismissal encompassing the earlier checkout-preservation assertions or possible user-work consequences. This consultation is not that independent check."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "tmux-retried-create-refusal-explanation-wording",
+        "destination": null
+      }
+    },
+    {
+      "key": "g116/l2",
+      "owner": "g116",
+      "id": "l2",
+      "domain": "supervisor-core-integration",
+      "purpose": "supervisor-core-integration: crates/farhelm-supervisor/src/service/core.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l2",
+            "state": "open",
+            "summary": "Check the host-install test helper's executable claim against its callers",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:15525",
+            "detail": "Reviewed commit: 08399d092d20815ced6619c26df2391944ae2b4a\n\nTLDR: The revised helper documentation says its chosen host is started by the test from the real Farhelm binary. A discovered caller passes test_host.socket(); whether this is the same executable-backed fixture needs checking before deciding whether the comment misstates the test boundary.\n\nDetails: Assigned patch changes the install_host_agent_for_test explanation at core.rs:15525 and 15535. The retained adjacent text says 'started by the test from the real `farhelm` binary, never inside the test process, since a host forks'. A pinned git grep finds a caller in core/tests/host_terminals.rs:1609 passing test_host.socket(), alongside an e2e caller in tests/e2e/host_terminals.rs:112. Source checks so far establish those caller expressions only; TestHost's actual construction has not been read in this pass. Missing premise: whether that fixture uses a real binary or an in-process protocol stand-in, and whether any inaccurate claim was introduced or retained by a change within the whole review range. Next check is the caller, fixture implementation and scoped history.\n\nSuggested bucket: other if confirmed (test-helper documentation). Confidence: unresolved lead, source only. proposed_drop: false pending checks. Could-be-highest: no established or suspected security/work-loss consequence from this documentation boundary. possible_cover: none; neighbour notes contain other TestHost-lifetime findings but not this helper claim. Caveats: no runtime defect or test failure is alleged; no execution or reproduction. This lead must be resolved by source checks rather than retained as uninvestigated uncertainty."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l2",
+            "state": "open",
+            "summary": "Host-install fixture wording mismatch predates the complete review range",
+            "location": "crates/farhelm-supervisor/src/service/core.rs:15525",
+            "detail": "Reviewed commit: 08399d092d20815ced6619c26df2391944ae2b4a\n\nTLDR: The host-install test helper's documentation can suggest all callers use a separate real Farhelm host, although a unit-test caller installs an in-process stand-in. This documentation mismatch already existed at the exclusive range base; the assigned rewording does not introduce it.\n\nDetails: At the reviewed commit, core.rs:15525-15529 says a host whose child the test chooses is started from the real Farhelm binary, never inside the test process. core/tests/host_terminals.rs:1606-1611 instead calls adopt_test_host(None) and installs test_host.socket(). hosts/terminal/test_host.rs:1-23 explicitly documents the listener in the test process, with a real sleep child and the test runner as peer; its adopt_test_host implementation at 365-372 constructs that stand-in. The e2e caller at tests/e2e/host_terminals.rs:81-114 really does use spawn_host with farhelm_bin, so the doc accurately describes that caller but not every fixture using the helper. Potential documentation consequence preserved: a maintainer could infer a real forked-host boundary for a unit test that uses a protocol stand-in. Production correctness does not refute this documentation mismatch.\n\nFull-range attribution check resolves the lead: exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a already contains the exact real-Farhelm/never-inside-test-process claim in core.rs:18555-18558, the same adopt_test_host/install_host_agent_for_test caller at core/tests/host_terminals.rs:1623-1627, and the same in-process-listener and test-runner-peer explanation in hosts/terminal/test_host.rs:1-23. A range-wide -S search for the exact real-binary wording finds no introduced occurrence; commit 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 moves that existing doc to the merged helper. The assigned patch changes 'switch points host arms' to 'supervisor lifecycle verbs' and identifies the replaced create host, without strengthening or adding this executable claim. No distinct new doc or test-oracle consequence is established in assigned scope.\n\nSuggested bucket: other if addressed separately. Confidence: confirmed source and full-range-base comparison. proposed_drop: attribution/scope refutation only; the same documentation mismatch and caller already exist at the exclusive base, and reviewing this comment-only patch does not authorize an independent defect hunt outside the range. No parent drop has been accepted. Could-be-highest: no established or suspected security/work-loss consequence from this wording. possible_cover: none known; neighbour findings concern other TestHost lifetimes, not this claim. Caveats: this is not a declaration that the comment is correct, and no runtime test, build or reproduction was run. Lead l2 is resolved to a candidate, with no missing source premise remaining."
+          }
+        }
+      ],
+      "latest": {
+        "line": 6,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l2",
+          "state": "open",
+          "summary": "Host-install fixture wording mismatch predates the complete review range",
+          "location": "crates/farhelm-supervisor/src/service/core.rs:15525",
+          "detail": "Reviewed commit: 08399d092d20815ced6619c26df2391944ae2b4a\n\nTLDR: The host-install test helper's documentation can suggest all callers use a separate real Farhelm host, although a unit-test caller installs an in-process stand-in. This documentation mismatch already existed at the exclusive range base; the assigned rewording does not introduce it.\n\nDetails: At the reviewed commit, core.rs:15525-15529 says a host whose child the test chooses is started from the real Farhelm binary, never inside the test process. core/tests/host_terminals.rs:1606-1611 instead calls adopt_test_host(None) and installs test_host.socket(). hosts/terminal/test_host.rs:1-23 explicitly documents the listener in the test process, with a real sleep child and the test runner as peer; its adopt_test_host implementation at 365-372 constructs that stand-in. The e2e caller at tests/e2e/host_terminals.rs:81-114 really does use spawn_host with farhelm_bin, so the doc accurately describes that caller but not every fixture using the helper. Potential documentation consequence preserved: a maintainer could infer a real forked-host boundary for a unit test that uses a protocol stand-in. Production correctness does not refute this documentation mismatch.\n\nFull-range attribution check resolves the lead: exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a already contains the exact real-Farhelm/never-inside-test-process claim in core.rs:18555-18558, the same adopt_test_host/install_host_agent_for_test caller at core/tests/host_terminals.rs:1623-1627, and the same in-process-listener and test-runner-peer explanation in hosts/terminal/test_host.rs:1-23. A range-wide -S search for the exact real-binary wording finds no introduced occurrence; commit 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 moves that existing doc to the merged helper. The assigned patch changes 'switch points host arms' to 'supervisor lifecycle verbs' and identifies the replaced create host, without strengthening or adding this executable claim. No distinct new doc or test-oracle consequence is established in assigned scope.\n\nSuggested bucket: other if addressed separately. Confidence: confirmed source and full-range-base comparison. proposed_drop: attribution/scope refutation only; the same documentation mismatch and caller already exist at the exclusive base, and reviewing this comment-only patch does not authorize an independent defect hunt outside the range. No parent drop has been accepted. Could-be-highest: no established or suspected security/work-loss consequence from this wording. possible_cover: none known; neighbour findings concern other TestHost lifetimes, not this claim. Caveats: this is not a declaration that the comment is correct, and no runtime test, build or reproduction was run. Lead l2 is resolved to a candidate, with no missing source premise remaining."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g116/findings.jsonl",
+        "id": "l2",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "host-install-test-helper-real-binary-documentation-mismatch",
+        "reason": "Parent explicitly accepted named out-of-range proposal from claims-075 after inspecting it. The helper documentation misdescribes the unit-test stand-in as a separate real Farhelm host, but the same claim and contradictory caller already exist at the exclusive range base. The reviewed rewording neither adds nor strengthens that claim. This is attribution refutation, not a conclusion that the documentation is correct. Outside 6e423e30068b62c6cfa276c6d720ee35bb70387a..00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db: the exact mismatch and caller are present at the exclusive base, and the in-range move/rewording introduces no distinct consequence. Its established impact is maintainer understanding, with no security or user-work-loss route alleged. No parent drop decision is inferred. Checked source/results: [\"08399d092d20815ced6619c26df2391944ae2b4a:crates/farhelm-supervisor/src/service/core.rs:15522-15538 says the chosen host is started from the real farhelm binary and never inside the test process. core/tests/host_terminals.rs:1606-1611 calls adopt_test_host(None), then passes test_host.socket() to this helper.\",\"At that revision hosts/terminal/test_host.rs:1-23 expressly describes a listener inside the test process, a real sleep child, and the test runner as peer. Its adopt_test_host at 365-372 constructs that stand-in. The contradiction is source-established.\",\"At that revision crates/farhelm/tests/e2e/host_terminals.rs:81-114 uses spawn_host with farhelm_bin and then the installation helper. The documentation accurately describes that caller, but not every caller.\",\"Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:core.rs:18550-18570 already contains the real-binary/never-inside claim. Its core/tests/host_terminals.rs:1623-1627 already passes the stand-in socket, and hosts/terminal/test_host.rs:1-23 already declares the in-process listener/test-runner peer.\",\"Range-wide git log -S 'never inside the test process' for core.rs returned no count-changing commit. The diff of 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 shows the existing paragraph moved into the merged installation helper. The assigned 08399d patch changes switch-point wording to lifecycle verbs and identifies the replaced create host; it retains the disputed executable claim.\",\"All supplied history was read, including the unresolved lead and its later attribution resolution. No runtime defect is alleged and no tests/builds/reproductions ran.\"] Current coverage/results: [\"Both specifications searched for the host-testing boundary. SPEC_impl.md:8164-8200 repeats the real-host testing explanation, including the built farhelm/never-inside assertion at 8190; this is not an explicit acceptance of inaccurate helper documentation. SPEC.md's terminal experience text does not settle this maintainer documentation mismatch.\",\"TODO.md:23-27: Planned is empty. No exact scheduled fix found.\",\"plans/queue searched for install_host_agent_for_test, adopt_test_host, real binary, never inside and stand-in wording. tmux-end-old-terminals.md:274-284 recognizes the in-process stand-in when discussing migration; tmux-drop-from-docs.md:67-103 schedules tmux-era wording cleanup. Neither states a correction of this real-binary claim, so neither is exact coverage.\",\"BUGS.md read in full: only the unrelated SSH transfer-output hang is recorded.\",\"INDEX.md and queue Markdown searched for the helper and exact executable-boundary wording, plus TestHost/stand-in/fixture terms. No same-root item found. input-test-comments-overstate-termination-coverage.md concerns different WebSocket test guarantees. The indexed stand-in cleanup/lifetime findings concern process cleanup and listener release, not this documentation claim. TRIAGE_OUTCOMES.md has no matching decision; the archive was not read.\",\"FILTER.md read in full. No complete boundary matches a persistent code-documentation claim about test execution. In particular the imprecise-diagnostic filter does not cover this helper contract.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A maintainer could infer a separate forked real-host execution boundary for a unit test that actually uses an in-process protocol stand-in. This remains a real documentation mismatch; production correctness and the genuine e2e caller do not refute it.\"; \"None for the pre-existing mismatch or its attribution. No distinct new documentation or test-oracle consequence was established within the review range.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g116/l2",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "host-install-test-helper-real-binary-documentation-mismatch",
+        "bucket": "other",
+        "recording": "out-of-range",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named out-of-range proposal from claims-075 after inspecting it. The helper documentation misdescribes the unit-test stand-in as a separate real Farhelm host, but the same claim and contradictory caller already exist at the exclusive range base. The reviewed rewording neither adds nor strengthens that claim. This is attribution refutation, not a conclusion that the documentation is correct. Outside 6e423e30068b62c6cfa276c6d720ee35bb70387a..00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db: the exact mismatch and caller are present at the exclusive base, and the in-range move/rewording introduces no distinct consequence. Its established impact is maintainer understanding, with no security or user-work-loss route alleged. No parent drop decision is inferred. Checked source/results: [\"08399d092d20815ced6619c26df2391944ae2b4a:crates/farhelm-supervisor/src/service/core.rs:15522-15538 says the chosen host is started from the real farhelm binary and never inside the test process. core/tests/host_terminals.rs:1606-1611 calls adopt_test_host(None), then passes test_host.socket() to this helper.\",\"At that revision hosts/terminal/test_host.rs:1-23 expressly describes a listener inside the test process, a real sleep child, and the test runner as peer. Its adopt_test_host at 365-372 constructs that stand-in. The contradiction is source-established.\",\"At that revision crates/farhelm/tests/e2e/host_terminals.rs:81-114 uses spawn_host with farhelm_bin and then the installation helper. The documentation accurately describes that caller, but not every caller.\",\"Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:core.rs:18550-18570 already contains the real-binary/never-inside claim. Its core/tests/host_terminals.rs:1623-1627 already passes the stand-in socket, and hosts/terminal/test_host.rs:1-23 already declares the in-process listener/test-runner peer.\",\"Range-wide git log -S 'never inside the test process' for core.rs returned no count-changing commit. The diff of 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 shows the existing paragraph moved into the merged installation helper. The assigned 08399d patch changes switch-point wording to lifecycle verbs and identifies the replaced create host; it retains the disputed executable claim.\",\"All supplied history was read, including the unresolved lead and its later attribution resolution. No runtime defect is alleged and no tests/builds/reproductions ran.\"] Current coverage/results: [\"Both specifications searched for the host-testing boundary. SPEC_impl.md:8164-8200 repeats the real-host testing explanation, including the built farhelm/never-inside assertion at 8190; this is not an explicit acceptance of inaccurate helper documentation. SPEC.md's terminal experience text does not settle this maintainer documentation mismatch.\",\"TODO.md:23-27: Planned is empty. No exact scheduled fix found.\",\"plans/queue searched for install_host_agent_for_test, adopt_test_host, real binary, never inside and stand-in wording. tmux-end-old-terminals.md:274-284 recognizes the in-process stand-in when discussing migration; tmux-drop-from-docs.md:67-103 schedules tmux-era wording cleanup. Neither states a correction of this real-binary claim, so neither is exact coverage.\",\"BUGS.md read in full: only the unrelated SSH transfer-output hang is recorded.\",\"INDEX.md and queue Markdown searched for the helper and exact executable-boundary wording, plus TestHost/stand-in/fixture terms. No same-root item found. input-test-comments-overstate-termination-coverage.md concerns different WebSocket test guarantees. The indexed stand-in cleanup/lifetime findings concern process cleanup and listener release, not this documentation claim. TRIAGE_OUTCOMES.md has no matching decision; the archive was not read.\",\"FILTER.md read in full. No complete boundary matches a persistent code-documentation claim about test execution. In particular the imprecise-diagnostic filter does not cover this helper contract.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A maintainer could infer a separate forked real-host execution boundary for a unit test that actually uses an in-process protocol stand-in. This remains a real documentation mismatch; production correctness and the genuine e2e caller do not refute it.\"; \"None for the pre-existing mismatch or its attribution. No distinct new documentation or test-oracle consequence was established within the review range.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-075",
+          "key": "g116/l2",
+          "latest_line": 6,
+          "recommendation": "out-of-range",
+          "bucket": "other",
+          "underlying_key": "host-install-test-helper-real-binary-documentation-mismatch",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The helper documentation misdescribes the unit-test stand-in as a separate real Farhelm host, but the same claim and contradictory caller already exist at the exclusive range base. The reviewed rewording neither adds nor strengthens that claim. This is attribution refutation, not a conclusion that the documentation is correct.",
+          "checks": [
+            "08399d092d20815ced6619c26df2391944ae2b4a:crates/farhelm-supervisor/src/service/core.rs:15522-15538 says the chosen host is started from the real farhelm binary and never inside the test process. core/tests/host_terminals.rs:1606-1611 calls adopt_test_host(None), then passes test_host.socket() to this helper.",
+            "At that revision hosts/terminal/test_host.rs:1-23 expressly describes a listener inside the test process, a real sleep child, and the test runner as peer. Its adopt_test_host at 365-372 constructs that stand-in. The contradiction is source-established.",
+            "At that revision crates/farhelm/tests/e2e/host_terminals.rs:81-114 uses spawn_host with farhelm_bin and then the installation helper. The documentation accurately describes that caller, but not every caller.",
+            "Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:core.rs:18550-18570 already contains the real-binary/never-inside claim. Its core/tests/host_terminals.rs:1623-1627 already passes the stand-in socket, and hosts/terminal/test_host.rs:1-23 already declares the in-process listener/test-runner peer.",
+            "Range-wide git log -S 'never inside the test process' for core.rs returned no count-changing commit. The diff of 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 shows the existing paragraph moved into the merged installation helper. The assigned 08399d patch changes switch-point wording to lifecycle verbs and identifies the replaced create host; it retains the disputed executable claim.",
+            "All supplied history was read, including the unresolved lead and its later attribution resolution. No runtime defect is alleged and no tests/builds/reproductions ran."
+          ],
+          "coverage_checked": [
+            "Both specifications searched for the host-testing boundary. SPEC_impl.md:8164-8200 repeats the real-host testing explanation, including the built farhelm/never-inside assertion at 8190; this is not an explicit acceptance of inaccurate helper documentation. SPEC.md's terminal experience text does not settle this maintainer documentation mismatch.",
+            "TODO.md:23-27: Planned is empty. No exact scheduled fix found.",
+            "plans/queue searched for install_host_agent_for_test, adopt_test_host, real binary, never inside and stand-in wording. tmux-end-old-terminals.md:274-284 recognizes the in-process stand-in when discussing migration; tmux-drop-from-docs.md:67-103 schedules tmux-era wording cleanup. Neither states a correction of this real-binary claim, so neither is exact coverage.",
+            "BUGS.md read in full: only the unrelated SSH transfer-output hang is recorded.",
+            "INDEX.md and queue Markdown searched for the helper and exact executable-boundary wording, plus TestHost/stand-in/fixture terms. No same-root item found. input-test-comments-overstate-termination-coverage.md concerns different WebSocket test guarantees. The indexed stand-in cleanup/lifetime findings concern process cleanup and listener release, not this documentation claim. TRIAGE_OUTCOMES.md has no matching decision; the archive was not read.",
+            "FILTER.md read in full. No complete boundary matches a persistent code-documentation claim about test execution. In particular the imprecise-diagnostic filter does not cover this helper contract."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "None for the pre-existing mismatch or its attribution. No distinct new documentation or test-oracle consequence was established within the review range.",
+          "original_stronger_consequence": "A maintainer could infer a separate forked real-host execution boundary for a unit test that actually uses an in-process protocol stand-in. This remains a real documentation mismatch; production correctness and the genuine e2e caller do not refute it.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Outside 6e423e30068b62c6cfa276c6d720ee35bb70387a..00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db: the exact mismatch and caller are present at the exclusive base, and the in-range move/rewording introduces no distinct consequence. Its established impact is maintainer understanding, with no security or user-work-loss route alleged. No parent drop decision is inferred."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "host-install-test-helper-real-binary-documentation-mismatch",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial g116 review complete: all 200 assigned patch lines reviewed at the recorded revision.\n\nNo reportable findings or unresolved leads. Candidate `c1` records the source-based reason for dropping the refusal-message concern. Findings log and progress are updated. No tests or reproductions run."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised `c1`: Planned rollback applies only after admission reaches the refusal helper; occupied paths refuse earlier and retain ownership. Settlement requires a successful transaction commit. No defect established in the changed wording; the proposed drop remains unaccepted. g107/l1 remains separate.\n\nUnresolved lead IDs: none."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 complete. Checked changed comment contracts, supporting callers, shutdown/seeding paths, and full-range attribution.\n\nNo new in-scope finding. `l2` resolved to a candidate: the helper-documentation mismatch predates the range.\n\nNew verified IDs: none. New unverified IDs: none. Open leads: none. No execution performed."
+    }
+  ],
+  "progress": "Group: g116 — supervisor-core-integration\n\nState: initial review complete, turn 1. Ready for the caller's later synthesis turn. Discovery-pass count: 0.\n\nScope: all 200 assigned patch lines for 08399d092d20815ced6619c26df2391944ae2b4a, crates/farhelm-supervisor/src/service/core.rs, delivered through the assigned evidence command. Read the inventory's complete commits field without reading excluded coverage metadata. No unread assigned material.\n\nResult: no reportable findings or unresolved leads. Candidate c1 was appended when the changed refusal message was judged non-reportable, then revised after caller and test-source checks. New verified finding IDs: none. New unverified finding IDs: none. Candidate IDs: c1 (source-refuted; proposed_drop). Open lead IDs: none.\n\nInterface assumptions checked at the recorded revision: every terminal is a terminal host; restarting an agent creates a new host and keeps tabs; history is read before claiming the next generation; an ambiguous restart publishes no terminal, while a published restart skips generic recovery; held listing rows bridge the off-map restart window; tab tags retain scope selection; shutdown drains output clients and checkpoints hosts; retry takeover of an interrupted tmux create refuses before allocation and keeps allocated-checkout ownership. The revised test/helper comments agree with their code. The patch changes comments and one refusal string, with no executable changes.\n\nContracts read from pinned private snapshots through evidence packets: SPEC.md Lifecycle operations (1888-2130), Terminal experience (2855-3170), Paths that are not valid UTF-8 (4737-4744); SPEC_impl.md terminal switch points, every-terminal, create and tab contracts and complete restarting-host bullet (2134-2345), complete across-supervisor-restarts bullet (2403-2501), Ending the old private tmux server (2780-2824), Answers bind to what was drawn (1069-1099). The supplemental contracts-manifest.json holds full snapshots for these context reads; it does not expand the assigned patch scope to the rest of those files.\n\nChecks: pinned source and caller inspection, pinned message-consumer search, and inspection of the existing refusal, ambiguous-restart, restart-listing and non-UTF-8 test sources. No runtime execution, builds or reproductions. No GUI handler is changed in this group. No checkout files were changed, and no live-install or unrelated-process actions were taken.\n\nNext: wait for the caller's synthesis prompt. Do not run a second pass inside the initial-review turn.\n\nTurn 2: later-turn synthesis complete. Discovery-pass count remains 0. No new verified or unverified findings. Revised c1 twice as premises were checked; no parent acceptance of its proposed drop is assumed. No open lead IDs and no unread assigned material.\n\nThe initial claim about Planned rollback is now explicitly conditional on reaching the tmux refusal helper. Earlier occupied-path validation refuses and retains before takeover; Allocated, missing or unreadable origin evidence reaching the helper also retains. Failed settlements require a successful atomic commit; persistence failure keeps prior evidence and reports unresolved durability. Source checks traced CreateGuards through admission and settlement, destination recovery, original-plan reuse, both store transactions and settled-outcome replay. These checks establish the local changed-string assessment, not the correctness of all retry admission or ownership behavior. The caller's related g107/l1 remains independent and is not dropped here.\n\nNo execution or reproductions. Next: await the caller's next turn. This synthesis does not count as a discovery pass.\n\nTurn 3: separate discovery pass 1 complete. Read discovery-neighbours.json fully in bounded chunks (1-724), then searched only the assigned patch's changed contracts and their supporting source. No new in-scope finding. New verified finding IDs: none. New unverified-after-investigation finding IDs: none. Open leads: none. New candidate: l2, first recorded as a lead and resolved by source and exclusive-base comparison. Neither l2 nor c1 has a parent-accepted drop.\n\nDiscovery checks: re-read the complete scoped per-commit diff, checked core.rs history across the whole pinned range, traced prompt timeout error propagation, replacement-host and history-seed call contracts, shutdown checkpoint calls, held restart-row documentation, tab scope derivation on close, and host-install helper callers. No code, test oracle or fixture-lifetime change occurs in the assigned patch; the neighbouring runtime/test findings are not adopted as new findings here. The helper's real-binary wording prompted l2: one caller uses an in-process TestHost, but the same wording, caller and stand-in implementation all exist at the exclusive base, so this is a pre-range documentation mismatch, not a newly attributed issue. The assigned core.rs file has no changes between its reviewed revision and pinned tip.\n\nAll checks are source analysis. No tests, builds, reproductions or live-install actions. Assigned patch coverage remains complete, with no unread assigned material. Next: await the caller's next prompt; a further discovery pass, if requested, must be a later turn.\n"
+}

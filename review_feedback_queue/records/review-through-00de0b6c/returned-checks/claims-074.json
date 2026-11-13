@@ -1,0 +1,281 @@
+[
+  {
+    "key": "g114/l2",
+    "latest_line": 21,
+    "recommendation": "retain-unverified",
+    "bucket": "other",
+    "underlying_key": "prompt-recorder-default-off-without-catchup-witness",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The missing explicit gate and conditional two-event failure are supported. The latest withdrawal basis refutes the examined fresh dash/Linux path, but does not establish a general supported-platform guarantee. Retain the portability uncertainty rather than turn the narrow refutation into a universal one.",
+    "checks": [
+      "At 1ed482dde220452e424973faf38a5e1318986333, core.rs:19820-19889 prints the raw eight-byte disable sequence and accepts a running probe, default-off paste mode and file existence; no caught_up observation occurs. core.rs:20110-20121 requires the paste-off diagnostic.",
+      "At that revision hosts/terminal.rs:1810-1859 records the queued-event fence, :1916-1927 processes one queued event before spawning the runtime, and :4008-4024 publishes caught_up only after the fence and adopted position are satisfied. Thus multiple initial events remain the necessary premise.",
+      "At that revision terminal-host/src/journal.rs:137-153 starts without output, resize or exit records; host.rs:503-535 drains a 64KiB read until EAGAIN and :628-654 queues encoded immutable frames. The live/no-input/no-resize fixture supplies no extra initial event itself.",
+      "Checked tagged primary sources at https://raw.githubusercontent.com/herbertx/dash/v0.5.12/src/output.c (flushout and xwrite), src/eval.c:942-969 and src/bltin/printf.c:129-175: buffered builtin output is flushed as one initial eight-byte write request. This supports the latest narrow producer refutation, not historical distro identity.",
+      "Checked https://raw.githubusercontent.com/torvalds/linux/v6.12/drivers/tty/{tty_io.c:965-1042,pty.c:105-121 and 892-907,tty_buffer.c:262-334 and 552-570,n_tty.c:1520-1540,1610-1662,1690-1750,1960-1998,2350-2448}. With fresh space, successful raw mode and one write, the small batch is committed together and read whole. This does not supply the hypothesized split; no newline/OPOST argument applies.",
+      "No runtime observation, shell reproduction or platform metadata probe was performed in this consultation. Scoped core.rs changes from the reviewed revision to 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db do not add the explicit readiness gate."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Searched paste mode, prompt, catch-up and fixture terms; no acceptance of this test-readiness defect.",
+      "SPEC_impl.md": "Terminal switch points at 2134-2174 and dormant PromptSession at 8874-8886 require catch-up before checking paste mode. They specify product eligibility, not an exemption for fixture readiness.",
+      "TODO.md Planned": "Empty bucket at 25-26.",
+      "plans/queue": "Searched prompt_recorder, paste-off, catch-up fixture and named lifecycle terms; no stated unlanded repair for this fixture.",
+      "BUGS.md": "Only the unrelated SSH-output-held-open install/update hang.",
+      "INDEX.md and queue": "Read the index; no exact fixture/trigger match. reconnect-replay-keeps-obsolete-event-count-fence is a different reconnect accounting defect, and placeholder-grid-fixture-readoption-uncertainty concerns supervisor retry adoption, not this producer.",
+      "TRIAGE_OUTCOMES.md": "Targeted exact trigger/consequence searches found no matching active decision; archive not read.",
+      "FILTER.md": "No filter fully covers a test readiness/oracle defect. A narrow timing window alone is insufficient."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "A concrete supported /bin/sh and PTY path that exposes this exact fresh raw eight-byte fixture as multiple initial stream events. Generic short-read permission is not that evidence. The checked dash/Linux-v6.12 healthy path does not provide it.",
+    "original_stronger_consequence": "The paste=false test could assert before host catch-up and receive terminal-restoration refusal instead of the required paste-off diagnostic. No production prompt malfunction, observed flake, security harm or user-work loss was claimed. Latest events propose excluding only the examined producer route; that proposed withdrawal is preserved here.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Keep as investigated uncertainty if recording the broad concern. A parent exclusion can rely on the examined healthy producer only at that narrow scope, preserving the unsupported-platform caveat. The supplied g131/l1 analogy uses a different newline producer and is not an exact alias established by this batch."
+  },
+  {
+    "key": "g114/c6",
+    "latest_line": 14,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "removed-statedir-tmux-destructor-no-surviving-caller",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The named stranded-tmux-fixture allegation has no remaining producer in the converted core tests. Replacement host cleanup is owned by TestDir.",
+    "checks": [
+      "At 1ed482dde220452e424973faf38a5e1318986333, core.rs:17022-17044 wraps farhelm_teststate::TestDir and explicitly gives it host cleanup ownership on assertion failure.",
+      "Pinned git grep for session_tmux_name, tmux.sock and kill-server in core.rs returns no surviving tmux fixture creation or use.",
+      "At the reviewed revision farhelm-teststate/src/lib.rs:794-821, TestDir::drop ends hosts and retains the directory if it cannot confirm cleanup. This immediate destructor is not claimed to kill tmux; its dead-run sweep has separate tmux handling."
+    ],
+    "coverage_checked": {
+      "SPEC.md and SPEC_impl.md": "Searched cleanup, terminal-host and tmux terms. SPEC_impl.md:2159-2174 requires every current terminal to run in a host; tests of ending old terminals create their own earlier-release tmux server. This confirms the named producer's retirement, not every fixture's cleanup quality.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "Targeted StateDir, kill-server and tmux cleanup searches found retired-production-tmux plans, not a repair of a surviving core fixture using this destructor.",
+      "BUGS.md": "Unrelated SSH helper hang only.",
+      "INDEX.md and queue": "No same producer/removed-destructor item. signal-test-child-lacks-unwind-cleanup concerns registration before cleanup ownership, not removal of unused tmux cleanup.",
+      "TRIAGE_OUTCOMES.md": "No matching active decision in targeted searches.",
+      "FILTER.md": "No filter used; disposition is source/caller refutation."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Assertion failure could strand a private tmux test server and its children after StateDir's tmux destructor was removed. This was a test-cleanup consideration, without an established security or user-work-loss route.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "No remaining named core fixture starts that tmux server; current fixtures use host cleanup. Do not extend this conclusion to independent harnesses or to TestDir's separate tmux sweep."
+  },
+  {
+    "key": "g114/l3",
+    "latest_line": 20,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "terminal-less-host-orphan-doc-asserts-no-survivors",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The rewritten test explanation makes a false host/program lifecycle claim. The pure predicate and its product behavior are not shown defective.",
+    "checks": [
+      "At 1ed482dde220452e424973faf38a5e1318986333, core.rs:17822-17857 says a host-orphaned Exited row has nothing running, then tests only synthetic terminal/outcome combinations.",
+      "At that revision hosts/terminal.rs:754-784 explicitly supports a child that ignored hangup and outlived its unavailable or ended host. A missing host therefore cannot establish the claimed no-programs-running premise.",
+      "Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a core.rs:20993-21005 already said nothing was running about tmux-orphaned rows. The reviewed change newly substitutes host-orphaned and terminal-probed; this is an in-range host-specific rewrite, not the first occurrence of the generic overstatement.",
+      "The scoped later core.rs diff through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db does not repair this wording. No runtime or cleanup-bypass observation was made."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Searched orphaned, terminal-less, cleanup and survivor terms; no acceptance of the false test explanation.",
+      "SPEC_impl.md": "Terminal-host ending contract at 1979 and reload residual at 2337 explicitly leave hangup-ignoring descendants to session cleanup. That contract contradicts rather than covers the stronger prose.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "No only_an_unconfirmed, host-orphan or no-survivor explanation repair in targeted searches. Old-tmux retirement plans concern different production compatibility behavior.",
+      "BUGS.md": "Unrelated SSH helper hang only.",
+      "INDEX.md and queue": "No exact explanatory claim. gone-retry-forgets-pinned-foreground-child concerns a conditional production recovery/cleanup route; it does not cover this test docstring.",
+      "TRIAGE_OUTCOMES.md": "No matching active decision in terminal-less/orphan/claim searches.",
+      "FILTER.md": "Static lifecycle documentation is not a rare diagnostic or self-correcting display. No full filter boundary matches."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Maintainers are taught that terminal-host loss proves no program remains. The finding has consistently been documentation correctness only; no production consent bypass, cleanup failure, security impact or loss of user work is established.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Record the changed host-specific lifecycle explanation. Preserve the pre-existing generic clause and keep the useful pure predicate test; no behavior change is requested by this finding."
+  },
+  {
+    "key": "g114/c7",
+    "latest_line": 22,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "host-report-fixture-display-metadata-not-admission-authority",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The reduced display fields do not choose the report kind, generation or Restart offer in these actual fixture assertions.",
+    "checks": [
+      "At 1ed482dde220452e424973faf38a5e1318986333, core.rs:22776-22829 builds the host with generation zero, then sets entry.snapshot from row.launch and entry.generation from row.generation. Pinned start_in_host call-site search finds the entry-shaped shell and OMP runtime helper paths.",
+      "core.rs:23061-23114 seeds OMP rows at generation zero. start_in_host is not reused after incrementing a row generation in these named paths.",
+      "core.rs:15311-15369 uses entry.snapshot.kind and entry.generation, checks the report generation and vendor against them, and does not use info.agent_kind. host_agent_anchor:15818-15854 requires the row's generation.",
+      "core.rs:23228-23238 calls session_snapshot, whose :7448-7478 projects the stored launch/capture/ownership version. The reduced SessionInfo is not its offer authority."
+    ],
+    "coverage_checked": {
+      "SPEC.md and SPEC_impl.md": "Targeted publication/report-generation searches identify the host-child anchor contract at SPEC_impl.md:2148-2149. No exception is needed for the named display-only metadata.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "No start_in_host, report-fixture metadata or generation-zero repair in targeted searches.",
+      "BUGS.md": "Unrelated SSH helper hang only.",
+      "INDEX.md and queue": "No exact admission/offer fixture metadata item; OMP readiness, permission and npx documentation items have different assertions and causes.",
+      "TRIAGE_OUTCOMES.md": "No matching active fixture-metadata decision.",
+      "FILTER.md": "Not used; this is a narrow source refutation."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "A Generic display kind or generation-zero host tag might cause report admission/refusal or Resume assertions to run for the wrong kind/generation. No product authority or work-loss consequence was established.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Exclude this competing mechanism for the current callers only. This does not certify a complete production-shaped SessionInfo or refute the separate owner-exit and numeric-group cleanup findings."
+  },
+  {
+    "key": "g114/c8",
+    "latest_line": 23,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "prompt-dead-target-conversion-preserves-boundary-states",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The migrated core test still supplies missing/Gone/Exited states; a retained host adapter test directly checks Exited-to-Dead conversion. The generic-error limitation predates the whole range.",
+    "checks": [
+      "At 1ed482dde220452e424973faf38a5e1318986333 core.rs:20071-20090 supplies None, fixed Gone and fixed Exited with a Claude target, then checks refusal and an untouched independent recorder.",
+      "hosts/terminal/tests.rs:1580-1625 adopts a pinned real-child stand-in, sends an ordered Exited record, awaits loss of the root and asserts TerminalProbe::Dead. This supplies direct adapter coverage rather than inferring test adequacy from production correctness.",
+      "At exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a core.rs:23756-23830, real exited and removed tmux fixtures likewise assert only is_err and untouched input. No distinguishing diagnostic oracle was removed by the conversion.",
+      "No runtime execution or claim that all host lifecycle producers are comprehensively tested."
+    ],
+    "coverage_checked": {
+      "SPEC.md and SPEC_impl.md": "Targeted prompt/liveness/terminal-host searches identify the live-agent requirement at SPEC_impl.md:8874-8886 and host-only terminal contract at 2159-2174. No specification accepts a false dead-target oracle; the asserted loss is instead source-refuted.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "No named prompt dead-target oracle repair in targeted searches.",
+      "BUGS.md": "Unrelated SSH helper hang only.",
+      "INDEX.md and queue": "No exact missing/Gone/Exited conversion allegation; paste-receipt and prompt-prefill tests concern distinct boundaries.",
+      "TRIAGE_OUTCOMES.md": "No matching active dead-target conversion decision.",
+      "FILTER.md": "Not used; this is source/assertion relocation and range attribution."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Removing real exited/deleted tmux targets might lose the oracle that an ended prompt target is refused. The original and converted tests share a generic-negative limitation; no shipped prompt error or user-work loss was established.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Exclude only a newly lost distinct host-death oracle. Preserve the inherited generic-error limitation without recording it as introduced in this range."
+  },
+  {
+    "key": "g115/c1",
+    "latest_line": 11,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "hold-mark-negative-oracle-retained-in-host-terminal-tests",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The record's later withdrawal is supported by the exact negative and positive assertions in the separately compiled host-terminal test. The earlier core.rs-only test search was incomplete.",
+    "checks": [
+      "At 1ed482dde220452e424973faf38a5e1318986333 core/tests/host_terminals.rs:475-527, the_hold_wait_waits_for_a_host_agents_child tracks a live child with no mark and asserts false, writes child+1 and asserts false, writes the exact child pid and asserts true, then observes child exit and checks no-mark settlement. These distinguish all allegedly lost mark cases.",
+      "core.rs:16280-16284 declares pub(crate) mod host_terminals under cfg(test), and host_terminals.rs:485 marks this function with farhelm_testtrace::test. It is not an unwired helper.",
+      "core.rs:7797-7812 reads a cached probe synchronously and compares the held mark to the child's pid. The external blocked-tmux probe stimulus no longer exists.",
+      "core.rs:25980-26019 alone still lacks a direct witness that registration was pending while the wait remained unfinished. That different limitation is already queued as shutdown-wait-test-does-not-witness-waiting.md; it does not revive the withdrawn missing/stale-mark claim."
+    ],
+    "coverage_checked": {
+      "SPEC.md and SPEC_impl.md": "Targeted version-hold/mark searches; SPEC_impl.md:2154 requires comparing the held mark with the child's pid. The retained test exercises this exact contract.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "No hold_settled, wait_for_pending_holds or missing/stale hold-mark repair in targeted searches.",
+      "BUGS.md": "Unrelated SSH helper hang only.",
+      "INDEX.md and queue": "Read shutdown-wait-test-does-not-witness-waiting.md in full: a distinct registration-wait witness defect, not mark validation. Read recovered-agent-retains-stale-launch-hold-handle.md: a production recovered-runtime handle defect, also different. Neither is exact coverage for c1's withdrawn allegation.",
+      "TRIAGE_OUTCOMES.md": "shutdown-wait-test-does-not-witness-waiting active entry concerns that existing distinct witness issue. No decision accepts missing/stale marks.",
+      "FILTER.md": "No filter used; the exact source test refutes the missing-oracle claim."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Originally considered shutdown failing to protect a just-starting session's version. The later retained allegation was only lost missing/stale-mark regression protection; event 11 withdraws it after locating the relocated host test. No runtime version loss was observed or established.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "The exact alleged lost assertions remain in a compiled host test. Conservatively route the withdrawal to the independent drop register because the original stronger motivation involved a session's executable/version protection, even though the established allegation is test-only. Do not drop the separately queued registration-witness issue."
+  },
+  {
+    "key": "g115/l1",
+    "latest_line": 12,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "omp-owner-exit-test-missing-owner-exit-barrier",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The migrated fixture sends a signal and returns without proving owner exit before a test that explicitly claims that premise. Persistence/reopen assertions remain useful but do not prove the missing lifecycle boundary.",
+    "checks": [
+      "At 1ed482dde220452e424973faf38a5e1318986333 core.rs:22806-22818 retains only the live root's numeric pid in OwnedRuntime with child None. :22545-22551 waits only for Some(child); :22582-22587 ignores group-signal failure. :23048-23052 adds no exit wait.",
+      "core.rs:24026-24029 promises the runtime and reporter are gone. :24048-24060 obtains the reporter identity, admits the report, calls kill_owner and immediately measures Resume; neither identity is checked gone/zombie.",
+      "core.rs:23228-23238 obtains the offer through session_snapshot; :7448-7478 reads only stored launch/capture/version and provides no owner-exit barrier. Reopening afterward tests durable reconstruction, not the earlier assertion's premise.",
+      "The immediate parent teardown at core.rs:24083-24087 called Child::wait before returning. The conversion therefore removes a real owner-exit synchronization point. It never independently waited for every reporter descendant; preserve that attribution limit.",
+      "Scoped core.rs changes through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db do not repair the teardown or owner-exit test. No runtime observation was made."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "First-class harnesses at 5233-5248 accepts partial non-first-class integration features. Its exact boundary does not explicitly accept an existing test claiming a lifecycle prerequisite it does not establish; retain if that scope remains ambiguous.",
+      "SPEC_impl.md": "Terminal-host child ownership/reaping and report/offer contracts explain why the parent test must observe process exit separately. No acceptance of this test-evidence gap found.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "No omp_accepted_capture, kill_owner, owner-exit or named helper repair in targeted searches.",
+      "BUGS.md": "Unrelated SSH helper hang only.",
+      "INDEX.md and queue": "No exact owner-exit fixture item. Read the OMP readiness, YOLO-default and npx-guide files; these are different documentation contracts. Existing process-readiness test items concern other producers.",
+      "TRIAGE_OUTCOMES.md": "Older direct-Bun and Bun-option decisions at 497-521 concern reporter ancestry, not owner-exit evidence. No exact active decision.",
+      "FILTER.md": "Non-first-class rare-edge filter confines its consequence to integration features, not inaccurate test evidence; no full match."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "The test meant to preserve Resume after an OMP agent exits can pass before owner exit. No product capture failure or lost user work was established. SIGKILL ordinarily acts quickly, and persistence itself is still tested. Supplied g114/f1's numeric-group reuse safety claim remains separate and is not lowered or refuted here.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Record the missing owner-exit prerequisite as other. The supplied history reports g114/c4 agrees it duplicates this cause, but c4 is not an assigned named record here, so no cross-batch alias verdict is made. A post-signal wait repairs this oracle only, not the distinct stale numeric-group cleanup risk."
+  },
+  {
+    "key": "g115/c2",
+    "latest_line": 3,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "retired-tmux-publication-gap-immediate-success-contract",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The removed test expected immediate admission through tmux pane recovery. Host admission deliberately retries until the matching entry is published; removing the obsolete immediate-success expectation does not establish startup-report loss.",
+    "checks": [
+      "Immediate parent core.rs:25541-25571 seeds an empty terminal address, writes a fake pane listing and expects immediate report admission/Resume. That is the removed tmux publication-gap scenario.",
+      "At 1ed482dde220452e424973faf38a5e1318986333 core.rs:15799-15854, old tmux rows are definitively refused, while host rows return Internal until the matching generation's published terminal supplies an anchor.",
+      "At that revision service/report_files.rs:248-266 maps Internal admission errors to Disposition::Retry rather than Settled. This confirms the retry behavior in source, not merely in comments.",
+      "No execution, actual dropped report or comprehensive host-report-retry test adequacy verdict is claimed."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Searched report publication, capture/restart and first-class terms. No need to infer report loss from a retired test.",
+      "SPEC_impl.md": "Terminal switch points at 2148-2149 expressly specifies waiting for a later pass before publication. This is the replacement behavior, not acceptance of losing reports.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "No named publication-gap report-loss repair in targeted searches.",
+      "BUGS.md": "Unrelated SSH helper hang only.",
+      "INDEX.md and queue": "No exact publication-gap immediate-admission item; OMP reporter ancestry/readiness documentation items have different triggers and consequences.",
+      "TRIAGE_OUTCOMES.md": "No matching active publication-gap decision; older OMP ancestry decisions do not cover it.",
+      "FILTER.md": "Not used; this is replacement-contract/source refutation."
+    },
+    "exact_cover_quotes": [
+      {"source": "SPEC_impl.md:2148-2149", "quote": "A hook report is anchored at the host's child; while the session's entry is not yet published the report waits for a later pass rather than being refused.", "scope": "Refutes requiring immediate admission in the retired tmux test; does not accept dropped reports."}
+    ],
+    "missing_premise": null,
+    "original_stronger_consequence": "Removal might lose startup conversation reports, suggested high if actual reports were lost. The source checks establish retry instead, not comprehensive regression coverage. A missing capture denies Resume; no wrong-conversation execution or loss of user-owned work was established.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Exclude the alleged regression from deleting this obsolete immediate tmux-recovery expectation. Do not claim the host retry path has comprehensive tests."
+  },
+  {
+    "key": "g115/l2",
+    "latest_line": 15,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "late-activity-test-doc-retains-removed-screen-read-await",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The test's explanation names an awaited screen read that the reviewed sampler no longer performs. The session-wide activity-cell invariant and synthetic late-write assertion remain useful.",
+    "checks": [
+      "At 1ed482dde220452e424973faf38a5e1318986333 core.rs:29636-29646 says sample_pass clones an entry, awaits its terminal screen and dates what it saw, naming that suspension window as the restart race.",
+      "At that revision service/ticker.rs:1292-1424 clones entries, has earlier persistence/observation awaits, then reads screen_tail and title synchronously before activity observation. hosts/terminal.rs:2229-2247 defines those synchronous methods.",
+      "The immediate-parent-to-reviewed ticker diff directly replaces terminal.screen_tail(sup, SAMPLE_TAIL_BYTES).await with terminal.screen_tail(SAMPLE_TAIL_BYTES), and removes the awaited title read. The explained screen-read suspension disappears within the range.",
+      "Pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db core.rs:29580-29588 retains the inaccurate explanation. Earlier awaits or concurrent worker scheduling still permit old cloned entries, so this finding does not invalidate the test or prove synchronous code cannot be preempted."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Searched sampling, activity and late-write terms; no acceptance of the stale explanation.",
+      "SPEC_impl.md": "Terminal switch points at 2140-2141 says screen/title sampling comes from the host emulator after catch-up. It does not preserve an async capture round-trip contract.",
+      "TODO.md Planned": "Empty.",
+      "plans/queue": "No a_late_activity_write, awaited-screen-read or named explanation repair in targeted searches.",
+      "BUGS.md": "Unrelated SSH helper hang only.",
+      "INDEX.md and queue": "Read index and searched awaited/read/late-activity documentation terms; no exact explanation defect. switcher-late-activity-baseline concerns native GUI input baselines, not this sampler test.",
+      "TRIAGE_OUTCOMES.md": "No matching active sampler explanation decision in targeted searches.",
+      "FILTER.md": "Static false lifecycle documentation is not a rare self-correcting diagnostic; no complete filter match."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Maintainers are given an obsolete async screen-read rationale for retaining a session-wide activity cell. This has consistently been an internal documentation defect, without product failure, an invalid test oracle, security impact or user-work loss.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Record the screen-read-await explanation only; preserve earlier sampler awaits, parallel scheduling, and the useful late-write test. The supplied g132/c3 analogy concerns different removed failed-capture reset prose and is not an assigned alias established here."
+  }
+]

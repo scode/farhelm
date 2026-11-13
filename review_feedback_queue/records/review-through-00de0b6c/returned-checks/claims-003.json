@@ -1,0 +1,335 @@
+[
+  {
+    "key": "g005/f4",
+    "latest_line": 11,
+    "recommendation": "filtered",
+    "bucket": "highest",
+    "underlying_key": "old-terminal-survivor-interrupted-restart-false-stop-warning",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The conditional warning/cleanup mismatch is established by source. A retained Restart question can change to Interrupted and promise nothing remains to stop, while the fresh AgentOnly cleanup stops a startup survivor. The current older-release-plus-rare-condition filter appears to cover the entire route. This is a proposed exclusion, not an accepted drop or a claim that the warning is correct.",
+    "checks": [
+      "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:crates/farhelm-ui/src/status.rs:608-651 explicitly assumes Interrupted leaves nothing behind, renders the update/reboot nothing-left warning, and derives false stop consent.",
+      "Same revision:session_view.rs:1990-2052,2243-2272,2580-2634 retains the opening independently of current status and answers with that render's false consent. The route requires the question to remain mounted across update/reconnect; navigation/unmount removes this premise. The generic stop tooltip contradicts rather than cures the consequence text.",
+      "Same revision:service/core.rs:3775-3800,12840-12916,12979-13018 treats terminal-less old rows as no live agent for the consent guard, then runs AgentOnly cleanup with the prior scope and Refuse before relaunch. service/core/old_terminals.rs:290-355, checked at 1ed482dde220452e424973faf38a5e1318986333, has a shared 15-second budget and Warn cleanup. No execution or lost work was observed.",
+      "Current status.rs:635 still contains the same warning. This is separate from the duplicate-agent inference: a successful fresh sweep supplies this harm instead of refuting it. History supplies g032/l5 as original provenance; that outside-batch record was not independently reconciled here."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:2048 onward destructive-consent rule and :2998-3014 old-terminal paragraph; SPEC_impl.md:2780-2825 accepts survivors and deferred cleanup, without expressly accepting a false nothing-left warning.",
+      "TODO.md:25-27 Planned is empty. The phase-3 removal at :225-232 is Mid term and is not coverage. BUGS.md is solely the local-SSH-output-helper hang, not this route.",
+      "Searched plans/queue for old-terminal, tmux, Restart/consent and guard terms. The matching tmux-removal and environment plans are already landed per plans/REPORTS.md:28-32; no unlanded plan repairing this warning was found.",
+      "Read INDEX.md and searched the queue and active TRIAGE_OUTCOMES.md for the exact old-survivor/Restart-consent route. retained-restart-hides-reboot-card.md concerns hidden recovery presentation; retained-refusal-can-clear-restart-delete-protection.md concerns a different generation-race producer. Neither covers this warning. No exact queue or active outcome found; archive not read.",
+      "FILTER.md, Upgrades from older releases combined with another rare condition: old terminal state across upgrade plus startup cleanup timeout/fault is required; harm stays with those sessions. No security/trust-boundary, database corruption, bricked installation or normal-update failure is claimed."
+    ],
+    "exact_cover_quotes": [
+      "FILTER.md: The trigger needs something carried across an upgrade from an older Farhelm release: state an older release wrote, a session or agent that kept running through the upgrade, or a hook or report an older release installed.",
+      "FILTER.md: The trigger also needs another rare condition on top of that: a narrow timing window, a crash or fault at a specific point, or an unusual sequence of user or agent actions.",
+      "FILTER.md: Unlike the filters above, this one also covers losing user-owned work within the affected sessions, such as resuming the wrong conversation."
+    ],
+    "missing_premise": "No missing source premise for the conditional control route. Runtime occurrence, survivor workload and frequency were not measured. Independent check must agree the startup fault and retained-question sequence fall wholly within the upgrade filter.",
+    "original_stronger_consequence": "Stopping surviving user-owned agent work beyond the displayed nothing-left consequence; highest retained. Initial supplied lead was independently checked by the primary reviewer. No duplicate-agent or marker-invisibility premise is required; no loss was reproduced.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Apply only the older-release-plus-another-rare-condition filter, after independent highest-drop agreement. If its boundary is disputed, retain verified at highest; best-effort startup acceptance alone does not settle false confirmation wording."
+  },
+  {
+    "key": "g005/f5",
+    "latest_line": 13,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "environment-unanswered-delete-wording-remote-rollback-reading",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The isolated phrase is imprecise, but the reviewed contract expressly says an unanswered accepted Delete can still seal the environment and be finished later. The proposed remote-rollback guarantee is not the complete contract's meaning. This source refutation does not rely merely on later correct implementation.",
+    "checks": [
+      "b106c0e49646ecb9a17e1a06b17a70da0ece73e0:SPEC.md:1498-1536 contains both authorized Delete outcomes, explicit lost-reply finishing, and the nothing-is-decided shorthand. SPEC_impl.md:6614-6657 pairs the marker with listing-driven destruction.",
+      "Same revision:SPEC_impl.md:22-54 says an accepted server-owned mutation survives connection loss; only its reply is lost. That independently resolves what no answer can prove.",
+      "Supplementary later source at 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:crates/farhelm-helm/src/sessions/sandbox.rs:113-122 explicitly says an unanswered request may have acted, and :198-244 says cannot tell for timeout/connection loss. Nothing was deleted is confined to the no-client branch. No runtime observation."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:1506-1536 and SPEC_impl.md:6135-6160 retain the same complete distinction. Their explicit lost-reply finishing resolves the isolated shorthand rather than accepting an implementation rollback bug.",
+      "Planned is empty; BUGS.md has only an unrelated SSH helper hang. Matching plans/queue/environment-agent-operations.md is already landed per plans/REPORTS.md:28 and is not unlanded repair coverage.",
+      "INDEX.md, matching queue search and active TRIAGE_OUTCOMES.md contain no exact unanswered-environment-Delete wording item. rename-lost-reply-restores-old-shortcut-indication.md is a different operation/consequence. No exact duplicate or extension found. Archive not read; no filter needed."
+    ],
+    "exact_cover_quotes": [
+      "b106c0e:SPEC.md:1519-1521: the helm finishes destroying any sealed sandbox it sees, whether or not it sent the Delete: after a lost reply, a failed destruction or its own restart.",
+      "b106c0e:SPEC_impl.md:24-27: A client that disconnects, reloads, has its credential rotated, or is cancelled loses the reply, never part of the work."
+    ],
+    "missing_premise": "None for the contextual reading. No misleading shipped remote-rollback message or new destructive authority was established.",
+    "original_stronger_consequence": "Taken alone, nothing was decided might make a reader think the resource cannot still be deleted. The original Delete already confirmed both session-only and last-session whole-environment deletion; the record never established additional unapproved destruction. Preserve the lead-to-refuted-candidate revision.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "The reviewed full subsection explicitly describes the very lost-reply deletion that the feared guarantee would prohibit; both destructive outcomes were already authorized. Conservative independent check because the rejected reading concerns deletion of user-owned resources."
+  },
+  {
+    "key": "g006/f1",
+    "latest_line": 6,
+    "recommendation": "needs-parent",
+    "bucket": "other",
+    "underlying_key": "removed-terminal-selector-stale-migration-spec-condition",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The historical documentation defect is verified, but it was removed later inside this same review range. Do not resurrect the reviewer's withdrawn nearby-correct-text refutation: the contradiction really existed at 647f0227. The result enum has no repaired-in-range disposition, so the parent must record that factual resolution explicitly.",
+    "checks": [
+      "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:SPEC_impl.md:2488-2492 still says with the internal switch on while :2289-2320 makes creates, tab opens and Restart unconditional.",
+      "647f0227^:SPEC_impl.md:2295-2333 defines the selector and both Restart settings; :2504-2508 has the same migration clause. Removing the selector introduces the obsolete prerequisite, although the clause itself was not edited.",
+      "git log -S 'with the internal switch' over the explicit review range identifies 1ed482dde220452e424973faf38a5e1318986333 as removing the clause. That commit deletes the obsolete migration subsection. Current SPEC_impl.md:2160-2185 unconditionally specifies terminal hosts and has no internal-switch prerequisite.",
+      "No runtime divergence, security route or user-work loss was alleged. Correct implementation does not refute the historical documentation defect."
+    ],
+    "coverage_checked": [
+      "Both current specifications no longer describe the switch. Historical matching text and its parent were read rather than treating current wording as historical evidence.",
+      "Planned is empty. BUGS.md and active TRIAGE_OUTCOMES.md have no switch/migration-prerequisite item. INDEX.md's restart-unwind-omits-tree-sweep-failure.md was read and concerns a different missing unwind exception.",
+      "Matching plans/queue/tmux-end-old-terminals.md and tmux-drop-from-docs.md already landed per plans/REPORTS.md:29,32; this is a completed in-range removal, not promised future coverage. No exact queue alias or useful extension found. No filter applies to this documentation contradiction."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No historical defect premise missing. Parent must choose its recording disposition for a defect repaired later in the pinned range; retaining it as a current unresolved defect would be inaccurate.",
+    "original_stronger_consequence": "Misleading authoritative maintenance/migration instructions give a nonexistent prerequisite for moving an existing session to a host. The original proposal to dismiss as minor/resolved by nearby text was explicitly withdrawn. No higher security or loss-of-work consequence was claimed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Verified historical defect introduced by removing the selector at 647f0227 and repaired by deleting the migration subsection at 1ed482dd, both within the review range."
+  },
+  {
+    "key": "g006/f2",
+    "latest_line": 7,
+    "recommendation": "covered",
+    "bucket": "high",
+    "underlying_key": "offline-uninstall-old-private-tmux-survivor",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The exact surviving-server residual is explicitly accepted in both specifications. It is incomplete cleanup and unreachable retained terminal access, not a demonstrated wrong-target deletion or excessive destructive action. High describes the consequence absent its acceptance; acceptance is a recording basis, not a severity downgrade.",
+    "checks": [
+      "500548b9253b07a26fd03119679184b69544e31d:crates/farhelm-helm/src/provisioning/backend.rs:3252-3371 skips systemctl stop for inactive/failed service state and then explicitly ends terminal hosts only. There is no private-tmux cleanup step in this implementation.",
+      "Current SPEC.md:210-219 and SPEC_impl.md:7813-7832 expressly cover a server that outlived an already stopped supervisor, including a startup ending failure followed by stop.",
+      "The record's broader uninstall ownership/containment discussion was not converted into a new finding or an exhaustive uninstall review. No runtime observation, resource measurement or additional destructive route was established."
+    ],
+    "coverage_checked": [
+      "Exact current product and implementation acceptance read in full surrounding uninstall paragraphs. Planned is empty; BUGS.md is unrelated.",
+      "Matching tmux-drop-from-install plan is already landed per plans/REPORTS.md:30. No unlanded plan is needed as cover.",
+      "INDEX.md and active TRIAGE_OUTCOMES.md searches found only other uninstall issues, including final-scan mount and path-identity concerns. Their trigger/consequence differs from leaving this server alive; they are not exact aliases. No archive or new defect search. No filter needed."
+    ],
+    "exact_cover_quotes": [
+      "SPEC.md:212-216: Uninstall has no tmux step of its own: stopping the supervisor's service ends whatever still runs under it, an earlier release's private tmux server included, but one that outlived a supervisor stopped before uninstall (on a host never updated to a release that ends it at startup, say) keeps running, which the maintainer accepted on 2026-11-11.",
+      "SPEC_impl.md:7824-7827: Uninstall has no tmux step: a private tmux server that outlived a supervisor stopped before uninstall (a host never updated to a release that ends it at startup, or one whose startup ending failed and whose supervisor was later stopped) keeps running. The maintainer accepted that residual on 2026-11-11 when the step was removed."
+    ],
+    "missing_premise": "No missing premise for the accepted survivor behavior. No established security or work-loss route from leaving these same-account processes alive; unrelated destructive behavior is excluded from this basis.",
+    "original_stronger_consequence": "Old terminals/processes may keep consuming resources and become unreachable through Farhelm after the host/install is removed. The earlier high-if-unaccepted consequence remains preserved; no claim that the surviving process itself was killed or work lost.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Exact specification acceptance for survivor-only cleanup. Conservative independent check because user-owned processes and their access are involved; agreement must not cover hypothetical wrong-target removal or other uninstall defects."
+  },
+  {
+    "key": "g006/f3",
+    "latest_line": 9,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "legacy-create-retry-spec-failure-policy-allocation-exception",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The sentence references the existing spec-write-failure policy, whose governing allocation exception retains the checkout's owning error session. It does not promise unconditional row or checkout deletion. The original feared maintenance expectation is resolved by the explicit cross-contract exception.",
+    "checks": [
+      "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:SPEC_impl.md:2315-2319 says rolled back like a launch whose spec never landed; :4110-4135 explicitly retains an error session and membership after allocation. SPEC.md:1756-1762 independently requires the same retention.",
+      "Same revision:service/core.rs:11827-11863 applies FailedStart::Spec with an allocated-checkout exception; :15855-15930 refuses a retried tmux launch and deletes only no-origin/Planned cases, retaining allocated or unreadable origins. The compared policy and implementation agree.",
+      "Current SPEC_impl.md:2180-2185 and :3637-3660, SPEC.md:1761 onward still contain the comparison and governing retention rule. No runtime observation."
+    ],
+    "coverage_checked": [
+      "Both specifications' complete allocation/retention paragraphs and retry comparison read. Planned is empty and BUGS.md is unrelated.",
+      "Searched plans/queue, INDEX.md, matching queue and active TRIAGE_OUTCOMES.md for retry rollback, allocation, spec failure and old terminal terms. retained-refusal-can-clear-restart-delete-protection.md and its active discard outcome concern a generation race, not this reference's meaning. No exact duplicate, extension or unlanded repair found; archive not read.",
+      "The record's supplied g107/g107-l3 concerns leftover private launch artifacts after refusal, not the ownership-preserving policy. It is outside this batch and was not independently reconciled. No filter needed."
+    ],
+    "exact_cover_quotes": [
+      "647f0227:SPEC_impl.md:4120-4125: A post-allocation failure atomically retains an error session and membership instead of losing the only deletion handle.",
+      "647f0227:SPEC.md:1756-1762: Once allocation has occurred, failures retain the session and its checkout association for inspection and Delete."
+    ],
+    "missing_premise": "None for the contextual source conclusion. The feared unconditional-deletion reading contradicts the explicitly governing allocation exception.",
+    "original_stronger_consequence": "A reader taking rolled back as unconditional row deletion could expect no session while an allocated checkout correctly remains associated with a visible error session. No actual deletion of allocated work or security route was established. Preserve the initial lead and later context-refutation.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Explicit governing allocation exception plus identical referenced FailedStart::Spec and legacy-retry retention branches. Conservative independent check because the rejected reading concerns the ownership handle for a user checkout."
+  },
+  {
+    "key": "g007/f1",
+    "latest_line": 12,
+    "recommendation": "covered",
+    "bucket": "other",
+    "underlying_key": "old-terminal-startup-best-effort-duplicate-agent-residual",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Best-effort startup and the possible duplicate-agent residual are expressly accepted. Source also defeats the simple inference that a startup cleanup failure alone causes two agents: Restart performs another refusing sweep. Original potential work loss and provisional lowering must remain in the independent register.",
+    "checks": [
+      "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:SPEC_impl.md:2994-3000 explicitly accepts deferred cleanup and a second agent beside a survivor. SPEC.md:3012-3016 repeats the acceptance.",
+      "Same revision:service/core.rs:6427-6442 unconditionally disables the old driver after best-effort retirement; :7330-7382 converts independently of sweep success. :12979-13018 reaps the prior scope and AgentOnly survivors with Refuse before relaunch.",
+      "Same revision:service/sweep.rs:248-260 includes current/legacy agent markers; :1027-1104 describes repeated enumeration and confirmed death; :1440-1469,1518-1568 validates roots, attempts scopes, retains fallback and returns Err for unconfirmed recorded scope under Refuse. An ordinary marker-readable/scoped survivor cannot be inferred to bypass that cleanup merely from startup failure.",
+      "SPEC.md:2088-2105 separately accepts detached unidentifiable unscoped processes. No shipped ordinary live-agent process shape surviving all fresh selectors was established, and no loss reproduced. The false Restart warning and no-live Delete authority claims are separate, not refuted by fresh cleanup."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:2998-3014 and SPEC_impl.md:2780-2825 retain exact startup/duplicate acceptance; portable-cleanup limits also remain. Planned is empty, BUGS.md unrelated.",
+      "Matching tmux plans already landed, per plans/REPORTS.md:29-32. No matching unlanded repair or active ledger decision found.",
+      "Read INDEX.md and matching queue items for cleanup/restart/refusal and active TRIAGE_OUTCOMES.md. No exact existing duplicate-agent item found. Supplied g005/f1 and g109/c1 aliases are outside this batch and not independently reconciled; use this underlying key for the parent's cross-batch reconciliation. No filter is required for this explicit acceptance basis."
+    ],
+    "exact_cover_quotes": [
+      "dbfc6975:SPEC_impl.md:2998-3000: A failure anywhere is logged and never fatal (the maintainer chose to start anyway and treat old sessions as ended, accepting that a Restart could then start a second agent beside one still running)",
+      "dbfc6975:SPEC.md:2094-2099: a detached process that hides or overwrites its environment survives stop and delete there",
+      "dbfc6975:SPEC.md:2099: these are accepted limits of such hosts, not defects to engineer around."
+    ],
+    "missing_premise": "A supported ordinary live agent must survive all fresh Restart marker/root/scope selectors and run alongside the new agent before the original highest duplicate/work-loss route is established. No runtime installed-agent premise supplied that process shape.",
+    "original_stronger_consequence": "Two agents may modify the same work and lose user-owned data. The history first suggested potentially highest, then provisionally lowered to other after finding fresh Restart cleanup. That lowering and proposed acceptance-based drop remain unapproved; separate false-consent harm is retained by g005/f4 and separate Delete authority by g007/c4.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Exact acceptance of startup continuation and potential duplicate agents, narrowly scoped; independent check must also judge the historical consequence lowering. Fresh cleanup does not authorize dismissing false confirmation or hidden-live-tab harm."
+  },
+  {
+    "key": "g007/c2",
+    "latest_line": 2,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "retired-tmux-doc-deletion-shared-launch-contract-relocation",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The shared launch classification, quoting and pre-stop validation rules were relocated under Terminal host, not removed. The candidate did not establish an implementation regression or a missing governing rule.",
+    "checks": [
+      "1ed482dde220452e424973faf38a5e1318986333:SPEC_impl.md:2700-2778 contains the full Launch failure classification subsection, including per-launch sentinel identity, pending-Stop inference guards, scoped waypoint diagnosis, literal placeholder replacement, and Restart validation before stopping.",
+      "The same subsection keeps Only LaunchSpec.argv receives [bash, -c, line], while metadata remains literal. No source execution or unrelated retired-driver review."
+    ],
+    "coverage_checked": [
+      "Current SPEC_impl.md:2603 onward still carries Launch failure classification. SPEC.md's command/lifecycle contracts were searched and do not accept deletion of these protections; deletion did not occur.",
+      "Planned empty; BUGS.md unrelated. Matching tmux-removal/tooling/docs plans landed per plans/REPORTS.md:29-32, not pending repairs. INDEX.md, matching queue and active ledger searches found no exact lost-contract report or useful extension. No archive; no filter needed."
+    ],
+    "exact_cover_quotes": [
+      "1ed482dd:SPEC_impl.md:2741-2753: Only those spans are replaced, using single-quoted literal values.",
+      "1ed482dd:SPEC_impl.md:2741-2753: Restart checks it before stopping the previous agent."
+    ],
+    "missing_premise": "None: the complete retained subsection directly refutes contract deletion. No stronger runtime consequence was established.",
+    "original_stronger_consequence": "Removing the tmux section might remove generic command-launch, shell quoting and failure-classification protections. Original record called this documentation preservation, with no established security or work-loss route; those protections remain present.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Direct retained-contract evidence, not low severity or correct production code alone. Conservative independent check because the considered rules include quoting and stopping preconditions."
+  },
+  {
+    "key": "g007/c3",
+    "latest_line": 4,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "retained-testing-tmux-summary-existing-release-integration-coverage",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Distribution tmux and real-server startup/cleanup tests remained after pinned-build removal. The stronger assertion that the testing sentence referred to nonexistent tests is false. Unchanged text in one assigned patch alone would not establish an out-of-range exclusion.",
+    "checks": [
+      "d751ff1633bb479c7bf53920f2e4ea4ba932a1c2:.github/dist-build-setup.yml:158-170 installs distribution tmux for real old-layout startup, test-state cleanup and user-run tmux scope tests, explicitly preventing skips from replacing coverage.",
+      "Same revision:SPEC_impl.md:8180-8210 still says supervisor+tmux and CI provides tmux. This is broad/imprecise about which CI, but the release gate is an actual matching CI producer. No claim that ordinary ci.yml installs it.",
+      "303a1264b7bd791e8f6f6de2c7bb6136c08e8bab:crates/farhelm-fixtures/src/fake_agent.rs enum was inspected; Binary is absent and the doc fixture-list deletion matches it. Current SPEC_impl.md:8184 describes supervisor tests with real terminal hosts, so even the broad old summary is no longer current. No runtime/build checks."
+    ],
+    "coverage_checked": [
+      "Searched both current specifications for Testing, tmux coverage and binary fixture claims. Current host wording and kept old-layout startup test description match the limited remaining tmux use.",
+      "Planned empty; BUGS.md unrelated; matching tmux tooling/docs plans landed per plans/REPORTS.md:31-32. INDEX.md and active ledger contain test-oracle issues but no exact nonexistent-supervisor/tmux-coverage item. No exact duplicate/extension or unlanded repair; no filter needed; archive not read."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No defect premise remains for nonexistent tests or a removed binary script still documented by the assigned patch. The phrase CI was broader than ordinary on-demand ci.yml, as preserved in the record.",
+    "original_stronger_consequence": "Possible misleading maintenance guidance after pinned tmux and Binary fixture removal. No security, user-work loss or runtime behavior consequence alleged. Do not use unchanged-in-two-patches as the sole range argument.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Concrete retained release-gate tmux installation and real-server test purpose, accurate Binary removal, and later current testing wording."
+  },
+  {
+    "key": "g007/c4",
+    "latest_line": 13,
+    "recommendation": "filtered",
+    "bucket": "highest",
+    "underlying_key": "old-terminal-survivor-nothing-alive-delete-authority-gap",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The conditional guard-to-WholeSession mismatch is source-established, distinct from the earlier refuted missing-cleanup concern. It nevertheless appears wholly inside the current older-release-plus-rare-condition filter: supported mixed old/new terminal state survives an upgrade and a rare startup connection failure leaves an old live tab hidden. Do not call successful cleanup a consent refutation.",
+    "checks": [
+      "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4^:SPEC_impl.md:2956-2958 expressly supports host agents with old tmux tabs. Let the host agent end while an old tab remains live.",
+      "1ed482dde220452e424973faf38a5e1318986333:service/core/old_terminals.rs:179-189 returns no pane inventory on non-absence connection failure; :296-298 skips an empty converted/pane sweep; :321-328 derives tab sessions only from converted rows/attributed panes. SPEC_impl.md at dbfc6975:2968-2970 documents EAGAIN/full-backlog and macOS live-listener refusal.",
+      "1ed482dd:status.rs:396-433 creates NothingAlive from ended agent and zero listed tabs. list/view.rs:3195-3236 performs direct Delete and its descendant-cleanup rationale presumes the actual program ended; it does not establish that a still-live old tab ended.",
+      "1ed482dd:service/handlers.rs:1243-1286 checks the guard under lifecycle ownership before teardown; service/core.rs:13307-13376 probes only current/recorded hosts and hosts.live_tabs. service/teardown.rs:387-458 keeps full sweep for incomplete historical inventory, and :531-540 invokes WholeSession. dbfc6975:service/sweep.rs:248-260 selects all session-marked processes for WholeSession. Thus the hidden tab can be killed after the no-live guard passes.",
+      "No runtime loss was observed. History's g128/l1 is a supplied alternative old-agent producer outside this batch, not independently reconciled here. Its stated root matches this guard gap; Restart false-warning uses a different guard and correction surface."
+    ],
+    "coverage_checked": [
+      "SPEC.md:2048-2056 protects direct NothingAlive clicks and all live terminal tabs. Current :2998-3014 and SPEC_impl.md:2780-2825 accept startup continuation, ended classification and later cleanup. Whether that acceptance also waives explicit no-live consent is ambiguous; retain absent the separately applicable filter.",
+      "Planned empty; Mid term phase-3 removal is not Planned coverage. BUGS.md unrelated. Matching tmux-removal plans already landed per plans/REPORTS.md:29-32; no unlanded guard repair found.",
+      "INDEX.md plus matching retained-refusal-can-clear-restart-delete-protection.md and active outcome were read: that is a missing generation-check producer requiring a still-unestablished validation failure, not old-terminal retirement. No exact queued root/extension or active same-finding decision found; archive not read.",
+      "FILTER.md older-release-plus-rare-condition boundary fits the complete stated trigger, and expressly permits loss of work in affected sessions. This route claims neither security/trust-boundary impact nor database corruption, a bricked install or inability to update normally. The fault is old-server retirement while the new supervisor starts."
+    ],
+    "exact_cover_quotes": [
+      "FILTER.md: The trigger needs something carried across an upgrade from an older Farhelm release: state an older release wrote, a session or agent that kept running through the upgrade, or a hook or report an older release installed.",
+      "FILTER.md: The trigger also needs another rare condition on top of that: a narrow timing window, a crash or fault at a specific point, or an unusual sequence of user or agent actions.",
+      "FILTER.md: Unlike the filters above, this one also covers losing user-owned work within the affected sessions, such as resuming the wrong conversation.",
+      "Competing, not definitive cover: SPEC.md:3006-3012 leaves unattributed old tabs for Delete and treats old sessions as ended despite retirement failure; SPEC.md:2048-2056 separately requires a NothingAlive Delete to refuse a running agent or any terminal tab."
+    ],
+    "missing_premise": "No missing source premise for the conditional old-tab route; actual EAGAIN/live workload was not reproduced. Independent judgment must approve the filter's complete boundary. If instead dropping on specification acceptance, independently settle the no-live-consent versus deferred-cleanup ambiguity rather than assuming the latter wins.",
+    "original_stronger_consequence": "Original concern: missing old-tab discovery might leave live processes modifying work; conservative teardown refuted missing cleanup. History then established a separate highest route: direct no-live Delete kills undisclosed live old tab/editor work. Preserve the earlier other bucket's limited completeness scope, every proposed-drop caveat and the final highest authority consequence.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Proposed filter-only exclusion for old-release carried state plus rare startup connection/cleanup fault, subject to independent highest-drop agreement. Without agreement, retain verified highest and preserve the specification ambiguity."
+  },
+  {
+    "key": "g007/c5",
+    "latest_line": 14,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "old-terminal-interruption-create-reservation-provenance-preserved",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Old-terminal interruption neither erases retained acceptance evidence nor uses Interrupted alone to fabricate it. The exact recorded-address/sentinel settlement routes refute the two proposed mechanisms; this does not certify every create recovery failure.",
+    "checks": [
+      "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:SPEC_impl.md:2982-2983 explicitly retains terminal_address for reservation evidence. service/core.rs:7400-7415 builds launched from an existing terminal or nonempty retained address; :7579-7637 separately tests scopes/sentinels and expressly excludes Interrupted alone.",
+      "Same revision:store.rs:529-534 maps TerminalEnded to Interrupted without an address-clearing operation. :4953-5000 documents/implements monotonic, session-bound transactional settlement; :5003-5047 preserves generation-zero sentinel acceptance before unlink, retaining the sentinel when the transaction cannot establish that shape.",
+      "Current SPEC_impl.md:2802-2804 retains the same evidence rule. No duplicate create, fabricated success, work loss or runtime behavior was observed."
+    ],
+    "coverage_checked": [
+      "Both specifications searched for reservation recovery, interruption, recorded address and cleanup; the specific current implementation paragraph and governing create-retention rules agree. Planned empty; BUGS.md unrelated.",
+      "Matching old-terminal plans landed, not future coverage. INDEX.md, matching queue and active outcomes searched for reservation/evidence/interruption; retained-refusal-can-clear-restart-delete-protection.md is a different generation-race mechanism, and retention-plan-omits-live-retry-downgrade-limit.md concerns downgrade disclosure, not acceptance provenance. No exact duplicate or extension found; archive not read; no filter needed."
+    ],
+    "exact_cover_quotes": [
+      "dbfc6975:SPEC_impl.md:2982-2983: Its terminal_address stays as stored, because the reservation settlement reads a recorded one as evidence that the launch happened."
+    ],
+    "missing_premise": "None for the considered address-loss or outcome-only-fabrication mechanisms: direct consumer code rules them out. Other startup/deletion/reservation failure paths were not assigned or certified.",
+    "original_stronger_consequence": "Erased accepted-create evidence could permit a duplicate create running conflicting user work; settling a never-started create could falsely report creation. Original record explicitly preserved possible highest loss if either route held, while establishing neither.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Exact preserved-address contract, narrow launched predicate and sentinel-before-unlink transaction, subject to independent check for the hypothetical duplicate/work-loss consequence."
+  },
+  {
+    "key": "g007/c6",
+    "latest_line": 15,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "retired-old-warning-helper-empty-production-pane-state",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The retained helper cannot reopen an old-terminal warning in shipped startup construction: the driver is forced absent and supplies no live old panes. Its notification predicate then cannot report running. Historical helper comments are a separate possible documentation surface, not a runtime recurrence claim.",
+    "checks": [
+      "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:service/core.rs:6427-6442 unconditionally calls no_server_after_startup. tmux/presence.rs:11-19 explains absent-server synthetic queries without tmux execution.",
+      "Same revision:service/notifications.rs:513-551 records only for running=true and otherwise resolves/does nothing; :603-639 requires a Tmux terminal with a live pane or an old tab in the pane map. Host/None agent entries and an empty synthesized map supply neither predicate.",
+      "Same revision:SPEC_impl.md:6170-6182 gives separate old_terminal and old_terminal_ended lifetimes, matching current :5682-5689. No runtime recurrence, omission or work loss observed."
+    ],
+    "coverage_checked": [
+      "Both current specifications' complete old-terminal notification paragraphs match the stated lifecycle. Planned empty; BUGS.md unrelated; matching tmux plans landed per plans/REPORTS.md:29-32.",
+      "INDEX.md and notification-read-failure-leaves-stale-cell.md read. That item is an explicit read-failure/publication retry defect and was narrowed after removal of this producer; it is not reopening an old warning from live pane evidence. No useful extension or exact alias. Active ledger search has no same recurrence decision; archive not read; no filter needed."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No missing production predicate premise. Test-only construction can supply synthetic pane states, but that is not a second shipped warning producer.",
+    "original_stronger_consequence": "A misleading obsolete migration warning might reappear immediately after startup resolves it. No security or user-owned-work loss route was alleged. Retained historical comments and unrelated notification publication failures are outside this refutation.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Forced absent driver plus the exact live-pane/tab predicate refute normal shipped warning recurrence."
+  },
+  {
+    "key": "g008/f1",
+    "latest_line": 7,
+    "recommendation": "covered",
+    "bucket": "highest",
+    "underlying_key": "upgrade-intentionally-ends-old-private-terminals-and-history",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Terminating old terminals and losing their retained screen/scrollback is explicitly specified product behavior. The reviewed implementation-specification rewrite catches up to behavior introduced earlier within this review range; being pre-existing to that one patch does not itself make the concern out of range.",
+    "checks": [
+      "1ed482dde220452e424973faf38a5e1318986333:SPEC_impl.md:2880-2930 describes replacement shutdown/conversion and removal of history-preserving tmux Restart. Same-revision SPEC.md:3003-3016 explicitly requires ending old processes, losing their server-held screen and starting Restart/Clone/Replace empty.",
+      "The immediately preceding reviewed retirement commit dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 already has the same product acceptance and core.rs:6427-6442 calls retirement before forcing the driver absent. This is accepted in-range behavior, not an out-of-range dismissal.",
+      "Current SPEC.md:2998-3014 and SPEC_impl.md:2780-2825 retain that acceptance. No execution, actual lost processes/output or exhaustive cleanup-ownership audit."
+    ],
+    "coverage_checked": [
+      "Both specifications' full old-terminal paragraphs read at reviewed and current revisions. Planned empty, BUGS.md unrelated. Matching tmux-end-old-terminals/docs plans are landed per plans/REPORTS.md:29,32, not pending repair cover.",
+      "INDEX.md, matching queue and active TRIAGE_OUTCOMES.md searched for upgrade/old-terminal termination/history loss. No exact queued remainder or active conflicting decision found. Other terminal-history bugs concern new host recovery and do not extend this accepted destruction. No archive; filter unnecessary because ordinary upgrade alone is enough for this behavior."
+    ],
+    "exact_cover_quotes": [
+      "1ed482dd:SPEC.md:3003-3006: This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.",
+      "1ed482dd:SPEC.md:3007-3009: one whose agent had already ended keeps its outcome, but its terminal's last screen, which lived in the server, is gone; old tabs are closed.",
+      "1ed482dd:SPEC.md:3016: After an update to this release, Restart, Clone and Replace start such a session in a new, empty terminal."
+    ],
+    "missing_premise": "None for explicit acceptance of this exact behavior. Acceptance does not cover stopping another owner's terminals, cleanup implementation errors, misleading later confirmations or effects beyond old terminal processes/output.",
+    "original_stronger_consequence": "Upgrade stops user-owned agents and shell tabs, loses old retained screen/scrollback and makes subsequent Restart empty. Preserve highest absent explicit acceptance; no runtime loss was observed. Later documentation attribution does not erase earlier in-range introduction.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Exact product acceptance of terminating old terminals and dropping their history, independently checked before exclusion. Scope excludes implementation ownership failures and later misleading destructive consent."
+  }
+]

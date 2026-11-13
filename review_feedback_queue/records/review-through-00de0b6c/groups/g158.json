@@ -1,0 +1,416 @@
+{
+  "group": {
+    "id": "g158",
+    "domain": "rust-terminal-host-regressions",
+    "purpose": "rust-terminal-host-regressions: crates/farhelm/tests/e2e/host_creates.rs, crates/farhelm/tests/e2e/host_processes.rs, crates/farhelm/tests/e2e/host_relaunches.rs, crates/farhelm/tests/e2e/host_restarts.rs, crates/farhelm/tests/e2e/host_tabs.rs, crates/farhelm/tests/e2e/host_terminals.rs, crates/farhelm/tests/e2e/merged_hosts.rs, crates/farhelm/tests/e2e/terminal_tabs.rs, crates/farhelm/tests/terminal_host_runtime.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g144",
+      "g145",
+      "g146",
+      "g151",
+      "g152",
+      "g153",
+      "g154",
+      "g155",
+      "g156",
+      "g157",
+      "g159",
+      "g160",
+      "g161",
+      "g162",
+      "g163",
+      "g164",
+      "g165",
+      "g166",
+      "g167",
+      "g168",
+      "g169",
+      "g170",
+      "g171",
+      "g172",
+      "g173"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/01566-000.patch",
+        "ranges": [
+          [
+            1,
+            74
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/host_creates.rs",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,5126)",
+        "lines": 74,
+        "bytes": 5126,
+        "start": 0,
+        "end": 5126,
+        "original": "[private-run]/prep/originals/01566.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01567-000.patch",
+        "ranges": [
+          [
+            1,
+            53
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/host_processes.rs",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,2978)",
+        "lines": 53,
+        "bytes": 2978,
+        "start": 0,
+        "end": 2978,
+        "original": "[private-run]/prep/originals/01567.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01569-000.patch",
+        "ranges": [
+          [
+            1,
+            109
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/host_relaunches.rs",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,7252)",
+        "lines": 109,
+        "bytes": 7252,
+        "start": 0,
+        "end": 7252,
+        "original": "[private-run]/prep/originals/01569.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01570-000.patch",
+        "ranges": [
+          [
+            1,
+            59
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/host_restarts.rs",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,3948)",
+        "lines": 59,
+        "bytes": 3948,
+        "start": 0,
+        "end": 3948,
+        "original": "[private-run]/prep/originals/01570.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01571-000.patch",
+        "ranges": [
+          [
+            1,
+            52
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/host_tabs.rs",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,3544)",
+        "lines": 52,
+        "bytes": 3544,
+        "start": 0,
+        "end": 3544,
+        "original": "[private-run]/prep/originals/01571.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01572-000.patch",
+        "ranges": [
+          [
+            1,
+            21
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/host_terminals.rs",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,1193)",
+        "lines": 21,
+        "bytes": 1193,
+        "start": 0,
+        "end": 1193,
+        "original": "[private-run]/prep/originals/01572.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01576-000.patch",
+        "ranges": [
+          [
+            1,
+            35
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/merged_hosts.rs",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,1886)",
+        "lines": 35,
+        "bytes": 1890,
+        "start": 0,
+        "end": 1886,
+        "original": "[private-run]/prep/originals/01576.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01587-000.patch",
+        "ranges": [
+          [
+            1,
+            64
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/terminal_tabs.rs",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,4019)",
+        "lines": 64,
+        "bytes": 4019,
+        "start": 0,
+        "end": 4019,
+        "original": "[private-run]/prep/originals/01587.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01589-000.patch",
+        "ranges": [
+          [
+            1,
+            22
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/terminal_host_runtime.rs",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,1364)",
+        "lines": 22,
+        "bytes": 1364,
+        "start": 0,
+        "end": 1364,
+        "original": "[private-run]/prep/originals/01589.patch"
+      }
+    ],
+    "lines": 489,
+    "bytes": 31314
+  },
+  "records": [
+    {
+      "key": "g158/c1",
+      "owner": "g158",
+      "id": "c1",
+      "domain": "rust-terminal-host-regressions",
+      "purpose": "rust-terminal-host-regressions: crates/farhelm/tests/e2e/host_creates.rs, crates/farhelm/tests/e2e/host_processes.rs, crates/farhelm/tests/e2e/host_relaunches.rs, crates/farhelm/tests/e2e/host_restarts.rs, crates/farhelm/tests/e2e/host_tabs.rs, crates/farhelm/tests/e2e/host_terminals.rs, crates/farhelm/tests/e2e/merged_hosts.rs, crates/farhelm/tests/e2e/terminal_tabs.rs, crates/farhelm/tests/terminal_host_runtime.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "The broader no-tmux test explanation matches the current supervisor contract",
+            "location": "crates/farhelm/tests/e2e/host_processes.rs:459",
+            "detail": "# The broader no-tmux test explanation matches the current supervisor contract\n\nReviewed commit: 08399d092d20815ced6619c26df2391944ae2b4a\n\n## TLDR\n\nNo issue to report: the changed explanation correctly says that session operations do not invoke tmux, including when an older service definition still names a tmux program.\n\n## Details\n\nConsidered whether replacing the restriction to new terminals with an unconditional no-tmux claim conceals the startup cleanup of old terminals or programs a user runs inside a terminal. Source checks: host_processes.rs:480-576 still validates its recorder, verifies FARHELM_TMUX in the child supervisor's environment, drives create, listing, attach, tab close, rename, Delete, ticker passes and shutdown, and asserts an empty invocation log. git grep of FARHELM_TMUX in the pinned supervisor source found it only in host_launch.rs's inheritance exclusion and its test. service/core/old_terminals.rs:14-16 states exactly: 'No tmux program runs, and none needs to be installed: the server is reached with a plain connect to its socket.' SPEC_impl.md:7996-8002 states 'The supervisor runs no tmux.' and 'Nothing this release starts or renders sets it, but a supervisor unit an earlier release wrote keeps setting it until its next setup or Update; the supervisor ignores it.' Thus ending an earlier server does not require executing the configured recorder. A user's own tmux is outside this test's session operations and is still allowed by SPEC.md. The changed assertion alters only its failure message.\n\nSuggested bucket: other (test documentation; no established product impact). Confidence: confirmed by source and contract analysis, not execution. Could-be-highest: no; no security or user-work-loss route introduced by this patch. proposed_drop: source-refuted candidate, exact contract and source text quoted above. possible_cover: none; no coverage sources searched. Caveats: this is a bounded regression test, not proof about every arbitrary user command. No tests or reproductions run."
+          }
+        },
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "The broader no-tmux test explanation matches the current supervisor contract",
+            "location": "crates/farhelm/tests/e2e/host_processes.rs:459",
+            "detail": "# The broader no-tmux test explanation matches the current supervisor contract\n\nReviewed commit: 08399d092d20815ced6619c26df2391944ae2b4a\n\n## TLDR\n\nNo issue to report: the changed explanation correctly says that session operations do not invoke tmux, including when an older service definition still names a tmux program.\n\n## Details\n\nConsidered whether replacing the restriction to new terminals with an unconditional no-tmux claim conceals the startup cleanup of old terminals or programs a user runs inside a terminal. Source checks: host_processes.rs:480-576 still validates its recorder, verifies FARHELM_TMUX in the child supervisor's environment, drives create, listing, attach, tab close, rename, Delete, ticker passes and shutdown, and asserts an empty invocation log. git grep of FARHELM_TMUX in the pinned supervisor source found it only in host_launch.rs's inheritance exclusion and its test. service/core/old_terminals.rs:14-16 states exactly: 'No tmux program runs, and none needs to be installed: the server is reached with a plain connect to its socket.' SPEC_impl.md:7996-8002 states 'The supervisor runs no tmux.' and 'Nothing this release starts or renders sets it, but a supervisor unit an earlier release wrote keeps setting it until its next setup or Update; the supervisor ignores it.' Thus ending an earlier server does not require executing the configured recorder. A user's own tmux is outside this test's session operations and is still allowed by SPEC.md. The changed assertion alters only its failure message.\n\nSuggested bucket: other (test documentation; no established product impact). Confidence: confirmed by source and contract analysis, not execution. Could-be-highest: no; no security or user-work-loss route introduced by this patch. proposed_drop: source-refuted candidate, exact contract and source text quoted above. possible_cover: none; no coverage sources searched. Caveats: this is a bounded regression test, not proof about every arbitrary user command. No tests or reproductions run.\n\nSynthesis revision (turn 2): checked actual startup termination rather than relying only on its documentation. service/core/old_terminals.rs:176-280 connects with UnixStream::connect to the state directory socket, verifies the same-user peer, snapshots its processes, drops the stream, and calls terminate_process_within with names_tmux_server_socket on that pinned process. It does not execute a configured tmux binary. Inherited FARHELM_TMUX can therefore coexist with termination of a previously running server without invoking the recorder. That existing server is not a program newly launched by these session operations. A user command or login file may separately run tmux, which SPEC.md Session view permits; this fixture does not ask for it. The parent reports g146/g144 confirmed real tmux remains only in explicit owned fixture paths and g150 confirmed warning resolution is startup-only. These corroborate the boundary; the direct pinned source check independently establishes this conclusion. Confidence and suggested bucket remain unchanged. proposed_drop remains source refutation, with exact source and contract text above; no parent disposition is assumed. The original suspected consequence was misleading regression documentation, not a demonstrated runtime regression. No execution was performed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 2,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "The broader no-tmux test explanation matches the current supervisor contract",
+          "location": "crates/farhelm/tests/e2e/host_processes.rs:459",
+          "detail": "# The broader no-tmux test explanation matches the current supervisor contract\n\nReviewed commit: 08399d092d20815ced6619c26df2391944ae2b4a\n\n## TLDR\n\nNo issue to report: the changed explanation correctly says that session operations do not invoke tmux, including when an older service definition still names a tmux program.\n\n## Details\n\nConsidered whether replacing the restriction to new terminals with an unconditional no-tmux claim conceals the startup cleanup of old terminals or programs a user runs inside a terminal. Source checks: host_processes.rs:480-576 still validates its recorder, verifies FARHELM_TMUX in the child supervisor's environment, drives create, listing, attach, tab close, rename, Delete, ticker passes and shutdown, and asserts an empty invocation log. git grep of FARHELM_TMUX in the pinned supervisor source found it only in host_launch.rs's inheritance exclusion and its test. service/core/old_terminals.rs:14-16 states exactly: 'No tmux program runs, and none needs to be installed: the server is reached with a plain connect to its socket.' SPEC_impl.md:7996-8002 states 'The supervisor runs no tmux.' and 'Nothing this release starts or renders sets it, but a supervisor unit an earlier release wrote keeps setting it until its next setup or Update; the supervisor ignores it.' Thus ending an earlier server does not require executing the configured recorder. A user's own tmux is outside this test's session operations and is still allowed by SPEC.md. The changed assertion alters only its failure message.\n\nSuggested bucket: other (test documentation; no established product impact). Confidence: confirmed by source and contract analysis, not execution. Could-be-highest: no; no security or user-work-loss route introduced by this patch. proposed_drop: source-refuted candidate, exact contract and source text quoted above. possible_cover: none; no coverage sources searched. Caveats: this is a bounded regression test, not proof about every arbitrary user command. No tests or reproductions run.\n\nSynthesis revision (turn 2): checked actual startup termination rather than relying only on its documentation. service/core/old_terminals.rs:176-280 connects with UnixStream::connect to the state directory socket, verifies the same-user peer, snapshots its processes, drops the stream, and calls terminate_process_within with names_tmux_server_socket on that pinned process. It does not execute a configured tmux binary. Inherited FARHELM_TMUX can therefore coexist with termination of a previously running server without invoking the recorder. That existing server is not a program newly launched by these session operations. A user command or login file may separately run tmux, which SPEC.md Session view permits; this fixture does not ask for it. The parent reports g146/g144 confirmed real tmux remains only in explicit owned fixture paths and g150 confirmed warning resolution is startup-only. These corroborate the boundary; the direct pinned source check independently establishes this conclusion. Confidence and suggested bucket remain unchanged. proposed_drop remains source refutation, with exact source and contract text above; no parent disposition is assumed. The original suspected consequence was misleading regression documentation, not a demonstrated runtime regression. No execution was performed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g158/findings.jsonl",
+        "id": "c1",
+        "line": 2,
+        "disposition": "excluded",
+        "group": "no-tmux-test-explanation-versus-startup-socket-cleanup",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-100 after inspecting it. The changed explanation describes supervisor session operations, which do not invoke a tmux program. Startup ends an old server through its socket and process identity; a user's own commands are outside this fixture's assertion. Source refutation of misleading regression documentation in the stated session-operation scope; preserve the explicit arbitrary-user-command caveat. Checked source/results: [\"At 08399d092d20815ced6619c26df2391944ae2b4a, host_processes.rs:459-476 states the bounded contract; :483-519 validates the recorder and its delivery through FARHELM_TMUX; :521-575 drives session/tab operations and orderly shutdown and requires an empty invocation log.\",\"At the same hash, service/core/old_terminals.rs:176-280 connects using UnixStream::connect, verifies same-user peer identity, snapshots the subtree and calls terminate_process_within with names_tmux_server_socket. It never executes the configured tmux binary in this path.\",\"Current SPEC_impl.md:7996-8002 explicitly states that the supervisor runs no tmux and ignores the FARHELM_TMUX retained in older installed units. No runtime pass is claimed.\"] Current coverage/results: [\"SPEC_impl.md:2780-2822 and :7996-8002 explicitly support no-program startup cleanup and obsolete environment handling. SPEC.md:5164-5195 explicitly allows the user's own tmux as an ordinary program; that does not make it a supervisor operation exercised by this fixture.\",\"TODO.md Planned is empty. Searched plans/queue for no-tmux, old-terminal and FARHELM_TMUX context; the tmux plans require program-free startup cleanup and removal of old environment plumbing, not a conflicting test contract.\",\"Current INDEX.md and matching queue-file searches found no exact misleading-no-tmux-test explanation item. BUGS.md and active TRIAGE_OUTCOMES.md have no matching trigger/consequence. No archive read.\",\"FILTER.md is not used; the named concern is source-refuted rather than a rare diagnostic exception.\"] Exact cited cover: [{\"source\":\"SPEC_impl.md:7996\",\"quote\":\"The supervisor runs no tmux.\"},{\"source\":\"SPEC_impl.md:2787-2788\",\"quote\":\"works whether or not any tmux program exists\"}] Original stronger consequence and missing premise remain preserved: \"The broader wording might mislead maintainers by overlooking startup retirement or user-launched tmux. The second history record checks actual startup termination rather than relying on comments. Neither version alleges a runtime regression or security/work-loss route; the fixture does not prove arbitrary user commands avoid tmux.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g158/c1",
+        "line": 2,
+        "disposition": "excluded",
+        "group": "no-tmux-test-explanation-versus-startup-socket-cleanup",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-100 after inspecting it. The changed explanation describes supervisor session operations, which do not invoke a tmux program. Startup ends an old server through its socket and process identity; a user's own commands are outside this fixture's assertion. Source refutation of misleading regression documentation in the stated session-operation scope; preserve the explicit arbitrary-user-command caveat. Checked source/results: [\"At 08399d092d20815ced6619c26df2391944ae2b4a, host_processes.rs:459-476 states the bounded contract; :483-519 validates the recorder and its delivery through FARHELM_TMUX; :521-575 drives session/tab operations and orderly shutdown and requires an empty invocation log.\",\"At the same hash, service/core/old_terminals.rs:176-280 connects using UnixStream::connect, verifies same-user peer identity, snapshots the subtree and calls terminate_process_within with names_tmux_server_socket. It never executes the configured tmux binary in this path.\",\"Current SPEC_impl.md:7996-8002 explicitly states that the supervisor runs no tmux and ignores the FARHELM_TMUX retained in older installed units. No runtime pass is claimed.\"] Current coverage/results: [\"SPEC_impl.md:2780-2822 and :7996-8002 explicitly support no-program startup cleanup and obsolete environment handling. SPEC.md:5164-5195 explicitly allows the user's own tmux as an ordinary program; that does not make it a supervisor operation exercised by this fixture.\",\"TODO.md Planned is empty. Searched plans/queue for no-tmux, old-terminal and FARHELM_TMUX context; the tmux plans require program-free startup cleanup and removal of old environment plumbing, not a conflicting test contract.\",\"Current INDEX.md and matching queue-file searches found no exact misleading-no-tmux-test explanation item. BUGS.md and active TRIAGE_OUTCOMES.md have no matching trigger/consequence. No archive read.\",\"FILTER.md is not used; the named concern is source-refuted rather than a rare diagnostic exception.\"] Exact cited cover: [{\"source\":\"SPEC_impl.md:7996\",\"quote\":\"The supervisor runs no tmux.\"},{\"source\":\"SPEC_impl.md:2787-2788\",\"quote\":\"works whether or not any tmux program exists\"}] Original stronger consequence and missing premise remain preserved: \"The broader wording might mislead maintainers by overlooking startup retirement or user-launched tmux. The second history record checks actual startup termination rather than relying on comments. Neither version alleges a runtime regression or security/work-loss route; the fixture does not prove arbitrary user commands avoid tmux.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-100",
+          "key": "g158/c1",
+          "latest_line": 2,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "no-tmux-test-explanation-versus-startup-socket-cleanup",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The changed explanation describes supervisor session operations, which do not invoke a tmux program. Startup ends an old server through its socket and process identity; a user's own commands are outside this fixture's assertion.",
+          "checks": [
+            "At 08399d092d20815ced6619c26df2391944ae2b4a, host_processes.rs:459-476 states the bounded contract; :483-519 validates the recorder and its delivery through FARHELM_TMUX; :521-575 drives session/tab operations and orderly shutdown and requires an empty invocation log.",
+            "At the same hash, service/core/old_terminals.rs:176-280 connects using UnixStream::connect, verifies same-user peer identity, snapshots the subtree and calls terminate_process_within with names_tmux_server_socket. It never executes the configured tmux binary in this path.",
+            "Current SPEC_impl.md:7996-8002 explicitly states that the supervisor runs no tmux and ignores the FARHELM_TMUX retained in older installed units. No runtime pass is claimed."
+          ],
+          "coverage_checked": [
+            "SPEC_impl.md:2780-2822 and :7996-8002 explicitly support no-program startup cleanup and obsolete environment handling. SPEC.md:5164-5195 explicitly allows the user's own tmux as an ordinary program; that does not make it a supervisor operation exercised by this fixture.",
+            "TODO.md Planned is empty. Searched plans/queue for no-tmux, old-terminal and FARHELM_TMUX context; the tmux plans require program-free startup cleanup and removal of old environment plumbing, not a conflicting test contract.",
+            "Current INDEX.md and matching queue-file searches found no exact misleading-no-tmux-test explanation item. BUGS.md and active TRIAGE_OUTCOMES.md have no matching trigger/consequence. No archive read.",
+            "FILTER.md is not used; the named concern is source-refuted rather than a rare diagnostic exception."
+          ],
+          "exact_cover_quotes": [
+            {
+              "source": "SPEC_impl.md:7996",
+              "quote": "The supervisor runs no tmux."
+            },
+            {
+              "source": "SPEC_impl.md:2787-2788",
+              "quote": "works whether or not any tmux program exists"
+            }
+          ],
+          "missing_premise": null,
+          "original_stronger_consequence": "The broader wording might mislead maintainers by overlooking startup retirement or user-launched tmux. The second history record checks actual startup termination rather than relying on comments. Neither version alleges a runtime regression or security/work-loss route; the fixture does not prove arbitrary user commands avoid tmux.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation of misleading regression documentation in the stated session-operation scope; preserve the explicit arbitrary-user-command caveat."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "no-tmux-test-explanation-versus-startup-socket-cleanup",
+        "destination": null
+      }
+    },
+    {
+      "key": "g158/c2",
+      "owner": "g158",
+      "id": "c2",
+      "domain": "rust-terminal-host-regressions",
+      "purpose": "rust-terminal-host-regressions: crates/farhelm/tests/e2e/host_creates.rs, crates/farhelm/tests/e2e/host_processes.rs, crates/farhelm/tests/e2e/host_relaunches.rs, crates/farhelm/tests/e2e/host_restarts.rs, crates/farhelm/tests/e2e/host_tabs.rs, crates/farhelm/tests/e2e/host_terminals.rs, crates/farhelm/tests/e2e/merged_hosts.rs, crates/farhelm/tests/e2e/terminal_tabs.rs, crates/farhelm/tests/terminal_host_runtime.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "The daemonized-descendant explanation still matches its distinguishing oracle",
+            "location": "crates/farhelm/tests/e2e/terminal_tabs.rs:1170",
+            "detail": "# The daemonized-descendant explanation still matches its distinguishing oracle\n\nReviewed commit: 08399d092d20815ced6619c26df2391944ae2b4a\n\n## TLDR\n\nNo new issue to report: the revised explanation of Delete's descendant-cleanup test is supported by a fixture that escapes terminal hangup. Its result distinguishes the process sweep from merely ending the shell's terminal.\n\n## Details\n\nDiscovery considered whether replacing the old tmux teardown explanation with host-hangup wording left a test whose descendant dies from terminal teardown anyway. This is a test-oracle question, independent of whether production cleanup is correct. The changed paragraph at terminal_tabs.rs:1169-1173 says that the daemonized child proves the sweep reached beyond ending the tab host. Source checks: deleting_a_session_takes_its_tabs_and_their_daemonized_descendants at :1175-1218 invokes write_daemon_script with scrub_env false, waits for the published daemon pid and arms cleanup, deletes the session, then requires both the shell and daemon gone and no remaining session-marked processes. The helper at :311-342 double-forks, runs setsid, redirects all terminal descriptors and emits the actual shell body 'trap \"\" HUP; echo $$ > {pid}; exec sleep 120'. Thus the daemon ignores SIGHUP before publication, retains session markers for the sweep, and cannot satisfy the daemon-gone assertion merely because the terminal hangs up. The helper's unchanged explanatory reference to kill-window is historical terminology; the actual signal/session isolation relevant to this changed explanation remains valid for a terminal host. This record makes no claim that the unchanged helper text predates the entire review range and attributes no runtime regression to it.\n\nSuggested bucket: other (test documentation/oracle). Confidence: confirmed source analysis, not runtime observation. Could-be-highest: no; no established security or user-work-loss route. proposed_drop: source refutation of the considered vacuous-cleanup-oracle concern, with the exact distinguishing fixture body quoted above. possible_cover: none; no prohibited coverage sources searched. Caveats: source shape establishes what this fixture is designed to distinguish, not an observed successful test run. No tests, builds or reproductions run."
+          }
+        }
+      ],
+      "latest": {
+        "line": 3,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "The daemonized-descendant explanation still matches its distinguishing oracle",
+          "location": "crates/farhelm/tests/e2e/terminal_tabs.rs:1170",
+          "detail": "# The daemonized-descendant explanation still matches its distinguishing oracle\n\nReviewed commit: 08399d092d20815ced6619c26df2391944ae2b4a\n\n## TLDR\n\nNo new issue to report: the revised explanation of Delete's descendant-cleanup test is supported by a fixture that escapes terminal hangup. Its result distinguishes the process sweep from merely ending the shell's terminal.\n\n## Details\n\nDiscovery considered whether replacing the old tmux teardown explanation with host-hangup wording left a test whose descendant dies from terminal teardown anyway. This is a test-oracle question, independent of whether production cleanup is correct. The changed paragraph at terminal_tabs.rs:1169-1173 says that the daemonized child proves the sweep reached beyond ending the tab host. Source checks: deleting_a_session_takes_its_tabs_and_their_daemonized_descendants at :1175-1218 invokes write_daemon_script with scrub_env false, waits for the published daemon pid and arms cleanup, deletes the session, then requires both the shell and daemon gone and no remaining session-marked processes. The helper at :311-342 double-forks, runs setsid, redirects all terminal descriptors and emits the actual shell body 'trap \"\" HUP; echo $$ > {pid}; exec sleep 120'. Thus the daemon ignores SIGHUP before publication, retains session markers for the sweep, and cannot satisfy the daemon-gone assertion merely because the terminal hangs up. The helper's unchanged explanatory reference to kill-window is historical terminology; the actual signal/session isolation relevant to this changed explanation remains valid for a terminal host. This record makes no claim that the unchanged helper text predates the entire review range and attributes no runtime regression to it.\n\nSuggested bucket: other (test documentation/oracle). Confidence: confirmed source analysis, not runtime observation. Could-be-highest: no; no established security or user-work-loss route. proposed_drop: source refutation of the considered vacuous-cleanup-oracle concern, with the exact distinguishing fixture body quoted above. possible_cover: none; no prohibited coverage sources searched. Caveats: source shape establishes what this fixture is designed to distinguish, not an observed successful test run. No tests, builds or reproductions run."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g158/findings.jsonl",
+        "id": "c2",
+        "line": 3,
+        "disposition": "excluded",
+        "group": "delete-daemon-oracle-distinguishes-terminal-hangup",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-100 after inspecting it. The fixture daemon escapes the controlling terminal and ignores HUP before publishing its process number. Requiring it to be gone after Delete distinguishes cleanup beyond ending the tab host. This is source reasoning about oracle sensitivity, not a successful test observation. Source refutation restricted to the terminal-hangup false-pass hypothesis. Other cleanup tests and their distinct premises are outside this disposition. Checked source/results: [\"At 08399d092d20815ced6619c26df2391944ae2b4a, terminal_tabs.rs:310-343 writes a background subshell invoking setsid, redirects all terminal descriptors and executes trap \\\"\\\" HUP before publishing the daemon PID and execing sleep.\",\"At the same hash, :1166-1173 explains the intended distinguishing oracle; :1195-1208 starts the daemon without scrubbing session markers, waits for its PID and arms cleanup. :1211-1217 deletes the session, requires both shell and daemon gone and requires no session-marked processes.\",\"The helper's remaining kill-window wording is historical terminology; it does not change the actual HUP immunity. This check does not assert that all unchanged wording predates the entire range. No tests or reproductions run.\"] Current coverage/results: [\"SPEC.md:5179-5195 describes teardown of ordinary descendants and cleanup limits; SPEC_impl.md:4794 onward describes sweeping beyond terminal hangup. Neither makes the claimed counterexample valid against this immune daemon fixture.\",\"TODO.md Planned is empty. Focused plans/queue searches for daemonized descendants and the named cleanup fixture found no plan repairing this purported vacuity; user-tmux cleanup policy is a distinct scope.\",\"Current INDEX.md includes child-hangup-masks-missing-stop-tree-sweep.md, concerning Stop and an unmarked descendant that lacks this escape premise. It is not an alias for this source-refuted Delete-daemon claim. No exact queue hit for the named fixture or daemonized-descendant claim.\",\"BUGS.md's detached SSH output holder concerns provisioning and is unrelated. Active TRIAGE_OUTCOMES.md has no matching Delete-daemon-oracle decision. No archive read.\",\"FILTER.md is not used; no established defect remains to filter.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The migrated explanation might claim descendant-sweep coverage while the descendant dies only from terminal teardown. The actual detached, HUP-ignoring fixture refutes that exact vacuity concern. No shipped cleanup failure, security impact or loss of user work was established.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g158/c2",
+        "line": 3,
+        "disposition": "excluded",
+        "group": "delete-daemon-oracle-distinguishes-terminal-hangup",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-100 after inspecting it. The fixture daemon escapes the controlling terminal and ignores HUP before publishing its process number. Requiring it to be gone after Delete distinguishes cleanup beyond ending the tab host. This is source reasoning about oracle sensitivity, not a successful test observation. Source refutation restricted to the terminal-hangup false-pass hypothesis. Other cleanup tests and their distinct premises are outside this disposition. Checked source/results: [\"At 08399d092d20815ced6619c26df2391944ae2b4a, terminal_tabs.rs:310-343 writes a background subshell invoking setsid, redirects all terminal descriptors and executes trap \\\"\\\" HUP before publishing the daemon PID and execing sleep.\",\"At the same hash, :1166-1173 explains the intended distinguishing oracle; :1195-1208 starts the daemon without scrubbing session markers, waits for its PID and arms cleanup. :1211-1217 deletes the session, requires both shell and daemon gone and requires no session-marked processes.\",\"The helper's remaining kill-window wording is historical terminology; it does not change the actual HUP immunity. This check does not assert that all unchanged wording predates the entire range. No tests or reproductions run.\"] Current coverage/results: [\"SPEC.md:5179-5195 describes teardown of ordinary descendants and cleanup limits; SPEC_impl.md:4794 onward describes sweeping beyond terminal hangup. Neither makes the claimed counterexample valid against this immune daemon fixture.\",\"TODO.md Planned is empty. Focused plans/queue searches for daemonized descendants and the named cleanup fixture found no plan repairing this purported vacuity; user-tmux cleanup policy is a distinct scope.\",\"Current INDEX.md includes child-hangup-masks-missing-stop-tree-sweep.md, concerning Stop and an unmarked descendant that lacks this escape premise. It is not an alias for this source-refuted Delete-daemon claim. No exact queue hit for the named fixture or daemonized-descendant claim.\",\"BUGS.md's detached SSH output holder concerns provisioning and is unrelated. Active TRIAGE_OUTCOMES.md has no matching Delete-daemon-oracle decision. No archive read.\",\"FILTER.md is not used; no established defect remains to filter.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The migrated explanation might claim descendant-sweep coverage while the descendant dies only from terminal teardown. The actual detached, HUP-ignoring fixture refutes that exact vacuity concern. No shipped cleanup failure, security impact or loss of user work was established.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-100",
+          "key": "g158/c2",
+          "latest_line": 3,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "delete-daemon-oracle-distinguishes-terminal-hangup",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The fixture daemon escapes the controlling terminal and ignores HUP before publishing its process number. Requiring it to be gone after Delete distinguishes cleanup beyond ending the tab host. This is source reasoning about oracle sensitivity, not a successful test observation.",
+          "checks": [
+            "At 08399d092d20815ced6619c26df2391944ae2b4a, terminal_tabs.rs:310-343 writes a background subshell invoking setsid, redirects all terminal descriptors and executes trap \"\" HUP before publishing the daemon PID and execing sleep.",
+            "At the same hash, :1166-1173 explains the intended distinguishing oracle; :1195-1208 starts the daemon without scrubbing session markers, waits for its PID and arms cleanup. :1211-1217 deletes the session, requires both shell and daemon gone and requires no session-marked processes.",
+            "The helper's remaining kill-window wording is historical terminology; it does not change the actual HUP immunity. This check does not assert that all unchanged wording predates the entire range. No tests or reproductions run."
+          ],
+          "coverage_checked": [
+            "SPEC.md:5179-5195 describes teardown of ordinary descendants and cleanup limits; SPEC_impl.md:4794 onward describes sweeping beyond terminal hangup. Neither makes the claimed counterexample valid against this immune daemon fixture.",
+            "TODO.md Planned is empty. Focused plans/queue searches for daemonized descendants and the named cleanup fixture found no plan repairing this purported vacuity; user-tmux cleanup policy is a distinct scope.",
+            "Current INDEX.md includes child-hangup-masks-missing-stop-tree-sweep.md, concerning Stop and an unmarked descendant that lacks this escape premise. It is not an alias for this source-refuted Delete-daemon claim. No exact queue hit for the named fixture or daemonized-descendant claim.",
+            "BUGS.md's detached SSH output holder concerns provisioning and is unrelated. Active TRIAGE_OUTCOMES.md has no matching Delete-daemon-oracle decision. No archive read.",
+            "FILTER.md is not used; no established defect remains to filter."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "The migrated explanation might claim descendant-sweep coverage while the descendant dies only from terminal teardown. The actual detached, HUP-ignoring fixture refutes that exact vacuity concern. No shipped cleanup failure, security impact or loss of user work was established.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation restricted to the terminal-hangup false-pass hypothesis. Other cleanup tests and their distinct premises are outside this disposition."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "delete-daemon-oracle-distinguishes-terminal-hangup",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete: all nine assigned patches read and checked against pinned source and contracts.\n\nNo reportable findings or open leads. Recorded candidate `c1` as source-refuted. Findings log and progress updated. No tests or reproductions run; no checkout changes."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised `c1`: startup cleanup directly connects to and signals the old server; it never executes the inherited tmux setting. The concern remains source-refuted.\n\nChecked child-environment handling, shared fixtures, and Restart seed/confirmation interactions. No new findings. Unresolved leads: none."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass complete. Checked neighbouring records and test oracles for fallback identity, interrupted launches, recovery, reattachment, and descendant cleanup.\n\nNo new reportable issue found. Logged source-refuted candidate `c2`.\n\n- New verified findings: none.\n- New unverified findings: none.\n- Open leads: none.\n\nProgress updated. No runtime execution."
+    }
+  ],
+  "progress": "# g158 initial review\n\nTurn type/count: discovery / 3. Discovery-pass count: 1.\nState: separate discovery pass complete; waiting for the caller's next instruction.\nScope: nine terminal-host regression test patches at 08399d092d20815ced6619c26df2391944ae2b4a.\nInterface assumptions: adjacent groups own production changes. At the pinned revision, the test harness holds terminal hosts through its TestDir, host_seams supplies the built binary, and all terminals are hosts. Older terminal cleanup contacts the socket and signals its pinned peer without invoking tmux. FARHELM_TMUX is ignored and excluded from host-child inheritance. The stored terminal address is terminal_address, including the empty-address claim window and restored earlier host after a failed restart.\n\nCoverage: all nine assigned evidence packets read in full (489 lines, each in its own evidence tool call). The complete commits field was read; excluded coverage metadata was not read. Pinned source context checked in all nine assigned files, harness.rs, host_launch.rs, old_terminals.rs and store.rs. Governing contracts checked in SPEC.md's complete Session view and Terminal experience sections, SPEC_impl.md's Terminal host section through Launch failure classification, Answers bind to what was drawn, and the provisioning paragraphs on tmux inheritance. No assigned patch material remains unread.\n\nChecks/results: the assigned patches contain comment changes and one assertion-message change, with no executable test behavior changed. Changed explanations agree with the current terminal-host, launch-environment, tab-isolation, restart-history and reload contracts. Existing tests were inspected as source against the supplied test-authoring checklist. No runtime tests, builds or reproductions were run or claimed. No checkout files were changed.\n\nNew verified/unverified finding IDs: none. Candidate appended: c1 (source-refuted no-tmux wording concern). Open leads: none. There were no substantive unresolved premises.\n\nRecording diagnostic: the first c1 append was rejected because the event used state closed. tooling.md was read, the event state was corrected to open, and the same evidence record command succeeded. The rejected call appended no event; findings.jsonl contains the durable corrected candidate.\n\nNext action: receive the caller's next instruction.\nUnread assigned scope: none.\n\n## Synthesis turn 2\n\nRevised c1 under its original ID immediately after checking the actual startup termination path. The old-server cleanup uses UnixStream::connect, peer credentials and terminate_process_within on the pinned peer; it does not execute the inherited configured binary. The candidate remains source-refuted, with no parent disposition presumed. User-run programs and explicit owned tmux fixtures remain distinct from the supervisor's session backend. Parent interface reports from g144/g146 and g150 corroborate that distinction.\n\nAdditional caller checks: HostStack::start applies FARHELM_TMUX with Command::env only to the child and awaits supervisor readiness. The shared real-process fixture invokes the bare supervisor in an owned TestDir and does not create an idle tmux server, supporting merged_hosts.rs's changed comments. The default in-process harness uses the built binary as launch shim. The host restart path passes its history seed and old size to spawn_agent_in_host, writes terminal_address only on confirmation, and on a confirmation-write error publishes the new host as launching before ending the replaced host. restart_seed waits for caught-up exit evidence, reads the host's history seed and preserves the documented empty-terminal exceptions. No interaction contradicting an assigned changed comment was found.\n\nTurn delta: c1 revised; no new finding or candidate IDs. Open leads: none. No runtime tests, builds or reproductions run. All conclusions this turn are source/contract analysis. No assigned material remains unread. A failed apply_patch attempt to replace event.json made no change; the subsequent event update and evidence record succeeded.\n\n## Discovery turn 3 / pass 1\n\nRead discovery-neighbours.json completely in bounded chunks before the new source search. No named pending cross-group questions were supplied. Neighbour findings distinguish historical removal of still-supported tmux test oracles, deliberate retirement, fixture cleanup and the separate Gone tab-host Delete route. Those are not new discoveries in this group's comment edits; no parent drop or lowering was assumed.\n\nFresh source checks concentrated on changed explanations that could misdescribe a distinguishing test oracle: host_creates.rs's encoded-runtime/socket-rename fallback, interrupted keyed create, held first-stage retry and launch-error record retention; host_relaunches.rs's store-deleted-during-confirmation race, viewer detach/reattach and multi-generation claim-window fixture; host_restarts.rs's snapshot/address recovery assertions; host_tabs.rs's dead-open cleanup assertions; and terminal_tabs.rs's daemon helper and descendant cleanup assertion. Verified actual premises and assertions rather than inferring test sensitivity from production correctness. Socket-rename fallback checks the two host processes, replacement tag, gate cancellation and elapsed fallback boundary. Claim-window setup requires both injected crashes and the empty address at generation 2. Failed-open cleanup compares both socket and process sets and requires no tab record. Record-retention checks the live host named by the preserved record after sentinel cleanup.\n\nAppended candidate c2 immediately upon resolving the considered daemon-oracle concern. The detached daemon ignores HUP before publishing its pid and keeps session markers, so its required disappearance distinguishes the sweep from terminal hangup. No runtime failure or independent new documentation defect was established. Existing c1 is unchanged.\n\nResult: no new reportable issue found. New verified finding IDs: none. New unverified-after-investigation finding IDs: none. New candidate IDs: c2 (source-refuted). Open lead IDs: none. No tests, builds, reproductions or live-install actions. No prohibited coverage source was searched. All assigned patch scope remains read; no scope omission.\n"
+}

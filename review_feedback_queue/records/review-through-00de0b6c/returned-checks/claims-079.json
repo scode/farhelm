@@ -1,0 +1,221 @@
+[
+  {
+    "key": "g124/l1",
+    "latest_line": 12,
+    "recommendation": "retain-verified",
+    "bucket": "highest",
+    "underlying_key": "natural-detach-unlocks-before-cancelling-unpolled-grid-input",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The changed cleanup releases attachment ownership before signalling input cancellation. A live-runtime encoding failure is reachable through accepted authenticated terminal messages. This establishes a conditional source route for old queued input to follow replacement input. It was not reproduced. Keep the original highest proposal: the endpoint explicitly documents scripts as callers, and no specification exclusion for those authenticated callers was found. A different interpretation of the shipped-control rule needs an independent priority check.",
+    "checks": [
+      "1ed482dde220452e424973faf38a5e1318986333:crates/farhelm-supervisor/src/service/connection.rs:1510-1519 partially moves old.forwarder, drops attachments, notifies, then drops old.input at scope end. Its parent:2172-2191 explicitly drops backend before attachments. The same late-drop order remains at 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:1509-1518.",
+      "1ed482d:service/grid_stream.rs:1169-1175 signals cancellation only on HostAttach drop; :1201-1278 prioritizes cancellation at poll boundaries but otherwise dequeues and sends queued input. :155-160 distinguishes unhanded input from input the runtime already owns. service/core.rs:16022 creates the multithread Tokio runtime.",
+      "1ed482d:farhelm-helm/src/terminal.rs:198-202,627-630,910-913 accepts and forwards u16 dimensions; :190-195 names scripts as callers and :363-390 documents initial-size and resize shapes. farhelm-helm/src/client.rs:4153-4212,4388-4403 forwards dimensions unchanged; supervisor service/handlers.rs:1910,2081 passes them to terminal.resize.",
+      "1ed482d:terminal-host/src/protocol.rs:102,135-145 allows 1..10000. supervisor hosts/terminal.rs:3082-3098 applies a resize while continuing; grid_output.rs:319-363 copies emulator dimensions; proto/grid.rs:446,1287-1325 limits Hello/Frame to 1000. grid_stream.rs:818-822 returns StreamFailed on encode failure, and connection.rs:1292-1307 schedules natural detach. A replacement at ordinary size can resize the same runtime.",
+      "1ed482d:farhelm-ui/assets/grid-terminal.js:246-250 caps the bundled GUI at 1000. No ordinary bundled >1000 producer is established. Gone/Unavailable finish the old runtime and drain unsent input (hosts/terminal.rs:3028-3053,4365-4377), so those verdicts are not the live-runtime route. Runtime-accepted input, hypothetical encoder faults and counter exhaustion are not needed for the retained route."
+    ],
+    "coverage_checked": [
+      "SPEC.md:3010-3013 requires supervisor-enforced exclusive attachment; SPEC_impl.md:2551-2588 requires an ending attachment to stop its pump and discard unhanded input. Neither accepts cancellation after replacement admission.",
+      "TODO.md Planned is empty (:25-27). Searched plans/queue for natural detach, input pump/cancellation, arbitration and the actual size-trigger route; no unlanded plan covering this cause. The tmux cleanup plans are already landed (plans/REPORTS.md:29-32).",
+      "BUGS.md contains only the SSH-helper provisioning hang. Searched INDEX.md, matching queue text and active TRIAGE_OUTCOMES.md for detach/takeover, input ownership/handoff/cancellation and the actual trigger. No exact queued or decided cover. kicked-input-test-local-filter.md concerns a test that locally discards stale frames, not queued input surviving natural detach.",
+      "FILTER.md's displaced-input handoff filter requires an already-polled send stalled after observing cancellation pending. This claim instead starts a previously unpolled pump while cancellation has not been signalled; the full boundary does not match. Rare-diagnostic and upgrade filters do not cover this input/control consequence."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No bundled GUI or ordinary CLI producer of >1000 dimensions is established, and there is no explicit public stable-terminal-API guarantee. Accepted authenticated scripted input and its wire contract are established. Parent must preserve that distinction when deciding whether its priority rule requires a bundled producer. Scheduling and command mixing are source conclusions, not runtime observations.",
+    "original_stronger_consequence": "Old-viewer input can cross replacement ownership and execute commands mixed into the replacement viewer's input. Earlier lines 3 and 5 proposed dropping/narrowing this route; lines 7-12 reopen and establish the accepted-API size trigger. No parent drop was accepted.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Retain the distinct cancellation-before-admission regression. Do not merge it into the pre-existing already-polled handoff filter or lower its original command-execution consequence without the required independent check."
+  },
+  {
+    "key": "g124/c2",
+    "latest_line": 4,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "retired-tmux-byte-replay-tests-removal",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The deleted fixture tests tmux's control-output recovery and byte-chunk bound, mechanisms the same patch removes. No surviving grid mechanism loses its only final-output oracle on this evidence. This is a bounded source refutation of the test-removal claim, not proof that all grid output behavior is correct.",
+    "checks": [
+      "1ed482d parent:service/connection.rs:2265-2510 contains replay_chunk_stays_within_the_helm_terminal_data_limit, pane_death_recovers_missing_final_output_after_client_resume and receive_through. The full fixture creates tmux sessions/input/replay clients, AttachOutput::Tmux, PaneDeath and AttachBackend::Tmux, and verifies an escape reset replacing missing control-output bytes.",
+      "1ed482d:service/grid_stream/tests.rs:380-404,472-500,765-795,900-930 retains separate source tests for an exit during catch-up, paused history, stall timeout and an exited program's final screen. These tests were inspected, not run."
+    ],
+    "coverage_checked": [
+      "SPEC.md Terminal experience at 1ed482d:3003-3016 and current :2998-3011 retires old terminals; current SPEC_impl.md:2551-2588 describes grid output from the runtime. These contracts explain why tmux control-stream recovery is obsolete; they do not excuse a surviving coverage gap.",
+      "Searched SPEC.md, SPEC_impl.md, empty TODO.md Planned, plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md for byte replay, final-output recovery and the removed tests. No exact independent cover. tmux cleanup plans are landed per plans/REPORTS.md:29-32. No FILTER.md boundary applies."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A specific surviving grid failure mechanism left untested by these deletions was not identified.",
+    "original_stronger_consequence": "The considered concern was loss of final terminal output from deleting replay/recovery tests. The sole record already confines it to obsolete test machinery and does not claim a product regression or a new security/process-loss route.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Dismiss this obsolete-mechanism test-removal claim only. Deliberate legacy-process termination is separately preserved in g125/c1 for independent checking."
+  },
+  {
+    "key": "g124/c3",
+    "latest_line": 17,
+    "recommendation": "out-of-range",
+    "bucket": "other",
+    "underlying_key": "pre-range-grid-first-input-queue-acceptance-wording",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The direct call keeps the host branch's existing queue-acceptance semantics and both ownership checks. The imprecise whole-frame-confirmed explanation also exists at the exclusive base. Thus the retained wording issue predates this range, and the claimed behavioral weakening is source-refuted.",
+    "checks": [
+      "6e423e30068b62c6cfa276c6d720ee35bb70387a:service/connection.rs:520-550 already checks attachment channel plus same_channel under the mutex, awaits the backend wrapper, and contains whole-frame confirmation wording and Agent/Ok(true) gating.",
+      "Exclusive-base service/terminals.rs:1975-1993 explicitly defines host delivery as queue acceptance and returns host.send_input(bytes) directly. 1ed482d:service/connection.rs:507-535 preserves the same check and gating; grid_stream.rs:1052-1071 explicitly returns whether queued encoded input submits a line."
+    ],
+    "coverage_checked": [
+      "Current SPEC_impl.md:4280-4300 describes queued grid input as the first-input mark. SPEC.md Terminal experience retains supervisor-enforced ownership; neither establishes a changed violation here.",
+      "Searched both specifications, TODO.md Planned (empty), plans/queue, BUGS.md, INDEX.md, matching kicked-input-test-local-filter.md and active TRIAGE_OUTCOMES.md for hook warning/delivery, input ownership and confirmation. No exact cover needed for the source/range disposition. No FILTER.md boundary applies."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No in-range change to grid delivery semantics, hook timing or the ownership guard is shown.",
+    "original_stronger_consequence": "The initial concern was newly premature hook warnings or weakened ownership after removing the async wrapper. The latest record preserves the guard refutation and adds full-range attribution; this does not dispose of g124/l1.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Pre-range attribution for the retained imprecise comment, and unchanged source behavior for the direct-call/ownership suspicion. Marked for independent checking conservatively because the rejected concern includes terminal-input ownership."
+  },
+  {
+    "key": "g124/l2",
+    "latest_line": 15,
+    "recommendation": "needs-parent",
+    "bucket": "other",
+    "underlying_key": "deleted-replay-chunk-leaves-connection-doc-reference",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The historical documentation defect is verified, but it is repaired later within the reviewed range. Preserve it as an intermediate defect and an explicit already-repaired disposition; no current fix remains to queue. Parent owns how this completed historical correction is represented.",
+    "checks": [
+      "1ed482d:service/connection.rs:43-46 links REPLAY_CHUNK and claims 32 KiB chunks/2 MiB worst-case data backlog; :867 retains another obsolete name. git grep over supervisor source at this revision finds only these two prose references, no definition/import.",
+      "1ed482d:grid_output.rs:67-78 makes 32 KiB a target and allows an oversized row alone; grid_stream.rs:818-825 encodes one whole message into a frame. connection queue depth is 64 and the grid cap is 1 MiB. The pre-existing universal 2 MiB statement is not newly introduced; the dangling link is.",
+      "The complete f560058da19e02716e6f943883a9508b447aff4e connection.rs patch replaces both obsolete references and states the 32 KiB target, 1 MiB cap and 64 MiB paper data bound. The repaired paragraph remains at pinned tip."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md:2973-2980 distinguishes ordinary packing from 1 MiB messages. No specification accepts a dangling link or the false universal bound.",
+      "Searched empty TODO.md Planned, plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md for REPLAY_CHUNK, writer-queue memory bounds and grid-message packing. No exact queued/planned cover. tmux-drop-from-docs's comment audit is already landed (plans/REPORTS.md:32), not an unlanded cover. No FILTER.md boundary applies to this source documentation defect."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "None for the historical dangling-reference defect. No rendered rustdoc warning, build failure or runtime memory regression is claimed or observed.",
+    "original_stronger_consequence": "The lead suggested misleading memory-bound reasoning; the finding narrows attribution to deletion of the linked constant. The inherited numeric claim predates the range, and the later in-range repair is explicitly preserved.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Verified at 1ed482d, repaired by f560058d within the range. Do not falsely label it pre-range, presently unfixed, or a runtime resource regression."
+  },
+  {
+    "key": "g124/l3",
+    "latest_line": 19,
+    "recommendation": "needs-parent",
+    "bucket": "other",
+    "underlying_key": "natural-detach-arbitration-oracle-migration-gap",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The assigned hook deletion removes an unused hook, but the overall range includes an earlier deletion of the arbitration test and a later grid replacement. Assignment boundaries do not make that earlier gap outside this review range. Preserve the history and reconcile ownership with the reviewer of the earlier test deletion; no current missing oracle is established.",
+    "checks": [
+      "Exclusive-base terminal_tabs.rs:2805-2899 forces the natural-versus-explicit takeover boundary using a tmux-client kill and a gate, then checks TakenOver and fresh winner output. The tmux mechanism is obsolete, while the arbitration contract survives. The old test uses yield_now after releasing the gate, not an explicit arbiter-completed acknowledgement.",
+      "Scoped historical log identifies 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 deleting takeover_reason_wins_over_a_gated_natural_detach, and f560058da19e02716e6f943883a9508b447aff4e adding takeover_reason_wins_over_a_held_natural_detach. Both commits are in the pinned range.",
+      "git grep natural_detach_gate at 1ed482d's parent finds only the connection call and core declaration, no test caller. Pinned-tip core/tests/host_terminals.rs:3939-4055 holds arbitration using mark_delete_in_progress, witnesses a natural verdict before takeover, checks only TakenOver and fresh output through the winner. The complete replacement was read, not run."
+    ],
+    "coverage_checked": [
+      "SPEC.md Terminal experience and SPEC_impl.md Grid streams preserve exclusive takeover and detach behavior. They do not accept loss of a surviving regression contract.",
+      "Searched both specs, empty TODO.md Planned, plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md for arbitration, held natural detach and takeover test deletion. kicked-input-test-local-filter.md covers a different stale-frame test oracle, not this verdict-arbitration boundary. No exact open cover or FILTER.md boundary. Later source replacement is repair evidence, not an unlanded-plan cover."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No current missing arbitration oracle or shipped runtime failure is established. Parent must reconcile the earlier in-range deletion with its source owner and represent the later repair.",
+    "original_stronger_consequence": "Loss of regression protection against an old viewer's natural verdict disrupting a replacement. The latest narrow drop applies only to attribution of that loss to the unused-hook deletion; it does not erase the earlier in-range test deletion or subsume l1's production input lifetime issue.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Historical test-coverage gap, attributed to 647f0227 and repaired at f560058d. The assigned 1ed hook deletion alone is not its cause."
+  },
+  {
+    "key": "g125/c1",
+    "latest_line": 9,
+    "recommendation": "covered",
+    "bucket": "highest",
+    "underlying_key": "specified-private-tmux-startup-retirement-loss",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The process/screen loss is real by source and explicitly accepted by the product contract. This proposal is exact specification coverage, subject to the parent's independent drop check because user-owned running work is ended.",
+    "checks": [
+      "1ed482d:service/core.rs:6142-6151 invokes old-server termination before reload for the state-directory owner; core/old_terminals.rs:162-164,223-251 invokes verified process termination and removes server files; core.rs:6675-6679 gives old tmux rows no terminal. Thus this is not merely removal of a client feature.",
+      "1ed482d:SPEC.md:3003-3016 explicitly ends the server and its old work, discards ended agents' screens, closes tabs, and accepts cleanup failure permitting a second agent after Restart. SPEC_impl.md:2210-2235 serves host runtimes and requires grid-capable attachment. Current SPEC.md:2998-3011 retains the same retirement rule; current SPEC_impl.md:2780-2801 describes startup shutdown."
+    ],
+    "coverage_checked": [
+      "Exact SPEC.md coverage at reviewed and current revisions; the trigger, consequence and old-terminal scope match. This does not accept terminating a current terminal host or unrelated process.",
+      "TODO.md Planned is empty. Searched plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md for private-tmux retirement, old-terminal startup termination and screen loss. No additional exact open cover; the tmux retirement plan is landed per plans/REPORTS.md:29. FILTER.md is unnecessary and no rare-upgrade inference is used."
+    ],
+    "exact_cover_quotes": [
+      {"source": "1ed482dde220452e424973faf38a5e1318986333:SPEC.md:3006-3007", "quote": "This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program."},
+      {"source": "current SPEC.md:3000-3004", "quote": "A supervisor that finds that tmux server when it starts ends it, and with it everything that still ran in an old terminal, without needing a tmux program."}
+    ],
+    "missing_premise": "None for this deliberate retirement consequence. Startup retirement's correctness against other processes is a separate question, not reviewed here.",
+    "original_stronger_consequence": "Terminates user-owned processes and discards old terminal state. Earlier candidate labels are superseded by a finding explicitly retained as highest for independent specification-acceptance checking. No parent drop was accepted.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Exact specification acceptance of old-private-server retirement only. Parent-supplied g099/g113/g118/g130 analogies were not inspected or silently treated as aliases because they are outside this batch."
+  },
+  {
+    "key": "g125/c2",
+    "latest_line": 11,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "grid-output-join-under-attachments-mutex-deadlock-suspicion",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "All displaced output tasks receive shutdown before any join, and their shutdown/reporting path does not wait for the attachment mutex. The proposed output-join deadlock is source-refuted. This leaves g124/l1's separate input lifetime intact.",
+    "checks": [
+      "1ed482d:service/handlers.rs:1865-1886 requests every doomed output shutdown before joining. grid_stream.rs:937-963 prioritizes shutdown, reports synchronously and owns no external control process. connection.rs:1272-1328 ignores Requested and schedules natural-detach work rather than awaiting attachments.",
+      "handlers.rs:1877-1886 scopes old attachments to loop iterations before replacement installation at :1956 and unlock at :1968. This is not the changed natural-detach partial-local lifetime at connection.rs:1510-1519. No runtime test was run."
+    ],
+    "coverage_checked": [
+      "SPEC.md Terminal experience requires responsive independent viewers; SPEC_impl.md Grid streams specifies per-attachment senders. Neither excuses a deadlock, but the suspected dependency cycle is absent in source.",
+      "Searched both specifications, empty TODO.md Planned, plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md for displaced sender joins, attachment-mutex deadlock and output shutdown. No exact coverage or alias; FILTER.md is not the basis for this refutation."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No output-task dependency on the held attachment mutex was found; a separate runtime/scheduler failure cannot be assumed.",
+    "original_stronger_consequence": "Cross-session terminal unresponsiveness during takeover, high if established. No security or user-work-loss route was alleged for this output-join suspicion. The interface synthesis explicitly preserves l1's potentially highest input consequence.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Refute only the suspected output-task/attachment-lock cycle, using the complete shutdown and synchronous verdict-dispatch path."
+  },
+  {
+    "key": "g125/c3",
+    "latest_line": 10,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "stop-comment-falsely-bans-retaining-original-final-screen",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The changed comment attributes a blanket final-frame non-retention rule to the specification, which explicitly preserves the original terminal's frame when a program does not leave its alternate screen. This is a documentation defect; correct runtime retention does not refute it.",
+    "checks": [
+      "1ed482d:service/handlers.rs:944-947 says a full-screen program's last frame is not retained after exit. Its :1144-1149 instead correctly says the host keeps the final screen and leaves the attachment intact. The inaccurate comment remains at pinned tip :944-947.",
+      "1ed482d:SPEC.md:2897-2901 preserves the frame of a program killed without leaving its full-screen display, across supervisor restarts. SPEC_impl.md:2703-2708 distinguishes keeping the original screen from capturing and repainting a snapshot in another terminal.",
+      "The parent comment at handlers.rs:1013-1024 already includes the blanket claim, but qualifies it with whatever tmux itself still holds. The assigned diff rewrites that explanation for hosts and removes the qualification. Attribution is the newly rewritten, unqualified host-lifecycle explanation, not first invention of the blanket phrase."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:2889-2898 retains the original-screen versus no-painted-snapshot distinction. It contradicts this comment, rather than accepting it.",
+      "Searched both specifications, empty TODO.md Planned, plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md for full-screen frame retention, stopped-host final screens and lifecycle comment drift. No exact queued/decided cover. tmux-drop-from-docs's broad comment audit is already landed (plans/REPORTS.md:32), so it is not an unlanded cover. No FILTER.md boundary matches ordinary source-comment misinformation."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "None for the source/contract discrepancy. No current disappearing frame, security consequence or user-work-loss route is established.",
+    "original_stronger_consequence": "Misdirecting future lifecycle maintenance or tests into clearing a frame the product promises to keep. Lines 4 and 6 proposed dropping the bounded comment issue for lack of runtime impact; lines 8 and 10 explicitly supersede that drop. The no-snapshot/no-repaint part remains correct.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain the bounded internal documentation finding at other. Do not describe it as a runtime frame-loss bug or merge it with unspecified analogous lifecycle comments."
+  },
+  {
+    "key": "g125/l4",
+    "latest_line": 14,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "list-reply-doc-prescribes-nonexistent-sentinel-read-failure",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The patch newly prescribes unreadable launch sentinels as a real way to make a session listing fail, although listing does no launch-file reads. The older inline stale clause predates the range; the new failure-fixture guidance is in range and remains at the tip.",
+    "checks": [
+      "1ed482d:service/handlers.rs:620-622 adds the unreadable-launch-sentinel failure-fixture example; :653-657 repeats it as request-fatal and cites list_all. The scoped patch confirms the new helper doc replaces a tmux-failure example. Both claims remain at pinned tip.",
+      "1ed482d:service/listing.rs:88-153 explicitly says launch-artifact read failure leaves lists available. The complete function projects retained state; its only fallible await is store.project_checkout_metadata. The complete store.rs:3557-3605 helper performs database working-copy projection and transaction commit, not launch-file reads.",
+      "Current SPEC_impl.md:4280-4288 assigns unreadable launch evidence to ticker retry and explicitly says it does not fail lists. No execution or listing failure was observed."
+    ],
+    "coverage_checked": [
+      "Searched SPEC.md and SPEC_impl.md for list errors, launch sentinels and launch-artifact reads; the current implementation contract contradicts the comment. No product-spec acceptance of the false guidance.",
+      "TODO.md Planned is empty. Searched plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md for sentinel failure, list_reply, listing error boundary and checkout projection. No exact cover. tmux-drop-from-docs's already-landed general audit is not unlanded-plan coverage. FILTER.md's rare diagnostic rule does not cover ordinary test-authoring guidance in a source comment."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "None for the new false fixture guidance. This does not claim listings actually read sentinels, fail because of them, or have regressed in availability.",
+    "original_stronger_consequence": "Misleading maintainers or tests about which operation fails and where the error boundary lies. The existing checkout-metadata failure example is real and should remain. The broad stale inline sentinel clause is disclosed as pre-range, not newly attributed to this patch.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain the in-range error-contract documentation defect at other, distinguishing it from correct listing behavior and from the pre-range stale inline wording."
+  }
+]

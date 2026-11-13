@@ -1,0 +1,319 @@
+[
+  {
+    "key": "g127/c1",
+    "latest_line": 9,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "environment-discard-reconciled-archive-removal-journal",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Both an archive recovered on retry and a discard committed before a crash retain removal intent. The original retained-files hypothesis is source-refuted. This is not a claim that filesystem failures cannot defer removal.",
+    "checks": [
+      "47f33bbdbd5ff4a6e437e97a800f9083be43096e teardown.rs:1401-1436 returns moved=true for Moved and MetadataComplete; only SourceMissing is false. Lines 1066-1074 collect recovered moved IDs for Discard, and 1125-1128 pass them to the deleting transaction.",
+      "Same revision store.rs:3838-3877 removes membership, verifies zero members, retires ArchivePending and journals discard in the same transaction. checkout_trash.rs:56-71 repoints the retired destination to .rm:.",
+      "Same revision teardown.rs:1152-1187 resumes the committed journal; checkout_trash.rs:899-963 recovers hidden or not-yet-hidden content with membership and retained-path checks. trash_remover.rs:356-373 retains supervisor ownership and reads authoritative session paths; core.rs:8734-8749 awaits recovery before accepting requests.",
+      "Source inspection only; no runtime observation or reproduction."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md Managed checkouts and SPEC_impl.md Environment Delete and the seal: non-final environment Delete discards rather than archives; this states the intended contract, not acceptance of retained ordinary archives.",
+      "TODO.md Planned is empty (25-26). BUGS.md has only the unrelated local-SSH-output hang. Searches of plans/queue, INDEX.md and active TRIAGE_OUTCOMES.md for discard/archive retry/journaling found no exact unresolved item or decision for this hypothesis. No archive read.",
+      "FILTER.md does not supply the refutation; no filter applied."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "An interrupted archive or post-commit restart could leave a non-final environment Delete's checkout as an ordinary archive instead of removing it. No work-loss consequence was claimed.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Narrow source refutation of lost removal recovery. Because this dismissal concerns persisted intent to remove a user checkout, carry it to the independent drop register conservatively; this consultation authorizes no drop."
+  },
+  {
+    "key": "g127/c2",
+    "latest_line": 2,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "removed-tmux-output-sink-lease-shutdown-tests",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The deleted tests exercise the removed tmux output-client lease/reaper resource. The replacement host output task has no external client resource requiring that lease contract. This refutes the named retired-resource concern, not every possible host shutdown or test-coverage defect.",
+    "checks": [
+      "1ed482dde220452e424973faf38a5e1318986333 teardown diff deletes SessionSinkHandle/SessionSinkLease fixtures and the live-lease/reaper tests.",
+      "Same revision teardown.rs:1222-1253 closes attachment admission under the map lock, drains attachments, signals all output tasks and joins them within one overall timeout.",
+      "Same revision grid_stream.rs:917-925 documents the output task's lack of external processes; 937-963 races the entire stream against shutdown and reports without awaiting attachment-map work. terminals.rs:478-482 joins the task.",
+      "Current SPEC_impl.md Terminal host and Ending the old private tmux server describe the host-only running supervisor and retirement of old terminals. Source checks, not runtime validation."
+    ],
+    "coverage_checked": [
+      "Both specifications searched for output shutdown, terminal hosts and old-terminal retirement; no replacement sink-lease requirement found.",
+      "TODO.md Planned empty; BUGS.md unrelated. plans/queue tmux-end-old-terminals describes this intentional replacement rather than an unlanded correction. INDEX.md and active TRIAGE_OUTCOMES.md searches yielded no exact sink-reaper-test item. No archive read.",
+      "FILTER.md not used."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Shutdown might return while an output client still needed orderly teardown. No established user-work-loss route; the original concern was the removed tmux output-client fence.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retired implementation contract plus inspected replacement shutdown, limited to the named sink resource."
+  },
+  {
+    "key": "g127/c3",
+    "latest_line": 7,
+    "recommendation": "refuted",
+    "bucket": "highest",
+    "underlying_key": "stop-restart-host-root-pinned-identity-refusal",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Stop and Restart still obtain their root from adoption-pinned identity, reread the process table and refuse unreadable evidence before recording intent or signalling. Preserve the original wrong-process consequence for independent drop judgment.",
+    "checks": [
+      "1ed482dde220452e424973faf38a5e1318986333 handlers.rs:898-907 and core.rs:12392-12397 call terminal.sweep_root and propagate errors before continuing.",
+      "Same revision hosts/terminal.rs:2571-2583 uses live_root and checks the probe PID. Lines 737-751 refuse unavailable/read-error states; 791-799 accepts only the same running PID/start identity. This refutes removal of the old helper as an identity-check omission.",
+      "Historical references in line 7 correct line 3's specification offsets; the alleged consequence and proposed drop did not change. Current SPEC.md Lifecycle operations requires unexamined cleanup to remain unconfirmed. No runtime reproduction."
+    ],
+    "coverage_checked": [
+      "SPEC.md Lifecycle operations and SPEC_impl.md Terminal host/process ownership require pinned roots and failure on unreadable evidence, not acceptance of recycled-PID signalling.",
+      "TODO.md Planned empty; BUGS.md unrelated. Searches of plans/queue, INDEX.md and active TRIAGE_OUTCOMES.md for pinned identity, unreadable root and recycled PID found no exact coverage. hosts-directory-replacement-stop-uncertainty is a different socket/directory-replacement premise, not this removed-helper claim. No archive read.",
+      "FILTER.md's terminal-host verification-to-numeric-signal handoff filter is a different host-process handoff; it does not cover omission of root verification, and was not applied."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Skipping an unreadable live root or binding cleanup to a recycled PID could signal unrelated processes and lose other user-owned work. The reviewer source-refuted that route; no occurrence was observed.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Narrow source refutation: replacement pinned-root validation preserves the removed helper's relevant safety invariant. Keep highest for the proposed-drop register; no lower or drop authorized here."
+  },
+  {
+    "key": "g127/c4",
+    "latest_line": 4,
+    "recommendation": "covered",
+    "bucket": "other",
+    "underlying_key": "retired-container-stop-refusal-contract",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Stop is explicitly unsupported for retired outside-supervisor container sessions. The named concern cannot treat that refused Stop as a successful lifecycle cleanup; Delete remains their supported cleanup action.",
+    "checks": [
+      "04d85f0c98a9b635709d00b056719a0baa7fd3fc core.rs:3729-3738 require_active_launch refuses container::is_retired before current operations can mutate the legacy launch.",
+      "Current SPEC.md:4892-4899 Retired containerized sessions explicitly requires Delete-only support, refusal of Stop and legacy removal/absence confirmation for Delete. plans/queue/podman-environments.md:284-296 contains the same retirement design, already implemented in the reviewed commit.",
+      "No runtime observation; original hypothesis concerned a container left running after a purportedly successful Stop."
+    ],
+    "coverage_checked": [
+      "Exact specification acceptance in SPEC.md Retired containerized sessions; SPEC_impl.md's environment and retirement descriptions agree.",
+      "TODO.md Planned empty; BUGS.md unrelated. plans/queue/podman-environments.md's matching retirement section was read. INDEX.md and active TRIAGE_OUTCOMES.md have no exact additional retired-Stop finding. Existing container store-routing cleanup items concern the older supported operation and are different triggers. No archive read.",
+      "FILTER.md unnecessary; no rarity basis used."
+    ],
+    "exact_cover_quotes": [
+      {"source": "SPEC.md:4894-4896, Retired containerized sessions", "quote": "Existing sessions support Delete only. Opening terminals or tabs, exec, Stop, Restart, Clone, Replace and Replace with are refused."}
+    ],
+    "missing_premise": null,
+    "original_stronger_consequence": "An old container could remain running after Stop's removal path was deleted; reviewer suggested high if Stop were still supported. The product intentionally refuses this operation instead of reporting success.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Exact Delete-only specification acceptance, not a claim that a successful supported Stop may omit cleanup."
+  },
+  {
+    "key": "g127/c5",
+    "latest_line": 10,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "host-tab-scoped-boolean-retains-portable-fallback",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The boolean is mandatory in every supported host-tab tag, and false/unavailable/incomplete inventory retains the portable sweep. This settles only the suspected cleanup omission. It does not settle the separate consent consequence of successful cleanup.",
+    "checks": [
+      "1ed482dde220452e424973faf38a5e1318986333 hosts/tag.rs:29-42,75-85 specifies the required v1 scoped byte; 188-208 refuses missing or invalid values rather than defaulting to scoped.",
+      "Same revision core.rs:14150-14179 passes the host selection into ScopeUnits::tab; sweep.rs:1291-1299 maps false to derived, preserving needs_sweep=true. Lines 1312-1314 OR uncertainty; 1324-1340 add/deduplicate names without clearing it.",
+      "Same revision core.rs:13418-13427 declares completeness only with a host and generation zero. teardown.rs:402-419 requires fallback for incomplete or absent inventory; session_hosts.rs:554-579 retains false selections and Gone/Unreadable records.",
+      "No runtime tests; line 8 and 10 explicitly preserve g128/l1's separate unwarned-termination concern."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md Lifecycle operations and SPEC_impl.md:4866-4899 explicitly require the observed fallback behavior; they do not accept omission of detached jobs because of missing metadata.",
+      "TODO.md Planned empty; BUGS.md unrelated. plans/queue/tmux-end-old-terminals and user-tmux-jobs-outlive-cleanup concern intentional retirement and intentional user-tmux escape, respectively; neither adds exact unresolved coverage of this metadata hypothesis. INDEX.md/active TRIAGE_OUTCOMES.md searches found no exact record. No archive read.",
+      "FILTER.md not used."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Detached tab programs could survive cleanup after Scoped/Unscoped/Unknown became a boolean; reviewer suggested high if omission were established. No extra destruction or loss-of-work route was claimed by this ID.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Narrow metadata/containment source refutation. g128/c2 corroborates the inventory fallback but has a different named omission premise; do not erase either history or conflate retained cleanup with authorization."
+  },
+  {
+    "key": "g127/c6",
+    "latest_line": 6,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "stop-host-exit-code-immediate-read-equivalence",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The old host branch already read the runtime exit code immediately. Removing the tmux query wrapper removed no wait from the host path.",
+    "checks": [
+      "1ed482dde220452e424973faf38a5e1318986333^ service/status.rs:627-642 explicitly returns host.exit_code() directly and allows an exit record not yet processed.",
+      "1ed482dde220452e424973faf38a5e1318986333 sweep.rs:2035-2038 performs that same immediate host read; hosts/terminal.rs:853-860 yields a numeric code only for processed Exited evidence and otherwise None.",
+      "No runtime reproduction; this establishes host-path source equivalence, not observed timing of exit delivery."
+    ],
+    "coverage_checked": [
+      "Both specifications searched for exit status and Stop recording; no contract requires a new host-path wait here.",
+      "TODO.md Planned empty; BUGS.md unrelated. plans/queue, INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact missing-wait concern. successor-exit-processing-witness and stop-annotation-exit-witness are test-observation defects, not this product-path change. No archive read.",
+      "FILTER.md unnecessary because the alleged behavioral regression is source-refuted."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Stop might lose a numeric exit diagnostic by omitting a wait. No security or user-owned-work consequence was claimed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Historical before/after host-path equivalence, limited to the alleged removed wait."
+  },
+  {
+    "key": "g127/l1",
+    "latest_line": 12,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "final-environment-delete-suppresses-internal-plan-notice",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The supervisor can construct an internal preserved-path notice, but the final environment Delete's shipped helm caller discards it after destruction. The original misleading-guidance consequence is not user-visible through that caller.",
+    "checks": [
+      "47f33bbdbd5ff4a6e437e97a800f9083be43096e teardown.rs:993-1026 constructs a Planned-path notice independently of the Abandon quiet branch at 1056-1064; the original internal observation is real.",
+      "00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db crates/farhelm-helm/src/sessions/sandbox.rs:257-261 matches Sealed with _notice, awaits finish_seal_locked and returns default empty outcome. Lines 249-255 retain notices for non-final Deleted, where the environment remains.",
+      "Latest history records this suppression's introduction in 222bf6253bcd168db04bcbb1df20180c88306998 and an older whole-environment caller returning an empty outcome; this consultation directly checked the shipped tip suppression, not that full provenance search.",
+      "Source checks only; no authorized environment destruction is disputed and no runtime observation was made."
+    ],
+    "coverage_checked": [
+      "Current SPEC_impl.md:6106-6149 Environment Delete and the seal describes final teardown notice as internal and Sealed as environment destruction. SPEC.md environment deletion and Managed checkouts govern final destruction versus retained environment notices.",
+      "TODO.md Planned empty; BUGS.md unrelated. Searches of plans/queue, INDEX.md and active TRIAGE_OUTCOMES.md for unresolved checkout, preserved-path notice and seal found no exact unresolved item. No archive read.",
+      "FILTER.md not applied; the caller refutes the user-visible premise."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "After knowingly destroying an environment, final Delete might falsely tell the user an unresolved checkout folder remains for inspection. This was a diagnostic-guidance claim, not unauthorized destruction or loss of work.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Explicit suppression at the final user-facing caller; retain the fact that the supervisor's intermediate notice exists."
+  },
+  {
+    "key": "g128/c1",
+    "latest_line": 1,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "delete-attachment-lock-output-task-join-deadlock",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Delete joins tasks under the map lock, but the output task's shutdown race wraps its whole stream and its verdict reporting does not await that map. The named cycle is absent. This does not establish constant-time work inside every stream poll.",
+    "checks": [
+      "1ed482dde220452e424973faf38a5e1318986333 teardown.rs:576-608 takes attachments, extracts the session's entries and signals every output before joining any task.",
+      "Same revision terminals.rs:478-482 only awaits the task; grid_stream.rs:917-925 documents separately scheduled map work, and 937-963 races stream.run() against shutdown.changed() before synchronous report_forwarder_end.",
+      "No runtime reproduction. The proposed refutation is limited to awaiting output reporting while holding its needed lock."
+    ],
+    "coverage_checked": [
+      "Both specifications' attachment/lifecycle descriptions searched; they require responsive independent sessions and do not accept the alleged cycle.",
+      "TODO.md Planned empty; BUGS.md unrelated local SSH hang. plans/queue, INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact output-join cycle. delete-reader-notice-bypass.md was read and concerns direct input-reader notice ownership, explicitly separate from a refuted arbiter deadlock. No archive read.",
+      "FILTER.md's hung-user-manager rule is not this trigger and was not applied."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "One Delete could stall terminal input for the whole host through the shared attachment lock; high/material availability if established. No security or loss-of-work route was claimed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Narrow source refutation of the alleged attachment-lock/output-reporting wait cycle."
+  },
+  {
+    "key": "g128/l1",
+    "latest_line": 13,
+    "recommendation": "retain-verified",
+    "bucket": "highest",
+    "underlying_key": "legacy-retirement-nothingalive-delete-surviving-agent-consent",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The conditional survivor/display/guard/sweep route is established by source. Retirement intentionally treats the session as ended and assigns leftovers to later Delete, but it does not expressly settle the later no-warning destructive-consent boundary. Retain that ambiguity and the strongest consequence; neither rarity nor preexistence in the final removal patch refutes it.",
+    "checks": [
+      "1ed482dde220452e424973faf38a5e1318986333 old_terminals.rs:162-167,203-233,267-277 can leave a server alive and charge its work to one budget; 290-357 attempts agent sweeps only with that budget's remainder. An actual surviving marked agent is required, not any startup error.",
+      "Same revision core.rs:6675-6679 omits old terminal lookup, 6808-6820 converts Running to Interrupted, and 7042-7050 commits after the bounded sweep. store.rs:2493-2507 adds tmux kind to older rows without creating host records. A pre-host session that never started host terminals or tabs has no host liveness to discover.",
+      "Same revision service/status.rs:198-234 emits Interrupted with absent terminal evidence and 379-388 lists only host tabs. UI status.rs:387-433 states the update ended the agent and derives NothingAlive for ended/zero-tab rows; list/shared.rs:33-70 dispatches that Delete without a killing question.",
+      "Same revision core.rs:5197-5218 protects only terminal-less Launching; 13312-13377 checks the absent runtime and host inventory. handlers.rs:1253-1279 then accepts and starts teardown. teardown.rs:411-419 forces a sweep and 531-540 requests WholeSession; sweep.rs:251-258,421-445 selects the surviving session-marked agent on a later successful process walk.",
+      "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 core.rs:6426-6438 introduces retirement and marks the tmux driver absent whatever happened. Ancestry checks place dbfc within the full reviewed range. The latest record correctly attributes the interaction there rather than to 1ed482d's removed teardown probe.",
+      "All eight supplied history events read. Corrections about the startup sweep, no-host-record scope and introducing commit are preserved. Referenced g007/c4 has different old-tab prerequisites and g032/l5 has a different explicit Restart sentence/action; neither is treated as an exact alias from this batch. No runtime execution or loss was observed."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:2050-2067 Lifecycle operations requires the no-question Delete to refuse a live agent. SPEC.md:2998-3011 and SPEC_impl.md:2780-2825 intentionally commit retirement despite failures and assign leftovers to Restart/Delete. Exact acceptance of this later unconfirmed kill remains ambiguous, so specification coverage does not justify omission.",
+      "TODO.md Planned is empty. The Mid term phase-3 removal entry is outside Planned and does not promise to repair consent for already converted rows. BUGS.md only covers the unrelated local-SSH-output hang.",
+      "plans/queue/tmux-end-old-terminals.md:162-174 says start anyway and do not add retry/refusal state for startup failure. Its running-product work is already represented by reviewed commits; it is not an unlanded plan to repair the later Delete guard. Other tmux follower plans remove tooling/install/docs and do not state a consent fix.",
+      "INDEX.md and active TRIAGE_OUTCOMES.md searched for legacy/tmux survivor, NothingAlive, terminal-less, retirement/Delete and confirmation. No exact queued/decided legacy-survivor Delete item found. retained-refusal-can-clear-restart-delete-protection.md was read: it has a distinct generation-update/missing-producer premise and is not coverage or an alias. No archive read.",
+      "FILTER.md Upgrades from older releases combined with another rare condition is a material possible cover: this route needs legacy state plus failed/timed-out bounded startup cleanup and allows session work loss. Its security/trust-boundary exclusion makes application to bypassing a destructive-consent guard ambiguous. Recommend retention pending the parent's explicit boundary judgment and independent drop check. The session-status/partial-operation filter expressly excludes destructive actions without required confirmation; the rare-diagnostic filter excludes lost processes/work. No filter applied."
+    ],
+    "exact_cover_quotes": [
+      {"source": "SPEC_impl.md:2815-2816, Ending the old private tmux server", "quote": "A sweep that runs out of time leaves the rest for the session's Restart or Delete: the conversion commits regardless."},
+      {"source": "SPEC.md:3008-3010, Terminal experience", "quote": "those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running."},
+      {"source": "SPEC.md:2050-2060, Lifecycle operations", "quote": "a destructive confirmation authorizes only what the prompt the user answered said would happen"},
+      {"source": "review_feedback_queue/FILTER.md, Upgrades from older releases combined with another rare condition", "quote": "Unlike the filters above, this one also covers losing user-owned work within the affected sessions"},
+      {"source": "review_feedback_queue/FILTER.md, same filter exclusions", "quote": "a security or trust-boundary consequence."}
+    ],
+    "missing_premise": "No remaining source premise for the conditional route was identified. The unresolved issue is whether the explicit retirement/leftovers-for-Delete exception or upgrade filter covers this later destructive-consent violation. The startup survivor is a required condition, not an observed incident.",
+    "original_stronger_consequence": "A legacy agent actually surviving bounded upgrade cleanup can be shown interrupted with zero tabs; a subsequent NothingAlive Delete can stop it without a killing warning and lose unsaved user-owned process work. Keep highest regardless of rarity. Intentional upgrade retirement itself was authorized and is not the disputed action.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Recommend retain-verified/highest. Preserve the reviewer's original proposed drop based on explicit retirement acceptance and leftovers assigned to Delete, along with its caveat that consent was not expressly waived. Any parent drop, filter application, merger or consequence lowering needs the independent check. Supplied complementary g007/c4 and distinct g032/l5 must retain their own IDs and prerequisites; no exact duplicate disposition proposed here."
+  },
+  {
+    "key": "g128/c2",
+    "latest_line": 5,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "removed-tmux-tab-inventory-preserves-delete-fallback",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Removing tmux discovery does not make missing historical tabs proof of complete containment. Terminal-less and later-generation sessions still force a portable sweep, and host tab roots/selections and scope globs remain. This does not refute successful cleanup without consent.",
+    "checks": [
+      "1ed482dde220452e424973faf38a5e1318986333 core.rs:13400-13427 limits complete inventory to an existing host at generation zero.",
+      "Same revision teardown.rs:402-419 requires the sweep for incomplete or absent inventory, and 431-449 independently enumerates session tab/launch scopes. session_hosts.rs:554-579 preserves unscoped and Gone/Unreadable host evidence.",
+      "The retained WholeSession sweep is explicit at teardown.rs:531-540. No omission route from deleting tmux inventory was established. No runtime test was run."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md Lifecycle operations and SPEC_impl.md:4866-4899 state the same conservative incomplete-inventory fallback. Intentional user-run tmux escape is a separate supported containment limit.",
+      "TODO.md Planned empty; BUGS.md unrelated. plans/queue/tmux-end-old-terminals and user-tmux-jobs-outlive-cleanup explain retirement/containment choices, not a missing-fallback correction. INDEX.md and active TRIAGE_OUTCOMES.md searches yielded no exact omission record. No archive read.",
+      "FILTER.md not used."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Delete could overlook leftover tab jobs after an upgrade. This ID alleged cleanup incompleteness, without an established extra-destruction or work-loss route; g128/l1 separately preserves consent harm.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Narrow source refutation of missing portable fallback after tmux-inventory removal. Do not treat this as a refutation or lowering of g128/l1 or the referenced complementary old-tab consent claim."
+  },
+  {
+    "key": "g128/d1",
+    "latest_line": 11,
+    "recommendation": "out-of-range",
+    "bucket": "other",
+    "underlying_key": "pre-range-teardown-comment-stop-leaves-tabs",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The comment is false, but its false sentence is already present at the exclusive base and remains unchanged. Correct production behavior does not refute the documentation defect; pre-range provenance excludes it from this review.",
+    "checks": [
+      "6e423e30068b62c6cfa276c6d720ee35bb70387a teardown.rs:442-445 already states that Delete alone takes tabs down and that Stop leaves them running. Base SPEC.md:1865-1871 already says Stop closes tabs and Restart leaves them running.",
+      "1ed482dde220452e424973faf38a5e1318986333 teardown.rs:370-373 retains the false sentence verbatim; core.rs:13430-13457 implements Stop's tab closes. The changed surrounding root explanation does not introduce that sentence.",
+      "Path-scoped git log over the full range lists only 04d85f0c98a9b635709d00b056719a0baa7fd3fc, 47f33bbdbd5ff4a6e437e97a800f9083be43096e, 70bc66a9f285cc2a9984924f389834d118b7cfdc and 1ed482dde220452e424973faf38a5e1318986333. No runtime tests needed or performed."
+    ],
+    "coverage_checked": [
+      "Both specifications agree Stop closes tabs; there is no acceptance of the erroneous comment.",
+      "TODO.md Planned empty; BUGS.md unrelated. plans/queue/tmux-drop-from-docs.md contains a broad future comment/rationale sweep, but no exact Stop/tab correction is needed as a coverage basis here. INDEX.md and active TRIAGE_OUTCOMES.md searches found no exact item. No archive read.",
+      "FILTER.md not applied; the disposition is full-range attribution, not low-value documentation filtering."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Developer documentation falsely teaches that Stop leaves tabs running. No demonstrated runtime failure or plausible reader-induced security/work-loss mistake was claimed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Exact false sentence and opposing contract both predate the exclusive review base. Preserve the documentation mismatch if separately addressed, but do not record it as introduced in this range."
+  },
+  {
+    "key": "g128/d2",
+    "latest_line": 12,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "attachment-teardown-input-pump-cancellation-ownership",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The attachment owns its input pump handle and cancellation sender. Teardown drops that input ownership, and the pump gives cancellation priority while waiting for queued work or a blocked handoff. The named missing-cancellation leak is source-refuted; cancellation is not a proof about every already-polled send ordering.",
+    "checks": [
+      "1ed482dde220452e424973faf38a5e1318986333 terminals.rs:457-461 stores HostAttach in ActiveAttach. teardown.rs:600-608 destructures/removes attachments and joins output tasks; 1237-1253 drains them for supervisor shutdown.",
+      "Same revision grid_stream.rs:1022-1049 creates a cancellation channel owned by HostAttach; 1169-1175 sends on Drop. Pump::run at 1201-1233 prioritizes cancellation both at its outer wait and around handle(input).",
+      "Same revision grid_stream.rs:937-963 independently races full output streaming against shutdown, and teardown signals outputs before joining them. No remaining tmux external client resource requires the deleted wrappers. No runtime observation."
+    ],
+    "coverage_checked": [
+      "Both specifications' terminal-host attachment/lifecycle descriptions searched; they do not require preserving a retired tmux sink wrapper for pump cancellation.",
+      "TODO.md Planned empty; BUGS.md unrelated. Searches of plans/queue, INDEX.md and active TRIAGE_OUTCOMES.md found no exact input-pump-cancellation leak. delete-reader-notice-bypass.md concerns an input failure's notice arbitration; retired-runtime-retains-restart-seed-reply concerns runtime channel lifetime, not this attachment pump ownership. No archive read.",
+      "FILTER.md's displaced-input-task already-running-poll ordering is explicitly narrower and different from omitting cancellation; no filter applied."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Delete or orderly supervisor shutdown could leave a viewer input pump alive or indefinitely waiting after wrapper removal. No material user effect, security consequence or loss of user-owned work was established for that leak hypothesis.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Narrow source ownership/cancellation refutation. Separate from g128/c1's output/map-lock cycle and from accepted already-polled input handoff residuals."
+  }
+]

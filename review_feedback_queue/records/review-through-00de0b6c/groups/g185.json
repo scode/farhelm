@@ -1,0 +1,423 @@
+{
+  "group": {
+    "id": "g185",
+    "domain": "browser-interaction-helpers",
+    "purpose": "browser-interaction-helpers: crates/farhelm-ui/assets/client-log-shim.js, crates/farhelm-ui/assets/events.js, crates/farhelm-ui/assets/session-action-shortcuts.js, crates/farhelm-ui/assets/template-shortcuts.js, crates/farhelm-ui/assets/tooltip.js, crates/farhelm-ui/js-tests/app-css-animations.test.js, crates/farhelm-ui/js-tests/client-log-shim.test.js, crates/farhelm-ui/js-tests/events.test.js, crates/farhelm-ui/js-tests/session-action-shortcuts.test.js, crates/farhelm-ui/js-tests/template-shortcuts.test.js; phases complete small per-commit changes",
+    "interfaces": [
+      "g009",
+      "g010",
+      "g011"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/01056-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/assets/client-log-shim.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,843)",
+        "lines": 13,
+        "bytes": 845,
+        "start": 0,
+        "end": 843,
+        "original": "[private-run]/prep/originals/01056.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01059-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/assets/events.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,756)",
+        "lines": 13,
+        "bytes": 760,
+        "start": 0,
+        "end": 756,
+        "original": "[private-run]/prep/originals/01059.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01067-000.patch",
+        "ranges": [
+          [
+            1,
+            23
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/assets/session-action-shortcuts.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,1270)",
+        "lines": 23,
+        "bytes": 1270,
+        "start": 0,
+        "end": 1270,
+        "original": "[private-run]/prep/originals/01067.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01069-000.patch",
+        "ranges": [
+          [
+            1,
+            30
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/assets/template-shortcuts.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,1601)",
+        "lines": 30,
+        "bytes": 1601,
+        "start": 0,
+        "end": 1601,
+        "original": "[private-run]/prep/originals/01069.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01074-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/assets/tooltip.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,795)",
+        "lines": 13,
+        "bytes": 795,
+        "start": 0,
+        "end": 795,
+        "original": "[private-run]/prep/originals/01074.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01086-000.patch",
+        "ranges": [
+          [
+            1,
+            14
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/js-tests/app-css-animations.test.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,834)",
+        "lines": 14,
+        "bytes": 834,
+        "start": 0,
+        "end": 834,
+        "original": "[private-run]/prep/originals/01086.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01087-000.patch",
+        "ranges": [
+          [
+            1,
+            31
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/js-tests/client-log-shim.test.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,2046)",
+        "lines": 31,
+        "bytes": 2052,
+        "start": 0,
+        "end": 2046,
+        "original": "[private-run]/prep/originals/01087.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01090-000.patch",
+        "ranges": [
+          [
+            1,
+            21
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/js-tests/events.test.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,1184)",
+        "lines": 21,
+        "bytes": 1188,
+        "start": 0,
+        "end": 1184,
+        "original": "[private-run]/prep/originals/01090.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01095-000.patch",
+        "ranges": [
+          [
+            1,
+            18
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/js-tests/session-action-shortcuts.test.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,1176)",
+        "lines": 18,
+        "bytes": 1176,
+        "start": 0,
+        "end": 1176,
+        "original": "[private-run]/prep/originals/01095.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01097-000.patch",
+        "ranges": [
+          [
+            1,
+            31
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/js-tests/template-shortcuts.test.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,1769)",
+        "lines": 31,
+        "bytes": 1769,
+        "start": 0,
+        "end": 1769,
+        "original": "[private-run]/prep/originals/01097.patch"
+      }
+    ],
+    "lines": 207,
+    "bytes": 12290
+  },
+  "records": [
+    {
+      "key": "g185/c1",
+      "owner": "g185",
+      "id": "c1",
+      "domain": "browser-interaction-helpers",
+      "purpose": "browser-interaction-helpers: crates/farhelm-ui/assets/client-log-shim.js, crates/farhelm-ui/assets/events.js, crates/farhelm-ui/assets/session-action-shortcuts.js, crates/farhelm-ui/assets/template-shortcuts.js, crates/farhelm-ui/assets/tooltip.js, crates/farhelm-ui/js-tests/app-css-animations.test.js, crates/farhelm-ui/js-tests/client-log-shim.test.js, crates/farhelm-ui/js-tests/events.test.js, crates/farhelm-ui/js-tests/session-action-shortcuts.test.js, crates/farhelm-ui/js-tests/template-shortcuts.test.js; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Replacement test reference does not demonstrate the named cross-realm Array.from technique",
+            "location": "crates/farhelm-ui/js-tests/events.test.js:145",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\nA test comment now points readers to an example that does not contain the specific technique it names. No user-facing failure is established.\n\n## Details\nThe assigned patch changes events.test.js:145 to say its local-realm reconstruction is the same dodge paste-sanitizer.test.js makes with Array.from. Read the complete replacement test at this commit (lines 1–60): it uses node:vm and checks the browser export, but has no Array.from or cross-realm array assertions. Its header does explain node --test and node:vm, so the other updated references to that header remain supported. This is a misleading example reference, not a change to the event tests or runtime code. Suggested bucket: other. Confidence: confirmed from source; no execution performed. proposed_drop: do not report this isolated comment-example mismatch as a security/correctness finding because it does not alter a contract, obscure a changed invariant, or establish a user consequence; the surrounding events.test.js comment itself explains the cross-realm reason. Could-be-highest: false; no security or loss-of-work route. possible_cover: none; coverage sources were not searched."
+          }
+        },
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c1",
+            "state": "open",
+            "summary": "Cross-realm test comment points to an example that does not exist",
+            "location": "crates/farhelm-ui/js-tests/events.test.js:145",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\nThe event-feed test sends future maintainers to a paste-sanitizer test for a cross-realm array technique that the referenced test does not use. Its explanation of the test harness now contains a false example.\n\n## Details\nThe commit's actual patch changes events.test.js:145 from term-bytes.test.js to paste-sanitizer.test.js while retaining the claim that the referenced file uses Array.from to rebuild a value in the assertion's own realm. events.test.js:140–150 explains that objects produced by node:vm have a different Object.prototype and reconstructs each report with a local object spread. The complete paste-sanitizer.test.js at this revision (lines 1–60), reread during synthesis, contains no Array.from, cross-realm array reconstruction, or structural comparison of a sandbox-created array/object. Its VM test at lines 46–59 calls sanitizePastedText and compares only a function's typeof and a returned primitive string. The referenced example is therefore materially false, not merely absent explanatory detail. Remove the specific Array.from/example assertion, or point it to a real test that demonstrates that technique; the existing local explanation of the report reconstruction can remain.\n\nSuggested bucket: other (documentation correctness). Confidence: confirmed by patch attribution and complete referenced-file source, not execution. proposed_drop: false. The previous c1 event proposed omitting this because it changed no runtime contract or user behavior and the local explanation was self-contained; that was a severity/actionability filter, not source refutation, and is superseded. Preserve its original consequence: misleading navigation for readers, with no established runtime failure or security/loss-of-work route. Could-be-highest: false. possible_cover: none; no coverage sources were searched. No reproduction or test execution was performed."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c1",
+            "state": "open",
+            "summary": "Cross-realm test comment points to an example that does not exist",
+            "location": "crates/farhelm-ui/js-tests/events.test.js:145",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\nThe event-feed test sends future maintainers to a paste-sanitizer test for a cross-realm array technique that the referenced test does not use. Its explanation of the test harness now contains a false example.\n\n## Details\nThe commit's actual patch changes events.test.js:145 from term-bytes.test.js to paste-sanitizer.test.js while retaining the claim that the referenced file uses Array.from to rebuild a value in the assertion's own realm. events.test.js:140–150 explains that objects produced by node:vm have a different Object.prototype and reconstructs each report with a local object spread. The complete paste-sanitizer.test.js at this revision (lines 1–60), reread during synthesis, contains no Array.from, cross-realm array reconstruction, or structural comparison of a sandbox-created array/object. Its VM test at lines 46–59 calls sanitizePastedText and compares only a function's typeof and a returned primitive string.\n\nHistorical attribution was also checked directly: f560058da19e02716e6f943883a9508b447aff4e^:crates/farhelm-ui/js-tests/term-bytes.test.js:108–116 actually explains the cross-realm Uint8Array problem and calls Array.from on the sandbox result. Thus the old reference was accurate; the assigned patch introduces the false reference by pointing that same claim at the extracted sanitizer-only test. This is a materially false example, not merely absent explanatory detail. Remove the specific Array.from/example assertion, or point it to a real test that demonstrates that technique; the existing local explanation of the report reconstruction can remain. The other assigned reference changes claim only the CommonJS/browser dual install or the node:vm actual-source pattern, both of which the sanitizer asset/test still demonstrate; source checks confirmed those exports and the VM test.\n\nSuggested bucket: other (documentation correctness). Confidence: confirmed by patch attribution, parent source and complete referenced-file source, not execution. proposed_drop: false. The initial c1 event proposed omitting this because it changed no runtime contract or user behavior and the local explanation was self-contained; that was a severity/actionability filter, not source refutation, and is superseded. Preserve its original consequence: misleading navigation for readers, with no established runtime failure or security/loss-of-work route. Could-be-highest: false. possible_cover: none; no coverage sources were searched. No reproduction or test execution was performed. No premise remains unresolved."
+          }
+        }
+      ],
+      "latest": {
+        "line": 5,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "c1",
+          "state": "open",
+          "summary": "Cross-realm test comment points to an example that does not exist",
+          "location": "crates/farhelm-ui/js-tests/events.test.js:145",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\nThe event-feed test sends future maintainers to a paste-sanitizer test for a cross-realm array technique that the referenced test does not use. Its explanation of the test harness now contains a false example.\n\n## Details\nThe commit's actual patch changes events.test.js:145 from term-bytes.test.js to paste-sanitizer.test.js while retaining the claim that the referenced file uses Array.from to rebuild a value in the assertion's own realm. events.test.js:140–150 explains that objects produced by node:vm have a different Object.prototype and reconstructs each report with a local object spread. The complete paste-sanitizer.test.js at this revision (lines 1–60), reread during synthesis, contains no Array.from, cross-realm array reconstruction, or structural comparison of a sandbox-created array/object. Its VM test at lines 46–59 calls sanitizePastedText and compares only a function's typeof and a returned primitive string.\n\nHistorical attribution was also checked directly: f560058da19e02716e6f943883a9508b447aff4e^:crates/farhelm-ui/js-tests/term-bytes.test.js:108–116 actually explains the cross-realm Uint8Array problem and calls Array.from on the sandbox result. Thus the old reference was accurate; the assigned patch introduces the false reference by pointing that same claim at the extracted sanitizer-only test. This is a materially false example, not merely absent explanatory detail. Remove the specific Array.from/example assertion, or point it to a real test that demonstrates that technique; the existing local explanation of the report reconstruction can remain. The other assigned reference changes claim only the CommonJS/browser dual install or the node:vm actual-source pattern, both of which the sanitizer asset/test still demonstrate; source checks confirmed those exports and the VM test.\n\nSuggested bucket: other (documentation correctness). Confidence: confirmed by patch attribution, parent source and complete referenced-file source, not execution. proposed_drop: false. The initial c1 event proposed omitting this because it changed no runtime contract or user behavior and the local explanation was self-contained; that was a severity/actionability filter, not source refutation, and is superseded. Preserve its original consequence: misleading navigation for readers, with no established runtime failure or security/loss-of-work route. Could-be-highest: false. possible_cover: none; no coverage sources were searched. No reproduction or test execution was performed. No premise remains unresolved."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g185/findings.jsonl",
+        "id": "c1",
+        "line": 5,
+        "disposition": "verified",
+        "group": "events-test-cross-realm-array-example-reference",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-116 after inspecting it. The reviewed patch replaces an accurate example reference with a file that does not demonstrate the claimed technique. This is an in-scope source-comment error, with misleading navigation for maintainers and no established product failure. Record an other-priority documentation-correctness finding. The source establishes the false example and its introduction within the range. No exact coverage or filter applies; runtime correctness does not refute the comment defect. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/js-tests/events.test.js:140-150 explicitly says paste-sanitizer.test.js uses Array.from for the same cross-realm workaround; the patch changes only the referenced filename at line 145.\",\"Read complete f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/js-tests/paste-sanitizer.test.js:1-60. Its VM test compares typeof and a primitive string; it contains no Array.from or sandbox-array structural comparison.\",\"f560058da19e02716e6f943883a9508b447aff4e^:crates/farhelm-ui/js-tests/term-bytes.test.js:108-116 explains cross-realm Uint8Array prototypes and uses Array.from, establishing that the filename replacement introduced the error.\",\"Explicit ancestor checks place f560058da19e02716e6f943883a9508b447aff4e after the review base and before the review tip. No runtime test or reproduction was run.\"] Current coverage/results: [\"SPEC.md and SPEC_impl.md: searched cross-realm, Array.from, paste-sanitizer, term-bytes and related shortcut/terminal-input terms; no accepted rule covers a false test-example reference.\",\"TODO.md: Planned is empty at lines 25-26.\",\"plans/queue: searched the actual filenames, cross-realm and Array.from; none match. Read tmux-drop-from-docs.md acceptance criteria 3 and 5 in full: its sweep addresses tmux/xterm comparisons and related complexity, not this now sanitizer-named cross-realm reference. The broader sweep does not explicitly remove this cause. tmux-end-old-terminals.md criteria 4-5 describe the already implemented removal, not an unlanded repair for the false reference.\",\"BUGS.md and active TRIAGE_OUTCOMES.md: searched the actual filenames and cross-realm/Array.from terms; no match. The archive was not read.\",\"Read review_feedback_queue/INDEX.md in full and searched queue files for cross-realm, Array.from, paste-sanitizer and term-bytes. The only Array.from hit concerns sandbox shard allocation and is unrelated. No same-root queue alias found.\",\"FILTER.md: no filter covers an ordinary persistent false source-comment reference. The initial severity/actionability omission is not a listed filter.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"No stronger consequence was asserted. Initial line 1 proposed omitting the misleading example because it changed no runtime contract and the local explanation was self-contained. Lines 3 and 5 explicitly supersede that proposed omission; the established consequence remains misleading maintainer navigation, without a security or user-work-loss route.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g185/c1",
+        "line": 5,
+        "disposition": "verified",
+        "group": "events-test-cross-realm-array-example-reference",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-116 after inspecting it. The reviewed patch replaces an accurate example reference with a file that does not demonstrate the claimed technique. This is an in-scope source-comment error, with misleading navigation for maintainers and no established product failure. Record an other-priority documentation-correctness finding. The source establishes the false example and its introduction within the range. No exact coverage or filter applies; runtime correctness does not refute the comment defect. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/js-tests/events.test.js:140-150 explicitly says paste-sanitizer.test.js uses Array.from for the same cross-realm workaround; the patch changes only the referenced filename at line 145.\",\"Read complete f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/js-tests/paste-sanitizer.test.js:1-60. Its VM test compares typeof and a primitive string; it contains no Array.from or sandbox-array structural comparison.\",\"f560058da19e02716e6f943883a9508b447aff4e^:crates/farhelm-ui/js-tests/term-bytes.test.js:108-116 explains cross-realm Uint8Array prototypes and uses Array.from, establishing that the filename replacement introduced the error.\",\"Explicit ancestor checks place f560058da19e02716e6f943883a9508b447aff4e after the review base and before the review tip. No runtime test or reproduction was run.\"] Current coverage/results: [\"SPEC.md and SPEC_impl.md: searched cross-realm, Array.from, paste-sanitizer, term-bytes and related shortcut/terminal-input terms; no accepted rule covers a false test-example reference.\",\"TODO.md: Planned is empty at lines 25-26.\",\"plans/queue: searched the actual filenames, cross-realm and Array.from; none match. Read tmux-drop-from-docs.md acceptance criteria 3 and 5 in full: its sweep addresses tmux/xterm comparisons and related complexity, not this now sanitizer-named cross-realm reference. The broader sweep does not explicitly remove this cause. tmux-end-old-terminals.md criteria 4-5 describe the already implemented removal, not an unlanded repair for the false reference.\",\"BUGS.md and active TRIAGE_OUTCOMES.md: searched the actual filenames and cross-realm/Array.from terms; no match. The archive was not read.\",\"Read review_feedback_queue/INDEX.md in full and searched queue files for cross-realm, Array.from, paste-sanitizer and term-bytes. The only Array.from hit concerns sandbox shard allocation and is unrelated. No same-root queue alias found.\",\"FILTER.md: no filter covers an ordinary persistent false source-comment reference. The initial severity/actionability omission is not a listed filter.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"No stronger consequence was asserted. Initial line 1 proposed omitting the misleading example because it changed no runtime contract and the local explanation was self-contained. Lines 3 and 5 explicitly supersede that proposed omission; the established consequence remains misleading maintainer navigation, without a security or user-work-loss route.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-116",
+          "key": "g185/c1",
+          "latest_line": 5,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "events-test-cross-realm-array-example-reference",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The reviewed patch replaces an accurate example reference with a file that does not demonstrate the claimed technique. This is an in-scope source-comment error, with misleading navigation for maintainers and no established product failure.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/js-tests/events.test.js:140-150 explicitly says paste-sanitizer.test.js uses Array.from for the same cross-realm workaround; the patch changes only the referenced filename at line 145.",
+            "Read complete f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/js-tests/paste-sanitizer.test.js:1-60. Its VM test compares typeof and a primitive string; it contains no Array.from or sandbox-array structural comparison.",
+            "f560058da19e02716e6f943883a9508b447aff4e^:crates/farhelm-ui/js-tests/term-bytes.test.js:108-116 explains cross-realm Uint8Array prototypes and uses Array.from, establishing that the filename replacement introduced the error.",
+            "Explicit ancestor checks place f560058da19e02716e6f943883a9508b447aff4e after the review base and before the review tip. No runtime test or reproduction was run."
+          ],
+          "coverage_checked": [
+            "SPEC.md and SPEC_impl.md: searched cross-realm, Array.from, paste-sanitizer, term-bytes and related shortcut/terminal-input terms; no accepted rule covers a false test-example reference.",
+            "TODO.md: Planned is empty at lines 25-26.",
+            "plans/queue: searched the actual filenames, cross-realm and Array.from; none match. Read tmux-drop-from-docs.md acceptance criteria 3 and 5 in full: its sweep addresses tmux/xterm comparisons and related complexity, not this now sanitizer-named cross-realm reference. The broader sweep does not explicitly remove this cause. tmux-end-old-terminals.md criteria 4-5 describe the already implemented removal, not an unlanded repair for the false reference.",
+            "BUGS.md and active TRIAGE_OUTCOMES.md: searched the actual filenames and cross-realm/Array.from terms; no match. The archive was not read.",
+            "Read review_feedback_queue/INDEX.md in full and searched queue files for cross-realm, Array.from, paste-sanitizer and term-bytes. The only Array.from hit concerns sandbox shard allocation and is unrelated. No same-root queue alias found.",
+            "FILTER.md: no filter covers an ordinary persistent false source-comment reference. The initial severity/actionability omission is not a listed filter."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "No stronger consequence was asserted. Initial line 1 proposed omitting the misleading example because it changed no runtime contract and the local explanation was self-contained. Lines 3 and 5 explicitly supersede that proposed omission; the established consequence remains misleading maintainer navigation, without a security or user-work-loss route.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Record an other-priority documentation-correctness finding. The source establishes the false example and its introduction within the range. No exact coverage or filter applies; runtime correctness does not refute the comment defect."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "events-test-cross-realm-array-example-reference",
+        "destination": "trailing-events-test-cross-realm-array-example-reference.md"
+      }
+    },
+    {
+      "key": "g185/c2",
+      "owner": "g185",
+      "id": "c2",
+      "domain": "browser-interaction-helpers",
+      "purpose": "browser-interaction-helpers: crates/farhelm-ui/assets/client-log-shim.js, crates/farhelm-ui/assets/events.js, crates/farhelm-ui/assets/session-action-shortcuts.js, crates/farhelm-ui/assets/template-shortcuts.js, crates/farhelm-ui/assets/tooltip.js, crates/farhelm-ui/js-tests/app-css-animations.test.js, crates/farhelm-ui/js-tests/client-log-shim.test.js, crates/farhelm-ui/js-tests/events.test.js, crates/farhelm-ui/js-tests/session-action-shortcuts.test.js, crates/farhelm-ui/js-tests/template-shortcuts.test.js; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Removing the xterm input selector preserves the shipped terminal shortcut boundary",
+            "location": "crates/farhelm-ui/assets/session-action-shortcuts.js:27; crates/farhelm-ui/assets/template-shortcuts.js:135",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\nConsidered whether removing the old terminal input selector could make Delete or template-sequence keys reach a terminal program. The remaining selector matches the only terminal input this revision creates.\n\n## Details\nBoth assigned executable changes remove only .xterm-helper-textarea and retain .grid-terminal-input. grid-terminal.js:364–388 creates a textarea with exactly that class, with no editable descendant requiring a closest match in the template classifier. terminal.js:4313 creates the surface through window.farhelmGridTerminal.create; source searches of terminal.js and lib.rs found no xterm creation path. lib.rs:1742–1762 includes and installs these same shortcut assets. session-action-shortcuts.js:38–53 retains modal, editor, repetition and disabled-button guards; template-shortcuts.js:199–280 retains admission, cancellation, snapshot capture and relay handling. The changed tests retain the terminal-vs-editor distinctions (session-action-shortcuts.test.js:39–49; template-shortcuts.test.js:418–432) and merely adapt their selector model. SPEC.md:3368–3383 requires browser Delete to leave ordinary editors alone and both shortcut families to work from terminal input; SPEC.md:1251 explicitly says 'The terminal’s input textarea counts as the terminal.' SPEC_impl.md:1506–1514 says 'Every terminal runs in a terminal host' and the browser 'draws a grid stream with its own grid client'. The removal is consistent with the replacement's contract; no regression route is established. Suggested bucket if there had been a shortcut regression: high/material UX. Confidence: confirmed from source; no execution performed. proposed_drop: source refutation, the only created keyboard target retains the matched class and all other selector behavior is unchanged. Could-be-highest: false for this considered route; no change to deletion confirmation or target binding and no established security/loss-of-work consequence. possible_cover: none; coverage sources were not searched."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Grid input and surviving tests support the narrowed shortcut selectors",
+            "location": "crates/farhelm-ui/assets/session-action-shortcuts.js:27; crates/farhelm-ui/assets/template-shortcuts.js:135",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\nRechecked the suspected regression: removing the old terminal selector does not exclude the shipped terminal keyboard target. Delete and template-sequence input interception still reaches the retained grid textarea.\n\n## Details\nThe original possible consequence was Delete or template-sequence keys being forwarded to a terminal program after selector narrowing. Synthesis checked the real DOM and its input path, beyond the test doubles: grid-terminal.js:367–368 creates a textarea with class grid-terminal-input; lines 1511–1534 attach the keydown and typed-input handlers to that same input; lines 1871–1872 focus that input. terminal.js:3389 invokes createGridSurface and :4313 creates the grid component. A textarea has no editable element descendant whose event target would require replacing the template helper's matches with closest. Both changed selectors retain this exact class; the session helper additionally uses closest. The guards run in window capture and stop propagation before the input target's keydown handler; no retained class or event-path mismatch was found.\n\nRemaining test source: session-action-shortcuts.test.js:39–49 still distinguishes terminal proxy, ordinary input, contenteditable, non-editor and null targets; :52–79 covers capture registration, disabled/missing controls and repeat suppression in the Mac installer. template-shortcuts.test.js:159–179 models the exact retained selector and ancestor editability; :418–432 asserts ordinary editors yield while a terminal textarea can begin. These are fabricated DOM tests, so they alone do not establish the shipped class. The independent source check above establishes it. Browser helper e2e/tests/helpers/term.ts:22–36 selects that same real class. e2e/tests/session-action-shortcuts.spec.ts:16–27 establishes focused live attachment; :35–77 describes the actual browser chord, ordinary confirmation, focus handback and exact non-forwarding assertion; :137–187 covers modal/editor yielding. e2e/tests/quick-launch.spec.ts:349–419 establishes terminal focus, begins a sequence with Control+Shift+KeyX, composes a launch and asserts no program input. Read these tests as source only; no pass or runtime behavior was observed.\n\nContract: SPEC.md:1251 exactly says \"The terminal's input textarea counts as the terminal.\" SPEC.md:3371 says \"The browser chord leaves text editors other than the terminal alone. A visible modal keeps keyboard ownership.\" The changed selectors agree with both. The original event's typographic apostrophe in the first quote is corrected here. Suggested bucket for the suspected shortcut regression would be high/material UX; no such regression is established. Confidence: confirmed source refutation of the proposed input-target mismatch, not execution. proposed_drop: source refutation as above; this remains a proposed disposition for the parent, with the original proposal preserved in the append-only history. No accepted drop is claimed. Could-be-highest: false for the considered route; no established security or loss-of-work effect, and deletion confirmation/target binding is unchanged by these patches. possible_cover: none; coverage sources were not searched. No readily checkable premise remains open for c2."
+          }
+        }
+      ],
+      "latest": {
+        "line": 4,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Grid input and surviving tests support the narrowed shortcut selectors",
+          "location": "crates/farhelm-ui/assets/session-action-shortcuts.js:27; crates/farhelm-ui/assets/template-shortcuts.js:135",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\nRechecked the suspected regression: removing the old terminal selector does not exclude the shipped terminal keyboard target. Delete and template-sequence input interception still reaches the retained grid textarea.\n\n## Details\nThe original possible consequence was Delete or template-sequence keys being forwarded to a terminal program after selector narrowing. Synthesis checked the real DOM and its input path, beyond the test doubles: grid-terminal.js:367–368 creates a textarea with class grid-terminal-input; lines 1511–1534 attach the keydown and typed-input handlers to that same input; lines 1871–1872 focus that input. terminal.js:3389 invokes createGridSurface and :4313 creates the grid component. A textarea has no editable element descendant whose event target would require replacing the template helper's matches with closest. Both changed selectors retain this exact class; the session helper additionally uses closest. The guards run in window capture and stop propagation before the input target's keydown handler; no retained class or event-path mismatch was found.\n\nRemaining test source: session-action-shortcuts.test.js:39–49 still distinguishes terminal proxy, ordinary input, contenteditable, non-editor and null targets; :52–79 covers capture registration, disabled/missing controls and repeat suppression in the Mac installer. template-shortcuts.test.js:159–179 models the exact retained selector and ancestor editability; :418–432 asserts ordinary editors yield while a terminal textarea can begin. These are fabricated DOM tests, so they alone do not establish the shipped class. The independent source check above establishes it. Browser helper e2e/tests/helpers/term.ts:22–36 selects that same real class. e2e/tests/session-action-shortcuts.spec.ts:16–27 establishes focused live attachment; :35–77 describes the actual browser chord, ordinary confirmation, focus handback and exact non-forwarding assertion; :137–187 covers modal/editor yielding. e2e/tests/quick-launch.spec.ts:349–419 establishes terminal focus, begins a sequence with Control+Shift+KeyX, composes a launch and asserts no program input. Read these tests as source only; no pass or runtime behavior was observed.\n\nContract: SPEC.md:1251 exactly says \"The terminal's input textarea counts as the terminal.\" SPEC.md:3371 says \"The browser chord leaves text editors other than the terminal alone. A visible modal keeps keyboard ownership.\" The changed selectors agree with both. The original event's typographic apostrophe in the first quote is corrected here. Suggested bucket for the suspected shortcut regression would be high/material UX; no such regression is established. Confidence: confirmed source refutation of the proposed input-target mismatch, not execution. proposed_drop: source refutation as above; this remains a proposed disposition for the parent, with the original proposal preserved in the append-only history. No accepted drop is claimed. Could-be-highest: false for the considered route; no established security or loss-of-work effect, and deletion confirmation/target binding is unchanged by these patches. possible_cover: none; coverage sources were not searched. No readily checkable premise remains open for c2."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g185/findings.jsonl",
+        "id": "c2",
+        "line": 4,
+        "disposition": "under-investigation",
+        "group": "g185-c2",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-116",
+          "key": "g185/c2",
+          "latest_line": 4,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "removed-xterm-shortcut-selector-excludes-live-terminal-input",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The specific proposed input-target mismatch is source-refuted: both narrowed selectors still match the actual terminal keyboard textarea. No shortcut regression is established. This proposes a disposition only; the original possible forwarding consequence remains preserved for the parent's drop check.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/assets/session-action-shortcuts.js:21-28 removes only the xterm selector and retains closest('.grid-terminal-input'); lines 38-54 install window capture, prevent default and stop propagation before clicking the existing guarded action.",
+            "f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/assets/template-shortcuts.js:127-143 retains matches('.grid-terminal-input'); lines 199-282 install window capture and stopImmediatePropagation for consumed keys. A real terminal textarea is itself the event target and needs no editable-descendant closest match.",
+            "f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/assets/grid-terminal.js:364-388 creates a textarea with class grid-terminal-input; lines 1511-1534 attach its keydown and typed-input paths, and lines 1871-1872 focus that same textarea.",
+            "f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/assets/terminal.js:3387-3393 creates the grid surface; lines 4311-4318 call window.farhelmGridTerminal.create. crates/farhelm-ui/src/lib.rs:1742-1762 embeds and installs the two checked shortcut assets.",
+            "Explicit ancestor checks place the selector patch within the review range. These are source checks only, with no claimed browser pass or runtime observation."
+          ],
+          "coverage_checked": [
+            "SPEC.md:1230-1285 and 3357-3376 require terminal-focused template/session shortcuts to consume their keys while ordinary editors and visible modals retain ownership. They support the intended boundary; they do not accept forwarding into a terminal program.",
+            "SPEC_impl.md:1614-1658 describes capture listeners consuming the terminal input proxy before the terminal. This agrees with checked source, without establishing an exception for failed interception.",
+            "TODO.md: Planned is empty at lines 25-26.",
+            "plans/queue: searches for shortcut, terminal-input and selector terms found no unlanded repair for this exact route. Read tmux-end-old-terminals.md acceptance criteria 4-5: it explicitly removes dual selectors and mounts the grid unconditionally, explaining the patch's intent, not accepting a regression. The tooling/docs plans address their respective tmux removal scopes, not loss of shortcut interception.",
+            "BUGS.md and active TRIAGE_OUTCOMES.md: no exact trigger/consequence/scope match. Other shortcut decisions concern stale labels, batch snapshots or auth-remount state, not the actual grid input class. The archive was not read.",
+            "Read review_feedback_queue/INDEX.md in full and searched queue files for the actual class names, asset names and selector/shortcut combinations. No same-root item found.",
+            "FILTER.md: no filter is needed or proposed; the basis is the retained selector matching the actual DOM."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "The suspected regression requires a shipped terminal keyboard target excluded by the retained selector. Checked source instead creates, focuses and listens on the matching grid-terminal-input textarea.",
+          "original_stronger_consequence": "Lines 2 and 4 considered Delete or template-sequence keystrokes being forwarded into the terminal program after selector narrowing, hypothetically high for material UX. No actual program-input sequence, wrong-target deletion, security effect or loss of user-owned work was established. Both records propose source refutation; neither claims an accepted drop.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Propose refuting only the removed-selector/live-target mismatch. Other is the bookkeeping bucket because no adverse consequence is established; the original suspected shortcut regression would be high if shown. Obtain the parent's independent drop check because the dismissed route concerns unintended input into a user's running program and could involve user-owned work. This consultation does not authorize that drop."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "removed-xterm-shortcut-selector-excludes-live-terminal-input",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial pass complete: all ten assigned patches reviewed at the pinned commit.\n\nNo substantive findings or unresolved leads. Recorded candidates `c1` and `c2` with omission reasons. Findings log and progress are updated; no assigned material remains unread. No tests or reproductions run."
+    },
+    {
+      "turn": 2,
+      "reply": "- `c1` promoted to a confirmed documentation finding. The patch replaces an accurate reference with one lacking the claimed `Array.from` example; prior omission proposal superseded.\n- `c2` revised with shipped input-path and surviving-test evidence. No selector mismatch found; proposed disposition retained for parent review.\n- Unresolved lead IDs: none.\n\nSource-only checks; no tests or reproductions run."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass complete. Checked full-range path history, exports and VM harnesses, CSS checker input, selector test changes, and terminal input targeting.\n\nNothing new found. New verified IDs: none. New unverified IDs: none. Open leads: none.\n\nProgress updated; no runtime execution."
+    }
+  ],
+  "progress": "Group: g185 (browser-interaction-helpers)\nState: assigned initial source-review pass complete; ready for the caller's later synthesis turn.\nTurn type/count: initial / 1. Discovery-pass count: 0 (no later discovery turn performed).\n\nCoverage: read the complete inventory commits field without reading excluded coverage metadata. Delivered all ten mandatory patch packets through the absolute evidence read command, 207 lines total, at f560058da19e02716e6f943883a9508b447aff4e. No unread assigned patch material. Read the required priority and feedback-format sections and the test-authoring checklist.\n\nContracts and interfaces: inspected pinned SPEC.md template-number and sequence rules (1226–1285), session-action shortcut rules (3368–3383), and animation behavior (2685–2694); pinned SPEC_impl.md answers-bind-to-render contract (1069–1098), grid-only terminal contract (1505–1514), session/template shortcut contracts (1629–1668), looping animation rule and rationale (658–685), and client-log contract (7084–7097). Interface assumptions for g009/g010/g011: the terminal surface is the grid component; terminal.js:4313 invokes farhelmGridTerminal.create, and grid-terminal.js:364–388 creates the textarea class both changed selectors retain. lib.rs:1742–1762 installs the reviewed assets directly. No external interface changes in this assigned scope.\n\nAnalysis: eight patches change comments only; two executable changes remove the obsolete xterm input alternative while preserving the actual grid input. Reviewed both complete shortcut helper assets, changed test contexts and DOM doubles, the replacement sanitizer asset and its complete test, and surrounding documentation in logging, events, tooltip and CSS-animation tests. The replacement reference explains the CommonJS/browser and node:vm pattern; its test does not contain the Array.from example one comment now claims.\n\nDurable records: c1 records the isolated inaccurate cross-realm example reference and its proposed omission; c2 records the source-refuted selector regression concern. New verified finding IDs: none. New unverified finding IDs: none. New candidate IDs: c1, c2. Open lead IDs: none. Findings log is append-only and remains the complete record.\n\nValidation: source and contract analysis only. No execution observations, runtime tests, reproductions, builds, checkout changes, queued-finding reads, or helper agents. No tests were required or run for this source-only assignment.\n\nNext action: return initial-pass results to caller; later synthesis/discovery protocol requires a subsequent caller turn.\n\nSynthesis turn 2 complete. Discovery-pass count remains 0; this was the requested later-turn synthesis, not a separate discovery pass. All assigned patch material remains read; no unread scope or open leads.\n\nChanges this turn: c1 promoted under its original ID to a confirmed documentation finding, bucket other, proposed_drop false. Its previous omission proposal is preserved in history and explicitly superseded. Reread the actual commit patch and all 60 lines of the replacement test. Also read the parent revision's original term-bytes.test.js:108–116: it really contains the Array.from example, establishing that the replacement reference introduced the false statement. No runtime consequence is claimed.\n\nc2 revised under its original ID with direct input-path and surviving-test checks. The real target is the textarea created at grid-terminal.js:367–368; its keydown/input handlers are attached at :1514–1534 and focus targets it at :1871–1872. The terminal factory, browser helper and remaining unit/browser test source agree on that same class. The proposed source-refuted disposition is retained for the parent; no accepted drop is claimed. Tests were read, not run.\n\nCross-batch checks: the sanitizer's CommonJS/browser exports and actual-source VM test support the other changed reference claims; the special Array.from claim is the exception recorded in c1. The vendor asset tree has no remaining xterm CSS, consistent with the removed comment in the animation checker. Shortcut capture and target input handlers retain their event-order relationship; narrowing the selectors changes no confirmation binding or template snapshot code.\n\nCorrection to the initial progress wording: six patches are comment-only; two change runtime selectors; two change the associated test selector doubles (with comments/names). The earlier phrase 'eight patches change comments only' incorrectly counted those fixture changes as comments.\n\nInterface assumptions for g009/g010/g011 are now source-checked through DOM creation, focus, input delivery, shortcut capture and browser test selectors; none remains readily checkable but unresolved. New verified finding IDs this turn: c1 (promotion). New unverified finding IDs: none. Revised candidate IDs: c2. Open lead IDs: none. No tests, builds or reproductions; no execution observations. Next: return synthesis delta; any later discovery pass belongs to a subsequent caller turn.\n\nDiscovery turn 3 complete. Discovery-pass count: 1. Result: empty; nothing new found beyond the existing records. New verified IDs: none. New unverified-after-investigation IDs: none. New candidates: none. Revised IDs: none. Open lead IDs: none. Findings history remains unchanged and append-only; no parent drop or lowering is treated as accepted.\n\nRead all 30 lines / 4065 bytes of discovery-neighbours.json first. g009 and g011 supplied no records; g010's single-write documentation finding concerns a separate contract and adds no pending question or novel route within this group's helper patches. Named pending questions were empty.\n\nUseful checks in this pass: queried all ten assigned paths across the full exclusive 6e423e30068b62c6cfa276c6d720ee35bb70387a through inclusive 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db range; f560058da19e02716e6f943883a9508b447aff4e is their only changing commit. Checked the client-log, events and tooltip export/install blocks against the rewritten dual-environment/test-pattern references and checked that logging/event tests load their real asset sources into VM contexts. Checked the CSS-animation test's real-style-sheet reads and assertions: they read APP_CSS_PATH and retain named-indicator assertions, with no dependency on the removed vendored stylesheet. Reexamined the two changed test selector doubles with wider patch context: their assertions and negative editor cases are preserved. Searched terminal/grid code for input class mutation, cloned input or shadow retargeting: the only matching operation is the original grid-terminal-input class assignment; no additional target path was found. These are source results, not execution observations.\n\nScope and interfaces unchanged: g185 only; pinned source and contracts reused from prior turns. No unread assigned material, unresolved caller assumption or missing source premise. No runtime tests, reproductions, live-install actions, checkout modifications, prohibited coverage-source searches or helper agents. Next: return the empty discovery result to the caller.\n"
+}

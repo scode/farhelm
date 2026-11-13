@@ -1,0 +1,170 @@
+[
+  {
+    "key": "g131/c2",
+    "latest_line": 2,
+    "recommendation": "covered",
+    "bucket": "other",
+    "underlying_key": "retired-tmux-periodic-warning-contract",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The removed tests require periodic warnings for terminals the release intentionally retires. The replacement startup contract explicitly resolves those warnings and records a different persistent notice. This does not adjudicate whether ending old processes is safe in every failure case.",
+    "checks": [
+      "At 1ed482dde220452e424973faf38a5e1318986333, SPEC.md:2804-2814 replaces the old warning with startup notices; SPEC_impl.md:2882-2931 retires the running tmux driver and specifies startup conversion.",
+      "At that revision, service/core.rs:6142-6184 ends the old server before reload; :7077-7091 calls record_ended even when ended is empty. service/core/old_terminals.rs:525-546 records OldTerminalEnded separately, then unconditionally resolves the OldTerminal kind. Errors are logged and later starts retry resolution.",
+      "The removed lifecycle tests concern warnings remaining while old panes/tabs run, not the new startup notice. No runtime experiment was performed."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:2804-2814 and :2998-3011 retain the exact replacement contract. Current SPEC_impl.md:2780-2824 also specifies startup-only termination and warning resolution, including accepted failure residuals.",
+      "TODO.md Planned is empty; BUGS.md has no matching warning/test-removal entry; exact searches of active TRIAGE_OUTCOMES.md found none.",
+      "Searched plans/queue; tmux-end-old-terminals matches this replacement, but plans/REPORTS.md:29 records it landed. It is not an unlanded-plan cover.",
+      "INDEX.md and matching notification-read-failure-leaves-stale-cell.md checked. That item concerns publication after a failed notification read, explicitly narrowed away from the removed old-warning reconciler; it is not this claim.",
+      "FILTER.md checked; no filter is needed or asserted."
+    ],
+    "exact_cover_quotes": [
+      "Current SPEC.md:2807-2808: 'no warning is recorded any more, and every supervisor start marks any unresolved one resolved.'",
+      "Reviewed SPEC.md:2811-2813: 'Nothing resolves the notice: it stays unresolved, and unread until the user reads it, across later supervisor starts, until it is cleared.'"
+    ],
+    "missing_premise": null,
+    "original_stronger_consequence": "Deleting the old notification lifecycle tests might leave users unaware of still-running old agents or resolve warnings too early. No security or work-loss route from the test deletion itself was established. The separate intentional startup termination policy and its mechanics were outside this candidate's audit.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Exact specification replacement, corroborated by startup callers. Conservatively register the proposed omission because its surrounding migration ends user processes; agreement must stay confined to obsolete periodic-warning tests. g132/c2 overlaps this warning question but also considers death/reap work, so it is not an exact alias."
+  },
+  {
+    "key": "g131/l1",
+    "latest_line": 12,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "test-one-shot-sample-before-host-catch-up",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The final history establishes a conditional Linux source route: separately visible text and CRLF can become two queued adoption events; adoption processes only one before returning; the test's sole pass can exclude the still-uncaught-up host. This is a test false failure, not an observed flake or a product-data-loss claim. The superseded unverified label must not overwrite the final source-verified disposition.",
+    "checks": [
+      "At 1ed482dde220452e424973faf38a5e1318986333, ticker.rs:1858-1891 returns Fresh adoption without waiting for caught_up. :5213-5251 installs the host and synthetic Waiting evidence, then samples once; :5253-5279 requires Running and a durable START key. :1331-1338 excludes a host whose caught_up is false.",
+      "At that revision, hosts/terminal.rs:1795-1821 counts events decoded during two Info round trips; :1858 initializes caught_up from fence/end; :1916-1928 processes one queued event and spawns the runtime. :3343-3344 decrements once per event; :4008-4027 requires the whole fence drained before publishing caught_up.",
+      "At that revision, terminal-host/src/host.rs:344-411 reads currently available PTY data, writes queued frames, handles client messages, then refills. :503-537 stops draining on EAGAIN; :628-650 materializes Output frames. journal.rs:207-229 coalesces stored bytes but :447-469 copies only bytes currently available at the cursor, so later bytes cannot merge into an already queued frame. hosts/client.rs:1016-1030 and :1078-1142 decode all buffered whole frames and queue output separately from Info replies. This permits the recorded O1/Reply1/O2/Reply2 order.",
+      "Checked primary Linux v6.12 source online. n_tty.c:420-429 and :539-547 separate ordinary text from newline conversion; :2387-2402 invokes block output then character output. pty.c:111-118 pushes each write to peer buffering; :914-917 preserves default output flags. tty_io.c:124-131 defaults OPOST|ONLCR. tty_buffer.c:486-496 reads committed bytes and :529-535 commits/queues work separately. Repo spawn.rs:371-400 preserves these output flags. The exact newline-bearing command therefore has a source-permitted split delivery. These are corrected raw-file line coordinates; the input history's Linux coordinates differ.",
+      "The source route is conditional on split visibility across host refill iterations, the specified Read/Info ordering, and runtime consumption after sample selection. A single event or an earlier runtime drain does not fail. No incidence, frequency, local kernel version or macOS failure was measured.",
+      "Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:ticker.rs:7013-7093 already has the printf command, four-Waiting seed, single pass and persistence assertions. Thus the separate producer-text-only argument predates the range. Diff from the reviewed commit to 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db changes ticker comments only and adds no test readiness dependency."
+    ],
+    "coverage_checked": [
+      "Both specifications searched for sampling, capture recovery, catch-up and work-start persistence; SPEC_impl.md:4164-4272 specifies owned-sample and work-start behavior, but does not accept one-shot test sampling before eligibility. SPEC.md's cosmetic-status acceptance is not test-reliability coverage.",
+      "TODO.md Planned is empty. BUGS.md and active TRIAGE_OUTCOMES.md have no matching test/eligibility claim.",
+      "plans/queue searched for the actual fixture, persistence, failed capture and catch-up; no unlanded plan states a repair for this fixture. The tmux removal plans are recorded landed in plans/REPORTS.md:29-32.",
+      "INDEX.md and matching queue text searched. The reconnect-replay fence item has a different production reconnect/resize trigger; successor-exit and other readiness tests concern different fixtures. No exact existing queue coverage found.",
+      "FILTER.md checked. A test false failure without a person racing a control, upgrade-carried state, diagnostic-only consequence or failed session operation does not fully match any filter."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "The initial concern was a false pass on blank startup text instead of literal 'work resumed'. That argument was later source-refuted for this test's transition/persistence subject: a differing blank screen can legitimately produce generic Working and still exercise the asserted transition, key allocation and durable write. It also predates the exclusive base. The intermediate statement that the line was 'normally' one event was an assumption and was withdrawn. The separate catch-up concern progressed from unverified to a source-verified conditional Linux route; no runtime failure was observed, no trace was demanded, and no parent drop was accepted.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain the final conditional failure route with other priority for maintainer-test reliability. Keep the separately refuted/out-of-range producer-text concern in the history. The input mentions g114/l2 at a different paste-off fixture; its newline-free output needs its own event-split proof, so it is not asserted as an exact alias here. Linux references: https://raw.githubusercontent.com/torvalds/linux/v6.12/drivers/tty/n_tty.c, https://raw.githubusercontent.com/torvalds/linux/v6.12/drivers/tty/pty.c, https://raw.githubusercontent.com/torvalds/linux/v6.12/drivers/tty/tty_buffer.c, https://raw.githubusercontent.com/torvalds/linux/v6.12/drivers/tty/tty_io.c."
+  },
+  {
+    "key": "g131/c3",
+    "latest_line": 6,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "removed-recycled-tmux-pane-lookup-guard",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The removed mismatch test protected a global lookup by recyclable tmux pane ID. The replacement sampling and status paths use the terminal runtime stored on the session entry and read that runtime's own emulator/status. The considered recycled-ID route is absent.",
+    "checks": [
+      "At 1ed482dde220452e424973faf38a5e1318986333, ticker.rs:1321-1340 clones entry.terminal and checks that handle's caught_up/owned-live state; :1362-1372 samples that handle. status.rs:130-132 and :198-215 derive evidence from entry.terminal.",
+      "At that revision, hosts/terminal.rs:2233-2248 reads the emulator held by the handle; :2275-2284 selects its live emulator or retained view under its own lock. The previous host branch already used direct runtime eligibility (parent ticker.rs:1712-1719). No replacement global pane-ID lookup is used here.",
+      "No runtime observation or independent discovery/tag-admission audit was performed. A caller assigning another session's HostTerminal would be a different construction defect, not the recycled-ID route removed here."
+    ],
+    "coverage_checked": [
+      "Both specifications searched for pane identity, old terminals and runtime ownership. Current SPEC_impl.md:1899-1905 says old pane IDs are never looked up again; :2780-2824 describes startup retirement. These corroborate the removed interface rather than accept cross-session sampling.",
+      "TODO.md Planned empty; BUGS.md, active TRIAGE_OUTCOMES.md, plans/queue and INDEX.md searched for recycled/mismatched pane or cross-session sampling; no exact current item or unlanded repair found.",
+      "FILTER.md checked; no security/trust-boundary filter applies. This is a source refutation, not a rarity dismissal."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "If sampling one session could read another session's terminal, output disclosure or harmful downstream actions could be highest. The named recycled-tmux-ID path no longer exists. No shipped replacement route was established; discovery/tag admission elsewhere was not audited.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Narrow source refutation of the removed recyclable-pane lookup route only. Independent drop agreement is required because the original consequence includes cross-session disclosure or actions."
+  },
+  {
+    "key": "g132/c1",
+    "latest_line": 6,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "host-screen-read-never-used-tmux-capture-failure-reset",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Removing tmux's failed-capture branch does not introduce a host-read failure regression: production host screen/title reads were already infallible, and the same caught-up/owned-live eligibility rule already applied. The encoding view remains readable.",
+    "checks": [
+      "At parent of 1ed482dde220452e424973faf38a5e1318986333, terminals.rs:319-339 returns Ok(host.screen_tail(...)) and Ok(host.title()); ticker.rs:1712-1719 already requires caught_up and owned-live. Reviewed ticker.rs:1330-1337 preserves this filter.",
+      "Reviewed hosts/terminal.rs:2229-2247 returns String for screen/title; :2275-2284 selects the live emulator or retained view without awaiting encoding. Reviewed ticker.rs:586-629 retains successful-sample baseline logic; :288-319 requires prior and fresh readings for activity/work starts.",
+      "The deleted injection seam simulated a failure production host reads did not return. No runtime test was run. The check does not prove wall-time liveness from an encoding view or adjudicate separate gap/re-adoption behavior."
+    ],
+    "coverage_checked": [
+      "Both specifications searched; SPEC_impl.md Recovery/checkpoints describes retained encoding views, and Status heuristics/Last-activity/Work-start (:4164-4272 current) describes successful-sample evidence. These support the retained behavior; they do not excuse a real host recovery defect.",
+      "TODO.md Planned empty; BUGS.md, active TRIAGE_OUTCOMES.md, plans/queue, INDEX.md and matching queue text searched for failed captures, baseline and encoding. No exact claim coverage found. tmux cleanup plans are landed, not pending cover.",
+      "FILTER.md checked; no filter invoked. g132/c3 is a distinct inaccurate-documentation finding and is retained."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "A session could retain stale Waiting evidence or date/reorder activity after a failed read because the old reset disappeared. The production host path never supplied that failure result before or after this patch. This refutation does not settle pre-existing host gaps, re-adoption or every heuristic, nor the separately retained false lifecycle comments.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutation of the claimed regression from removing fallible tmux capture dispatch. The established considered impact is cosmetic status/activity ordering, with no security or user-work-loss route."
+  },
+  {
+    "key": "g132/c2",
+    "latest_line": 8,
+    "recommendation": "covered",
+    "bucket": "other",
+    "underlying_key": "retired-tmux-periodic-warning-contract",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The new terminal model removes the continuing periodic tmux responsibilities. Warning resolution is performed during writable startup reload even when no old agent rows were converted; new termination notices remain separate and unresolved. No supported legacy runtime is left needing pane-map sampling or tmux-tab reap.",
+    "checks": [
+      "At 1ed482dde220452e424973faf38a5e1318986333, service/terminals.rs:122-141 resolves HostTerminal; :175-176 identifies old rows as ended by startup. core.rs:6142-6184 ends old terminals before reload; :7077-7091 calls old_terminals::record_ended on every writable reload.",
+      "At that revision, core/old_terminals.rs:525-546 records OldTerminalEnded separately and resolves all OldTerminal warnings independently of ended-list membership; :522-524 documents retry at later startup after failure.",
+      "Reviewed SPEC_impl.md:2882-2891 says the runtime has no tmux driver; SPEC.md:2804-2814 replaces periodic warning behavior. These checks concern retired ticker responsibilities, not approval of all startup destruction/failure behavior. No runtime experiment was performed."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:2804-2814 and :2998-3011 explicitly replace old warnings and retire old terminals; current SPEC_impl.md:2780-2824 specifies startup-only conversion, sweeps and resolution.",
+      "TODO.md Planned empty; BUGS.md and active TRIAGE_OUTCOMES.md contain no exact competing periodic-tmux obligation.",
+      "plans/queue checked; tmux-end-old-terminals and later cleanup plans are recorded landed at plans/REPORTS.md:29-32, so not unlanded-plan cover.",
+      "INDEX.md and notification-read-failure-leaves-stale-cell.md checked. The latter explicitly excludes the retired reconciler and retains another notification-publication failure; it does not refute this migration contract.",
+      "FILTER.md checked; no filter invoked. g131/c2 covers the removed warning tests only, so the records overlap but are not exact aliases."
+    ],
+    "exact_cover_quotes": [
+      "Reviewed SPEC_impl.md:2883-2891: 'This release ends them at startup' and 'The running supervisor runs no tmux at all, and its driver of the old terminals is gone'.",
+      "Current SPEC.md:2807-2808: 'no warning is recorded any more, and every supervisor start marks any unresolved one resolved.'"
+    ],
+    "missing_premise": null,
+    "original_stronger_consequence": "Legacy sessions might lose needed status/death/tab-reap updates, or old warnings might remain unresolved after periodic reconciliation is removed. No route from this ticker deletion to killing user work was asserted. Separate destructive startup policy, cleanup residuals and database-failure behavior are expressly outside this proposed omission.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Exact specification retirement plus source refutation of the missing startup resolver. Conservatively register the proposed omission because the broader migration ends user processes; the check must not swallow a separate startup termination finding."
+  },
+  {
+    "key": "g132/c3",
+    "latest_line": 7,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "sampler-docs-promise-deleted-capture-failure-reset",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The present-tense sampler contracts still describe resetting screen evidence and transition readiness on failed captures, but the patch deletes the operation implementing that lifecycle. Infallible host-only sampling does not supply an equivalent event. This is a documentation correctness defect, even though no runtime regression is established.",
+    "checks": [
+      "At 1ed482dde220452e424973faf38a5e1318986333, ticker.rs:265-268 says the first sample after failed capture has no prior; :373-380 promises trust clearing and waiting-claim withdrawal; :411-431 describes fallback/reset after failure. These are current contracts, not labelled historical explanation.",
+      "Parent ticker.rs:743-750 implements forget_tail clearing trust, comparison and transition_ready. The reviewed revision removes that method and forget_tail_hinted. A complete reviewed-src transition_ready search returns only declaration :432, read :609 and assignment true :614. Fresh/reloaded/replacement constructors (:512-541) establish initial state rather than failure recovery.",
+      "Reviewed ticker.rs:1327-1337 skips unavailable/replaying hosts; hosts/terminal.rs:2229-2247 and :2275-2284 expose infallible emulator/view reads. No retained failed-capture reset was found. Diff through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db changes unrelated ticker comments and leaves these contracts intact; current ticker.rs:267,372-424 still contains them.",
+      "No runtime defect, fabricated activity during encoding, or need to restore the old reset is asserted. The earlier no-runtime-harm dismissal was withdrawn in the named history and is not a valid source refutation."
+    ],
+    "coverage_checked": [
+      "Both specs searched. Current SPEC_impl.md:3702-3704 also says the trust bool resets after failed capture; :4234-4235 and :4251-4254 repeat capture-failure baseline language. These describe the same obsolete lifecycle, not explicit acceptance that source comments may falsely promise it. Preserve this contract ambiguity for triage; do not silently turn it into a runtime finding.",
+      "TODO.md Planned empty. BUGS.md and active TRIAGE_OUTCOMES.md have no matching sampler-contract disposition.",
+      "plans/queue/tmux-drop-from-docs.md:68-75 and :88-96 broadly require stale comments cleaned, but plans/REPORTS.md:32 records the plan landed. It is neither pending coverage nor evidence these particular comments were repaired.",
+      "INDEX.md plus matching queue text searched. transition-accessor-comment.md concerns only an obsolete accessor spelling while preserving its contract, not this false recovery lifecycle. No exact existing item or useful same-root extension found.",
+      "FILTER.md checked. A permanently misleading internal lifecycle contract has no rare runtime trigger or wholly self-correcting diagnostic consequence, so no full filter match."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Future maintainers can rely on a nonexistent failure-recovery reset when reasoning about prompt hints and activity ordering. The first record set this aside for lack of runtime harm, then explicitly reopened and verified the documentation contract. No security or user-work-loss route was claimed; g132/c1 separately refutes a new production host-read regression. New/reloaded/replacement initialization is not a failed-capture recovery event.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain the inaccurate current lifecycle declarations with other priority. Keep the matching SPEC_impl wording and the already-landed cleanup plan visible as context, without treating either as cover for incorrect source documentation."
+  }
+]

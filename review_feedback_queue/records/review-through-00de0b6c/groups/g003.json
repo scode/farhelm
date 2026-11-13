@@ -1,0 +1,740 @@
+{
+  "group": {
+    "id": "g003",
+    "domain": "product-contracts",
+    "purpose": "product-contracts: SPEC_impl.md; phases complete small per-commit changes",
+    "interfaces": [
+      "g001",
+      "g002",
+      "g004",
+      "g005",
+      "g006",
+      "g007",
+      "g008",
+      "g009",
+      "g010",
+      "g011",
+      "g012",
+      "g014",
+      "g015",
+      "g016",
+      "g097",
+      "g103",
+      "g104",
+      "g122",
+      "g127",
+      "g129",
+      "g138",
+      "g151",
+      "g055",
+      "g065",
+      "g064",
+      "g061"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00083-000.patch",
+        "ranges": [
+          [
+            1,
+            594
+          ]
+        ],
+        "original_path": "SPEC_impl.md",
+        "commit": "c8bc155cc36723c8c53870944d07ce8ec61ef9ed",
+        "notes": "patch header; patch character offsets [0,59652)",
+        "lines": 594,
+        "bytes": 59681,
+        "start": 0,
+        "end": 59652,
+        "original": "[private-run]/prep/originals/00083.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00738-000.patch",
+        "ranges": [
+          [
+            1,
+            52
+          ]
+        ],
+        "original_path": "SPEC_impl.md",
+        "commit": "70bc66a9f285cc2a9984924f389834d118b7cfdc",
+        "notes": "patch header; patch character offsets [0,5745)",
+        "lines": 52,
+        "bytes": 5745,
+        "start": 0,
+        "end": 5745,
+        "original": "[private-run]/prep/originals/00738.patch"
+      }
+    ],
+    "lines": 646,
+    "bytes": 65426
+  },
+  "records": [
+    {
+      "key": "g003/f1",
+      "owner": "g003",
+      "id": "f1",
+      "domain": "product-contracts",
+      "purpose": "product-contracts: SPEC_impl.md; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "f1",
+            "state": "open",
+            "summary": "Check proxy environment sampling time against creation contract",
+            "location": "SPEC_impl.md:6561",
+            "detail": "Reviewed commit: c8bc155cc36723c8c53870944d07ce8ec61ef9ed. TLDR: A new container might inherit stale proxy settings if its host environment is sampled only during an earlier background probe. Source basis: SPEC.md, Container sessions (4737–4815), says containers inherit proxy variables from the container host systemd user manager environment at creation and later changes affect newly created containers; SPEC_impl.md, Podman places, creation and images (6537–6571), says to read them during the host probe and write selected variables at creation. Suggested bucket: other pending a concrete consequence; could-be-highest: no established security or work-loss route. Confidence: unresolved source-contract lead. proposed_drop: false. possible_cover: none. Checks so far: read complete assigned contract hunk and product Container sessions section; no runtime execution. Missing premise: whether a creation refresh or a temporal convention elsewhere reconciles probe-time and creation-time sampling. Next source check: complete governing topology/probe and proxy references at this revision, plus classify this docs-only design commit separately from implementation changes. No shipped runtime failure established."
+          }
+        },
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "f1",
+            "state": "open",
+            "summary": "Proxy sampling wording does not establish stale creation settings",
+            "location": "SPEC_impl.md:6561",
+            "detail": "Reviewed commit: c8bc155cc36723c8c53870944d07ce8ec61ef9ed. TLDR: Investigated whether new containers must inherit stale proxy settings sampled by an earlier background host probe. No stale-settings route is established by this documentation-only commit. SPEC_impl.md 6561–6564 says to read proxy variables during the place probe, but does not say that only a previously cached background probe may supply creation settings or forbid a creation-time probe. SPEC.md 4802–4804 explicitly requires creation-time inheritance: \"Containers inherit proxy variables from the container host's systemd user manager environment at creation.\" It also says, \"Later host changes affect newly created containers.\" The full SPEC_impl.md introduction (lines 3–6) resolves observable disagreements: \"SPEC.md defines what the product does; when this document and SPEC.md disagree about observable behavior, SPEC.md wins.\" Checks: delivered all assigned contract patch text, read complete Disposable environments and Container sessions sections, searched all proxy/show-environment references in both pinned specifications, and inspected commit stat (only SPEC.md and SPEC_impl.md change). These checks show an implementation must refresh sufficiently to honor SPEC.md; this patch does not introduce code choosing old cache data. Suggested bucket: other for wording ambiguity only; could-be-highest: false, no established security or work-loss route, and no changed runtime path. Confidence: confirmed scope/contract analysis, not execution. proposed_drop: no concrete faulty implementation or contradictory mandatory choice; the product contract explicitly settles the required behavior. possible_cover: none. Preserved suspected consequence: an implementation using only an old cached probe could give new containers obsolete or absent proxy settings and prevent their network access; that would need source evidence in the implementation group. No runtime tests or reproductions run."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "f1",
+            "state": "open",
+            "summary": "Reopened: creation installs proxy values from the place observation",
+            "location": "crates/farhelm-helm/src/environment/podman.rs:1195",
+            "detail": "Reviewed commit: c8bc155cc36723c8c53870944d07ce8ec61ef9ed (assigned design patch); synthesis source revision: 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: New containers may receive old host proxy settings, preventing network access after the host proxy changes. Reopened the earlier documentation-only candidate after reading the actual creation lifecycle. At pinned tip, podman.rs 1183–1227 installs ready.proxy through self.place at 1195 before first admission; admitted environments deliberately retain their original snapshot. podman_probe.rs 326–334 accepts recent cached observations; fresh at 385–406 returns such a cache without refresh, and runtime at 340–380 accepts an older cached success. Missing premise: which observation policy self.place selects, whether a refresh is forced earlier by every creation caller, and the resulting exact age bound. SPEC.md at original revision 4802–4804 requires creation-time inheritance and later host changes to affect newly created containers; SPEC_impl.md 6561–6564 samples during a probe. Suggested bucket: other pending established route and impact; could-be-highest: false on current evidence, no security/work-loss consequence established. Confidence: substantive reopened source lead, not observed execution. proposed_drop: false; previous candidate disposition is superseded pending caller trace, while preserving its correct conclusion that the assigned design patch alone changes no runtime code. possible_cover: none. Next: inspect self.place and launch/preparation callers plus tip contract wording. No reproduction or runtime test run."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f1",
+            "state": "open",
+            "summary": "New containers can permanently inherit a cached host proxy environment",
+            "location": "crates/farhelm-helm/src/environment/podman.rs:1195",
+            "detail": "Reviewed commit: c8bc155cc36723c8c53870944d07ce8ec61ef9ed (assigned specification patch); verified implementation revision: 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: After the container host proxy settings change, a new container can keep the old settings for its entire lifetime, leaving its agents unable to reach the network even though it was launched after the change. The earlier design-only candidate is superseded by this established implementation route; the original consequence of stale or absent network proxy settings is preserved. Source route at tip: environment/podman.rs ensure_prepared 975–990 calls places.fresh, but podman_probe.rs 18–20 and 326–334 admit a cached observation up to 300 seconds old; fresh 385–406 immediately returns that observation. With an already prepared image, creation needs no intervening build. podman.rs 1183–1205 calls self.place and installs ready.proxy for the unadmitted container. self.place 148–164 calls places.runtime; podman_probe.rs 340–380 returns an existing success for the same route without any age check or forced read. Thus change the host manager proxy after an already completed probe while the launcher stays open, then launch within that five-minute freshness window: both admission and proxy installation consume the old observation. No further refresh is required by this path. podman.rs 1223–1227 deliberately preserves the installed snapshot after admission, so a later probe or reboot does not repair this new container. Contract at tip SPEC.md 4877–4879: \"Containers inherit proxy variables from the container host's systemd user manager environment at creation.\" and \"Later host changes affect newly created containers.\" Original contract is identical at SPEC.md 4802–4804. SPEC_impl.md 6561–6564 at the assigned revision says sampling occurs during a probe, but does not authorize old values for new containers; the SPEC_impl.md introduction explicitly gives SPEC.md precedence on observable behavior. Suggested bucket: other (established configuration-propagation correctness; no established security or user-work loss route). Could-be-highest: false on current evidence; no claim is made that stale proxies disclose credentials or bypass network policy. Confidence: confirmed by source/contract and callers, not execution. proposed_drop: false; no parent drop accepted. possible_cover: none (no forbidden coverage sources searched). Fix direction: separate fresh creation-time manager proxy sampling from reusable capability observations; preserve the deliberate no-rewrite behavior for environments already admitted. Caveats: the effect requires a manager-environment change after the observation and before the new container snapshot; refreshing after the change and waiting for it prevents this route. The 300-second bound applies before preparation, not necessarily to a lengthy preparation's final install, whose runtime cache has no age bound. No runtime tests or reproductions run."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f1",
+            "state": "open",
+            "summary": "New containers can permanently inherit a cached host proxy environment",
+            "location": "crates/farhelm-helm/src/environment/podman.rs:1195",
+            "detail": "Reviewed assigned contract commit: c8bc155cc36723c8c53870944d07ce8ec61ef9ed. Verified implementation revision: 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db; git blame attributes the creation-time self.place/proxies call to full commit 56659839785691f76da3af5d8f51b511cff4ba8b, which is in the supplied commit list. TLDR: After the container host proxy settings change, a newly launched container can keep the old or absent proxy settings for its lifetime, preventing its agents from reaching the network. This supersedes the original design-only candidate; its original suspected network consequence is preserved and now source-confirmed. At pinned tip provisioning/tensorlake_add.rs 377–398 admits cached place metadata and registers a fresh environment; environment_session_steps 521–555 performs ensure_prepared then create. environment/podman.rs 975–990 calls places.fresh before preparation. However podman_probe.rs 18–20 and 326–334 accept observations up to 300 seconds old, and fresh 385–406 returns such a cached result without refreshing. With an existing prepared image no intervening build is needed. Creation at podman.rs 1183–1205 gets ready.proxy through self.place at 1195. self.place 148–164 uses places.runtime; podman_probe.rs 340–380 accepts a same-route cached success without any age check or forced read. Thus after a completed launcher probe, change the host manager proxy while keeping that launcher open, then launch within five minutes: admission and installation both use the old snapshot. Probe source at podman_probe.rs 596–628 reads the manager only when probe runs, selects the proxy values, and returns them in ReadyPlace at 658–663. Installation is not a second read of the host manager: podman.rs proxies 558–638 reads the container manager only for XDG_CONFIG_HOME, renders the passed cached values at 588–589, installs their environment.d file at 612–614, and unsets/imports precisely those values at 621–636. The creation path then restarts the supervisor at 1214–1216. After admission, 1223–1227 deliberately refuses to rewrite the snapshot on later probes/retries/reboots, so this new container does not heal when the cache refreshes. Contract: original SPEC.md 4802–4804, unchanged at tip 4877–4879, says \"Containers inherit proxy variables from the container host's systemd user manager environment at creation\" and \"Later host changes affect newly created containers.\" Original SPEC_impl.md 6561–6564 says read during a probe but never authorizes stale values for a later creation; its introduction gives SPEC.md precedence. Suggested bucket: other (configuration-propagation correctness); could-be-highest: false on established evidence. Confidence: confirmed by source/contract and caller trace; no execution observed. proposed_drop: false; no parent drop accepted. possible_cover: none; no forbidden coverage searches. Fix direction: sample the host manager proxy for the new environment at creation, independently of capability-cache reuse, while preserving existing admitted environments. Caveats: requires a host manager-environment change between observation and launch; an explicit completed refresh after that change avoids the route. Initial observation is bounded to five minutes before preparation, but a long preparation can age it further because installation uses the age-unbounded runtime cache. No security disclosure or loss-of-work route is claimed. No tests or reproductions run."
+          }
+        }
+      ],
+      "latest": {
+        "line": 8,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "f1",
+          "state": "open",
+          "summary": "New containers can permanently inherit a cached host proxy environment",
+          "location": "crates/farhelm-helm/src/environment/podman.rs:1195",
+          "detail": "Reviewed assigned contract commit: c8bc155cc36723c8c53870944d07ce8ec61ef9ed. Verified implementation revision: 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db; git blame attributes the creation-time self.place/proxies call to full commit 56659839785691f76da3af5d8f51b511cff4ba8b, which is in the supplied commit list. TLDR: After the container host proxy settings change, a newly launched container can keep the old or absent proxy settings for its lifetime, preventing its agents from reaching the network. This supersedes the original design-only candidate; its original suspected network consequence is preserved and now source-confirmed. At pinned tip provisioning/tensorlake_add.rs 377–398 admits cached place metadata and registers a fresh environment; environment_session_steps 521–555 performs ensure_prepared then create. environment/podman.rs 975–990 calls places.fresh before preparation. However podman_probe.rs 18–20 and 326–334 accept observations up to 300 seconds old, and fresh 385–406 returns such a cached result without refreshing. With an existing prepared image no intervening build is needed. Creation at podman.rs 1183–1205 gets ready.proxy through self.place at 1195. self.place 148–164 uses places.runtime; podman_probe.rs 340–380 accepts a same-route cached success without any age check or forced read. Thus after a completed launcher probe, change the host manager proxy while keeping that launcher open, then launch within five minutes: admission and installation both use the old snapshot. Probe source at podman_probe.rs 596–628 reads the manager only when probe runs, selects the proxy values, and returns them in ReadyPlace at 658–663. Installation is not a second read of the host manager: podman.rs proxies 558–638 reads the container manager only for XDG_CONFIG_HOME, renders the passed cached values at 588–589, installs their environment.d file at 612–614, and unsets/imports precisely those values at 621–636. The creation path then restarts the supervisor at 1214–1216. After admission, 1223–1227 deliberately refuses to rewrite the snapshot on later probes/retries/reboots, so this new container does not heal when the cache refreshes. Contract: original SPEC.md 4802–4804, unchanged at tip 4877–4879, says \"Containers inherit proxy variables from the container host's systemd user manager environment at creation\" and \"Later host changes affect newly created containers.\" Original SPEC_impl.md 6561–6564 says read during a probe but never authorizes stale values for a later creation; its introduction gives SPEC.md precedence. Suggested bucket: other (configuration-propagation correctness); could-be-highest: false on established evidence. Confidence: confirmed by source/contract and caller trace; no execution observed. proposed_drop: false; no parent drop accepted. possible_cover: none; no forbidden coverage searches. Fix direction: sample the host manager proxy for the new environment at creation, independently of capability-cache reuse, while preserving existing admitted environments. Caveats: requires a host manager-environment change between observation and launch; an explicit completed refresh after that change avoids the route. Initial observation is bounded to five minutes before preparation, but a long preparation can age it further because installation uses the age-unbounded runtime cache. No security disclosure or loss-of-work route is claimed. No tests or reproductions run."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g003/findings.jsonl",
+        "id": "f1",
+        "line": 8,
+        "disposition": "verified",
+        "group": "new-container-proxy-snapshot-capability-cache",
+        "reason": "Parent's original source check and fully read focused001 exact current coverage establish cached ReadyPlace proxy values reach newly created containers: fresh accepts300s capability cache; runtime returns a same-route cached success without age bound; preparation can age it further; create passes ready.proxy rather than reading the host manager. Installed per-container values deliberately persist through later refresh/reboot. SPEC4877-4879 says later host changes affect newly created containers; probe-time implementation wording does not explicitly accept stale new-container inheritance, and product rule wins observable conflict. Conditional high effect is lasting agent network failure on a proxy-dependent host after old proxy stops working, requiring repair/replacement; no security disclosure or work loss established. No exact Planned/unlanded plan/BUGS/queue/active-ledger cover, and durable wrong settings exceed rare-glitch filter. Preserve original other suggestion and source-only confidence."
+      },
+      "accepted_parent_decision": {
+        "key": "g003/f1",
+        "line": 8,
+        "disposition": "verified",
+        "group": "new-container-proxy-snapshot-capability-cache",
+        "bucket": "high",
+        "recording": "new queue item; reconcile064/c4 corroboration",
+        "needs_independent_drop_check": false,
+        "reason": "Parent's original source check and fully read focused001 exact current coverage establish cached ReadyPlace proxy values reach newly created containers: fresh accepts300s capability cache; runtime returns a same-route cached success without age bound; preparation can age it further; create passes ready.proxy rather than reading the host manager. Installed per-container values deliberately persist through later refresh/reboot. SPEC4877-4879 says later host changes affect newly created containers; probe-time implementation wording does not explicitly accept stale new-container inheritance, and product rule wins observable conflict. Conditional high effect is lasting agent network failure on a proxy-dependent host after old proxy stops working, requiring repair/replacement; no security disclosure or work loss established. No exact Planned/unlanded plan/BUGS/queue/active-ledger cover, and durable wrong settings exceed rare-glitch filter. Preserve original other suggestion and source-only confidence."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-001",
+          "key": "g003/f1",
+          "latest_line": 8,
+          "recommendation": "retain-verified",
+          "bucket": "high",
+          "underlying_key": "new-podman-environment-proxy-snapshot-from-capability-cache",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "A newly created container can permanently receive the prior manager proxy values after the host proxy changes. On a host that requires the changed proxy, this prevents agents reaching the network until the container is repaired or replaced, a material UX failure. This is source-established conditional behavior, with no measured incident or security/work-loss claim.",
+          "checks": [
+            "At reviewed tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db provisioning/tensorlake_add.rs:377-398 admits cached place metadata and registers an environment. Its environment_session_steps at :501-555 calls ensure_prepared then create, with no separate proxy refresh between them.",
+            "podman.rs:975-990 calls places.fresh. podman_probe.rs:18-20 uses a 300-second freshness window; :326-334 accepts that cache; :385-406 returns it immediately. podman.rs:148-164 uses runtime; podman_probe.rs:340-380 returns a same-route cached success without an age bound.",
+            "podman.rs:1183-1205 selects ready.proxy through self.place and passes it into proxies. :558-638 reads the container manager only for XDG_CONFIG_HOME and installs/imports the passed values, rather than rereading the place host. podman_probe.rs:596-628 reads host manager values only during the probe, retaining them in ReadyPlace at :658-663.",
+            "podman.rs:1214-1227 restarts the unadmitted supervisor, then deliberately preserves already admitted proxy snapshots. Later cache refresh therefore does not heal a newly created stale container. git blame :1195-1205 attributes the installation path to in-range 56659839785691f76da3af5d8f51b511cff4ba8b."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md Container sessions (:4877-4879) explicitly requires inheritance at creation and later host changes to affect newly created containers. SPEC_impl.md:6082-6085 says read during the probe; its introduction :3-6 gives SPEC.md precedence for observable disagreements. Probe wording does not explicitly accept stale creation values.",
+            "TODO.md Planned is empty; BUGS.md concerns SSH output holders. Searched INDEX.md and active TRIAGE_OUTCOMES.md for cached proxy/environment inheritance and creation snapshots; no exact item or decision found. Privacy-scrubber entries concern proxy disclosure, a different root. No archive read.",
+            "Read matching podman-environments.md:230-249, :456-459 and :853-854. It specifies deterministic probe-time inheritance and later repairs command-line secret transport; it does not repair stale creation snapshots. plans/REPORTS.md:21 records the plan landed, so its old goal is not pending repair coverage. Other unlanded plans found by proxy searches concern SSH routing/key order, not this cache.",
+            "FILTER.md does not match the whole consequence: the wrong per-container setting persists across refresh/reboot and requires repair or replacement. Rarity of changing host proxy settings would not remove that exclusion."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "The network consequence is conditional on the old or absent proxy no longer working, as on a proxy-dependent host after a proxy replacement. Requires the manager change after observation and before creation; an explicit completed refresh avoids it. The 300-second bound applies before preparation, while lengthy preparation may age the runtime cache further. No security disclosure, policy bypass or work loss is established.",
+          "original_stronger_consequence": "The original design-only stale/absent proxy and network-failure concern was first set aside for lack of implementation evidence, then reopened and source-confirmed from the in-range creation lifecycle. That withdrawal is superseded rather than silently erased. The original reviewer suggested other; high here follows the established conditional loss of agent network access for the container lifetime.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Record the stale creation snapshot. Preserve admitted containers' deliberate stable settings while separating new-container proxy sampling from reusable capability observations. No drop or highest lowering proposed.",
+          "new_interface_evidence": "The record's environment_session_steps reference is a function in provisioning/tensorlake_add.rs:501-555, not a separate file. podman_probe.rs:596-615 first reads structured busctl manager environment and falls back to show-environment; both occur only during the cached probe. These citation details do not change the stale-snapshot conclusion."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "new-container-proxy-snapshot-capability-cache",
+        "destination": "trailing-new-container-proxy-snapshot-capability-cache.md"
+      }
+    },
+    {
+      "key": "g003/f2",
+      "owner": "g003",
+      "id": "f2",
+      "domain": "product-contracts",
+      "purpose": "product-contracts: SPEC_impl.md; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "f2",
+            "state": "open",
+            "summary": "Unit-test host startup outside glibc Linux is an explicit limitation",
+            "location": "SPEC_impl.md:2314",
+            "detail": "Reviewed commit: 70bc66a9f285cc2a9984924f389834d118b7cfdc. TLDR: Considered whether the new test-binary terminal-host program silently skips terminal-host coverage on other systems. It does not claim portability: unsupported platforms fail host startup instead of passing on another substrate. Source: SPEC_impl.md 2311–2318 says, \"It is registered on glibc Linux only; elsewhere every host start from a unit test is refused (libtest rejects the arguments), so those tests fail by name rather than run on another kind of terminal.\" crates/farhelm-supervisor/src/hosts/test_program.rs documents the same limitation and gates entry registration with cfg(all(target_os = \"linux\", target_env = \"gnu\")); unit_test_host_program still returns current_exe elsewhere. hosts/mod.rs includes test_program only under cfg(test). Suggested bucket: other (test tooling); could-be-highest: false, no shipped security or work-loss route. Confidence: confirmed by source, not execution. proposed_drop: source refutes silent fallback and the implementation contract expressly states failure on unsupported systems. possible_cover: none. Caveat: this does not prove that every affected test suite is scheduled only on glibc Linux; no such portability guarantee is made by this edited paragraph. No runtime tests or reproductions run."
+          }
+        }
+      ],
+      "latest": {
+        "line": 2,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "f2",
+          "state": "open",
+          "summary": "Unit-test host startup outside glibc Linux is an explicit limitation",
+          "location": "SPEC_impl.md:2314",
+          "detail": "Reviewed commit: 70bc66a9f285cc2a9984924f389834d118b7cfdc. TLDR: Considered whether the new test-binary terminal-host program silently skips terminal-host coverage on other systems. It does not claim portability: unsupported platforms fail host startup instead of passing on another substrate. Source: SPEC_impl.md 2311–2318 says, \"It is registered on glibc Linux only; elsewhere every host start from a unit test is refused (libtest rejects the arguments), so those tests fail by name rather than run on another kind of terminal.\" crates/farhelm-supervisor/src/hosts/test_program.rs documents the same limitation and gates entry registration with cfg(all(target_os = \"linux\", target_env = \"gnu\")); unit_test_host_program still returns current_exe elsewhere. hosts/mod.rs includes test_program only under cfg(test). Suggested bucket: other (test tooling); could-be-highest: false, no shipped security or work-loss route. Confidence: confirmed by source, not execution. proposed_drop: source refutes silent fallback and the implementation contract expressly states failure on unsupported systems. possible_cover: none. Caveat: this does not prove that every affected test suite is scheduled only on glibc Linux; no such portability guarantee is made by this edited paragraph. No runtime tests or reproductions run."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g003/findings.jsonl",
+        "id": "f2",
+        "line": 2,
+        "disposition": "excluded",
+        "group": "unit-test-host-unsupported-platform-silent-fallback",
+        "reason": "Parent accepts fully read focused001 specific source/contract refutation:70bc66a SPEC_impl2314-2315 explicitly registers the initializer on glibc Linux only and says other platforms fail named host starts, while hosts/test_program32-51 always selects current_exe and gates only interception. No alternate terminal fallback exists on the checked path. This does not prove all such tests are scheduled only on glibc, certify broader portability or assert execution. No security/user-work consequence was proposed, and no separate current queued platform issue is absorbed."
+      },
+      "accepted_parent_decision": {
+        "key": "g003/f2",
+        "line": 2,
+        "disposition": "excluded",
+        "group": "unit-test-host-unsupported-platform-silent-fallback",
+        "bucket": "other",
+        "recording": "omit narrowly source-refuted silent fallback",
+        "needs_independent_drop_check": false,
+        "reason": "Parent accepts fully read focused001 specific source/contract refutation:70bc66a SPEC_impl2314-2315 explicitly registers the initializer on glibc Linux only and says other platforms fail named host starts, while hosts/test_program32-51 always selects current_exe and gates only interception. No alternate terminal fallback exists on the checked path. This does not prove all such tests are scheduled only on glibc, certify broader portability or assert execution. No security/user-work consequence was proposed, and no separate current queued platform issue is absorbed."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-001",
+          "key": "g003/f2",
+          "latest_line": 2,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "unit-test-terminal-host-unsupported-platform-silent-fallback",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The alleged silent fallback is contradicted by both the explicit platform contract and the host-program selection. Unsupported systems attempt to start the unit-test binary and fail, rather than silently exercising another terminal implementation.",
+          "checks": [
+            "At 70bc66a9f285cc2a9984924f389834d118b7cfdc SPEC_impl.md:2311-2318 explicitly states glibc Linux registration and refused host starts elsewhere, so affected tests fail by name.",
+            "At the same revision hosts/test_program.rs:32-38 documents that failure; :42-47 always returns current_exe; :49-51 gates only the initializer to Linux GNU; :55-92 intercepts exactly internal terminal-host --socket before libtest on the supported platform. No alternative terminal fallback is selected by this helper. No runtime result is claimed."
+          ],
+          "coverage_checked": [
+            "Current SPEC_impl.md:2160-2175 retains the explicit glibc-only test-host behavior and failure elsewhere. Root SPEC.md contains no contrary guarantee that this private unit-test initializer supports every product platform.",
+            "TODO.md Planned is empty; BUGS.md and active TRIAGE_OUTCOMES.md searches found no matching silent-fallback or unit-test initializer issue. Searched plans/queue and INDEX.md for glibc, unit-test host and platform fallback; no exact queue item or unlanded repair found. No archive read.",
+            "The terminal-settings stty portability queue item concerns serialization in a separate process test and does not cover or substantiate silent fallback. FILTER.md is unnecessary because the named concern is source-refuted."
+          ],
+          "exact_cover_quotes": [
+            "SPEC_impl.md at 70bc66a9f285cc2a9984924f389834d118b7cfdc:2314-2315: It is registered on glibc Linux only; elsewhere every host start from a unit test is refused (libtest rejects the arguments), so those tests fail by name rather than run on another kind of terminal."
+          ],
+          "missing_premise": "No proof is supplied that every affected suite is scheduled only on glibc Linux; that broader CI scheduling claim is not needed to refute silent fallback and is not asserted.",
+          "original_stronger_consequence": "The candidate considered silently losing terminal-host test coverage on unsupported platforms. It did not establish or withdraw a security, process-loss or user-work-loss consequence.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Dismiss the named silent-fallback concern on the explicit failure contract and source selection. Do not generalize this to an all-platform test-support guarantee."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "unit-test-host-unsupported-platform-silent-fallback",
+        "destination": null
+      }
+    },
+    {
+      "key": "g003/f3",
+      "owner": "g003",
+      "id": "f3",
+      "domain": "product-contracts",
+      "purpose": "product-contracts: SPEC_impl.md; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f3",
+            "state": "open",
+            "summary": "Proposed drop: lost initial-create reply permits destroying the new environment",
+            "location": "SPEC_impl.md:6577",
+            "detail": "Reviewed commit: c8bc155cc36723c8c53870944d07ce8ec61ef9ed. TLDR: If the first session starts but its creation reply is lost, failed-launch cleanup is allowed to destroy its newly created container, including the agent and any work it already wrote. This is a potentially highest loss-of-work consequence, explicitly accepted by the product contract; recorded as a finding with proposed_drop for the required independent acceptance check. Source: SPEC_impl.md, Environment ownership and refusal (6572–6592), says, \"A failed normal initial launch may destroy only its new environment.\" SPEC.md, Container sessions (4762–4768), says, \"An ordinary failed initial launch may discard its newly created container, including after a lost session-create reply.\" The governing Sandbox sessions section is explicit at 1464–1472: \"If an ordinary new launch fails before the helm has confirmed session creation, including a lost create reply, it attempts to delete that newly created sandbox and snapshots\" and \"This may end an agent that started before its reply was lost.\" The same sections distinguish Replace: failed or ambiguous Replace preserves the existing environment and files. Suggested bucket: highest if this were unaccepted behavior (new agent work can be destroyed); could-be-highest: true. Confidence: confirmed accepted contract consequence, not an observed runtime bug; this commit edits specifications only, so no newly shipped destruction route is established by its diff. proposed_drop: exact product-spec acceptance quoted above; independent check required. possible_cover: none. Caveats: only an ordinary initial launch's own new environment may be cleaned this way; this acceptance does not excuse destruction during Replace or of unrelated resources. No runtime tests or reproductions run."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f3",
+            "state": "open",
+            "summary": "Proposed drop retained: cleanup may destroy only the initial launch's new resource",
+            "location": "crates/farhelm-helm/src/provisioning/tensorlake_add.rs:1040",
+            "detail": "Reviewed commit: c8bc155cc36723c8c53870944d07ce8ec61ef9ed; synthesis implementation revision: 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: An agent whose first creation reply to the helm is lost can already have written work when failed-initial-launch cleanup destroys its own newly allocated environment. Preserve this potentially highest loss-of-work consequence and proposed drop for independent checking; no parent drop accepted. Exact original acceptance: SPEC.md 4764–4766 says, \"Failed or ambiguous Replace preserves the container and files\" and \"An ordinary failed initial launch may discard its newly created container, including after a lost session-create reply.\" SPEC_impl.md 6576–6578 says Replace preserves existing files and \"A failed normal initial launch may destroy only its new environment.\" SPEC.md 1465–1470 explicitly says failed ordinary new launch, including lost create reply, attempts deletion and \"This may end an agent that started before its reply was lost.\" At pinned tip the same initial-launch/Replace distinction remains in SPEC.md 4831–4837. Source checks now establish the route rather than relying only on design: provisioning/tensorlake_add.rs 388–398 allocates a fresh reserved name and registers a new session-owned row, retains that returned host through environment_session_steps and finish_session_launch at 479–485, and passes that exact captured host to first-session creation at 1019–1025. sessions.rs 1761–1803 uses that captured session-owned host; its ordinary create path propagates a client create error at 2077–2094. finish_session_launch 1040–1050 invokes whole-resource cleanup on that same host for an error, expressly including a lost create reply; successful creation at 1030–1038 takes no such cleanup. Browser/result-receiver loss is different: the owned task completes, and its final result.send at 1069 is ignored if the receiver is gone; losing the outer browser reply alone does not destroy a successfully confirmed session. hosts.rs 1506–1553 resolves the captured row's binding, invokes that provider's destroy, and requires returned proof before forgetting it. Podman destroy 1292–1333 resolves only its recorded canonical ID or pending-create reserved name, checks ownership for recovered IDs, and retains unsettled absence. remove_container at 400–414 rechecks this helm/session labels, removes the inspected canonical ID, and confirms absence. No source route to unrelated resources was established by these checks. Replace has a separate path: sessions.rs finish_replacement 4547–4647 sends client.delete_session_with for only the accepted replacement's source at 4575; failures report definite/ambiguous source outcomes rather than invoking whole-resource cleanup. Suggested bucket: highest for the preserved agent-work loss consequence if unaccepted; could-be-highest: true. Confidence: source-confirmed implementation and explicit specification acceptance, not execution. proposed_drop: exact initial-new-resource acceptance quoted above, pending independent caller decision. possible_cover: none. The acceptance does not cover Replace's existing resource, any unrelated environment, or normal successful create followed only by browser disconnection. It does not authorize cleanup after confirmed creation. No runtime tests or reproductions run."
+          }
+        }
+      ],
+      "latest": {
+        "line": 7,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "f3",
+          "state": "open",
+          "summary": "Proposed drop retained: cleanup may destroy only the initial launch's new resource",
+          "location": "crates/farhelm-helm/src/provisioning/tensorlake_add.rs:1040",
+          "detail": "Reviewed commit: c8bc155cc36723c8c53870944d07ce8ec61ef9ed; synthesis implementation revision: 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: An agent whose first creation reply to the helm is lost can already have written work when failed-initial-launch cleanup destroys its own newly allocated environment. Preserve this potentially highest loss-of-work consequence and proposed drop for independent checking; no parent drop accepted. Exact original acceptance: SPEC.md 4764–4766 says, \"Failed or ambiguous Replace preserves the container and files\" and \"An ordinary failed initial launch may discard its newly created container, including after a lost session-create reply.\" SPEC_impl.md 6576–6578 says Replace preserves existing files and \"A failed normal initial launch may destroy only its new environment.\" SPEC.md 1465–1470 explicitly says failed ordinary new launch, including lost create reply, attempts deletion and \"This may end an agent that started before its reply was lost.\" At pinned tip the same initial-launch/Replace distinction remains in SPEC.md 4831–4837. Source checks now establish the route rather than relying only on design: provisioning/tensorlake_add.rs 388–398 allocates a fresh reserved name and registers a new session-owned row, retains that returned host through environment_session_steps and finish_session_launch at 479–485, and passes that exact captured host to first-session creation at 1019–1025. sessions.rs 1761–1803 uses that captured session-owned host; its ordinary create path propagates a client create error at 2077–2094. finish_session_launch 1040–1050 invokes whole-resource cleanup on that same host for an error, expressly including a lost create reply; successful creation at 1030–1038 takes no such cleanup. Browser/result-receiver loss is different: the owned task completes, and its final result.send at 1069 is ignored if the receiver is gone; losing the outer browser reply alone does not destroy a successfully confirmed session. hosts.rs 1506–1553 resolves the captured row's binding, invokes that provider's destroy, and requires returned proof before forgetting it. Podman destroy 1292–1333 resolves only its recorded canonical ID or pending-create reserved name, checks ownership for recovered IDs, and retains unsettled absence. remove_container at 400–414 rechecks this helm/session labels, removes the inspected canonical ID, and confirms absence. No source route to unrelated resources was established by these checks. Replace has a separate path: sessions.rs finish_replacement 4547–4647 sends client.delete_session_with for only the accepted replacement's source at 4575; failures report definite/ambiguous source outcomes rather than invoking whole-resource cleanup. Suggested bucket: highest for the preserved agent-work loss consequence if unaccepted; could-be-highest: true. Confidence: source-confirmed implementation and explicit specification acceptance, not execution. proposed_drop: exact initial-new-resource acceptance quoted above, pending independent caller decision. possible_cover: none. The acceptance does not cover Replace's existing resource, any unrelated environment, or normal successful create followed only by browser disconnection. It does not authorize cleanup after confirmed creation. No runtime tests or reproductions run."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g003/findings.jsonl",
+        "id": "f3",
+        "line": 7,
+        "disposition": "under-investigation",
+        "group": "g003-f3",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-002",
+          "key": "g003/f3",
+          "latest_line": 7,
+          "recommendation": "covered",
+          "bucket": "highest",
+          "underlying_key": "failed-initial-environment-launch-discards-started-agent-after-lost-create-reply",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The source permits destruction of the fresh launch's own resource after an ambiguous first create. Both specifications explicitly accept that exact potentially destructive consequence. This is only a proposed exclusion; it requires the independent drop check.",
+          "checks": [
+            "At 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, provisioning/tensorlake_add.rs:1019-1069 passes the captured host to first-session creation, destroys that host on Err, and only sends the result on Ok. Losing the outer result receiver alone does not take the cleanup branch.",
+            "At the reviewed tip, SPEC.md:1480-1486 explicitly includes a lost create reply and an already-started agent; :4831-4837 applies this initial-launch rule to containers and separately preserves failed/ambiguous Replace. SPEC_impl.md:6093-6105 preserves the same scope.",
+            "No execution or reproduction was performed. The source conclusion is conditional on a lost first-create reply, not an observed loss. No route to another resource or cleanup after confirmed creation is established."
+          ],
+          "coverage_checked": [
+            "Recording main 24bc058066fd57848e788b465719b0e6da2f98f7: SPEC.md Sandbox sessions and Container sessions, and SPEC_impl.md Environment ownership and refusal, expressly cover this trigger/consequence/scope.",
+            "TODO.md Planned is empty. Searches of plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no additional exact cover or same-root queued item. The environment plans listed in plans/REPORTS.md have landed, so their continued queue files are not unlanded-plan cover.",
+            "FILTER.md does not independently cover initial new-resource destruction; this is not merely a diagnostic or safe retry."
+          ],
+          "exact_cover_quotes": [
+            "SPEC.md:1480-1482: 'If an ordinary new launch fails before the helm has confirmed session creation, including a lost create reply, it attempts to delete that newly created sandbox and snapshots' and 'This may end an agent that started before its reply was lost.'",
+            "SPEC.md:4835: 'failed initial launch may discard its newly created container, including after a lost session-create reply.'",
+            "SPEC_impl.md:6100: 'failed normal initial launch may destroy only its new environment.'"
+          ],
+          "missing_premise": null,
+          "original_stronger_consequence": "An agent can already have written user work when the lost first-create reply causes cleanup to destroy its new environment. Preserve highest pending independent adjudication; Replace, unrelated resources and browser-only reply loss are excluded.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Exact product-spec acceptance, confined to ordinary failed initial launch and its own newly created resource."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-002.json",
+          "key": "g003/f3",
+          "proposal": "claim-checks/claims-002/result.json",
+          "parent_proposal": "covered",
+          "final_independent_gate": "required-before-drop",
+          "reason": "Parentreadfull002. ExactSPECinitialordinarylaunchacceptance explicitlyincludeslostfirstsession-createreply/alreadystartedagent anddestructiononlyitsnewresource. SourceErr→destroycapturedhostmatches, outerreceiverlossaloneisnottrigger. Highestactualpossiblewrittenworkretained untilfreshAGREE onexactacceptance; Replace preservation/unrelatedresources/confirmedcreate excluded. No rarityfilter or runtimeobservation."
+        }
+      ],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "failed-initial-environment-launch-discards-started-agent-after-lost-create-reply",
+        "destination": "trailing-failed-initial-environment-launch-discards-started-agent-after-lost-create-reply.md"
+      }
+    },
+    {
+      "key": "g003/f4",
+      "owner": "g003",
+      "id": "f4",
+      "domain": "product-contracts",
+      "purpose": "product-contracts: SPEC_impl.md; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "f4",
+            "state": "open",
+            "summary": "Check testing overview against the newly documented unit-test host executable",
+            "location": "SPEC_impl.md:8650",
+            "detail": "Reviewed commit: 70bc66a9f285cc2a9984924f389834d118b7cfdc. TLDR: The implementation specification may give developers two different accounts of the executable used to start real terminal hosts in supervisor tests. The assigned new paragraph at SPEC_impl.md 2311–2318 says the supervisor unit-test binary is its own host program and enters the real host entry point through a loader initializer. The Testing overview at 8646–8654 still says, \"The supervisor's side starts real hosts from the built `farhelm`, never inside a test process, since a host forks\". hosts/test_program.rs 1–38 and 42–46 confirms the new program selection. Possible consequence is a misleading test-architecture map, not a product regression; a separate host exec still satisfies the single-threaded process requirement. Suggested bucket: other; could-be-highest: false. Confidence: unresolved documentation-scope lead; need check whether the overview is explicitly limited to e2e tests, prior wording/behavior, and whether a later in-range edit reconciles it. proposed_drop: false; possible_cover: none in supplied neighbour records for this exact overview statement. No runtime execution or reproduction. New lead was appended before further source checks."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f4",
+            "state": "open",
+            "summary": "Testing overview names the wrong executable for supervisor unit-test hosts",
+            "location": "SPEC_impl.md:8650",
+            "detail": "Reviewed commit: 70bc66a9f285cc2a9984924f389834d118b7cfdc. TLDR: Developers consulting the implementation specification's testing overview are told the supervisor tests start real terminal hosts from a built product binary, although this change makes the unit tests use their own executable specifically because they have no product binary. This is a distinct inaccurate test-architecture explanation, not a runtime defect or a missing test oracle. Source: the complete Testing section at this revision is a workspace-wide account covering browser, Rust integration, terminal-host, emulator, property and JS tests; its terminal-host bullet at 8646–8654 says, \"The supervisor's side starts real hosts from the built `farhelm`, never inside a test process, since a host forks\". It does not restrict that claim to the Rust e2e harness or name the new unit-test exception. The assigned changed paragraph at 2311–2318 instead says, \"The supervisor crate's own unit tests have no `farhelm`, so their test binary is its own host program\" and describes the loader initializer. hosts/test_program.rs 1–38 and 42–46 confirms this is a fresh exec of the unit-test binary before libtest main, and service/core.rs 20551–20565 supplies that path through host_seams. Attribution: the commit adds hosts/test_program.rs and host_seams, replaces the old unit-test tmux helper calls, and replaces the former SPEC_impl.md statement that unit tests have no host-starting binary and use old terminals. The previous Testing summary's built-farhelm account therefore becomes incomplete/incorrect for newly added real unit-test hosts in this commit; this is not a claim that runtime behavior predates the reviewed change or pinned range. Later-tip check: SPEC_impl.md at 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db retains the unit-test-binary explanation at 2166ff and the unqualified built-farhelm statement at 8190. Suggested bucket: other, internal documentation accuracy. Confidence: confirmed by per-commit diff, complete surrounding Testing text and pinned source; not observed execution. proposed_drop: false. possible_cover: none in supplied exact neighbour records; no prohibited coverage sources searched. Could-be-highest: false; no security or loss-of-work route. Fix direction: identify the e2e product binary and the glibc Linux unit-test executable separately in the testing overview, retaining the important separate-process/single-threaded host-start boundary. Caveat: the statement that hosts are not forked inside a running test process remains correct; this finding concerns only the falsely general executable account, and production correctness does not refute it. No tests, builds or reproductions run. This closes f4's scope and later-repair leads under the original ID."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "f4",
+          "state": "open",
+          "summary": "Testing overview names the wrong executable for supervisor unit-test hosts",
+          "location": "SPEC_impl.md:8650",
+          "detail": "Reviewed commit: 70bc66a9f285cc2a9984924f389834d118b7cfdc. TLDR: Developers consulting the implementation specification's testing overview are told the supervisor tests start real terminal hosts from a built product binary, although this change makes the unit tests use their own executable specifically because they have no product binary. This is a distinct inaccurate test-architecture explanation, not a runtime defect or a missing test oracle. Source: the complete Testing section at this revision is a workspace-wide account covering browser, Rust integration, terminal-host, emulator, property and JS tests; its terminal-host bullet at 8646–8654 says, \"The supervisor's side starts real hosts from the built `farhelm`, never inside a test process, since a host forks\". It does not restrict that claim to the Rust e2e harness or name the new unit-test exception. The assigned changed paragraph at 2311–2318 instead says, \"The supervisor crate's own unit tests have no `farhelm`, so their test binary is its own host program\" and describes the loader initializer. hosts/test_program.rs 1–38 and 42–46 confirms this is a fresh exec of the unit-test binary before libtest main, and service/core.rs 20551–20565 supplies that path through host_seams. Attribution: the commit adds hosts/test_program.rs and host_seams, replaces the old unit-test tmux helper calls, and replaces the former SPEC_impl.md statement that unit tests have no host-starting binary and use old terminals. The previous Testing summary's built-farhelm account therefore becomes incomplete/incorrect for newly added real unit-test hosts in this commit; this is not a claim that runtime behavior predates the reviewed change or pinned range. Later-tip check: SPEC_impl.md at 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db retains the unit-test-binary explanation at 2166ff and the unqualified built-farhelm statement at 8190. Suggested bucket: other, internal documentation accuracy. Confidence: confirmed by per-commit diff, complete surrounding Testing text and pinned source; not observed execution. proposed_drop: false. possible_cover: none in supplied exact neighbour records; no prohibited coverage sources searched. Could-be-highest: false; no security or loss-of-work route. Fix direction: identify the e2e product binary and the glibc Linux unit-test executable separately in the testing overview, retaining the important separate-process/single-threaded host-start boundary. Caveat: the statement that hosts are not forked inside a running test process remains correct; this finding concerns only the falsely general executable account, and production correctness does not refute it. No tests, builds or reproductions run. This closes f4's scope and later-repair leads under the original ID."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g003/findings.jsonl",
+        "id": "f4",
+        "line": 10,
+        "disposition": "verified",
+        "group": "testing-overview-falsely-generalizes-built-farhelm-host-program",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-002 after inspecting it. The testing overview gives an unqualified executable account that conflicts with the newly introduced supervisor unit-test host executable. Correct separate-process behavior does not repair the documentation error. Retain the bounded documentation defect, identifying the glibc Linux unit-test exception without alleging production failure. Checked source/results: [\"At 70bc66a9f285cc2a9984924f389834d118b7cfdc, crates/farhelm-supervisor/src/hosts/test_program.rs:1-46 explains and selects current_exe(), then dispatches the host entry before libtest starts threads. This is a fresh executable invocation, not a host fork inside an executing test.\",\"At 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, SPEC_impl.md:2160-2174 explicitly distinguishes the e2e product binary and unit-test binary. Its complete Testing section at :8159-8203 covers workspace testing generally, while :8190 still says the supervisor's side uses the built farhelm without naming the unit-test exception.\",\"The finding concerns the new real-host unit tests introduced by 70bc66a9, not the age of the pre-existing overview sentence. No runtime defect or test failure was observed.\"] Current coverage/results: [\"Current SPEC_impl.md retains both conflicting statements. SPEC.md contains no acceptance of inaccurate testing architecture documentation.\",\"TODO.md Planned is empty. Exact executable/unit-test/real-host searches across plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no item covering this explanation. The broad tmux docs cleanup plan is recorded landed in plans/REPORTS.md:32, and the statement remains.\",\"FILTER.md does not cover a persistent authoritative architecture error merely because it is documentation. No rare runtime trigger is involved.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Misleading internal test-architecture map only; the separate-process/single-threaded host boundary remains correct. No security or loss-of-work consequence was alleged.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g003/f4",
+        "line": 10,
+        "disposition": "verified",
+        "group": "testing-overview-falsely-generalizes-built-farhelm-host-program",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-002 after inspecting it. The testing overview gives an unqualified executable account that conflicts with the newly introduced supervisor unit-test host executable. Correct separate-process behavior does not repair the documentation error. Retain the bounded documentation defect, identifying the glibc Linux unit-test exception without alleging production failure. Checked source/results: [\"At 70bc66a9f285cc2a9984924f389834d118b7cfdc, crates/farhelm-supervisor/src/hosts/test_program.rs:1-46 explains and selects current_exe(), then dispatches the host entry before libtest starts threads. This is a fresh executable invocation, not a host fork inside an executing test.\",\"At 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, SPEC_impl.md:2160-2174 explicitly distinguishes the e2e product binary and unit-test binary. Its complete Testing section at :8159-8203 covers workspace testing generally, while :8190 still says the supervisor's side uses the built farhelm without naming the unit-test exception.\",\"The finding concerns the new real-host unit tests introduced by 70bc66a9, not the age of the pre-existing overview sentence. No runtime defect or test failure was observed.\"] Current coverage/results: [\"Current SPEC_impl.md retains both conflicting statements. SPEC.md contains no acceptance of inaccurate testing architecture documentation.\",\"TODO.md Planned is empty. Exact executable/unit-test/real-host searches across plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no item covering this explanation. The broad tmux docs cleanup plan is recorded landed in plans/REPORTS.md:32, and the statement remains.\",\"FILTER.md does not cover a persistent authoritative architecture error merely because it is documentation. No rare runtime trigger is involved.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Misleading internal test-architecture map only; the separate-process/single-threaded host boundary remains correct. No security or loss-of-work consequence was alleged.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-002",
+          "key": "g003/f4",
+          "latest_line": 10,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "testing-overview-falsely-generalizes-built-farhelm-host-program",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The testing overview gives an unqualified executable account that conflicts with the newly introduced supervisor unit-test host executable. Correct separate-process behavior does not repair the documentation error.",
+          "checks": [
+            "At 70bc66a9f285cc2a9984924f389834d118b7cfdc, crates/farhelm-supervisor/src/hosts/test_program.rs:1-46 explains and selects current_exe(), then dispatches the host entry before libtest starts threads. This is a fresh executable invocation, not a host fork inside an executing test.",
+            "At 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, SPEC_impl.md:2160-2174 explicitly distinguishes the e2e product binary and unit-test binary. Its complete Testing section at :8159-8203 covers workspace testing generally, while :8190 still says the supervisor's side uses the built farhelm without naming the unit-test exception.",
+            "The finding concerns the new real-host unit tests introduced by 70bc66a9, not the age of the pre-existing overview sentence. No runtime defect or test failure was observed."
+          ],
+          "coverage_checked": [
+            "Current SPEC_impl.md retains both conflicting statements. SPEC.md contains no acceptance of inaccurate testing architecture documentation.",
+            "TODO.md Planned is empty. Exact executable/unit-test/real-host searches across plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no item covering this explanation. The broad tmux docs cleanup plan is recorded landed in plans/REPORTS.md:32, and the statement remains.",
+            "FILTER.md does not cover a persistent authoritative architecture error merely because it is documentation. No rare runtime trigger is involved."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Misleading internal test-architecture map only; the separate-process/single-threaded host boundary remains correct. No security or loss-of-work consequence was alleged.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain the bounded documentation defect, identifying the glibc Linux unit-test exception without alleging production failure."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "testing-overview-falsely-generalizes-built-farhelm-host-program",
+        "destination": "trailing-testing-overview-falsely-generalizes-built-farhelm-host-program.md"
+      }
+    },
+    {
+      "key": "g003/f5",
+      "owner": "g003",
+      "id": "f5",
+      "domain": "product-contracts",
+      "purpose": "product-contracts: SPEC_impl.md; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "f5",
+            "state": "open",
+            "summary": "Provider status and helper expiry preserve their documented distinctions",
+            "location": "SPEC_impl.md:6454",
+            "detail": "Reviewed contract commit: c8bc155cc36723c8c53870944d07ce8ec61ef9ed; checked implementation through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: Considered whether provider generalization could dial a container in an unknown state as though its status lookup merely failed, or leave environment helper pipes without their required expiry. Source refutes those routes. Original Environment rows and provider state contract at SPEC_impl.md 6454–6461 states, \"An unknown vendor state is not usable and must not dial\", separately reserving DialAnyway for Tensorlake unanswered status and RetryLater for Podman. At tip environment/mod.rs 243–268 represents Unknown separately from StatusUnanswered; podman.rs 1254–1273 maps successful unknown strings to Ok(Unknown), not lookup errors. manager.rs environment_gate 3585–3606 refuses every successful Changing/Missing/Unknown result and consults fallback policy only for Err(StatusUnanswered). The actor consumes that gate at 4411ff; no unresolved identity or return-type premise remains in this checked branch. Original transport contract says \"All environment stdio routes pass `--stdin-idle-limit-secs 120` unconditionally\" and ordinary SSH has no input-idle deadline. access.rs stdio_argv 32–40 appends the route-selected option, and stdin_idle_limit_secs 238–249 returns Some(120) for both Tensorlake SSH and PodmanExec while UserConfig SSH returns None. Suggested bucket: other had a correctness mismatch existed; could-be-highest: false on the considered routes, no security or user-work-loss route established. Confidence: confirmed source refutation for these narrow gate/argv checks, not an execution claim or broad validation of all provider behavior. proposed_drop: concrete source refutation above, not blanket acceptance or pre-range attribution. possible_cover: none; no prohibited coverage searches. This candidate adds no reported defect. No runtime tests, builds or reproductions run."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "f5",
+            "state": "open",
+            "summary": "Shared status gate and steady-state helper constructor checks do not cover provisioning probes",
+            "location": "SPEC_impl.md:6454",
+            "detail": "Reviewed contract commit: c8bc155cc36723c8c53870944d07ce8ec61ef9ed; implementation checked through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. Revision reconciles newly supplied interface g055/l5 before discovery, without claiming a new finding or accepting a parent drop. Original considered routes/consequences are preserved: provider generalization might dial a successful unknown state as an unanswered lookup, or an environment stdio command built through the shared constructor might lack its two-minute expiry. The narrow source checks still refute those routes: environment/mod.rs 243–268 separates Unknown from StatusUnanswered; podman.rs 1254–1273 returns Ok(Unknown) for unknown vendor strings; manager.rs 3585–3606 refuses successful Unknown/Changing/Missing and uses DialAnyway only for Err under the provider policy. access.rs 32–40 appends the selected idle-limit option; 238–249 selects Some(120) for Tensorlake and PodmanExec, None for ordinary UserConfig SSH. The original SPEC_impl.md 6454–6461 says unknown vendor state must not dial, and 6478–6481 says all environment stdio routes must pass --stdin-idle-limit-secs 120. The former gate and shared constructor implement those narrow responsibilities. IMPORTANT scope correction: those source checks do not prove that every invocation uses that constructor. Supplied g055/l5 separately identifies the setup/update probe bypass; directly checked tip provisioning/backend.rs 1602–1618 constructs exec resolved internal stdio with optional state-dir only, and spawn_probe at 1622–1645 calls this script through remote_command instead of HostAccess::stdio_argv. That known invocation-contract defect is not refuted or dropped by this candidate. It remains owned by g055/l5, with its full consequence/provenance there; no duplicate local finding or new discovery is claimed. Suggested bucket for the originally considered narrow mismatch: other had it existed. Could-be-highest: false for this narrow candidate; no established security/user-work-loss route. Confidence: confirmed scoped source checks, not runtime behavior. proposed_drop: source refutation only of the original shared-gate/shared-constructor suspicion; no general claim of provider correctness and no parent drop/lowering accepted. possible_cover: g055/l5 is supplied context for the distinct bypass, not a duplicate refuted route. No forbidden coverage sources, tests, builds or reproductions."
+          }
+        }
+      ],
+      "latest": {
+        "line": 12,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "f5",
+          "state": "open",
+          "summary": "Shared status gate and steady-state helper constructor checks do not cover provisioning probes",
+          "location": "SPEC_impl.md:6454",
+          "detail": "Reviewed contract commit: c8bc155cc36723c8c53870944d07ce8ec61ef9ed; implementation checked through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. Revision reconciles newly supplied interface g055/l5 before discovery, without claiming a new finding or accepting a parent drop. Original considered routes/consequences are preserved: provider generalization might dial a successful unknown state as an unanswered lookup, or an environment stdio command built through the shared constructor might lack its two-minute expiry. The narrow source checks still refute those routes: environment/mod.rs 243–268 separates Unknown from StatusUnanswered; podman.rs 1254–1273 returns Ok(Unknown) for unknown vendor strings; manager.rs 3585–3606 refuses successful Unknown/Changing/Missing and uses DialAnyway only for Err under the provider policy. access.rs 32–40 appends the selected idle-limit option; 238–249 selects Some(120) for Tensorlake and PodmanExec, None for ordinary UserConfig SSH. The original SPEC_impl.md 6454–6461 says unknown vendor state must not dial, and 6478–6481 says all environment stdio routes must pass --stdin-idle-limit-secs 120. The former gate and shared constructor implement those narrow responsibilities. IMPORTANT scope correction: those source checks do not prove that every invocation uses that constructor. Supplied g055/l5 separately identifies the setup/update probe bypass; directly checked tip provisioning/backend.rs 1602–1618 constructs exec resolved internal stdio with optional state-dir only, and spawn_probe at 1622–1645 calls this script through remote_command instead of HostAccess::stdio_argv. That known invocation-contract defect is not refuted or dropped by this candidate. It remains owned by g055/l5, with its full consequence/provenance there; no duplicate local finding or new discovery is claimed. Suggested bucket for the originally considered narrow mismatch: other had it existed. Could-be-highest: false for this narrow candidate; no established security/user-work-loss route. Confidence: confirmed scoped source checks, not runtime behavior. proposed_drop: source refutation only of the original shared-gate/shared-constructor suspicion; no general claim of provider correctness and no parent drop/lowering accepted. possible_cover: g055/l5 is supplied context for the distinct bypass, not a duplicate refuted route. No forbidden coverage sources, tests, builds or reproductions."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g003/findings.jsonl",
+        "id": "f5",
+        "line": 12,
+        "disposition": "excluded",
+        "group": "shared-environment-status-gate-and-stdio-constructor-suspicions",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-002 after inspecting it. The original narrow gate and shared-constructor suspicions are source-refuted. This says nothing about callers that bypass the constructor; the separately owned provisioning-probe issue survives. Concrete exhaustive gate and option construction, limited to the two named original suspicions; preserve the supplied g055/l5 bypass provenance. Checked source/results: [\"At 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, manager.rs:3585-3606 refuses successful Unknown/Changing/Missing. Only Err(StatusUnanswered) consults the provider fallback, so a successful unknown state does not receive DialAnyway.\",\"At the same hash, access.rs:32-40 appends the selected stdin limit; :238-249 selects 120 for Tensorlake and PodmanExec and None for ordinary SSH.\",\"Directly checked provisioning/backend.rs:1602-1645: probe_script emits internal stdio with an optional state directory and spawn_probe uses remote_command, bypassing stdio_argv. The narrow refutation must not be transcribed as a finding that every invocation satisfies the expiry contract.\",\"SPEC_impl.md:5973-5981 distinguishes unknown state from unanswered status; :5999-6003 requires all environment routes to carry the option. No runtime observation was made.\"] Current coverage/results: [\"Both specifications were searched for unknown status and helper expiry; the relevant current implementation contracts are SPEC_impl.md Environment rows and provider state / One route for transport and provisioning / Tensorlake transport watchdog.\",\"TODO.md Planned is empty. Status/stdio/idle-limit searches of plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no exact same-root queue item. podman-environments is landed per plans/REPORTS.md:21, not unlanded cover.\",\"No FILTER.md exclusion is needed or asserted.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Unknown provider state might be dialed as an unanswered lookup, or a command built through the shared environment constructor might lack expiry. Neither narrow route is established. No original security/user-work-loss consequence was established.\"; \"The refuted constructor suspicion would require a missing option in stdio_argv itself. The known bypass is a different caller and remains with its original owner.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g003/f5",
+        "line": 12,
+        "disposition": "excluded",
+        "group": "shared-environment-status-gate-and-stdio-constructor-suspicions",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-002 after inspecting it. The original narrow gate and shared-constructor suspicions are source-refuted. This says nothing about callers that bypass the constructor; the separately owned provisioning-probe issue survives. Concrete exhaustive gate and option construction, limited to the two named original suspicions; preserve the supplied g055/l5 bypass provenance. Checked source/results: [\"At 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, manager.rs:3585-3606 refuses successful Unknown/Changing/Missing. Only Err(StatusUnanswered) consults the provider fallback, so a successful unknown state does not receive DialAnyway.\",\"At the same hash, access.rs:32-40 appends the selected stdin limit; :238-249 selects 120 for Tensorlake and PodmanExec and None for ordinary SSH.\",\"Directly checked provisioning/backend.rs:1602-1645: probe_script emits internal stdio with an optional state directory and spawn_probe uses remote_command, bypassing stdio_argv. The narrow refutation must not be transcribed as a finding that every invocation satisfies the expiry contract.\",\"SPEC_impl.md:5973-5981 distinguishes unknown state from unanswered status; :5999-6003 requires all environment routes to carry the option. No runtime observation was made.\"] Current coverage/results: [\"Both specifications were searched for unknown status and helper expiry; the relevant current implementation contracts are SPEC_impl.md Environment rows and provider state / One route for transport and provisioning / Tensorlake transport watchdog.\",\"TODO.md Planned is empty. Status/stdio/idle-limit searches of plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no exact same-root queue item. podman-environments is landed per plans/REPORTS.md:21, not unlanded cover.\",\"No FILTER.md exclusion is needed or asserted.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Unknown provider state might be dialed as an unanswered lookup, or a command built through the shared environment constructor might lack expiry. Neither narrow route is established. No original security/user-work-loss consequence was established.\"; \"The refuted constructor suspicion would require a missing option in stdio_argv itself. The known bypass is a different caller and remains with its original owner.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-002",
+          "key": "g003/f5",
+          "latest_line": 12,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "shared-environment-status-gate-and-stdio-constructor-suspicions",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The original narrow gate and shared-constructor suspicions are source-refuted. This says nothing about callers that bypass the constructor; the separately owned provisioning-probe issue survives.",
+          "checks": [
+            "At 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, manager.rs:3585-3606 refuses successful Unknown/Changing/Missing. Only Err(StatusUnanswered) consults the provider fallback, so a successful unknown state does not receive DialAnyway.",
+            "At the same hash, access.rs:32-40 appends the selected stdin limit; :238-249 selects 120 for Tensorlake and PodmanExec and None for ordinary SSH.",
+            "Directly checked provisioning/backend.rs:1602-1645: probe_script emits internal stdio with an optional state directory and spawn_probe uses remote_command, bypassing stdio_argv. The narrow refutation must not be transcribed as a finding that every invocation satisfies the expiry contract.",
+            "SPEC_impl.md:5973-5981 distinguishes unknown state from unanswered status; :5999-6003 requires all environment routes to carry the option. No runtime observation was made."
+          ],
+          "coverage_checked": [
+            "Both specifications were searched for unknown status and helper expiry; the relevant current implementation contracts are SPEC_impl.md Environment rows and provider state / One route for transport and provisioning / Tensorlake transport watchdog.",
+            "TODO.md Planned is empty. Status/stdio/idle-limit searches of plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no exact same-root queue item. podman-environments is landed per plans/REPORTS.md:21, not unlanded cover.",
+            "No FILTER.md exclusion is needed or asserted."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "The refuted constructor suspicion would require a missing option in stdio_argv itself. The known bypass is a different caller and remains with its original owner.",
+          "original_stronger_consequence": "Unknown provider state might be dialed as an unanswered lookup, or a command built through the shared environment constructor might lack expiry. Neither narrow route is established. No original security/user-work-loss consequence was established.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Concrete exhaustive gate and option construction, limited to the two named original suspicions; preserve the supplied g055/l5 bypass provenance."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "shared-environment-status-gate-and-stdio-constructor-suspicions",
+        "destination": null
+      }
+    },
+    {
+      "key": "g003/f6",
+      "owner": "g003",
+      "id": "f6",
+      "domain": "product-contracts",
+      "purpose": "product-contracts: SPEC_impl.md; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "f6",
+            "state": "open",
+            "summary": "Recipe definition saves and referenced-place mutations retain cleanup ownership",
+            "location": "SPEC_impl.md:6443",
+            "detail": "Reviewed contract commit: c8bc155cc36723c8c53870944d07ce8ec61ef9ed; source checks at inclusive tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: Considered whether sharing the recipe catalog and host storage could let an ordinary recipe save overwrite resource ownership, or let host removal/retargeting discard the route needed to clean up existing environments. Narrow source checks refute those paths; no reported defect or new runtime issue. Original contract at SPEC_impl.md 6436–6449 requires the complete kind/name/provider discriminator, reference-based place mutation refusal and cleanup proof before forgetting. Shared recipes at 6491ff/6782–6792 keeps independent definition and build-state writers. At tip store.rs HostKind::from_columns 798–815 matches all three columns and refuses unknown/inconsistent provider spellings. tensorlake/recipes.rs update_tensorlake_recipe 294–342 validates and writes only spec_json/updated_at in an immediate transaction; tensorlake/build.rs write_recipe_state 318–367 reads the current spec/state under an immediate transaction and writes only state_json. Thus these writers cannot clobber each other's column even if their requests race. delete_tensorlake_recipe 393–427 rechecks host use and needs_cleanup in the final immediate transaction before deletion. store/podman.rs refuse_referenced_place 213–250 checks every referring place_host row without filtering stopped/cleanup states and recipe per-place needs_cleanup; store.rs update_ssh_destination 7533–7567 invokes it inside its mutation transaction, and remove_host_row 8034–8065 invokes it inside the removal transaction and requires the row-specific destruction proof for environment rows. set_podman_prepared_create at store/podman.rs 256–278 atomically writes login/home/uid, selected installation facts and pending marker under the exact expected environment entry/binding. Suggested bucket if the suspected write/refusal gap existed: other for unconfirmed cleanup-route loss; no actual loss consequence established. Could-be-highest: potential access to existing user processes/work could matter if a mutation really discarded its sole route, but the inspected concrete writer/mutation routes are source-refuted; no established security or loss-of-work route. Confidence: confirmed narrow source refutation, not runtime observed. proposed_drop: exact source guards and separate-column writes above; no blanket acceptance, no parent drop/lowering accepted. possible_cover: supplied g064/c3 and g065/l3 concern power-loss rollback, a distinct accepted durability boundary not refuted by transactional ordering; g020 approval-time place retarget is likewise a distinct earlier phase, as supplied in g065/l3. This candidate addresses only already-recorded resource references and concurrent catalog writers, not those known issues. No forbidden coverage search, tests, builds or reproductions."
+          }
+        }
+      ],
+      "latest": {
+        "line": 13,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "f6",
+          "state": "open",
+          "summary": "Recipe definition saves and referenced-place mutations retain cleanup ownership",
+          "location": "SPEC_impl.md:6443",
+          "detail": "Reviewed contract commit: c8bc155cc36723c8c53870944d07ce8ec61ef9ed; source checks at inclusive tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: Considered whether sharing the recipe catalog and host storage could let an ordinary recipe save overwrite resource ownership, or let host removal/retargeting discard the route needed to clean up existing environments. Narrow source checks refute those paths; no reported defect or new runtime issue. Original contract at SPEC_impl.md 6436–6449 requires the complete kind/name/provider discriminator, reference-based place mutation refusal and cleanup proof before forgetting. Shared recipes at 6491ff/6782–6792 keeps independent definition and build-state writers. At tip store.rs HostKind::from_columns 798–815 matches all three columns and refuses unknown/inconsistent provider spellings. tensorlake/recipes.rs update_tensorlake_recipe 294–342 validates and writes only spec_json/updated_at in an immediate transaction; tensorlake/build.rs write_recipe_state 318–367 reads the current spec/state under an immediate transaction and writes only state_json. Thus these writers cannot clobber each other's column even if their requests race. delete_tensorlake_recipe 393–427 rechecks host use and needs_cleanup in the final immediate transaction before deletion. store/podman.rs refuse_referenced_place 213–250 checks every referring place_host row without filtering stopped/cleanup states and recipe per-place needs_cleanup; store.rs update_ssh_destination 7533–7567 invokes it inside its mutation transaction, and remove_host_row 8034–8065 invokes it inside the removal transaction and requires the row-specific destruction proof for environment rows. set_podman_prepared_create at store/podman.rs 256–278 atomically writes login/home/uid, selected installation facts and pending marker under the exact expected environment entry/binding. Suggested bucket if the suspected write/refusal gap existed: other for unconfirmed cleanup-route loss; no actual loss consequence established. Could-be-highest: potential access to existing user processes/work could matter if a mutation really discarded its sole route, but the inspected concrete writer/mutation routes are source-refuted; no established security or loss-of-work route. Confidence: confirmed narrow source refutation, not runtime observed. proposed_drop: exact source guards and separate-column writes above; no blanket acceptance, no parent drop/lowering accepted. possible_cover: supplied g064/c3 and g065/l3 concern power-loss rollback, a distinct accepted durability boundary not refuted by transactional ordering; g020 approval-time place retarget is likewise a distinct earlier phase, as supplied in g065/l3. This candidate addresses only already-recorded resource references and concurrent catalog writers, not those known issues. No forbidden coverage search, tests, builds or reproductions."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g003/findings.jsonl",
+        "id": "f6",
+        "line": 13,
+        "disposition": "under-investigation",
+        "group": "g003-f6",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-002",
+          "key": "g003/f6",
+          "latest_line": 13,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "ordinary-recipe-definition-write-or-referenced-place-mutation-loses-cleanup-ownership",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Separate-column writes and final transactional refusal checks refute the named ordinary catalog-write and already-referenced-place paths. This does not settle power-loss durability or approval-time retargeting.",
+          "checks": [
+            "At 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, tensorlake/recipes.rs:294-342 updates only spec_json/updated_at inside an immediate transaction; tensorlake/build.rs:318-367 reads current spec/state and writes only state_json inside an immediate transaction.",
+            "tensorlake/recipes.rs:393-427 rechecks referring hosts and needs_cleanup before deletion. store/podman.rs:213-250 refuses every place_host reference, including stopped/unresolved rows, and any recipe's needs_cleanup state; :256-278 guards prepared-coordinate publication by the exact entry and prior binding.",
+            "store.rs:798-815 decodes all three discriminator columns. :8034-8065 invokes referenced-place refusal in the removal transaction and requires host-specific destruction evidence for environment rows. Directly checked :7565-7567 invokes the same refusal inside the destination-update transaction before the ordinary SSH mutation.",
+            "Current SPEC_impl.md:5954-5970 explicitly requires reference refusal and cleanup evidence. No runtime or power-loss test was performed."
+          ],
+          "coverage_checked": [
+            "SPEC.md Container sessions and SPEC_impl.md Environment rows and provider state / Shared recipes and prepared artifacts were checked for the claimed ownership guarantees; they require preservation rather than accepting loss.",
+            "TODO.md Planned is empty. Recipe ownership/reference/retarget searches of plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no exact same-root cover. Existing snapshot-registration and detached-write queue entries concern different timing/generation boundaries, not these separate-column writers.",
+            "No FILTER.md basis is asserted. Supplied power-loss and approval-time retarget interfaces remain outside this narrow source refutation."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "A loss route would need a different writer or a place mutation that bypasses the final reference guard. None is established by this named claim; crash durability is explicitly a different premise.",
+          "original_stronger_consequence": "Discarding the sole route to an existing environment could affect access to user processes/work. Preserve that possible highest consequence in the independent drop register even though the inspected ordinary routes are refuted.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Separate transactional spec/state writes and refusal of already-recorded place references, not a blanket claim that all resource ownership is crash durable."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-002.json",
+          "key": "g003/f6",
+          "proposal": "claim-checks/claims-002/result.json",
+          "parent_proposal": "source-refuted",
+          "final_independent_gate": "required-before-drop",
+          "reason": "Parentreadfull002. Immediate-transaction independent spec_json/state_json writes preserveothercolumn; deletionsanddestinationmutation recheck placehostreferencesandrecipecleanup insidefinaltransaction, preparedcoordinates compareexactpriorbinding. Refutes namedordinarywrite/alreadyreferencedplace lossroute, notcrashdurability or approvaltimeretargeting. Originalpotentialsoleaccess/userworkloss route preserved; freshcheck mustcheckwriters/finalguards, no broadownershipsafetyclaim."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "ordinary-recipe-definition-write-or-referenced-place-mutation-loses-cleanup-ownership",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Review is blocked by invalid manifest ranges: the snapshots contain 594 and 52 lines, but the manifest requires 595 and 53.\n\nRead the full brief and complete commits field. Updated `g003/progress.md`; findings log remains empty. Both assigned patches remain unread, and no coverage is claimed.\n\nThe evidence-tool instructions prohibit modifying a manifest during review, so I’ve requested authorization to correct the two endpoints."
+    },
+    {
+      "turn": 2,
+      "reply": "Initial pass complete. All 646 mandatory patch lines delivered; no unread scope.\n\nLogged `f1` and `f2` as candidates, and `f3` as a specification-accepted loss-of-work consequence proposed for independent drop checking. No actionable defect confirmed; no open leads.\n\nUpdated `progress.md`. No tests, reproductions, or checkout changes."
+    },
+    {
+      "turn": 3,
+      "reply": "- `f1`: revised to a source-confirmed finding. New containers can retain cached proxy settings despite host changes.\n- `f3`: revised with the cleanup caller trace. Acceptance remains limited to the initial launch’s new resource; proposed drop awaits independent review.\n\nUnresolved leads: none. Source-only checks; no execution."
+    },
+    {
+      "turn": 4,
+      "reply": "Discovery pass 1 found one new issue: `f4`, an inaccurate testing-overview statement about which executable starts unit-test terminal hosts.\n\nChecked parent/change/tip documentation and caller seams, plus environment status gates and helper arguments. Recorded the latter checks as refuted candidate `f5`.\n\nNew verified: `f4`. New unverified: none. Open leads: none. Source-only; no execution."
+    },
+    {
+      "turn": 5,
+      "reply": "Discovery pass 2 found no new reportable issue.\n\nChecked recipe writers, host binding guards, and deletion admission/cleanup ordering. Logged refuted candidate `f6`; clarified `f5` against the known provisioning-probe bypass.\n\nNew verified: none. New unverified: none. Open leads: none. Source-only; no execution."
+    }
+  ],
+  "progress": "# g003 product-contracts\n\nInitial review, turn 1. Read brief and complete inventory commits field. Findings log exists and is empty. Reviewing SPEC_impl.md patches at c8bc155cc36723c8c53870944d07ce8ec61ef9ed and 70bc66a9f285cc2a9984924f389834d118b7cfdc against pinned product contracts and implementation context. No runtime execution requested. All assigned patch packets remain unread. Interface assumption: implementation groups own their patches; this group checks contract edits and their source implications. Next: read mandatory packets, governing sections, and investigate concrete contract mismatches. Discovery passes: 0; new IDs: none.\n\nEvidence tooling block: manifest requires [1,595] and [1,53], but wc reports 594 and 52 newline-terminated lines. evidence read failed twice with Invalid source range; helper validates every manifest range before delivering any source. Requested authorization to correct only EOF range ends. No mandatory patch text delivered or coverage claimed. Next independent action: locate governing contracts and commit subjects without substituting for mandatory patch reads.\n\nTurn boundary: initial review turn 1 paused at mandatory evidence delivery. Complete brief, commits field, required priority/recording sections, container product decisions (SPEC.md 4737–4824), disposable-environment contract (SPEC_impl.md 6408–6592), retired container contract (8642–8657), drawn-answer contract (1068ff), and pinned terminal-host/testing context were read. Source facts only; no tests, reproductions, or checkout mutations. No findings/candidates/leads established. New verified/unverified IDs: none; discovery passes: 0. Unread mandatory scope: 00083-000.patch all 594 actual lines and 00738-000.patch all 52 actual lines. No coverage claimed. Next action: caller-corrected manifest or authorization to fix the two EOF endpoints, then mandatory packet delivery and the full assigned initial review. Interface assumptions unchanged.\n\nInitial review continuation, turn 2 (coverage repair). Parent corrected EOF ranges without changing source bytes or hashes. Brief reread fully; findings log verified empty. Next: deliver corrected mandatory packets, then complete source/contract analysis. No later synthesis or discovery pass started.\n\nTurn boundary: initial source-review pass completed in turn 2 after coverage repair. Discovery-pass count: 0 (no later synthesis/discovery protocol performed). Corrected mandatory text delivered in six separate evidence calls: 00083-000.patch 1–120, 121–240, 241–360, 361–480, 481–594; 00738-000.patch 1–52. Unread or omitted assigned material: none. Parent owns the formal transcript audit.\n\nReviewed assigned changes at c8bc155cc36723c8c53870944d07ce8ec61ef9ed and 70bc66a9f285cc2a9984924f389834d118b7cfdc, with complete governing disposable-environment, container-session, sandbox-session, shared-recipe, named-credential, transport, security and local-authority contract sections and the drawn-answer rule. Checked terminal-host unit-test program and caller seams at the latter revision. One combined context result clipped Local authority; reread the entire section alone. Commit stat confirms the former is a specification-only change, so missing future implementation is not treated as a newly shipped runtime regression.\n\nDurable delta: f1 opened as a proxy-sampling lead, investigated and revised to candidate (the implementation wording does not mandate using an old cache, and SPEC.md expressly requires creation-time inheritance); f2 candidate records the explicitly documented unsupported-platform test-start refusal; f3 finding with proposed_drop records the potentially highest lost-initial-create-reply destruction consequence and the exact explicit product acceptance, for the caller's independent drop check. New confirmed actionable defects: none. New unverified findings: none. Open leads: none. f3 is a verified accepted contract consequence, not a verified unaccepted bug. No runtime behavior observed, tests or reproductions run, or checkout files changed.\n\nInterface assumptions: implementation groups own actual provider and test-migration patches; this group's conclusions cover the assigned contract edits, not runtime conformance of later implementation commits. SPEC.md wins observable disagreements; only the initial launch's own new environment may be cleaned after a lost reply, while failed/ambiguous Replace must preserve the existing resource. Next action: await caller's later synthesis/discovery prompt and independent f3 acceptance check. Findings log preserved append-only (four events, three local IDs).\n\nTurn 3: later-turn synthesis started after parent audited delivery. Revisit f1 against actual provider creation/probe lifecycle at pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db; revisit f3 exact initial-new-resource cleanup and Replace distinction. Existing IDs preserved; no parent drops accepted. Open leads at entry: none. Discovery count remains 0.\n\nTurn 3 boundary: later-turn synthesis complete. Discovery-pass count remains 0. Initial audited delivery remains complete (646 lines); unread assigned material: none. Revisited cross-batch contracts and actual creation/probe/cleanup callers at pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db.\n\nDelta: f1 reopened as lead, then revised to a source-confirmed finding (other). Launch admission accepts a proxy-bearing capability observation for 300 seconds; creation uses the runtime cache without forced sampling, writes those passed values to environment.d and the running manager, and deliberately preserves them after admission. Captured the full caller chain and attributed installation lines to in-range commit 56659839785691f76da3af5d8f51b511cff4ba8b. Original stale/absent-proxy network failure consequence preserved; no highest consequence established. f3 revised with the actual new-row/captured-host/error propagation/whole-resource cleanup route, exact acceptance at original and tip specifications, provider ownership/absence proof, and separate session-only Replace removal. Clarified that a lost supervisor-to-helm create reply can trigger cleanup, whereas loss of the browser result alone does not. f3 remains finding with proposed_drop pending independent parent review; no parent drop accepted. f2 unchanged.\n\nNew verified finding this pass: f1. Revised verified accepted consequence: f3. New unverified findings: none. Unresolved lead IDs: none. All conclusions are source/contract analysis; no tests, reproductions, runtime observations, or checkout mutations. Interface assumptions now include actual later implementation source, so f1 supersedes the earlier lack-of-runtime-route rationale while retaining that the assigned original commit itself was documentation-only. Next: caller's independent f3 drop check and subsequent discovery turn required after this substantive f1 confirmation. No discovery pass was folded into synthesis.\n\nTurn 4: separate discovery pass 1 started. Reusing complete own findings/candidate history and audited initial delivery. Read interface context before new search. No pending named questions. Scope remains the assigned SPEC_impl.md patches at c8bc155cc36723c8c53870944d07ce8ec61ef9ed and 70bc66a9f285cc2a9984924f389834d118b7cfdc, with pinned source/contract context only. No runtime tests or reproductions.\n\nTurn 4 boundary: separate discovery pass 1 complete. Read discovery-neighbours.json fully in bounded chunks 1–55, 56–110, 111–170, 171–225, 226–280, 281–325 and 326–365; initial combined 1–160 output clipped, so those ranges were reread rather than credited from the clipped result. Synthesized supplied context for novelty before new source search. No pending named questions or changed parent dispositions. No known finding restated as new, and no neighbour finding copied into the local log.\n\nDiscovery checks: revisited the assigned 70bc66a9 test-migration paragraph against its parent, the new loader-host module and caller-seam diff, and the full general Testing section at that revision. Checked later tip for both executable descriptions. New f4 started as a scope/repair lead, then source-confirmed: the general Testing overview still says supervisor hosts start from built farhelm, while the same change introduces real unit-test hosts from their own executable, with no e2e-only qualification in the overview. This is documentation accuracy only; separate-process safety remains correct. It persists at tip. New verified finding ID: f4. New unverified-after-investigation IDs: none.\n\nAlso rechecked new environment transport/status distinctions against actual tip access argv, status types, Podman status mapping and manager gate. Recorded candidate f5 immediately after source refutation: unknown successful status cannot borrow unanswered-lookup dial policy; both environment routes receive the 120-second helper argument while ordinary SSH does not. This was a narrow contract/caller check, not runtime validation. f1/f2/f3 unchanged this pass; no parent drop or lowering accepted.\n\nAnything new found: yes, f4. Remaining open lead IDs: none. Initial mandatory coverage remains fully audited, 646 lines; unread assigned scope: none. No tests, builds, reproductions, live-install actions or checkout mutations. Next action: caller's later synthesis of f4, followed by a later discovery pass if requested. Discovery-pass count: 1.\n\nTurn 5: separate discovery pass 2 started. Reuse own complete f1–f5 history; no pending named cross-group questions. Read latest neighbour context first, then examine remaining assigned contract interactions for recipe storage, registration identity and cleanup ordering. No known issue will be counted as new. No parent drop/lowering accepted.\n\nTurn 5 boundary: separate discovery pass 2 complete. Discovery count: 2. Read updated discovery-neighbours.json completely in bounded ranges 1–50, 51–100, 101–150, 151–200, 201–250, 251–300, 301–350, 351–400, 401–450, 451–500, 501–516 before new source analysis. No clipped neighbour packet this turn. Latest input synthesized for novelty; known interface issues were not claimed as discoveries.\n\nInterface delta: revised existing candidate f5 to make its checked constructor/gate scope explicit. Directly checked backend.rs 1602–1645 confirms supplied g055/l5's distinct provisioning-probe invocation bypasses the shared argv constructor. The previous narrow constructor check does not refute that known defect; g055 retains ownership/provenance. No parent drop or lowering accepted and no duplicate local finding added.\n\nNew search: compared the assigned shared-environment/recipe contracts against pinned-tip HostKind three-column decode; atomic prepared-create identity/login/pending write; referenced-place removal/retarget guards; definition-only and state-only recipe SQL writers; final recipe-use/cleanup refusal transaction. Recorded new candidate f6 immediately after source refuted the considered catalog-clobber/route-loss paths. Then finished deletion-order checks: recipe route owns work, takes begin_delete before provider cleanup, retains admission through final store deletion; Providers::clean_recipe iterates every installed provider while collecting its first error; DeleteGuard checks registry identity/name; final store deletion rechecks use and aggregate needs_cleanup. No new mismatch established by these checks. Known power-loss tail rollback, approval-time retarget, failed image cleanup and provisioning-probe issues are distinct and unchanged; this pass makes no broad correctness claim about them.\n\nNew verified finding IDs: none. New unverified-after-investigation IDs: none. New candidate: f6. Revised known candidate: f5. Remaining open lead IDs: none. Anything new found: no new reportable issue in this separate discovery pass. f1–f4 findings/dispositions unchanged. Audited mandatory coverage remains 646 lines, unread assigned scope none. No runtime tests, builds, reproductions, live-install operations, forbidden coverage searches or checkout mutations. Next action: caller-directed synthesis or closeout; no additional discovery pass performed inside this turn.\n"
+}

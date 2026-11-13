@@ -1,0 +1,614 @@
+{
+  "group": {
+    "id": "g010",
+    "domain": "product-contracts",
+    "purpose": "product-contracts: SPEC_impl.md; phases complete small per-commit changes",
+    "interfaces": [
+      "g001",
+      "g003",
+      "g004",
+      "g005",
+      "g006",
+      "g007",
+      "g008",
+      "g009",
+      "g011",
+      "g012",
+      "g014",
+      "g015",
+      "g016",
+      "g017",
+      "g020",
+      "g026",
+      "g027",
+      "g030",
+      "g032",
+      "g033",
+      "g035",
+      "g036",
+      "g037",
+      "g038",
+      "g040",
+      "g044",
+      "g045",
+      "g049",
+      "g053",
+      "g070",
+      "g074",
+      "g075",
+      "g076",
+      "g079",
+      "g080",
+      "g081",
+      "g082",
+      "g083",
+      "g087",
+      "g088",
+      "g089",
+      "g091",
+      "g092",
+      "g093",
+      "g098",
+      "g099",
+      "g101",
+      "g104",
+      "g117",
+      "g122",
+      "g129",
+      "g135",
+      "g136",
+      "g138",
+      "g141",
+      "g142",
+      "g144",
+      "g146",
+      "g152",
+      "g153",
+      "g157",
+      "g178",
+      "g179",
+      "g180",
+      "g181",
+      "g185",
+      "g186",
+      "g188",
+      "g189",
+      "g190",
+      "g191",
+      "g192",
+      "g193",
+      "g194",
+      "g195",
+      "g196",
+      "g197",
+      "g198",
+      "g174"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/01018-000.patch",
+        "ranges": [
+          [
+            1,
+            558
+          ]
+        ],
+        "original_path": "SPEC_impl.md",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,58698)",
+        "lines": 558,
+        "bytes": 58757,
+        "start": 0,
+        "end": 58698,
+        "original": "[private-run]/prep/originals/01018.patch"
+      }
+    ],
+    "lines": 558,
+    "bytes": 58757
+  },
+  "records": [
+    {
+      "key": "g010/f1",
+      "owner": "g010",
+      "id": "f1",
+      "domain": "product-contracts",
+      "purpose": "product-contracts: SPEC_impl.md; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "f1",
+            "state": "open",
+            "summary": "Check absolute Shift+Enter single-write wording against partial PTY writes",
+            "location": "SPEC_impl.md:1722",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: The revised implementation specification says Shift+Enter is written to the PTY in one write, while the terminal host explicitly permits a partial PTY write and writes the remaining suffix later. This may overstate the contract on a nearly full macOS PTY. Source basis: SPEC_impl.md:1722-1728 newly describes the single-write promise; crates/terminal-host/src/host.rs:570-617 documents and implements partial writes, including the macOS nearly-full-input-queue case. Suggested bucket: other for a documentation contract mismatch; the original potential consequence is Escape and Enter reaching a boundary-sensitive line editor separately. Confidence: unresolved lead; need to read the complete terminal-host Input contract and corresponding product/spec acceptance before deciding. Could-be-highest: no established loss-of-work or security route; an unintended submit is possible in the abstract but no shipped destructive sequence is established. proposed_drop: false. possible_cover: terminal-host SPEC.md Input section, not yet read. No execution performed; these are source observations."
+          }
+        },
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f1",
+            "state": "open",
+            "summary": "Qualify the grid Shift+Enter single-write guarantee",
+            "location": "SPEC_impl.md:1724",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: The implementation specification promises that Shift+Enter reaches the terminal in one write even though the supported Mac implementation explicitly permits it to be split when the terminal input queue is nearly full. This overstates the guarantee future maintainers are told to preserve. Details: SPEC_impl.md:1722-1728 newly says the terminal host writes ESC CR to the pty in one write and that this single write is the promise. The encoder does produce one two-byte input (crates/farhelm-supervisor/src/grid_input.rs:298-313), but crates/terminal-host/src/host.rs:570-617 only offers the remaining bytes in one libc::write call and retains a short-write suffix for a later call. The terminal-host contract at crates/terminal-host/SPEC.md:399-403 explicitly says: An Input of at most ATOMIC_INPUT bytes is offered to the pty whole, in one write call; The pty may still take only part of it when its input queue is nearly full (macOS's pty takes what fits and returns a short write), and the rest then follows in later writes; How the program's reads divide the bytes is up to the program and its terminal settings; the host promises nothing about it. The revised root implementation spec should state the same offered-in-one-call guarantee and OS/read-boundary caveat. The original suspected consequence was Escape and Enter arriving separately at a boundary-sensitive line editor; the explicit lower-level contract accepts that PTY behavior, so this finding is the contradictory new documentation, not a request to change the terminal host. Suggested bucket: other (maintenance contract accuracy; no established user data-loss or security route). Confidence: confirmed by source and both contracts; no execution performed. proposed_drop: false. possible_cover: none for the conflicting root wording; the terminal-host Input section accepts the actual partial-write implementation. Material caveat: the ordinary case and the encoder's one-message behavior are correct; only the unconditional guarantee is wrong."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f1",
+            "state": "open",
+            "summary": "Qualify the grid Shift+Enter single-write guarantee",
+            "location": "SPEC_impl.md:1724",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. Synthesis revision: retain the documentation-only finding; distinguish a single encoder message, an offer to libc::write, successful physical writes, and program read boundaries. TLDR: The new implementation explanation promises an unconditional single PTY write, although the terminal-host contract explicitly allows a short-write suffix to be written later. Future maintainers receive incompatible guarantees. Details: SPEC_impl.md:1722-1727 newly says the encoder sends ESC CR as one input, which the terminal host writes to the pty in one write, and states \"The single write is the promise\". One input is established by grid_input.rs:298-313; that does not establish one successful physical write. terminal-host/src/host.rs:573-580 explicitly describes offering the whole input initially, possible macOS short writes and no room-first wait. Its implementation at 591-617 writes segment.data[segment.written..], advances written by the returned count and retains a short-write suffix for a later call. The exact lower contract at crates/terminal-host/SPEC.md:399-403 is: \"An `Input` of at most `ATOMIC_INPUT` bytes is offered to the pty whole, in one `write` call, so the host itself never\nsplits a key that encodes to several bytes (Shift+Enter's ESC CR). The pty may still take only part of it when its input\nqueue is nearly full (macOS's pty takes what fits and returns a short write), and the rest then follows in later writes.\nHow the program's reads divide the bytes is up to the program and its terminal settings; the host promises nothing about\nit.\" SPEC.md:2869-2876 already contains the stronger product-level single-write/read-boundary motivation; the newly added root implementation wording repeats that stronger guarantee without reconciling it with the actual terminal-host contract. It is therefore an incorrect unconditional implementation explanation even though it is not a newly introduced end-to-end product requirement. Qualify the new text as offered whole in the initial write call, preserve the short-write and program-read caveats, and reconcile the existing product statement rather than treating a one-message encoder as proof of delivery atomicity. Original suspected consequence preserved: ESC and CR might reach a boundary-sensitive line editor separately, changing a newline chord into Escape-plus-submit. The lower-level contract explicitly permits the relevant PTY/read behavior; no runtime split, unintended submit, destructive command or loss-of-work sequence was observed or established. This record does not request a terminal-host code change and does not lower any previously established security/data-loss route (none was established). Suggested bucket: other, documentation contract accuracy. Could-be-highest: no established route; a destructive submit would require a concrete shipped input sequence and effect not shown by these source checks. Confidence: confirmed documentation contradiction and partial-write source path; user-visible split outcome is not verified. proposed_drop: false. possible_cover: none for the inaccurate new explanation; the terminal-host Input contract accepts the actual implementation. No runtime execution or reproduction performed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 4,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "f1",
+          "state": "open",
+          "summary": "Qualify the grid Shift+Enter single-write guarantee",
+          "location": "SPEC_impl.md:1724",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. Synthesis revision: retain the documentation-only finding; distinguish a single encoder message, an offer to libc::write, successful physical writes, and program read boundaries. TLDR: The new implementation explanation promises an unconditional single PTY write, although the terminal-host contract explicitly allows a short-write suffix to be written later. Future maintainers receive incompatible guarantees. Details: SPEC_impl.md:1722-1727 newly says the encoder sends ESC CR as one input, which the terminal host writes to the pty in one write, and states \"The single write is the promise\". One input is established by grid_input.rs:298-313; that does not establish one successful physical write. terminal-host/src/host.rs:573-580 explicitly describes offering the whole input initially, possible macOS short writes and no room-first wait. Its implementation at 591-617 writes segment.data[segment.written..], advances written by the returned count and retains a short-write suffix for a later call. The exact lower contract at crates/terminal-host/SPEC.md:399-403 is: \"An `Input` of at most `ATOMIC_INPUT` bytes is offered to the pty whole, in one `write` call, so the host itself never\nsplits a key that encodes to several bytes (Shift+Enter's ESC CR). The pty may still take only part of it when its input\nqueue is nearly full (macOS's pty takes what fits and returns a short write), and the rest then follows in later writes.\nHow the program's reads divide the bytes is up to the program and its terminal settings; the host promises nothing about\nit.\" SPEC.md:2869-2876 already contains the stronger product-level single-write/read-boundary motivation; the newly added root implementation wording repeats that stronger guarantee without reconciling it with the actual terminal-host contract. It is therefore an incorrect unconditional implementation explanation even though it is not a newly introduced end-to-end product requirement. Qualify the new text as offered whole in the initial write call, preserve the short-write and program-read caveats, and reconcile the existing product statement rather than treating a one-message encoder as proof of delivery atomicity. Original suspected consequence preserved: ESC and CR might reach a boundary-sensitive line editor separately, changing a newline chord into Escape-plus-submit. The lower-level contract explicitly permits the relevant PTY/read behavior; no runtime split, unintended submit, destructive command or loss-of-work sequence was observed or established. This record does not request a terminal-host code change and does not lower any previously established security/data-loss route (none was established). Suggested bucket: other, documentation contract accuracy. Could-be-highest: no established route; a destructive submit would require a concrete shipped input sequence and effect not shown by these source checks. Confidence: confirmed documentation contradiction and partial-write source path; user-visible split outcome is not verified. proposed_drop: false. possible_cover: none for the inaccurate new explanation; the terminal-host Input contract accepts the actual implementation. No runtime execution or reproduction performed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g010/findings.jsonl",
+        "id": "f1",
+        "line": 4,
+        "disposition": "under-investigation",
+        "group": "g010-f1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-004",
+          "key": "g010/f1",
+          "latest_line": 4,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "shift-enter-unconditional-pty-write-guarantee",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The new explanation overstates what a single encoded input establishes: the host initially offers all bytes, but a short write can require a later suffix write. The lower contract explicitly permits this.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e:SPEC_impl.md:1722-1727 promises one PTY write; recording-time :1721-1726 retains that wording. SPEC.md:2869-2876 already contains the stronger product-level promise and motivation, so it is not newly introduced by this implementation paragraph.",
+            "Same reviewed hash crates/terminal-host/src/host.rs:570-617 explicitly explains macOS short writes, writes segment.data[segment.written..], advances by the returned count and keeps the suffix for a later call.",
+            "Same hash crates/terminal-host/SPEC.md:399-403 promises offering a small Input whole in the initial call, expressly allows short-write suffixes and disclaims program-read boundaries. This directly limits the new unconditional explanation.",
+            "One encoder message, one initial write offer, successful physical writes, and program read boundaries are distinct. No source claim here establishes an actual unintended submit or destructive command."
+          ],
+          "coverage_checked": [
+            "Both current root specs searched for single/short write and Shift+Enter; applicable product bullet and implementation paragraph read. Repeating an overstrong promise does not cover the contradictory implementation explanation.",
+            "TODO Planned empty; BUGS.md unrelated; active TRIAGE_OUTCOMES.md and INDEX.md contain no exact documentation-guarantee item. Read shift-enter-test-lacks-reader-readiness.md: it concerns an integration-test blocked-reader premise and independently notes deterministic initial-offer coverage. That is not this documentation defect or an extension of the same cause.",
+            "grid-shift-enter-loses-independent-altgraph concerns modifier recognition, not PTY boundaries. No unlanded matching plan found; matching docs cleanup plan already landed. FILTER.md does not clearly cover a persistent false implementation guarantee."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "A concrete supported terminal/line-editor input sequence and effect showing a destructive submit or loss of work is missing. Short-write possibility alone does not establish that stronger consequence.",
+          "original_stronger_consequence": "ESC and CR might reach a boundary-sensitive line editor separately, changing a newline chord into Escape-plus-submit. No runtime split, unintended submit, destructive command or loss-of-work sequence was observed or established. The ordinary initial offer and single-message encoder behavior are correct.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Retain the other-priority documentation mismatch and reconcile the root wording with the lower contract. Because the history narrows a potential unintended-submit route to documentation, have the parent independently check that consequence narrowing; this consultation does not accept a drop of a security/work-loss route."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-004.json",
+          "key": "g010/f1",
+          "proposal": "claim-checks/claims-004/result.json",
+          "parent_proposal": "retain-verified-other",
+          "final_independent_gate": "required-for-original-consequence-narrowing",
+          "reason": "Full004newf560SPEC_implunconditionalonePTYwriteexplanationcontradictsactualhostshortwritesuffixloopandterminal-hostSPECinitialwholeoffer/shortwriteallowed/no-read-boundaryguarantee. RootSPECstrongerwordingalreadybase, butnewimplementationclaiminrange. Retainpersistentdocumentationcontractmismatch, ordinaryencoderoneframe/initialofferisnotphysicalwriteatomicity. Proposedotherbecauseactualsupportedlineeditorsequence/split→unintendedsubmit→destructiveworklossnotestablished; originalhypothesishighestremainsinregister forfreshpriorityjudgment, ambiguousloweringkeepshighest. No runtime/falsephysicalreadclaim. SeparateRustblockedreaderandAltGraphrootsnotduplicates."
+        }
+      ],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "shift-enter-unconditional-pty-write-guarantee",
+        "destination": "trailing-shift-enter-unconditional-pty-write-guarantee.md"
+      }
+    },
+    {
+      "key": "g010/f2",
+      "owner": "g010",
+      "id": "f2",
+      "domain": "product-contracts",
+      "purpose": "product-contracts: SPEC_impl.md; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "f2",
+            "state": "open",
+            "summary": "Clipboard queue may replace older pending copies under a slow sink",
+            "location": "SPEC_impl.md:1732",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: Considered whether the new shared clipboard-queue description conflicts with the promise to copy each completed selection, because a busy sink causes older pending values to be replaced. Source: the new wording at SPEC_impl.md:1730-1737 describes both selection and program-copy paths through one queue. crates/farhelm-ui/assets/clipboard-writer.js:1-63 has one in-flight write and one replaceable pending value. terminal.js:4326-4334 sends both system-clipboard program writes and local selections to this queue. Decision: do not report; the behavior is explicitly accepted by SPEC.md Terminal experience, the clipboard paragraph, whose exact relevant text is: \"Clipboard operations are explicitly best-effort and silent on failure\" and \"A broken, hung or slow clipboard is not something Farhelm adds complexity to support well: copies may be dropped while it is in that state, but nothing else in Farhelm may stall because of it.\" The source queue implements that bounded nonblocking behavior; no new defect in its replacement policy was established. Could-be-highest: no; clipboard contents are expressly excluded from loss-of-user-owned-work severity by review_feedback_queue/AGENTS.md Priority buckets, and no credential read or other security route is involved here. Suggested bucket if retained: other. Confidence: confirmed source/spec acceptance; no execution. proposed_drop: the exact SPEC.md clipboard acceptance quoted above. possible_cover: that specification rule only; no other coverage sources searched."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "f2",
+            "state": "open",
+            "summary": "Clipboard queue may replace older pending copies under a slow sink",
+            "location": "SPEC_impl.md:1732",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. Synthesis revision: retain the proposed exclusion as narrowly about replacing pending clipboard writes, with exact acceptance and queue limits. TLDR: When a clipboard operation is still outstanding, additional copy requests may supersede an older pending value instead of each reaching the sink. Considered whether the new queue description conflicts with every-completed-selection copying; the explicit slow-clipboard exception accepts this consequence. Source: SPEC_impl.md:1729-1734 newly describes a page-wide queue. terminal.js:4326-4334 routes system-clipboard program writes and completed local selections through enqueueClipboardWrite. clipboard-writer.js:22-59 starts one operation, retains one replaceable pending value, and starts that pending value only when the prior operation resolves, rejects or throws. It does not wait in the selection/parser caller. An indefinitely pending operation holds that slot indefinitely; continued copies only replace the one pending value. The limit established here is one in-flight operation plus one pending value, not a proof of a byte limit inside this helper. Exact specification acceptance at SPEC.md:3075-3080: \"Clipboard operations are\n  explicitly best-effort and silent on failure — permission policy, secure-context requirements, and an engine's own\n  clipboard behavior are outside this system's control — a deliberate, named exception to the Errors and diagnostics\n  section's surface-every-error rule below, not a lapse in it. Farhelm assumes the host's system clipboard works. A\n  broken, hung or slow clipboard is not something Farhelm adds complexity to support well: copies may be dropped while\n  it is in that state, but nothing else in Farhelm may stall because of it.\" The three-copy case where the middle pending value is superseded is the original suspected consequence; this revision preserves it and does not claim every accepted enqueue reaches the sink. Decision: proposed exclusion unchanged because the exact named exception permits copies to be dropped while the sink is slow or hung, and this helper keeps unrelated processing nonblocking. Suggested bucket if retained: other. Could-be-highest: false; this is clipboard-value replacement only, which Priority buckets excludes from loss of user-owned work; no read/disclosure claim or credential route is made. Confidence: confirmed source/spec acceptance, not execution. proposed_drop: SPEC.md Terminal experience 3075-3080, exact text quoted above. possible_cover: only that specification rule; no forbidden coverage sources searched. Parent has not accepted this proposed exclusion. No tests or reproductions run."
+          }
+        }
+      ],
+      "latest": {
+        "line": 5,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "f2",
+          "state": "open",
+          "summary": "Clipboard queue may replace older pending copies under a slow sink",
+          "location": "SPEC_impl.md:1732",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. Synthesis revision: retain the proposed exclusion as narrowly about replacing pending clipboard writes, with exact acceptance and queue limits. TLDR: When a clipboard operation is still outstanding, additional copy requests may supersede an older pending value instead of each reaching the sink. Considered whether the new queue description conflicts with every-completed-selection copying; the explicit slow-clipboard exception accepts this consequence. Source: SPEC_impl.md:1729-1734 newly describes a page-wide queue. terminal.js:4326-4334 routes system-clipboard program writes and completed local selections through enqueueClipboardWrite. clipboard-writer.js:22-59 starts one operation, retains one replaceable pending value, and starts that pending value only when the prior operation resolves, rejects or throws. It does not wait in the selection/parser caller. An indefinitely pending operation holds that slot indefinitely; continued copies only replace the one pending value. The limit established here is one in-flight operation plus one pending value, not a proof of a byte limit inside this helper. Exact specification acceptance at SPEC.md:3075-3080: \"Clipboard operations are\n  explicitly best-effort and silent on failure — permission policy, secure-context requirements, and an engine's own\n  clipboard behavior are outside this system's control — a deliberate, named exception to the Errors and diagnostics\n  section's surface-every-error rule below, not a lapse in it. Farhelm assumes the host's system clipboard works. A\n  broken, hung or slow clipboard is not something Farhelm adds complexity to support well: copies may be dropped while\n  it is in that state, but nothing else in Farhelm may stall because of it.\" The three-copy case where the middle pending value is superseded is the original suspected consequence; this revision preserves it and does not claim every accepted enqueue reaches the sink. Decision: proposed exclusion unchanged because the exact named exception permits copies to be dropped while the sink is slow or hung, and this helper keeps unrelated processing nonblocking. Suggested bucket if retained: other. Could-be-highest: false; this is clipboard-value replacement only, which Priority buckets excludes from loss of user-owned work; no read/disclosure claim or credential route is made. Confidence: confirmed source/spec acceptance, not execution. proposed_drop: SPEC.md Terminal experience 3075-3080, exact text quoted above. possible_cover: only that specification rule; no forbidden coverage sources searched. Parent has not accepted this proposed exclusion. No tests or reproductions run."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g010/findings.jsonl",
+        "id": "f2",
+        "line": 5,
+        "disposition": "excluded",
+        "group": "slow-clipboard-single-flight-replaces-pending-value",
+        "reason": "Parent explicitly accepted named covered proposal from claims-004 after inspecting it. The exact slow/hung-clipboard exception permits dropping copies while requiring unrelated processing to remain nonblocking. One in-flight plus replaceable pending value implements this accepted consequence. Propose exclusion only for replacement of pending clipboard values during a slow or hung sink, using the exact specification exception. No parent decision is inferred. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:assets/clipboard-writer.js:22-59 retains one in-flight operation and one pending value. A third request replaces the second while the first remains pending; an indefinitely pending first operation keeps that slot indefinitely.\",\"Same hash terminal.js:4326-4334 sends program system-clipboard writes and completed local selections to the same synchronous enqueue operation. It does not await the sink in the parser/selection caller.\",\"Current SPEC.md:3053-3073 both requires completed selections to copy and expressly permits drops while the clipboard is broken, hung or slow. Current SPEC_impl.md:1728-1744 describes the native-first page-wide queue and invokes this best-effort exception.\",\"These checks establish two retained values, not an independent byte bound inside this helper. No read, disclosure, credential or wider-stall claim was made.\"] Current coverage/results: [\"Both specifications checked for completed selection, slow clipboard, queue and best-effort behavior; the exact trigger/consequence/scope is explicitly accepted in SPEC.md's clipboard paragraph.\",\"TODO Planned empty; BUGS.md unrelated; active TRIAGE_OUTCOMES.md and INDEX.md searched for clipboard queue/pending replacement. Read clipboard-notice-drain-lacks-per-turn-work-bound.md: it concerns supervisor broadcast draining before scheduling/cancellation, a different stage and consequence; it does not duplicate this browser writer policy.\",\"No unlanded matching plan found; landed tmux-doc cleanup and clipboard-cap work are not pending coverage. FILTER.md is unnecessary because the specification directly accepts the narrow value-replacement consequence.\"] Exact cited cover: [\"SPEC.md:3071-3073: Farhelm assumes the host's system clipboard works. A broken, hung or slow clipboard is not something Farhelm adds complexity to support well: copies may be dropped while it is in that state, but nothing else in Farhelm may stall because of it.\"] Original stronger consequence and missing premise remain preserved: \"In the three-copy case the middle pending copy may never reach the sink. No promise that every accepted enqueue reaches the sink is inferred. Clipboard-value replacement alone is excluded from loss-of-user-owned-work severity by the queue's priority rules.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g010/f2",
+        "line": 5,
+        "disposition": "excluded",
+        "group": "slow-clipboard-single-flight-replaces-pending-value",
+        "bucket": "other",
+        "recording": "covered",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named covered proposal from claims-004 after inspecting it. The exact slow/hung-clipboard exception permits dropping copies while requiring unrelated processing to remain nonblocking. One in-flight plus replaceable pending value implements this accepted consequence. Propose exclusion only for replacement of pending clipboard values during a slow or hung sink, using the exact specification exception. No parent decision is inferred. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:assets/clipboard-writer.js:22-59 retains one in-flight operation and one pending value. A third request replaces the second while the first remains pending; an indefinitely pending first operation keeps that slot indefinitely.\",\"Same hash terminal.js:4326-4334 sends program system-clipboard writes and completed local selections to the same synchronous enqueue operation. It does not await the sink in the parser/selection caller.\",\"Current SPEC.md:3053-3073 both requires completed selections to copy and expressly permits drops while the clipboard is broken, hung or slow. Current SPEC_impl.md:1728-1744 describes the native-first page-wide queue and invokes this best-effort exception.\",\"These checks establish two retained values, not an independent byte bound inside this helper. No read, disclosure, credential or wider-stall claim was made.\"] Current coverage/results: [\"Both specifications checked for completed selection, slow clipboard, queue and best-effort behavior; the exact trigger/consequence/scope is explicitly accepted in SPEC.md's clipboard paragraph.\",\"TODO Planned empty; BUGS.md unrelated; active TRIAGE_OUTCOMES.md and INDEX.md searched for clipboard queue/pending replacement. Read clipboard-notice-drain-lacks-per-turn-work-bound.md: it concerns supervisor broadcast draining before scheduling/cancellation, a different stage and consequence; it does not duplicate this browser writer policy.\",\"No unlanded matching plan found; landed tmux-doc cleanup and clipboard-cap work are not pending coverage. FILTER.md is unnecessary because the specification directly accepts the narrow value-replacement consequence.\"] Exact cited cover: [\"SPEC.md:3071-3073: Farhelm assumes the host's system clipboard works. A broken, hung or slow clipboard is not something Farhelm adds complexity to support well: copies may be dropped while it is in that state, but nothing else in Farhelm may stall because of it.\"] Original stronger consequence and missing premise remain preserved: \"In the three-copy case the middle pending copy may never reach the sink. No promise that every accepted enqueue reaches the sink is inferred. Clipboard-value replacement alone is excluded from loss-of-user-owned-work severity by the queue's priority rules.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-004",
+          "key": "g010/f2",
+          "latest_line": 5,
+          "recommendation": "covered",
+          "bucket": "other",
+          "underlying_key": "slow-clipboard-single-flight-replaces-pending-value",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The exact slow/hung-clipboard exception permits dropping copies while requiring unrelated processing to remain nonblocking. One in-flight plus replaceable pending value implements this accepted consequence.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e:assets/clipboard-writer.js:22-59 retains one in-flight operation and one pending value. A third request replaces the second while the first remains pending; an indefinitely pending first operation keeps that slot indefinitely.",
+            "Same hash terminal.js:4326-4334 sends program system-clipboard writes and completed local selections to the same synchronous enqueue operation. It does not await the sink in the parser/selection caller.",
+            "Current SPEC.md:3053-3073 both requires completed selections to copy and expressly permits drops while the clipboard is broken, hung or slow. Current SPEC_impl.md:1728-1744 describes the native-first page-wide queue and invokes this best-effort exception.",
+            "These checks establish two retained values, not an independent byte bound inside this helper. No read, disclosure, credential or wider-stall claim was made."
+          ],
+          "coverage_checked": [
+            "Both specifications checked for completed selection, slow clipboard, queue and best-effort behavior; the exact trigger/consequence/scope is explicitly accepted in SPEC.md's clipboard paragraph.",
+            "TODO Planned empty; BUGS.md unrelated; active TRIAGE_OUTCOMES.md and INDEX.md searched for clipboard queue/pending replacement. Read clipboard-notice-drain-lacks-per-turn-work-bound.md: it concerns supervisor broadcast draining before scheduling/cancellation, a different stage and consequence; it does not duplicate this browser writer policy.",
+            "No unlanded matching plan found; landed tmux-doc cleanup and clipboard-cap work are not pending coverage. FILTER.md is unnecessary because the specification directly accepts the narrow value-replacement consequence."
+          ],
+          "exact_cover_quotes": [
+            "SPEC.md:3071-3073: Farhelm assumes the host's system clipboard works. A broken, hung or slow clipboard is not something Farhelm adds complexity to support well: copies may be dropped while it is in that state, but nothing else in Farhelm may stall because of it."
+          ],
+          "missing_premise": null,
+          "original_stronger_consequence": "In the three-copy case the middle pending copy may never reach the sink. No promise that every accepted enqueue reaches the sink is inferred. Clipboard-value replacement alone is excluded from loss-of-user-owned-work severity by the queue's priority rules.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Propose exclusion only for replacement of pending clipboard values during a slow or hung sink, using the exact specification exception. No parent decision is inferred."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "slow-clipboard-single-flight-replaces-pending-value",
+        "destination": null
+      }
+    },
+    {
+      "key": "g010/f3",
+      "owner": "g010",
+      "id": "f3",
+      "domain": "product-contracts",
+      "purpose": "product-contracts: SPEC_impl.md; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "f3",
+            "state": "open",
+            "summary": "The shared control font rule preserves the grid input's terminal typeface",
+            "location": "SPEC_impl.md:695",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. Discovery candidate: checked whether admitting the grid input to the shared form-control font rule contradicts the rewritten explanation or replaces the terminal font with the interface face. TLDR: no incorrect font behavior or substantive replacement-contract gap established. The new SPEC_impl.md:692-696 says controls inherit their surroundings and calls the hidden terminal input harmless, with its font set inline. Exact source: app.css:583-585 applies font-family:inherit at zero specificity; grid-terminal.js:367-388 places the input directly under the grid root; :391-392 sets that root's fontFamily and fontSize inline from the terminal's options. The input therefore inherits the grid's inline terminal family, rather than the application chrome's face. app.css:8791-8804 keeps it transparent and without a layout width/height; grid-terminal.js:1603-1615 temporarily changes only its positioning/size for context-menu input. The wording sets its own font inline describes the grid's inherited inline owner, not an additional input-element style assignment; no separate contract relies on that assignment. Decision: do not report a font regression or inaccurate typeface ownership from this wording. Suggested bucket if retained: other (internal prose precision only). Could-be-highest: false; no security or loss-of-work route. Confidence: confirmed source refutation of the suspected typeface replacement; no execution. proposed_drop: source refutation, grid-terminal.js:367-392 plus app.css:583-585 as above. possible_cover: none. This is a new considered candidate, not a new finding; it does not revise f1 or f2."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f3",
+            "state": "open",
+            "summary": "The new font-rule explanation assigns the inline font to the wrong element",
+            "location": "SPEC_impl.md:695",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. Discovery revision: promote f3 from candidate; withdraw the original proposed source-refutation of the documentation consequence. The source refutes a runtime typeface regression, but that is distinct from whether the new explanation correctly identifies who owns the font. TLDR: The replacement explanation says the hidden input sets its own inline font, although the grid root sets that font and the input receives it through the very inheritance rule being described. A future maintainer is given the wrong dependency model. Details: the assigned patch newly says at SPEC_impl.md:695-696: \"The rule leaves font size alone; the grid\nterminal's hidden input field matches it harmlessly, since it is never visible and sets its own font inline.\" The input has no inline font assignment: grid-terminal.js:367-388 creates the textarea and appends it under the root; :391-392 sets element.style.fontFamily and fontSize on that root. The complete input CSS at app.css:8791-8804 has no font declaration, and the input.style assignments at grid-terminal.js:1603-1615 only position/size and later clear its inline CSS. app.css:583-585 supplies font-family:inherit, so this rule is what lets that input inherit the inline root family. The changed stylesheet rationale at app.css:579-582 repeats the same inaccurate direct-input-font claim, but that separate changed path belongs to its assigned owner. Correct this assigned specification sentence to say the input inherits the grid root's inline terminal family through the shared rule. This is not a request to change the font behavior. Original considered consequence preserved: possible replacement of the terminal typeface by the chrome face; source refutes that runtime concern, since the parent is the grid root. The separate new documentation error remains because correct production styling does not make the stated inline-owner rationale accurate. The earlier interpretation that the sentence simply describes inherited inline ownership is not established author intent and is withdrawn; the actual source owner is explicit. Suggested bucket: other, internal documentation accuracy only. Could-be-highest: false; no established or suspected security or loss-of-work route. Confidence: confirmed through exact new prose and source ownership, not execution. proposed_drop: false (previous source-refutation proposal withdrawn for the documentation finding only). possible_cover: none in supplied neighbours; no prohibited coverage search. Material caveat: the field is transparent, the current UI works, and no user-visible typeface regression is established. This is a narrow maintenance explanation defect, not a runtime finding."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f3",
+            "state": "open",
+            "summary": "The new font-rule explanation assigns the inline font to the wrong element",
+            "location": "SPEC_impl.md:695",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. Discovery revision: promote f3 from candidate; withdraw the original proposed source-refutation of the documentation consequence. The source refutes a runtime typeface regression, but that is distinct from whether the new explanation correctly identifies who owns the font. TLDR: The replacement explanation says the hidden input sets its own inline font, although the grid root sets that font and the input receives it through the very inheritance rule being described. A future maintainer is given the wrong dependency model. Details: the assigned patch newly says at SPEC_impl.md:695-696: \"The rule leaves font size alone; the grid\nterminal's hidden input field matches it harmlessly, since it is never visible and sets its own font inline.\" The input has no inline font assignment: grid-terminal.js:367-388 creates the textarea and appends it under the root; :391-392 sets element.style.fontFamily and fontSize on that root. The complete input CSS at app.css:8791-8804 has no font declaration, and the input.style assignments at grid-terminal.js:1603-1615 only position/size and later clear its inline CSS. app.css:583-585 supplies font-family:inherit, so this rule is what lets that input inherit the inline root family. The changed stylesheet rationale at app.css:579-582 repeats the same inaccurate direct-input-font claim, but that separate changed path belongs to its assigned owner. Correct this assigned specification sentence to say the input inherits the grid root's inline terminal family through the shared rule. This is not a request to change the font behavior. Original considered consequence preserved: possible replacement of the terminal typeface by the chrome face; source refutes that runtime concern, since the parent is the grid root. The separate new documentation error remains because correct production styling does not make the stated inline-owner rationale accurate. The earlier interpretation that the sentence simply describes inherited inline ownership is not established author intent and is withdrawn; the actual source owner is explicit. Suggested bucket: other, internal documentation accuracy only. Could-be-highest: false; no established or suspected security or loss-of-work route. Confidence: confirmed through exact new prose and source ownership, not execution. proposed_drop: false (previous source-refutation proposal withdrawn for the documentation finding only). possible_cover: none in supplied neighbours; no prohibited coverage search. Material caveat: the field is transparent, the current UI works, and no user-visible typeface regression is established. This is a narrow maintenance explanation defect, not a runtime finding. Attribution and persistence checks: exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:SPEC_impl.md:692-695 and immediate parent f560058^:SPEC_impl.md:695-698 exclude the vendored xterm helper textarea and contain no claim that a grid input sets an inline font. The assigned f560058 patch introduces that replacement explanation. Pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:SPEC_impl.md:695-696 retains it verbatim. A whole-file search of grid-terminal.js input.style/input.setAttribute/element.style.font confirms that the only input inline-style writes are positioning/reset at 1605 and 1613-1614, while the root font assignments are at 391-392 and 2022. Thus this is attributed to the newly written explanation within the pinned range, not an unrelated pre-existing implementation defect. No readily checkable premise remains open."
+          }
+        }
+      ],
+      "latest": {
+        "line": 8,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "f3",
+          "state": "open",
+          "summary": "The new font-rule explanation assigns the inline font to the wrong element",
+          "location": "SPEC_impl.md:695",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. Discovery revision: promote f3 from candidate; withdraw the original proposed source-refutation of the documentation consequence. The source refutes a runtime typeface regression, but that is distinct from whether the new explanation correctly identifies who owns the font. TLDR: The replacement explanation says the hidden input sets its own inline font, although the grid root sets that font and the input receives it through the very inheritance rule being described. A future maintainer is given the wrong dependency model. Details: the assigned patch newly says at SPEC_impl.md:695-696: \"The rule leaves font size alone; the grid\nterminal's hidden input field matches it harmlessly, since it is never visible and sets its own font inline.\" The input has no inline font assignment: grid-terminal.js:367-388 creates the textarea and appends it under the root; :391-392 sets element.style.fontFamily and fontSize on that root. The complete input CSS at app.css:8791-8804 has no font declaration, and the input.style assignments at grid-terminal.js:1603-1615 only position/size and later clear its inline CSS. app.css:583-585 supplies font-family:inherit, so this rule is what lets that input inherit the inline root family. The changed stylesheet rationale at app.css:579-582 repeats the same inaccurate direct-input-font claim, but that separate changed path belongs to its assigned owner. Correct this assigned specification sentence to say the input inherits the grid root's inline terminal family through the shared rule. This is not a request to change the font behavior. Original considered consequence preserved: possible replacement of the terminal typeface by the chrome face; source refutes that runtime concern, since the parent is the grid root. The separate new documentation error remains because correct production styling does not make the stated inline-owner rationale accurate. The earlier interpretation that the sentence simply describes inherited inline ownership is not established author intent and is withdrawn; the actual source owner is explicit. Suggested bucket: other, internal documentation accuracy only. Could-be-highest: false; no established or suspected security or loss-of-work route. Confidence: confirmed through exact new prose and source ownership, not execution. proposed_drop: false (previous source-refutation proposal withdrawn for the documentation finding only). possible_cover: none in supplied neighbours; no prohibited coverage search. Material caveat: the field is transparent, the current UI works, and no user-visible typeface regression is established. This is a narrow maintenance explanation defect, not a runtime finding. Attribution and persistence checks: exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:SPEC_impl.md:692-695 and immediate parent f560058^:SPEC_impl.md:695-698 exclude the vendored xterm helper textarea and contain no claim that a grid input sets an inline font. The assigned f560058 patch introduces that replacement explanation. Pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:SPEC_impl.md:695-696 retains it verbatim. A whole-file search of grid-terminal.js input.style/input.setAttribute/element.style.font confirms that the only input inline-style writes are positioning/reset at 1605 and 1613-1614, while the root font assignments are at 391-392 and 2022. Thus this is attributed to the newly written explanation within the pinned range, not an unrelated pre-existing implementation defect. No readily checkable premise remains open."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g010/findings.jsonl",
+        "id": "f3",
+        "line": 8,
+        "disposition": "verified",
+        "group": "grid-input-font-inline-owner-rationale",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-005 after inspecting it. The newly written explanation assigns the font to the textarea, while the root owns the inline font and the textarea inherits it. This is an in-range documentation defect. The earlier runtime font-regression concern is source-refuted; that does not refute this explanation defect. Retain the narrow source-confirmed explanation defect as other; do not turn it into a runtime styling regression. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:SPEC_impl.md:692-696 says the input sets its own font inline; that commit's diff introduces the sentence, replacing the xterm-textarea exclusion.\",\"At f560058, crates/farhelm-ui/assets/grid-terminal.js:367-392 creates the input under element and assigns fontFamily/fontSize to element. Whole-file input.style/input.setAttribute/element.style.font search finds input positioning/reset at 1605,1613-1614 and root font assignments at 391-392,2022, with no input font assignment.\",\"At f560058, app.css:579-585 repeats the inaccurate rationale and supplies font-family:inherit; 8791-8805 has no input font declaration. The root's terminal face therefore survives; no runtime typeface replacement is established.\",\"00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:SPEC_impl.md:692-696 retains the sentence. Source-only checks; no execution.\"] Current coverage/results: [\"Recording-time SPEC_impl.md:692-696 contains the statement being challenged, not acceptance of inaccurate ownership. SPEC.md searches for font/typeface/inheritance supply no acceptance of this explanation.\",\"TODO.md:23-27 has an empty Planned bucket. Targeted plans/queue searches found only the completed tmux documentation sweep; plans/REPORTS.md:29-32 confirms the tmux series landed. A general sweep does not explicitly cover the erroneous inline owner.\",\"BUGS.md contains only the SSH-helper provisioning hang. INDEX.md and active TRIAGE_OUTCOMES.md searches for font, input, inheritance and typeface found font-test readiness items, not this rationale. No matching queue item or active decision found.\",\"FILTER.md has no boundary covering a persistent inaccurate implementation explanation.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Possible replacement of the terminal face by the chrome face was considered at line 6 and refuted by root ownership/inheritance. Lines 7-8 withdraw the proposed dismissal of the separate documentation defect. No security or work-loss consequence was asserted.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g010/f3",
+        "line": 8,
+        "disposition": "verified",
+        "group": "grid-input-font-inline-owner-rationale",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-005 after inspecting it. The newly written explanation assigns the font to the textarea, while the root owns the inline font and the textarea inherits it. This is an in-range documentation defect. The earlier runtime font-regression concern is source-refuted; that does not refute this explanation defect. Retain the narrow source-confirmed explanation defect as other; do not turn it into a runtime styling regression. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:SPEC_impl.md:692-696 says the input sets its own font inline; that commit's diff introduces the sentence, replacing the xterm-textarea exclusion.\",\"At f560058, crates/farhelm-ui/assets/grid-terminal.js:367-392 creates the input under element and assigns fontFamily/fontSize to element. Whole-file input.style/input.setAttribute/element.style.font search finds input positioning/reset at 1605,1613-1614 and root font assignments at 391-392,2022, with no input font assignment.\",\"At f560058, app.css:579-585 repeats the inaccurate rationale and supplies font-family:inherit; 8791-8805 has no input font declaration. The root's terminal face therefore survives; no runtime typeface replacement is established.\",\"00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:SPEC_impl.md:692-696 retains the sentence. Source-only checks; no execution.\"] Current coverage/results: [\"Recording-time SPEC_impl.md:692-696 contains the statement being challenged, not acceptance of inaccurate ownership. SPEC.md searches for font/typeface/inheritance supply no acceptance of this explanation.\",\"TODO.md:23-27 has an empty Planned bucket. Targeted plans/queue searches found only the completed tmux documentation sweep; plans/REPORTS.md:29-32 confirms the tmux series landed. A general sweep does not explicitly cover the erroneous inline owner.\",\"BUGS.md contains only the SSH-helper provisioning hang. INDEX.md and active TRIAGE_OUTCOMES.md searches for font, input, inheritance and typeface found font-test readiness items, not this rationale. No matching queue item or active decision found.\",\"FILTER.md has no boundary covering a persistent inaccurate implementation explanation.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Possible replacement of the terminal face by the chrome face was considered at line 6 and refuted by root ownership/inheritance. Lines 7-8 withdraw the proposed dismissal of the separate documentation defect. No security or work-loss consequence was asserted.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-005",
+          "key": "g010/f3",
+          "latest_line": 8,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "grid-input-font-inline-owner-rationale",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The newly written explanation assigns the font to the textarea, while the root owns the inline font and the textarea inherits it. This is an in-range documentation defect. The earlier runtime font-regression concern is source-refuted; that does not refute this explanation defect.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e:SPEC_impl.md:692-696 says the input sets its own font inline; that commit's diff introduces the sentence, replacing the xterm-textarea exclusion.",
+            "At f560058, crates/farhelm-ui/assets/grid-terminal.js:367-392 creates the input under element and assigns fontFamily/fontSize to element. Whole-file input.style/input.setAttribute/element.style.font search finds input positioning/reset at 1605,1613-1614 and root font assignments at 391-392,2022, with no input font assignment.",
+            "At f560058, app.css:579-585 repeats the inaccurate rationale and supplies font-family:inherit; 8791-8805 has no input font declaration. The root's terminal face therefore survives; no runtime typeface replacement is established.",
+            "00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:SPEC_impl.md:692-696 retains the sentence. Source-only checks; no execution."
+          ],
+          "coverage_checked": [
+            "Recording-time SPEC_impl.md:692-696 contains the statement being challenged, not acceptance of inaccurate ownership. SPEC.md searches for font/typeface/inheritance supply no acceptance of this explanation.",
+            "TODO.md:23-27 has an empty Planned bucket. Targeted plans/queue searches found only the completed tmux documentation sweep; plans/REPORTS.md:29-32 confirms the tmux series landed. A general sweep does not explicitly cover the erroneous inline owner.",
+            "BUGS.md contains only the SSH-helper provisioning hang. INDEX.md and active TRIAGE_OUTCOMES.md searches for font, input, inheritance and typeface found font-test readiness items, not this rationale. No matching queue item or active decision found.",
+            "FILTER.md has no boundary covering a persistent inaccurate implementation explanation."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Possible replacement of the terminal face by the chrome face was considered at line 6 and refuted by root ownership/inheritance. Lines 7-8 withdraw the proposed dismissal of the separate documentation defect. No security or work-loss consequence was asserted.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain the narrow source-confirmed explanation defect as other; do not turn it into a runtime styling regression.",
+          "new_interface_evidence": "The same direct-input inline-font rationale appears in f560058:crates/farhelm-ui/assets/app.css:579-582. Consolidate that comment and SPEC_impl.md under this underlying key if its owner reports it."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "grid-input-font-inline-owner-rationale",
+        "destination": "trailing-grid-input-font-inline-owner-rationale.md"
+      }
+    },
+    {
+      "key": "g010/f4",
+      "owner": "g010",
+      "id": "f4",
+      "domain": "product-contracts",
+      "purpose": "product-contracts: SPEC_impl.md; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "f4",
+            "state": "open",
+            "summary": "Check withheld web-link gesture ownership across overlapping mouse buttons",
+            "location": "SPEC_impl.md:1778",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. Discovery pass 2 lead: the replacement paragraph at SPEC_impl.md:1778-1784 says an intercepted primary web-link press sends neither that press, its drag nor its release to the program. Previously read grid-terminal.js:1760-1810 creates a fresh single gesture on every mousedown, while :1645-1668 conditions release suppression on the current gesture.withheld. A later secondary-button press may replace the withheld-primary state before the primary release, causing an unmatched primary release/report. Suspected user consequence: program mouse input from a primary link gesture the user intended Farhelm alone to own; no security or loss-of-work route established. Need directly reread current handlers, startGesture/stopGesture and reporting classification, governing Terminal experience paragraph, and compare base/parent raw and grid ownership to resolve source and whole-range attribution. This is a substantive unresolved source check, not execution or an asserted bug. Suggested bucket if established: other, mouse-input correctness or inaccurate replacement documentation. Could-be-highest: false on current evidence. Confidence: open lead. proposed_drop: false. possible_cover: none in the refreshed supplied interface records; no forbidden coverage searches. No runtime reproduction or payload construction."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "f4",
+            "state": "open",
+            "summary": "Check withheld web-link gesture ownership across overlapping mouse buttons",
+            "location": "SPEC_impl.md:1778",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. Discovery pass 2 lead: the replacement paragraph at SPEC_impl.md:1778-1784 says an intercepted primary web-link press sends neither that press, its drag nor its release to the program. Previously read grid-terminal.js:1760-1810 creates a fresh single gesture on every mousedown, while :1645-1668 conditions release suppression on the current gesture.withheld. A later secondary-button press may replace the withheld-primary state before the primary release, causing an unmatched primary release/report. Suspected user consequence: program mouse input from a primary link gesture the user intended Farhelm alone to own; no security or loss-of-work route established. Need directly reread current handlers, startGesture/stopGesture and reporting classification, governing Terminal experience paragraph, and compare base/parent raw and grid ownership to resolve source and whole-range attribution. This is a substantive unresolved source check, not execution or an asserted bug. Suggested bucket if established: other, mouse-input correctness or inaccurate replacement documentation. Could-be-highest: false on current evidence. Confidence: open lead. proposed_drop: false. possible_cover: none in the refreshed supplied interface records; no forbidden coverage searches. No runtime reproduction or payload construction. Source check results: reread grid-terminal.js:1747-1758 and 1761-1807. Every recognized button press replaces the single gesture, and a nonprimary press has link=null and withheld=false. A middle press during an intercepted primary web-link hold therefore overwrites its ownership. The middle release with the primary still held does not end a reporting gesture (1666-1674); subsequent primary-held moves pass 1657-1658 and primary release passes 1670. grid-input.js:508-517 maps middle and primary distinctly and prioritizes primary on overlapping move masks; :555-559 accepts every up under mouse reporting; :575-584 deduplicates only identical moves, not releases. Exact product contract SPEC.md:3084-3088 requires withholding primary press together with release and drag while preserving other buttons. Source thus establishes the state-loss mechanism and contradicted promise, without execution. Remaining readily checkable premise: full-range attribution, particularly whether the removed raw-path independent-primary ownership already handled this and whether the new authoritative paragraph newly generalizes its guarantee. Continue source comparison before final classification."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f4",
+            "state": "open",
+            "summary": "The grid link-gesture guarantee omits ownership lost to another button",
+            "location": "SPEC_impl.md:1779",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. Discovery pass 2: f4 lead resolved to a source-confirmed replacement-documentation defect; the supporting grid behavior predates the range and is not attributed as a newly added handler. TLDR: The new grid-only explanation promises that an intercepted primary link gesture never reaches the terminal program, but pressing another mouse button before releasing the primary loses that ownership. The program can receive a primary release or drag for the press Farhelm withheld, and the intended link click is lost. Details: SPEC_impl.md:1778-1784 newly states that the grid reports neither the press nor its drag nor its release to the program. Under mouse reporting and default intercept, grid-terminal.js:1773-1792 withholds the primary link press and starts a reporting gesture carrying withheld=true. A middle-button mousedown in the same grid has pressed/link=null (1773-1774), hence withheld=false, and startGesture at 1747-1751 unconditionally stops/replaces the earlier gesture. Release the middle button while the primary remains held: onDocumentMouseUp:1666-1674 reports that middle release but keeps the replacement gesture because ev.buttons is nonzero. A later primary-held move passes 1657-1658 without suppression; the primary release passes 1670 because ending.withheld is now false. That release also has ending.link=null, so 1689-1693 does not activate the originally pressed link. grid-input.js:508-517 recognizes these buttons and maps primary-held motion to button 0; 555-559 admits releases and dragged motion, and 575-584 deduplicates only repeated moves. The supervisor does not restore ownership: grid_input.rs:688-745 encodes valid primary Up and held Move directly for ordinary SGR click/drag modes. No reproduction or runtime incidence is claimed; this is the conditional source path through the shipped event handlers.\nContract: SPEC.md:3084-3088 explicitly requires a default intercepted primary web press to be withheld together with its release and any drag starting there, while other buttons keep their behavior. The new root implementation description falsely presents that as a maintained grid invariant; per-button ownership must survive a second press or the documented guarantee must be explicitly reconciled with the product contract. Full-range attribution: exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a grid-terminal.js already has the same gesture.withheld/ending.withheld and replacing startGesture path at 1677,1690,1768,1799. Thus no newly introduced runtime gesture bug is alleged for existing grid terminals. The assigned patch instead replaces an xterm-specific explanation (parent SPEC_impl.md:1822-1839) that explicitly preserves independent primary ownership even when another button installs reporters, with the newly unconditional grid claim at 1778-1784. The parent raw path's separate withheldPrimary state is at terminal.js:4189,4552-4611; its full capture/cleanup logic remains to be reread to qualify the removed-path comparison, but is not needed to establish the new claim's contradiction with the checked grid handlers. Pinned tip SPEC_impl.md:1779-1785 retains the new explanation and tip grid-terminal.js retains the same suppression/replacement predicates; no endpoint repair shown by these direct checks.\nSuggested bucket: other, inaccurate implementation contract and rare mouse-input interference; no established security or loss-of-work route. Could-be-highest: false on this evidence; no destructive or privileged program action is inferred from a mouse release. Confidence: confirmed conditional handler/classifier/encoder and documentation contradiction, not execution-observed. proposed_drop: false. possible_cover: none among the complete refreshed supplied interface records; no prohibited coverage searches. Material caveats: an ordinary single-button intercepted click behaves correctly; the trigger needs another recognized button press inside the grid before primary release, with program mouse reporting on. The original suspected unmatched primary release/drag consequence is preserved; source adds that the single gesture also loses its original link identity. The remaining raw-path comparison is supplemental attribution, not an unresolved premise of the new documentation finding. No runtime test, build or reproduction."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f4",
+            "state": "open",
+            "summary": "The grid link-gesture guarantee omits ownership lost to another button",
+            "location": "SPEC_impl.md:1779",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. Discovery pass 2: f4 lead resolved to a source-confirmed replacement-documentation defect; the supporting grid behavior predates the range and is not attributed as a newly added handler. TLDR: The new grid-only explanation promises that an intercepted primary link gesture never reaches the terminal program, but pressing another mouse button before releasing the primary loses that ownership. The program can receive a primary release or drag for the press Farhelm withheld, and the intended link click is lost. Details: SPEC_impl.md:1778-1784 newly states that the grid reports neither the press nor its drag nor its release to the program. Under mouse reporting and default intercept, grid-terminal.js:1773-1792 withholds the primary link press and starts a reporting gesture carrying withheld=true. A middle-button mousedown in the same grid has pressed/link=null (1773-1774), hence withheld=false, and startGesture at 1747-1751 unconditionally stops/replaces the earlier gesture. Release the middle button while the primary remains held: onDocumentMouseUp:1666-1674 reports that middle release but keeps the replacement gesture because ev.buttons is nonzero. A later primary-held move passes 1657-1658 without suppression; the primary release passes 1670 because ending.withheld is now false. That release also has ending.link=null, so 1689-1693 does not activate the originally pressed link. grid-input.js:508-517 recognizes these buttons and maps primary-held motion to button 0; 555-559 admits releases and dragged motion, and 575-584 deduplicates only repeated moves. The supervisor does not restore ownership: grid_input.rs:688-745 encodes valid primary Up and held Move directly for ordinary SGR click/drag modes. No reproduction or runtime incidence is claimed; this is the conditional source path through the shipped event handlers.\nContract: SPEC.md:3084-3088 explicitly requires a default intercepted primary web press to be withheld together with its release and any drag starting there, while other buttons keep their behavior. The new root implementation description falsely presents that as a maintained grid invariant; per-button ownership must survive a second press or the documented guarantee must be explicitly reconciled with the product contract. Full-range attribution: exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a grid-terminal.js already has the same gesture.withheld/ending.withheld and replacing startGesture path at 1677,1690,1768,1799. Thus no newly introduced runtime gesture bug is alleged for existing grid terminals. The assigned patch instead replaces an xterm-specific explanation (parent SPEC_impl.md:1822-1839) that explicitly preserves independent primary ownership even when another button installs reporters, with the newly unconditional grid claim at 1778-1784. The parent raw path's separate withheldPrimary state is at terminal.js:4189,4552-4611; its full capture/cleanup logic remains to be reread to qualify the removed-path comparison, but is not needed to establish the new claim's contradiction with the checked grid handlers. Pinned tip SPEC_impl.md:1779-1785 retains the new explanation and tip grid-terminal.js retains the same suppression/replacement predicates; no endpoint repair shown by these direct checks.\nSuggested bucket: other, inaccurate implementation contract and rare mouse-input interference; no established security or loss-of-work route. Could-be-highest: false on this evidence; no destructive or privileged program action is inferred from a mouse release. Confidence: confirmed conditional handler/classifier/encoder and documentation contradiction, not execution-observed. proposed_drop: false. possible_cover: none among the complete refreshed supplied interface records; no prohibited coverage searches. Material caveats: an ordinary single-button intercepted click behaves correctly; the trigger needs another recognized button press inside the grid before primary release, with program mouse reporting on. The original suspected unmatched primary release/drag consequence is preserved; source adds that the single gesture also loses its original link identity. The remaining raw-path comparison is supplemental attribution, not an unresolved premise of the new documentation finding. No runtime test, build or reproduction. Supplemental comparison completed: parent terminal.js:4186-4195 stores withheldPrimary independently and filters onData through suppressMouseReport; :4576-4584 captures withheld primary motion/release and only clears that state on a primary down/up, so a middle press/release does not erase its primary ownership. :4538-4611 was read in full for the relevant screen listener, capture and teardown. This settles the raw-path comparison without asserting an unrelated retired-code defect. Base SPEC.md:3064-3071 already contains the same product withholding promise, so no new product requirement or new grid runtime regression is attributed to this range; the assigned new grid-specific implementation explanation is the independently incorrect statement. Direct endpoint grid-terminal.js:1640-1690 and 1735-1810 confirms unchanged replacing gesture and suppression conditions, and endpoint SPEC_impl.md:1779-1785 retains the false unconditional description. Correct exact reviewed root assertion is SPEC_impl.md:1781, inside the paragraph starting 1778 (location remains 1779 for the replacement mechanism). All readily checkable attribution, helper, classifier, encoder and persistence premises are resolved; no open lead remains. Existing runtime implementation, documentary error and removed-path comparison are kept separate. No accepted parent lowering/drop or runtime observation added."
+          }
+        }
+      ],
+      "latest": {
+        "line": 12,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "f4",
+          "state": "open",
+          "summary": "The grid link-gesture guarantee omits ownership lost to another button",
+          "location": "SPEC_impl.md:1779",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. Discovery pass 2: f4 lead resolved to a source-confirmed replacement-documentation defect; the supporting grid behavior predates the range and is not attributed as a newly added handler. TLDR: The new grid-only explanation promises that an intercepted primary link gesture never reaches the terminal program, but pressing another mouse button before releasing the primary loses that ownership. The program can receive a primary release or drag for the press Farhelm withheld, and the intended link click is lost. Details: SPEC_impl.md:1778-1784 newly states that the grid reports neither the press nor its drag nor its release to the program. Under mouse reporting and default intercept, grid-terminal.js:1773-1792 withholds the primary link press and starts a reporting gesture carrying withheld=true. A middle-button mousedown in the same grid has pressed/link=null (1773-1774), hence withheld=false, and startGesture at 1747-1751 unconditionally stops/replaces the earlier gesture. Release the middle button while the primary remains held: onDocumentMouseUp:1666-1674 reports that middle release but keeps the replacement gesture because ev.buttons is nonzero. A later primary-held move passes 1657-1658 without suppression; the primary release passes 1670 because ending.withheld is now false. That release also has ending.link=null, so 1689-1693 does not activate the originally pressed link. grid-input.js:508-517 recognizes these buttons and maps primary-held motion to button 0; 555-559 admits releases and dragged motion, and 575-584 deduplicates only repeated moves. The supervisor does not restore ownership: grid_input.rs:688-745 encodes valid primary Up and held Move directly for ordinary SGR click/drag modes. No reproduction or runtime incidence is claimed; this is the conditional source path through the shipped event handlers.\nContract: SPEC.md:3084-3088 explicitly requires a default intercepted primary web press to be withheld together with its release and any drag starting there, while other buttons keep their behavior. The new root implementation description falsely presents that as a maintained grid invariant; per-button ownership must survive a second press or the documented guarantee must be explicitly reconciled with the product contract. Full-range attribution: exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a grid-terminal.js already has the same gesture.withheld/ending.withheld and replacing startGesture path at 1677,1690,1768,1799. Thus no newly introduced runtime gesture bug is alleged for existing grid terminals. The assigned patch instead replaces an xterm-specific explanation (parent SPEC_impl.md:1822-1839) that explicitly preserves independent primary ownership even when another button installs reporters, with the newly unconditional grid claim at 1778-1784. The parent raw path's separate withheldPrimary state is at terminal.js:4189,4552-4611; its full capture/cleanup logic remains to be reread to qualify the removed-path comparison, but is not needed to establish the new claim's contradiction with the checked grid handlers. Pinned tip SPEC_impl.md:1779-1785 retains the new explanation and tip grid-terminal.js retains the same suppression/replacement predicates; no endpoint repair shown by these direct checks.\nSuggested bucket: other, inaccurate implementation contract and rare mouse-input interference; no established security or loss-of-work route. Could-be-highest: false on this evidence; no destructive or privileged program action is inferred from a mouse release. Confidence: confirmed conditional handler/classifier/encoder and documentation contradiction, not execution-observed. proposed_drop: false. possible_cover: none among the complete refreshed supplied interface records; no prohibited coverage searches. Material caveats: an ordinary single-button intercepted click behaves correctly; the trigger needs another recognized button press inside the grid before primary release, with program mouse reporting on. The original suspected unmatched primary release/drag consequence is preserved; source adds that the single gesture also loses its original link identity. The remaining raw-path comparison is supplemental attribution, not an unresolved premise of the new documentation finding. No runtime test, build or reproduction. Supplemental comparison completed: parent terminal.js:4186-4195 stores withheldPrimary independently and filters onData through suppressMouseReport; :4576-4584 captures withheld primary motion/release and only clears that state on a primary down/up, so a middle press/release does not erase its primary ownership. :4538-4611 was read in full for the relevant screen listener, capture and teardown. This settles the raw-path comparison without asserting an unrelated retired-code defect. Base SPEC.md:3064-3071 already contains the same product withholding promise, so no new product requirement or new grid runtime regression is attributed to this range; the assigned new grid-specific implementation explanation is the independently incorrect statement. Direct endpoint grid-terminal.js:1640-1690 and 1735-1810 confirms unchanged replacing gesture and suppression conditions, and endpoint SPEC_impl.md:1779-1785 retains the false unconditional description. Correct exact reviewed root assertion is SPEC_impl.md:1781, inside the paragraph starting 1778 (location remains 1779 for the replacement mechanism). All readily checkable attribution, helper, classifier, encoder and persistence premises are resolved; no open lead remains. Existing runtime implementation, documentary error and removed-path comparison are kept separate. No accepted parent lowering/drop or runtime observation added."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g010/findings.jsonl",
+        "id": "f4",
+        "line": 12,
+        "disposition": "verified",
+        "group": "secondary-button-erases-intercepted-primary-ownership",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-005 after inspecting it. The runtime trigger and consequence exactly match an existing item. The in-range replacement specification adds a useful documentation extension: it newly describes the grid as preserving an invariant that its existing singleton gesture does not preserve. Extend the existing item with this new assertion rather than create another runtime finding. Extend the existing item with the false in-range grid-specific promise and its attribution. Runtime scope is exact existing coverage; the documentation evidence is an extension, not grounds to lose the claim. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:SPEC_impl.md:1778-1784, especially 1781, newly promises no forwarded press, drag or release for an intercepted link press.\",\"At f560058, grid-terminal.js:1747-1758 replaces the singleton gesture. 1773-1792 gives a second non-primary reporting press link=null and withheld=false. 1651-1674 subsequently checks only that replacement's withheld flag; 1689-1693 also loses the original link. This establishes the conditional handler route, not observed runtime incidence.\",\"6e423e30068b62c6cfa276c6d720ee35bb70387a:grid-terminal.js:1677,1690,1768-1769,1799 already has the same suppression and replacement predicates. The runtime defect predates this range; the newly written grid-specific explanation is the in-range addition.\",\"At 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, grid-terminal.js:1652-1669,1742-1746,1768-1802 and SPEC_impl.md:1779-1785 retain the mechanism and assertion.\"] Current coverage/results: [\"SPEC.md:3077-3085 requires primary press/release/drag withholding and preserves other buttons; SPEC_impl.md:1779-1785 incorrectly asserts that behavior rather than accepting the overlap exception.\",\"INDEX.md:1267-1269 points to secondary-button-erases-intercepted-primary-ownership.md. Read that complete file: exact runtime trigger, forwarded primary motion/release, lost activation, and proposed independent ownership all match. Its historical SPEC_impl reference predates the new grid-only paragraph, so the new inaccurate assertion is useful additional evidence.\",\"TODO.md Planned is empty. Targeted plans/queue searches found no unlanded plan fixing this ownership state; the tmux series is landed per plans/REPORTS.md:29-32. BUGS.md has no match. Active TRIAGE_OUTCOMES.md has no matching interception/secondary-button decision.\",\"FILTER.md does not establish that a deliberate overlapping-button gesture meets its rare-trigger boundary. No filter proposed.\"] Exact cited cover: [\"Existing queue TLDR: Holding a web-link click and pressing a second mouse button loses the primary click's interception, so its subsequent drag/release reaches the terminal program and its original link no longer opens.\"] Original stronger consequence and missing premise remain preserved: \"The original lead alleged an unmatched primary release or drag. The final claim preserves that consequence and adds lost link identity. No destructive or privileged action from the mouse report was established. Ordinary single-button intercepted clicks remain outside the trigger.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g010/f4",
+        "line": 12,
+        "disposition": "verified",
+        "group": "secondary-button-erases-intercepted-primary-ownership",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": "review_feedback_queue/secondary-button-erases-intercepted-primary-ownership.md",
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-005 after inspecting it. The runtime trigger and consequence exactly match an existing item. The in-range replacement specification adds a useful documentation extension: it newly describes the grid as preserving an invariant that its existing singleton gesture does not preserve. Extend the existing item with this new assertion rather than create another runtime finding. Extend the existing item with the false in-range grid-specific promise and its attribution. Runtime scope is exact existing coverage; the documentation evidence is an extension, not grounds to lose the claim. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:SPEC_impl.md:1778-1784, especially 1781, newly promises no forwarded press, drag or release for an intercepted link press.\",\"At f560058, grid-terminal.js:1747-1758 replaces the singleton gesture. 1773-1792 gives a second non-primary reporting press link=null and withheld=false. 1651-1674 subsequently checks only that replacement's withheld flag; 1689-1693 also loses the original link. This establishes the conditional handler route, not observed runtime incidence.\",\"6e423e30068b62c6cfa276c6d720ee35bb70387a:grid-terminal.js:1677,1690,1768-1769,1799 already has the same suppression and replacement predicates. The runtime defect predates this range; the newly written grid-specific explanation is the in-range addition.\",\"At 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, grid-terminal.js:1652-1669,1742-1746,1768-1802 and SPEC_impl.md:1779-1785 retain the mechanism and assertion.\"] Current coverage/results: [\"SPEC.md:3077-3085 requires primary press/release/drag withholding and preserves other buttons; SPEC_impl.md:1779-1785 incorrectly asserts that behavior rather than accepting the overlap exception.\",\"INDEX.md:1267-1269 points to secondary-button-erases-intercepted-primary-ownership.md. Read that complete file: exact runtime trigger, forwarded primary motion/release, lost activation, and proposed independent ownership all match. Its historical SPEC_impl reference predates the new grid-only paragraph, so the new inaccurate assertion is useful additional evidence.\",\"TODO.md Planned is empty. Targeted plans/queue searches found no unlanded plan fixing this ownership state; the tmux series is landed per plans/REPORTS.md:29-32. BUGS.md has no match. Active TRIAGE_OUTCOMES.md has no matching interception/secondary-button decision.\",\"FILTER.md does not establish that a deliberate overlapping-button gesture meets its rare-trigger boundary. No filter proposed.\"] Exact cited cover: [\"Existing queue TLDR: Holding a web-link click and pressing a second mouse button loses the primary click's interception, so its subsequent drag/release reaches the terminal program and its original link no longer opens.\"] Original stronger consequence and missing premise remain preserved: \"The original lead alleged an unmatched primary release or drag. The final claim preserves that consequence and adds lost link identity. No destructive or privileged action from the mouse report was established. Ordinary single-button intercepted clicks remain outside the trigger.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-005",
+          "key": "g010/f4",
+          "latest_line": 12,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "secondary-button-erases-intercepted-primary-ownership",
+          "aliases": [
+            "review_feedback_queue/secondary-button-erases-intercepted-primary-ownership.md"
+          ],
+          "target_queue_file": "review_feedback_queue/secondary-button-erases-intercepted-primary-ownership.md",
+          "why": "The runtime trigger and consequence exactly match an existing item. The in-range replacement specification adds a useful documentation extension: it newly describes the grid as preserving an invariant that its existing singleton gesture does not preserve. Extend the existing item with this new assertion rather than create another runtime finding.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e:SPEC_impl.md:1778-1784, especially 1781, newly promises no forwarded press, drag or release for an intercepted link press.",
+            "At f560058, grid-terminal.js:1747-1758 replaces the singleton gesture. 1773-1792 gives a second non-primary reporting press link=null and withheld=false. 1651-1674 subsequently checks only that replacement's withheld flag; 1689-1693 also loses the original link. This establishes the conditional handler route, not observed runtime incidence.",
+            "6e423e30068b62c6cfa276c6d720ee35bb70387a:grid-terminal.js:1677,1690,1768-1769,1799 already has the same suppression and replacement predicates. The runtime defect predates this range; the newly written grid-specific explanation is the in-range addition.",
+            "At 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, grid-terminal.js:1652-1669,1742-1746,1768-1802 and SPEC_impl.md:1779-1785 retain the mechanism and assertion."
+          ],
+          "coverage_checked": [
+            "SPEC.md:3077-3085 requires primary press/release/drag withholding and preserves other buttons; SPEC_impl.md:1779-1785 incorrectly asserts that behavior rather than accepting the overlap exception.",
+            "INDEX.md:1267-1269 points to secondary-button-erases-intercepted-primary-ownership.md. Read that complete file: exact runtime trigger, forwarded primary motion/release, lost activation, and proposed independent ownership all match. Its historical SPEC_impl reference predates the new grid-only paragraph, so the new inaccurate assertion is useful additional evidence.",
+            "TODO.md Planned is empty. Targeted plans/queue searches found no unlanded plan fixing this ownership state; the tmux series is landed per plans/REPORTS.md:29-32. BUGS.md has no match. Active TRIAGE_OUTCOMES.md has no matching interception/secondary-button decision.",
+            "FILTER.md does not establish that a deliberate overlapping-button gesture meets its rare-trigger boundary. No filter proposed."
+          ],
+          "exact_cover_quotes": [
+            "Existing queue TLDR: Holding a web-link click and pressing a second mouse button loses the primary click's interception, so its subsequent drag/release reaches the terminal program and its original link no longer opens."
+          ],
+          "missing_premise": null,
+          "original_stronger_consequence": "The original lead alleged an unmatched primary release or drag. The final claim preserves that consequence and adds lost link identity. No destructive or privileged action from the mouse report was established. Ordinary single-button intercepted clicks remain outside the trigger.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Extend the existing item with the false in-range grid-specific promise and its attribution. Runtime scope is exact existing coverage; the documentation evidence is an extension, not grounds to lose the claim."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "secondary-button-erases-intercepted-primary-ownership",
+        "destination": "secondary-button-erases-intercepted-primary-ownership.md"
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review is blocked: the manifest requires lines 1–559, but the snapshot contains 558 lines. The evidence reader rejects every request.\n\nRead the full brief and inventory’s commits field. Updated progress.md; findings.jsonl remains empty. No assigned patch coverage is claimed.\n\nCorrect the manifest’s end line to 558 so review can continue."
+    },
+    {
+      "turn": 2,
+      "reply": "Initial pass complete: all 558 mandatory lines read through the corrected evidence manifest; no unread assigned scope.\n\nRecorded:\n- **f1:** confirmed documentation mismatch in the Shift+Enter single-write guarantee; suggested bucket **other**.\n- **f2:** clipboard-queue candidate set aside under explicit specification acceptance.\n\nNo open leads. No tests or reproductions run. Findings and progress logs updated."
+    },
+    {
+      "turn": 3,
+      "reply": "Revised f1 and f2 under their original IDs.\n\n- **f1:** Retained as documentation-only; caller checks confirm one input frame does not guarantee one physical write or program read.\n- **f2:** Preserved the proposed exclusion with exact slow-clipboard acceptance and one-in-flight/one-pending limits.\n\nNo new findings. Unresolved lead IDs: none."
+    },
+    {
+      "turn": 4,
+      "reply": "Discovery pass 1 complete. New verified finding: **f3**, a documentation-only font-ownership mismatch, bucket **other**.\n\nChecked heading references, sizing/fonts, snapshot lifecycle, notice teardown, and base/parent/tip attribution.\n\nNew unverified IDs: none. Open leads: none. Logs updated; no runtime execution."
+    },
+    {
+      "turn": 5,
+      "reply": "Discovery pass 2 complete. New verified ID: **f4**, an inaccurate grid link-gesture guarantee, bucket **other**.\n\nChecked overlapping-button ownership, report encoding, shortcut handling, hyperlink tags, and base/parent/tip attribution.\n\nNew unverified IDs: none. Open leads: none. Something new was found; logs updated. No runtime execution."
+    },
+    {
+      "turn": 6,
+      "reply": "Discovery pass 3 complete. Checked mount prerequisites, font assets, composition handling, shortcut interception, selection modifiers, and notice teardown.\n\nNothing new found. New verified IDs: none. New unverified IDs: none. Open leads: none.\n\nProgress updated; findings log unchanged."
+    }
+  ],
+  "progress": "g010 product-contracts — initial source review complete.\nTurn type/count: initial review, coverage-repair turn 2 (turn 1 blocked on an out-of-range manifest endpoint). Discovery-pass count: 0. No synthesis/discovery turn performed.\n\nCorrected brief reread in full. Inventory commits field was read in full on turn 1; excluded coverage metadata was not read. findings.jsonl was verified present before source review, remains append-only, and contains three events: f1 lead, f1 confirmed finding, f2 candidate. Evidence findings reports active=1, candidates=1, leads=0.\n\nMandatory coverage: all actual assigned patch lines 1-558 delivered through the corrected evidence manifest, in separate shell calls for 1-100, 101-180, 181-260, 261-340, 341-420, 421-500, 501-558. Each output contains the complete packet and end marker. Snapshot SHA-256 remains 6ffec83a6b54fb11aa267c5a62afa075088eaa6ecda8a710ae078ef5eff7873a. The final assigned line is a following hunk header; following patch text is outside this group's assignment. Unread assigned scope: none. The two prior failed reads certified no coverage; this turn's seven reads repair it.\n\nReviewed commit: f560058da19e02716e6f943883a9508b447aff4e. All implementation/specification context was read at that revision with git show, not from the working tree. Contracts read: SPEC.md Terminal experience 2855-3177 in full (previous turn), Security 4472-4604 in full; SPEC_impl.md grid island and grid client 1504-1887 in full, Grid streams 3009-3110 in full, Version and skew and Rootless Podman 8268-8364 in full (previous turn); Answers bind to what was drawn 1069-1098 and adjacent 1044-1068 (previous turn); lifecycle ownership/completion paragraphs 1129-1172; terminal-host SPEC.md Input 389-429 in full. Both specification heading indexes and targeted searches informed these reads. Confirmed clipboard paragraph line numbers with SPEC.md 3060-3089.\n\nSource context read: grid_input.rs 1-230, 298-345, 375-405; terminal-host host.rs 552-627; terminal emulator effects.rs 100-207; service/grid_stream.rs 410-466; terminal.js 383-462, 2693-2745, 4200-4410; grid-terminal.js 1625-1875, 1988-2054; grid-buffer.js 590-685; clipboard-writer.js 1-63 (entire asset); terminal-links.js 140-182, 405-585; UI lib.rs 1438-1545; helm terminal.rs 1-168. Targeted git grep confirmed default scrollback=12000, protocol version=77, clipboard event refusal, font loading, flow-control and input locations. No unread relevant result previews or truncated packets.\n\nNew verified finding: f1, other bucket, contradictory unconditional Shift+Enter one-write wording versus the terminal-host Input contract's explicit partial-PTY-write caveat. New unverified findings: none. Candidate: f2, best-effort clipboard queue replacement accepted explicitly by SPEC.md 3075-3080; could-be-highest=false. No open leads. All records distinguish source conclusions from execution; no tests or reproductions ran.\n\nInterface assumptions: implementation patches belong to the other assigned groups; this group owns only the mapped SPEC_impl.md patch segment. The retired xterm/tmux path's removal was judged against the product's terminal-host and protocol-skew rules, not reviewed for unrelated old defects. No checkout files changed, no live install interaction, no helpers spawned, no queue/TODO/plan/filter/ledger coverage searches. Parent owns coverage reconciliation and disposition.\n\nNext action: return initial-pass delta and coverage status; await the parent's later synthesis/discovery prompt. Findings remain in findings.jsonl; no separate report file.\n\nSynthesis turn 3 started. Discovery-pass count remains 0. Rechecking original f1 physical-write/read-boundary premises and f2 exact slow-clipboard acceptance; prior mandatory delivery audited by parent. No open leads at entry.\n\nSynthesis turn 3 completed. Discovery-pass count remains 0. Revisited interactions across the assigned patch: the new universal-grid explanation delegates flow control, input encoding and copy behavior to separate owners; no combined owner change establishes a stronger physical-input or per-copy delivery guarantee than those owners actually provide.\n\nRecords revised this turn: f1 (finding, other) at event line 4 and f2 (candidate, proposed exclusion only) at event line 5. f1 retains the original possible Escape-plus-submit consequence and explicitly separates it from unestablished destructive input or data loss; it also notes that SPEC.md already had stronger single-write language, so the new incorrect guarantee is an unconditional implementation explanation, not a new product requirement. f2 now holds the exact SPEC.md 3075-3080 acceptance, one-in-flight/one-pending queue limit, hung-sink behavior and explicit exclusion of any clipboard read/disclosure claim. No parent exclusion has been accepted or applied.\n\nAdditional source checks this turn, all at f560058da19e02716e6f943883a9508b447aff4e: numbered SPEC_impl.md 1707-1746, terminal-host SPEC.md Input 389-429, host.rs 568-627, SPEC.md 2862-2878 and 3060-3080, full clipboard-writer.js 1-65, terminal.js 4311-4338 and 748-783, grid_stream.rs 1048-1107 and 1223-1268, input_frames definition plus context 262-285. Readily checkable caller premises resolved: grid_stream queues nonempty key bytes as one OneOff and input_frames keeps a two-byte key in one frame; no caller proof upgrades the lower-level offered-whole contract into successful physical-write or read atomicity. The page's enqueueClipboardWrite returns synchronously, shares one lazily created queue for every island and both copy paths, and returns the native/web promise to that queue; source confirms the one-slot backlog remains independent of the caller's processing. These checks support the revised records; no additional defect or unverified premise emerged.\n\nOpen lead IDs: none. New IDs this turn: none. New verified/unverified findings: none (existing f1 retained and clarified). Unread assigned scope: none; prior mandatory delivery remains audited and unchanged. No runtime tests, reproductions, checkout writes or forbidden coverage searches. Interface assumptions remain unchanged. Next action: return this turn's delta and await the parent's next instruction.\n\nDiscovery turn 4, pass 1 started. Read discovery-neighbours.json completely in bounded ranges 1-70,71-140,141-210,211-280,281-350,351-420,421-500,501-570,571-640,641-710,711-780,781-850,851-920,921-990,991-1024. No clipped output or unread neighbour material. This supplied interface context, not mandatory source credit or prohibited coverage.\nPre-search synthesis: no named pending questions. Known interface issues about stale Restart completion, primary-selection notice forwarding, old-page input reinterpretation, retirement guarantees, helper/test documentation and constructor cleanup have owners; they are not new g010 discoveries. They do not change the narrow f1/f2 conclusions or establish an additional defect in my assigned patch. New search will check the remaining replacement-documentation assertions (heading references, sizing/font and recovery wording, pointer/hover ownership) at f560058 without re-reviewing unrelated implementation.\n\nDiscovery pass 1 completed (turn 4). Something new was found: f3, confirmed documentation-only inline-font ownership mismatch, suggested bucket other. Recorded immediately as a candidate while checking runtime typeface ownership, then promoted under the same ID after separating the correct styling behavior from the inaccurate newly written rationale; its earlier proposed source-refutation is withdrawn only for the documentation consequence. Latest f3 also holds whole-range attribution and endpoint persistence. No other new finding or unverified-after-investigation concern; open leads: none. f1 and f2 unchanged.\n\nUseful discovery checks/results, all source-only: exact former terminal-heading text and anchor searches across SPEC.md, SPEC_impl.md, crates and docs at f560058 returned no references; no dangling heading defect established. app.css 551-590 and 8785-8825; grid-terminal.js 305-415,1577-1625 and whole-file input.style/font searches established f3's actual root/textarea ownership. Parent and exclusive-base SPEC_impl searches show the old xterm exception, not this new inaccurate grid explanation; pinned-tip 695-696 retains it. grid-terminal.js 412-528 and 1930-1992 confirm new size measurement/refit and initial hello-size correction descriptions. app.css scrollbar search and grid-terminal SCROLLBAR_FADE_MS both confirm 800ms. terminal.js 1540-1638,4438-4470,4775-4848 plus reveal context 3756-3778, and grid-terminal.js 2075-2148 establish the replacement snapshot move/freeze/restore/disposal and notice-driver teardown ordering described by the assigned replacement prose. The grid root retains local selection/copy and links while freeze removes sending/resize; the notice driver is stopped before freezing, matching this assigned contract. No additional defect found there. grid-input.js platformOf plus terminal.js platform test confirmed the retained platform-owner relationship; no new mismatch claim.\n\nNovelty context was read completely before new source search. Existing neighbour issues were used only to avoid duplicates; no new local record was created for stale Restart completion, primary-selection notice forwarding, old-page JSON input, retirement cleanup/survival assurance, or failed-mount test discrepancies. No forbidden coverage searches, runtime tests/reproductions, live-install actions, helper agents or checkout changes. No unread assigned scope or omitted neighbour ranges. Interface assumptions unchanged. Next action: return discovery delta; because f3 is a new discovery, any further convergence/discovery pass is a later parent-requested turn, not folded into this one.\n\nDiscovery turn 5/pass 2 started. Refreshed discovery-neighbours.json (at 2026-11-13T17:32:17.444Z, 469239 bytes) read completely in separate bounded ranges 1-60 through 1381-1436; no omissions/clipping. No named pending questions. Interface synthesis: new supplied entries refine known ownership, scope and documentation/test findings but do not require revisions to f1-f3 or f2 acceptance. Their old-page, styling capability and primary-copy guidance findings remain with their owners and are not new local discoveries. Own full append-only history remains in context; no parent drop/lowering accepted. New source search concentrates on the remaining replacement input/link ownership assertions. New f4 lead recorded immediately from existing source context: verify withheld-primary ownership survives a secondary press before primary release; do not treat it as established until handler/classifier and full-range checks complete. No runtime tests or reproductions.\n\nDiscovery pass 2 (turn 5) completed. Something new found: f4, confirmed documentation/replacement-gesture contract mismatch, suggested other bucket. Original f4 lead and its source-check revision were appended before further analysis; it was then resolved to a finding and supplemented with the completed raw-path/base/tip checks. Source shows single-gesture replacement loses intercepted primary ownership on another recognized button press, unlike the removed independent-primary owner. The new authoritative grid-specific explanation is inaccurate even though the grid implementation defect and product promise predate the range. Do not attribute a new grid handler regression to f560058. No security or loss-of-work consequence inferred. New verified IDs this pass: f4. New unverified-after-investigation IDs: none. Remaining lead IDs: none. Existing f1-f3 and f2 proposed acceptance unchanged; no parent dispositions applied.\n\nReads/checks: refreshed neighbours fully read in 24 bounded ranges (1-60,61-120,...1321-1380,1381-1436), before source search. grid-terminal.js at reviewed commit 1635-1699,1745-1830; grid-input.js pressButton/moveButton/modeReports/deduper context; SPEC.md3081-3102; grid_input.rs688-757; parent SPEC_impl.md1819-1843 and terminal.js4538-4620,4175-4215; reviewed SPEC_impl.md1773-1788; terminal.js4333-4355; terminal-links.js155-174. Base grid predicate search and base SPEC.md3064-3071 establish pre-range runtime/promise distinction; tip grid-terminal.js1640-1690,1735-1810 and tip SPEC_impl.md1775-1789 establish persistence. Inspected changed-path diffstat then used direct endpoint reads for actual predicates rather than treating large commentary diffs as behavior evidence. The supporting nonprimary event sequence is source reasoning only; no generated reproduction, UI automation or runtime test.\n\nRemaining replacement assertions checked after recording f4: complete session-action-shortcuts.js shows current grid textarea classified as terminal input while ordinary editors retain browser Delete, in agreement with this patch's text replacement. grid-buffer.js650-682 confirms integer per-question hyperlink tags in linkLines; no second issue found there. Earlier input/font/snapshot checks remain applicable. No additional substantive lead, candidate or finding arose. All assigned patch text remains delivered/audited; unread assigned scope none. No checkout edits, helper agents, live-install interaction or forbidden coverage searches. Next action: return this pass delta; further discovery after this substantive new finding belongs to a separate later turn.\n\nDiscovery turn 6/pass 3 started. No open leads at entry; prior findings/candidate history reused. Current neighbour artifact at 2026-11-13T18:04:19.620Z is 485264 bytes. Reused 106 identical latest records after an exact per-record JSON comparison with the prior delivered output, and read all seven changed/added records in full from neighbours-pass3-changes.json ranges1-25,26-50,51-72; removed g008/f4 was noted, not accepted as a drop. Current full file is retained privately as neighbours-pass3-exact.json. No named pending questions; changed interface entries do not revise f1-f4/f2 or supply a novel assigned-contract concern. Existing secondary-button discussion in supplied g174/c4 references a separate pre-range mechanism without supplying that local record, so no disposition/duplicate assumption is made here.\n\nNeighbour reuse method/correction: private neighbour-delta.ts recovered the contiguous source reads from this group's own turn5.events.jsonl and compared latest record objects, rather than summarizing the changed records. The old source had1437 physical lines with no final newline; the earlier wc-based1436 upper bound omitted only its final root closing brace, not any record content. Recovery added that structural brace, required the original469239-byte count and valid complete JSON, then compared record content. This corrects the earlier full-file wording while retaining that every old record was actually delivered. Helper format/type checks and its missing-packet self-check ran only against private JSON tooling; no repository/product test, reproduction, build or runtime fixture was run. Initial reconstruction refused the missing brace before any reuse; after correction it reported106 reused,7 changed and the one removed ID. No source coverage is certified by this utility, and mandatory patch delivery remains the parent's prior audited evidence.\n\nDiscovery pass 3 (turn 6) completed. Nothing new found. New verified IDs: none. New unverified-after-investigation IDs: none. New considered candidates: none. Remaining open lead IDs: none. findings.jsonl unchanged at12 events; f1-f4/f2 retain their prior records and proposed-drop histories. No parent drop or lowering accepted.\n\nUseful source checks/results, all at f560058da19e02716e6f943883a9508b447aff4e: SPEC_impl.md1487-1521 reread the complete input-method paragraph and grid-island/font explanation. grid-input.js326-360 confirms composing/229 keydowns are ignored and typed/dead-key handling is delegated; grid-terminal.js1485-1565 retains independent compositionstart/end and committed-text dispatch, with the documented omission of composition-at-cursor display. terminal.js3191-3255 explicitly waits for all grid and shared helper globals, fontSettled and the mount node, without waiting on removed xterm constructors. Earlier two-font loader reads still apply. UI lib.rs1400-1446 confirms the bundled font assets/licenses; existing asset-registration context covers the grid globals. terminal.js2642-2678 confirms capture-phase Equal/Minus with the stated platform modifier, Shift, no Alt and a mounted island, consuming the shortcut before terminal/browser processing. copy-on-select.js96-106,151-174 and grid-input.js260-275 use the same exact Mac platform list for forced-selection wording and behavior. terminal.js4412-4459 retains the program-copy grace sequence, pane visibility guard and deferred-work invalidation described by the assigned notice paragraph. No new issue in these paths. Initial pattern searches that found no named function were followed by direct actual method/handler reads; no absent-result assumption was used as evidence.\n\nRefreshed-neighbour synthesis found no named pending question or contradiction requiring own record revision. Seven changed records were read in full and106 record objects were reused byte-for-byte after JSON equivalence, as documented above; the one removed neighbour record was not treated as an accepted disposition. Scope remains only the assigned SPEC_impl.md patch segment and its validating callers/contracts. No assigned material remains unread; prior mandatory delivery is unchanged and audited. No repository tests/builds, runtime fixtures, reproductions, checkout edits, live-install actions, helper agents or prohibited coverage searches. Only the separately documented private JSON reuse utility was formatted/type-checked/self-checked to avoid rereading unchanged neighbour payloads. Next action: return empty pass delta and await parent instruction.\n"
+}

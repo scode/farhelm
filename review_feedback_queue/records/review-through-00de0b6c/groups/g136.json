@@ -1,0 +1,621 @@
+{
+  "group": {
+    "id": "g136",
+    "domain": "terminal-link-file-actions",
+    "purpose": "terminal-link-file-actions: crates/farhelm-ui/js-tests/terminal-files.test.js; phases complete small per-commit changes",
+    "interfaces": [
+      "g009",
+      "g010",
+      "g011",
+      "g079",
+      "g080",
+      "g081",
+      "g082",
+      "g083",
+      "g084",
+      "g135",
+      "g188",
+      "g189",
+      "g190",
+      "g191",
+      "g192",
+      "g193",
+      "g194",
+      "g195",
+      "g196",
+      "g197"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/01099-000.patch",
+        "ranges": [
+          [
+            1,
+            319
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/js-tests/terminal-files.test.js",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,19008)",
+        "lines": 319,
+        "bytes": 19016,
+        "start": 0,
+        "end": 19008,
+        "original": "[private-run]/prep/originals/01099.patch"
+      }
+    ],
+    "lines": 319,
+    "bytes": 19016
+  },
+  "records": [
+    {
+      "key": "g136/c1",
+      "owner": "g136",
+      "id": "c1",
+      "domain": "terminal-link-file-actions",
+      "purpose": "terminal-link-file-actions: crates/farhelm-ui/js-tests/terminal-files.test.js; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Retired xterm adapter tests do not leave an active adapter untested",
+            "location": "crates/farhelm-ui/js-tests/terminal-files.test.js:378",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: Considered whether deleting immediate-recognition and native OSC-provider preservation tests lets file links regress; no active adapter behavior was removed from coverage by these two deletions. Details: the assigned patch removes tests for XtermFileLinksAddon and its xterm provider identity checks, together with that class's removal in assets/terminal-files.js (parent lines 662-703; commit diff). The replacement is the existing grid-hosted FileLinks: assets/terminal.js:945-959 supplies the view and gesture gate, 1029-1059 classifies every OSC target with oscTarget and makes other schemes inert, and 1108-1115 synchronously offers OSC, text and path links through the grid provider. There is no asynchronous stat in that provider. SPEC_impl.md, Session-host file reads, explicitly says: `terminal-files.js` supplies conservative token recognition and the terminal-owned file links (`FileLinks`), which the grid hosts directly (terminal.js's `createGridLinks`), after OSC 8 and printed web links in the order a line's links are offered. The changed tests retain direct recognition and OSC allowlist checks at terminal-files.test.js:195-261 and 294-375. Suggested bucket: other (a considered test-coverage issue only). Confidence: confirmed by source, not execution. proposed_drop: refuted by retirement of the tested adapter and the synchronous replacement/provider scheme boundary above. possible_cover: none; prohibited coverage sources not consulted. Could-be-highest: false for the considered test deletion; no shipped security or loss-of-work route established. Caveat: this does not certify the entire grid provider, which is outside this group's assigned patch."
+          }
+        }
+      ],
+      "latest": {
+        "line": 1,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Retired xterm adapter tests do not leave an active adapter untested",
+          "location": "crates/farhelm-ui/js-tests/terminal-files.test.js:378",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: Considered whether deleting immediate-recognition and native OSC-provider preservation tests lets file links regress; no active adapter behavior was removed from coverage by these two deletions. Details: the assigned patch removes tests for XtermFileLinksAddon and its xterm provider identity checks, together with that class's removal in assets/terminal-files.js (parent lines 662-703; commit diff). The replacement is the existing grid-hosted FileLinks: assets/terminal.js:945-959 supplies the view and gesture gate, 1029-1059 classifies every OSC target with oscTarget and makes other schemes inert, and 1108-1115 synchronously offers OSC, text and path links through the grid provider. There is no asynchronous stat in that provider. SPEC_impl.md, Session-host file reads, explicitly says: `terminal-files.js` supplies conservative token recognition and the terminal-owned file links (`FileLinks`), which the grid hosts directly (terminal.js's `createGridLinks`), after OSC 8 and printed web links in the order a line's links are offered. The changed tests retain direct recognition and OSC allowlist checks at terminal-files.test.js:195-261 and 294-375. Suggested bucket: other (a considered test-coverage issue only). Confidence: confirmed by source, not execution. proposed_drop: refuted by retirement of the tested adapter and the synchronous replacement/provider scheme boundary above. possible_cover: none; prohibited coverage sources not consulted. Could-be-highest: false for the considered test deletion; no shipped security or loss-of-work route established. Caveat: this does not certify the entire grid provider, which is outside this group's assigned patch."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g136/findings.jsonl",
+        "id": "c1",
+        "line": 1,
+        "disposition": "excluded",
+        "group": "retired-xterm-provider-test-deletion",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-085 after inspecting it. The deleted adapter/provider-identity tests target a removed class. The replacement provider retains the considered recognition and scheme boundary; no active-adapter loss of coverage is established. Narrow source refutation of lost active-adapter coverage, preserving separate historical test-oracle finding g135/l3. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e diff deletes XtermFileLinksAddon and the immediate recognition/real-xterm OSC-provider identity tests. terminal.js:1029-1059 classifies OSC via oscTarget and makes other schemes inert; :1108-1115 offers OSC/text/path results synchronously without stat.\",\"Same revision terminal-files.test.js:195-261,294-375 retains direct recognition, OSC allowlist and range tests. git grep found no XtermFileLinksAddon in pinned assets/tests. This refutes the considered active-adapter deletion concern, not l3's historical timing-blind oracle. Source only.\"] Current coverage/results: [\"SPEC_impl.md:3564-3587 specifies direct grid-hosted FileLinks after OSC/text links and explicit scheme handling; SPEC.md file-link paragraphs preserve the boundary. Planned/unlanded-plan INDEX empty; retained tmux-end-old-terminals.md:125-132 concerns already-landed retirement. BUGS, queue INDEX and active ledger searches found no exact adapter-deletion item. No filter used.\"] Exact cited cover: [\"SPEC_impl.md:3564-3566: `terminal-files.js` supplies conservative token recognition and the terminal-owned file links (`FileLinks`), which the grid hosts directly (terminal.js's `createGridLinks`), after OSC 8 and printed web links in the order a line's links are offered.\"] Original stronger consequence and missing premise remain preserved: \"Deleting recognition/native OSC-provider preservation tests could allow file-link regressions; considered test coverage issue, no shipped security or loss-of-work route established.\"; \"No surviving xterm adapter contract needing those identity tests was found. Full grid integration coverage is not certified.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g136/c1",
+        "line": 1,
+        "disposition": "excluded",
+        "group": "retired-xterm-provider-test-deletion",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-085 after inspecting it. The deleted adapter/provider-identity tests target a removed class. The replacement provider retains the considered recognition and scheme boundary; no active-adapter loss of coverage is established. Narrow source refutation of lost active-adapter coverage, preserving separate historical test-oracle finding g135/l3. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e diff deletes XtermFileLinksAddon and the immediate recognition/real-xterm OSC-provider identity tests. terminal.js:1029-1059 classifies OSC via oscTarget and makes other schemes inert; :1108-1115 offers OSC/text/path results synchronously without stat.\",\"Same revision terminal-files.test.js:195-261,294-375 retains direct recognition, OSC allowlist and range tests. git grep found no XtermFileLinksAddon in pinned assets/tests. This refutes the considered active-adapter deletion concern, not l3's historical timing-blind oracle. Source only.\"] Current coverage/results: [\"SPEC_impl.md:3564-3587 specifies direct grid-hosted FileLinks after OSC/text links and explicit scheme handling; SPEC.md file-link paragraphs preserve the boundary. Planned/unlanded-plan INDEX empty; retained tmux-end-old-terminals.md:125-132 concerns already-landed retirement. BUGS, queue INDEX and active ledger searches found no exact adapter-deletion item. No filter used.\"] Exact cited cover: [\"SPEC_impl.md:3564-3566: `terminal-files.js` supplies conservative token recognition and the terminal-owned file links (`FileLinks`), which the grid hosts directly (terminal.js's `createGridLinks`), after OSC 8 and printed web links in the order a line's links are offered.\"] Original stronger consequence and missing premise remain preserved: \"Deleting recognition/native OSC-provider preservation tests could allow file-link regressions; considered test coverage issue, no shipped security or loss-of-work route established.\"; \"No surviving xterm adapter contract needing those identity tests was found. Full grid integration coverage is not certified.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-085",
+          "key": "g136/c1",
+          "latest_line": 1,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "retired-xterm-provider-test-deletion",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The deleted adapter/provider-identity tests target a removed class. The replacement provider retains the considered recognition and scheme boundary; no active-adapter loss of coverage is established.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e diff deletes XtermFileLinksAddon and the immediate recognition/real-xterm OSC-provider identity tests. terminal.js:1029-1059 classifies OSC via oscTarget and makes other schemes inert; :1108-1115 offers OSC/text/path results synchronously without stat.",
+            "Same revision terminal-files.test.js:195-261,294-375 retains direct recognition, OSC allowlist and range tests. git grep found no XtermFileLinksAddon in pinned assets/tests. This refutes the considered active-adapter deletion concern, not l3's historical timing-blind oracle. Source only."
+          ],
+          "coverage_checked": [
+            "SPEC_impl.md:3564-3587 specifies direct grid-hosted FileLinks after OSC/text links and explicit scheme handling; SPEC.md file-link paragraphs preserve the boundary. Planned/unlanded-plan INDEX empty; retained tmux-end-old-terminals.md:125-132 concerns already-landed retirement. BUGS, queue INDEX and active ledger searches found no exact adapter-deletion item. No filter used."
+          ],
+          "exact_cover_quotes": [
+            "SPEC_impl.md:3564-3566: `terminal-files.js` supplies conservative token recognition and the terminal-owned file links (`FileLinks`), which the grid hosts directly (terminal.js's `createGridLinks`), after OSC 8 and printed web links in the order a line's links are offered."
+          ],
+          "missing_premise": "No surviving xterm adapter contract needing those identity tests was found. Full grid integration coverage is not certified.",
+          "original_stronger_consequence": "Deleting recognition/native OSC-provider preservation tests could allow file-link regressions; considered test coverage issue, no shipped security or loss-of-work route established.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Narrow source refutation of lost active-adapter coverage, preserving separate historical test-oracle finding g135/l3."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retired-xterm-provider-test-deletion",
+        "destination": null
+      }
+    },
+    {
+      "key": "g136/c2",
+      "owner": "g136",
+      "id": "c2",
+      "domain": "terminal-link-file-actions",
+      "purpose": "terminal-link-file-actions: crates/farhelm-ui/js-tests/terminal-files.test.js; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "The new live line fixtures still expose repaints to transfer admission",
+            "location": "crates/farhelm-ui/js-tests/terminal-files.test.js:287",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: Considered whether replacing the old buffer fixture with stringLines weakens the changed-text safety tests; the new fixture reads every row afresh and preserves the assertions' distinguishing evidence. Details: js-tests/terminal-files.test.js:287-291 reads rows[abs] per line() call, 671-678 exposes mutable host.lines through a view getter and setLines, and 755-781 mutates a continuation and finally empties the same captured array. Each edit is visible to production FileLinks.download, assets/terminal-files.js:587-595, which rereads view.lines and compares linkRangeText against the hover snapshot before any transfer. stringLines marks rows unwrapped, but terminal-links.js:499-515 snapshots an explicitly supplied range without consulting wrapped; that test invokes hover with link=null to model an OSC label and therefore intentionally does not re-tokenize a printed path. The separate test at terminal-files.test.js:788-819 retains real wrapped/hard-broken cell fixtures, verifies the old rectangle still matches after suffix growth, proves live path recognition differs, and checks refusal and restored admission in both browser/native modes. Contract: SPEC.md, Terminal experience, requires that a partial redraw changing link text withdraw transfer/opening permission; SPEC_impl.md, Session-host file reads, requires printed-path re-recognition and fresh snapshots. Suggested bucket: other (considered test fidelity issue). Confidence: confirmed by source, not execution. proposed_drop: source refutes the suspected stale fixture or lost wrap coverage as above. possible_cover: none. Could-be-highest: false for this considered test-fidelity issue; no incorrect shipped transfer route established. Caveat: fixtures model link lines rather than the complete browser renderer; geometry remains integration coverage, as the helper explicitly states."
+          }
+        }
+      ],
+      "latest": {
+        "line": 2,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "The new live line fixtures still expose repaints to transfer admission",
+          "location": "crates/farhelm-ui/js-tests/terminal-files.test.js:287",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: Considered whether replacing the old buffer fixture with stringLines weakens the changed-text safety tests; the new fixture reads every row afresh and preserves the assertions' distinguishing evidence. Details: js-tests/terminal-files.test.js:287-291 reads rows[abs] per line() call, 671-678 exposes mutable host.lines through a view getter and setLines, and 755-781 mutates a continuation and finally empties the same captured array. Each edit is visible to production FileLinks.download, assets/terminal-files.js:587-595, which rereads view.lines and compares linkRangeText against the hover snapshot before any transfer. stringLines marks rows unwrapped, but terminal-links.js:499-515 snapshots an explicitly supplied range without consulting wrapped; that test invokes hover with link=null to model an OSC label and therefore intentionally does not re-tokenize a printed path. The separate test at terminal-files.test.js:788-819 retains real wrapped/hard-broken cell fixtures, verifies the old rectangle still matches after suffix growth, proves live path recognition differs, and checks refusal and restored admission in both browser/native modes. Contract: SPEC.md, Terminal experience, requires that a partial redraw changing link text withdraw transfer/opening permission; SPEC_impl.md, Session-host file reads, requires printed-path re-recognition and fresh snapshots. Suggested bucket: other (considered test fidelity issue). Confidence: confirmed by source, not execution. proposed_drop: source refutes the suspected stale fixture or lost wrap coverage as above. possible_cover: none. Could-be-highest: false for this considered test-fidelity issue; no incorrect shipped transfer route established. Caveat: fixtures model link lines rather than the complete browser renderer; geometry remains integration coverage, as the helper explicitly states."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g136/findings.jsonl",
+        "id": "c2",
+        "line": 2,
+        "disposition": "excluded",
+        "group": "file-redraw-test-live-string-fixture",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-085 after inspecting it. The replacement reads changed rows afresh and the separate cell fixture preserves wrap/suffix-growth discrimination. The suspected stale fixture or lost wrap oracle is refuted. Source refutation of the specifically alleged fixture/oracle loss; no general admission-security assurance. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:terminal-files.test.js:287-291 reads rows[abs] per call; :671-678 exposes host.lines through a getter and setLines; :755-781 changes a continuation then empties the same array. terminal-files.js:587-595 rereads view.lines and compares linkRangeText before transfer.\",\"Same test file:788-819 retains wrapped/hard-cut cell fixtures, proves old rectangle text survives suffix growth while recognition changes, checks refusal, then restored admission in browser/native modes. linkRangeText:499-515 reads explicit ranges without consulting wrapped. OSC-style hover has link=null intentionally. Source only.\"] Current coverage/results: [\"SPEC.md:3141-3146 requires changed-text permission withdrawal; SPEC_impl.md:3578-3604 requires fresh evidence and printed-path recognition, consistent with the retained oracles. Planned/unlanded-plan INDEX empty; BUGS has no match.\",\"Read changed-file-hover-test-clicks-before-stat-readiness.md: different browser readiness race, no exact coverage. Read container-redraw-discards-hover.md and container-path-publication-keeps-stale-cut.md: different asynchronous provider consequences. Active ledger search has no exact fixture issue. FILTER unnecessary.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Replacing buffer fixtures with stringLines might weaken changed-text safety tests; considered test fidelity issue only, no incorrect shipped transfer route established.\"; \"No stale row capture or deletion of the separate wrap/suffix evidence was found. Real renderer geometry remains integration coverage.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g136/c2",
+        "line": 2,
+        "disposition": "excluded",
+        "group": "file-redraw-test-live-string-fixture",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-085 after inspecting it. The replacement reads changed rows afresh and the separate cell fixture preserves wrap/suffix-growth discrimination. The suspected stale fixture or lost wrap oracle is refuted. Source refutation of the specifically alleged fixture/oracle loss; no general admission-security assurance. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:terminal-files.test.js:287-291 reads rows[abs] per call; :671-678 exposes host.lines through a getter and setLines; :755-781 changes a continuation then empties the same array. terminal-files.js:587-595 rereads view.lines and compares linkRangeText before transfer.\",\"Same test file:788-819 retains wrapped/hard-cut cell fixtures, proves old rectangle text survives suffix growth while recognition changes, checks refusal, then restored admission in browser/native modes. linkRangeText:499-515 reads explicit ranges without consulting wrapped. OSC-style hover has link=null intentionally. Source only.\"] Current coverage/results: [\"SPEC.md:3141-3146 requires changed-text permission withdrawal; SPEC_impl.md:3578-3604 requires fresh evidence and printed-path recognition, consistent with the retained oracles. Planned/unlanded-plan INDEX empty; BUGS has no match.\",\"Read changed-file-hover-test-clicks-before-stat-readiness.md: different browser readiness race, no exact coverage. Read container-redraw-discards-hover.md and container-path-publication-keeps-stale-cut.md: different asynchronous provider consequences. Active ledger search has no exact fixture issue. FILTER unnecessary.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Replacing buffer fixtures with stringLines might weaken changed-text safety tests; considered test fidelity issue only, no incorrect shipped transfer route established.\"; \"No stale row capture or deletion of the separate wrap/suffix evidence was found. Real renderer geometry remains integration coverage.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-085",
+          "key": "g136/c2",
+          "latest_line": 2,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "file-redraw-test-live-string-fixture",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The replacement reads changed rows afresh and the separate cell fixture preserves wrap/suffix-growth discrimination. The suspected stale fixture or lost wrap oracle is refuted.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e:terminal-files.test.js:287-291 reads rows[abs] per call; :671-678 exposes host.lines through a getter and setLines; :755-781 changes a continuation then empties the same array. terminal-files.js:587-595 rereads view.lines and compares linkRangeText before transfer.",
+            "Same test file:788-819 retains wrapped/hard-cut cell fixtures, proves old rectangle text survives suffix growth while recognition changes, checks refusal, then restored admission in browser/native modes. linkRangeText:499-515 reads explicit ranges without consulting wrapped. OSC-style hover has link=null intentionally. Source only."
+          ],
+          "coverage_checked": [
+            "SPEC.md:3141-3146 requires changed-text permission withdrawal; SPEC_impl.md:3578-3604 requires fresh evidence and printed-path recognition, consistent with the retained oracles. Planned/unlanded-plan INDEX empty; BUGS has no match.",
+            "Read changed-file-hover-test-clicks-before-stat-readiness.md: different browser readiness race, no exact coverage. Read container-redraw-discards-hover.md and container-path-publication-keeps-stale-cut.md: different asynchronous provider consequences. Active ledger search has no exact fixture issue. FILTER unnecessary."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No stale row capture or deletion of the separate wrap/suffix evidence was found. Real renderer geometry remains integration coverage.",
+          "original_stronger_consequence": "Replacing buffer fixtures with stringLines might weaken changed-text safety tests; considered test fidelity issue only, no incorrect shipped transfer route established.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation of the specifically alleged fixture/oracle loss; no general admission-security assurance."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "file-redraw-test-live-string-fixture",
+        "destination": null
+      }
+    },
+    {
+      "key": "g136/l1",
+      "owner": "g136",
+      "id": "l1",
+      "domain": "terminal-link-file-actions",
+      "purpose": "terminal-link-file-actions: crates/farhelm-ui/js-tests/terminal-files.test.js; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Failed-mount fixture may not model the actual grid view getter",
+            "location": "crates/farhelm-ui/js-tests/terminal-files.test.js:834",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: The revised test says grid links dispose safely before a component exists, but its view getter returns undefined whereas the actual view dereferences the component. Details: terminal-files.test.js:671-674 uses host.element, and 838-848 disposes a failedMount with element undefined. The production view in assets/terminal.js:945-950 instead evaluates getGrid().element; createGridSurface passes getGrid: () => created at 4302-4311 and disposes links in its catch at 4356-4358 after create throws before assignment. FileLinks.dispose reaches view.element through clearHover at assets/terminal-files.js:460-468 and hideMessage at 525-530, where optional chaining does not protect against an exception inside the getter. Suspected consequence: original grid construction failure is replaced by an undefined.element TypeError, while the new lifecycle test still passes. Checks so far: read fixture, FileLinks constructor/dispose/clearHover/hideMessage, actual view and creation catch. Next checks: compare the prior grid view, inspect creation failure cleanup and outer mount error handling, and determine whether this is an in-scope test-fidelity finding or no actionable change. Missing premise: what cleanup/diagnostic behavior is lost beyond masking the construction error, and whether the revised test materially claims coverage of that behavior. Suggested bucket: other pending investigation; no established security or loss-of-work route. Confidence: source-supported lead, not executed. proposed_drop: false. possible_cover: none. Could-be-highest: false on current evidence. No reproduction requested or performed."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Failed-grid-mount test bypasses the production view getter that throws",
+            "location": "crates/farhelm-ui/js-tests/terminal-files.test.js:838",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: When a terminal component fails to start, cleanup can replace the useful startup error with an undefined-component TypeError. The rewritten failed-mount test claims to cover that lifecycle but constructs a different view, so it cannot catch the failure. Details: the assigned change rewrites terminal-files.test.js:615-678 to claim the grid's hosting shape and changes 834-848 to test failed construction/disposal. Its view.element getter at 674 returns host.element, which safely returns undefined on failedMount. The shipped grid view in assets/terminal.js:945-950 instead evaluates getGrid().element. createGridSurface at 4302-4313 passes getGrid: () => created before assigning created from farhelmGridTerminal.create; if creation throws, catch at 4356-4358 invokes gridLinks.dispose while created is undefined. FileLinks.dispose at assets/terminal-files.js:641-645 calls clearHover; clearHover at 460-468 evaluates this.view?.element, invoking that getter and throwing before cleanup can rethrow the original err. Optional chaining guards the view object, not an exception inside its accessor. The outer mount catch at terminal.js:4698-4743 ultimately displays Failed to start terminal using this replacement error; no additional resource leak or permanent loss has been established. Contract: the createGridSurface documentation at 4288-4292 explicitly promises failed-build rollback and disposal of links even when the component never exists, and the revised test's 834-836 comment repeats this failed-mount contract. Make the absent-component production view safe and exercise the same deferred component accessor in the lifecycle test (or an actual createGridLinks failure path), rather than supplying a pre-safe alternate getter. Validation by source only: inspected the entire assigned patch, both fixture versions, FileLinks teardown, actual grid hosting/catch and outer error handling. Parent revision f560058da19e02716e6f943883a9508b447aff4e^:terminal.js:1199-1204 and 5971-6017 already had the unsafe accessor/catch; this is a pre-existing production diagnostic bug exposed by the newly repurposed test's false hosting premise, not a claim that this commit introduced the production exception. Suggested bucket: other (misleading test premise and masked startup diagnostics; the original failure already prevents mounting). Confidence: confirmed from source; no runtime execution or reproduction performed. proposed_drop: false. possible_cover: none; prohibited coverage sources not read. Could-be-highest: false; no security, user-data, process or other user-owned-work loss route established. Interface caveat: assets/terminal.js is contextual interface code outside g136's assigned test patch; parent should coordinate its owner rather than infer full provider coverage from this finding."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Failed-grid-mount test bypasses the production view getter that throws",
+            "location": "crates/farhelm-ui/js-tests/terminal-files.test.js:838",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. Synthesis checked through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: When a terminal component fails to start, cleanup can replace the useful startup error with an undefined-component TypeError. The rewritten failed-mount test claims to cover that lifecycle but supplies a different view, so it cannot catch the failure. The test change introduces ineffective lifecycle coverage; it does not introduce a new product exception. Details: the assigned change rewrites terminal-files.test.js:615-678 to claim 'hosted the way the grid hosts it: a view whose element may not exist yet' and changes 834-848 to say 'Failed mounts must also dispose safely'. The fixture getter at 674 returns host.element; host exists at 671 even when opened=false, so failedMount safely yields undefined. The production getter in assets/terminal.js:945-950 instead evaluates getGrid().element. createGridSurface at 4302-4313 passes getGrid: () => created before assigning created from farhelmGridTerminal.create; if creation throws, catch at 4356-4358 invokes gridLinks.dispose while created is undefined. FileLinks.dispose at assets/terminal-files.js:641-645 calls clearHover, whose line 467 evaluates this.view?.element and throws from the getter before the catch can rethrow the original error. Optional chaining guards the view, not exceptions inside its accessor. The outer mount catch at terminal.js:4698-4743 still handles rollback and displays Failed to start terminal using the replacement TypeError. Established impact is ineffective test coverage and loss of the original startup diagnostic; no additional resource leak, failed retry, permanent inability to mount, security impact or loss of user work is established. Contract: createGridSurface's documentation at terminal.js:4288-4292 promises failed-build rollback and disposal of links even when the component never exists; the revised test's own 834-836 comment specifically asserts that failed-mount lifecycle. The test needs to exercise the actual deferred component accessor or createGridLinks failure path, alongside making the production accessor safe for an absent component. Source checks: entire assigned patch and resulting test, both fixture versions, FileLinks teardown, real grid view and construction catch, and outer error handling. Parent f560058da19e02716e6f943883a9508b447aff4e^ already has the unsafe getter at terminal.js:1199-1204 and construction catch at 5971-6017. git log over f560058da19e02716e6f943883a9508b447aff4e..00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db for terminal.js, terminal-files.js and terminal-files.test.js returned no commits; pinned-tip source directly retains the getter, catch, outer banner and fixture at the same lines. No later repair to these paths exists through that tip. Suggested bucket: other (test fidelity and masked diagnostics; the original exception already prevents startup). Confidence: confirmed by source; no runtime execution or reproduction. proposed_drop: false. possible_cover: none; prohibited coverage sources not consulted. Could-be-highest: false on established source consequences. Interface ownership: g135 owns FileLinks/helper deletions; g079/g083 own actual terminal surface phases. They should receive the getter/rollback input; this group does not claim full source coverage of their phases."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Failed-grid-mount test bypasses the production view getter that throws",
+            "location": "crates/farhelm-ui/js-tests/terminal-files.test.js:838",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. Synthesis checked through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: When a terminal component fails to start, cleanup can replace the useful startup error with an undefined-component TypeError. The rewritten failed-mount test claims to cover that lifecycle but supplies a different view, so it cannot catch the failure. The test change introduces ineffective lifecycle coverage; it does not introduce a new product exception. Details: the assigned change rewrites terminal-files.test.js:615-678 to claim 'hosted the way the grid hosts it: a view whose element may not exist yet' and changes 834-848 to say 'Failed mounts must also dispose safely'. The fixture getter at 674 returns host.element; host exists at 671 even when opened=false, so failedMount safely yields undefined. The production getter in assets/terminal.js:945-950 instead evaluates getGrid().element. createGridSurface at 4302-4313 passes getGrid: () => created before assigning created from farhelmGridTerminal.create; if creation throws, catch at 4356-4358 invokes gridLinks.dispose while created is undefined. FileLinks.dispose at assets/terminal-files.js:641-645 calls clearHover, whose line 467 evaluates this.view?.element and throws from the getter before the catch can rethrow the original error. Optional chaining guards the view, not exceptions inside its accessor. The outer mount catch at terminal.js:4698-4743 still handles rollback and displays Failed to start terminal using the replacement TypeError. Established impact is ineffective test coverage and loss of the original startup diagnostic; no additional resource leak, failed retry, permanent inability to mount, security impact or loss of user work is established. Contract: createGridSurface's documentation at terminal.js:4288-4292 promises failed-build rollback and disposal of links even when the component never exists; the revised test's own 834-836 comment specifically asserts that failed-mount lifecycle. The test needs to exercise the actual deferred component accessor or createGridLinks failure path, alongside making the production accessor safe for an absent component. Source checks: entire assigned patch and resulting test, both fixture versions, FileLinks teardown, real grid view and construction catch, and outer error handling. Parent f560058da19e02716e6f943883a9508b447aff4e^ already has the unsafe getter at terminal.js:1199-1204 and construction catch at 5971-6017. git log over f560058da19e02716e6f943883a9508b447aff4e..00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db for terminal.js, terminal-files.js and terminal-files.test.js returned no commits; pinned-tip source directly retains the getter, catch, outer banner and fixture at the same lines. No later repair to these paths exists through that tip. Suggested bucket: other (test fidelity and masked diagnostics; the original exception already prevents startup). Confidence: confirmed by source; no runtime execution or reproduction. proposed_drop: false. possible_cover: none; prohibited coverage sources not consulted. Could-be-highest: false on established source consequences. Interface ownership: g135 owns FileLinks/helper deletions; g079/g083 own actual terminal surface phases. They should receive the getter/rollback input; this group does not claim full source coverage of their phases. Further synthesis source checks: terminal.js:3275-3276 initializes the outer grid and ws to null; 3389-3390 assigns grid only after createGridSurface returns, and 3424 creates WebSocket later. Thus, on the specific constructor-throw route, the outer catch has no returned component or new socket to dispose. FileLinks constructor at terminal-files.js:298-324 stores state without registering DOM listeners or starting a request; the helper bug itself has no established outstanding transfer/listener leak at this boundary. grid-terminal.js:310-389 creates the model and DOM before returning its public component (end at 2142); its normal onDispose callback at 2138 is not a constructor-failure finally. These checks support the narrow masked-diagnostic consequence, not a new resource-loss claim. Test repair should exercise the actual production view/provider boundary or a shared extracted view factory; copying a separately safe deferred getter into the fixture would retain the same source-divergence blind spot. The remaining c1-c3 interaction checks produced no changes: recognition and allowlist tests remain, live ASCII repaint rows still reach admission, and cell fixtures retain wrap/width and suffix-growth checks."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Failed-grid-mount test bypasses the production view getter that throws",
+            "location": "crates/farhelm-ui/js-tests/terminal-files.test.js:838",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. Synthesis checked through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: When a terminal component fails to start, cleanup can replace the useful startup error with an undefined-component TypeError. The rewritten failed-mount test claims to cover that lifecycle but supplies a different view, so it cannot catch the failure. The test change introduces ineffective lifecycle coverage; it does not introduce a new product exception. Details: the assigned change rewrites terminal-files.test.js:615-678 to claim 'hosted the way the grid hosts it: a view whose element may not exist yet' and changes 834-848 to say 'Failed mounts must also dispose safely'. The fixture getter at 674 returns host.element; host exists at 671 even when opened=false, so failedMount safely yields undefined. The production getter in assets/terminal.js:945-950 instead evaluates getGrid().element. createGridSurface at 4302-4313 passes getGrid: () => created before assigning created from farhelmGridTerminal.create; if creation throws, catch at 4356-4358 invokes gridLinks.dispose while created is undefined. FileLinks.dispose at assets/terminal-files.js:641-645 calls clearHover, whose line 467 evaluates this.view?.element and throws from the getter before the catch can rethrow the original error. Optional chaining guards the view, not exceptions inside its accessor. The outer mount catch at terminal.js:4698-4743 still handles rollback and displays Failed to start terminal using the replacement TypeError. Established impact is ineffective test coverage and loss of the original startup diagnostic; no additional resource leak, failed retry, permanent inability to mount, security impact or loss of user work is established. Contract: createGridSurface's documentation at terminal.js:4288-4292 promises failed-build rollback and disposal of links even when the component never exists; the revised test's own 834-836 comment specifically asserts that failed-mount lifecycle. The test needs to exercise the actual deferred component accessor or createGridLinks failure path, alongside making the production accessor safe for an absent component. Source checks: entire assigned patch and resulting test, both fixture versions, FileLinks teardown, real grid view and construction catch, and outer error handling. Parent f560058da19e02716e6f943883a9508b447aff4e^ already has the unsafe getter at terminal.js:1199-1204 and construction catch at 5971-6017. git log over f560058da19e02716e6f943883a9508b447aff4e..00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db for terminal.js, terminal-files.js and terminal-files.test.js returned no commits; pinned-tip source directly retains the getter, catch, outer banner and fixture at the same lines. No later repair to these paths exists through that tip. Suggested bucket: other (test fidelity and masked diagnostics; the original exception already prevents startup). Confidence: confirmed by source; no runtime execution or reproduction. proposed_drop: false. possible_cover: none; prohibited coverage sources not consulted. Could-be-highest: false on established source consequences. Interface ownership: g135 owns FileLinks/helper deletions; g079/g083 own actual terminal surface phases. They should receive the getter/rollback input; this group does not claim full source coverage of their phases. Further synthesis source checks: terminal.js:3275-3276 initializes the outer grid and ws to null; 3389-3390 assigns grid only after createGridSurface returns, and 3424 creates WebSocket later. Thus, on the specific constructor-throw route, the outer catch has no returned component or new socket to dispose. FileLinks constructor at terminal-files.js:298-324 stores state without registering DOM listeners or starting a request; the helper bug itself has no established outstanding transfer/listener leak at this boundary. grid-terminal.js:310-389 creates the model and DOM before returning its public component (end at 2142); its normal onDispose callback at 2138 is not a constructor-failure finally. These checks support the narrow masked-diagnostic consequence, not a new resource-loss claim. Test repair should exercise the actual production view/provider boundary or a shared extracted view factory; copying a separately safe deferred getter into the fixture would retain the same source-divergence blind spot. The remaining c1-c3 interaction checks produced no changes: recognition and allowlist tests remain, live ASCII repaint rows still reach admission, and cell fixtures retain wrap/width and suffix-growth checks. Discovery-pass attribution check now includes the full range baseline, not only the assigned commit parent: at exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a, terminal.js:1194-1215 already defines getGrid().element, and 5981-6044 already closes over unassigned created and calls gridLinks.dispose before rethrow in the creation catch. Thus the production weakness predates the whole pinned review range; the repurposed fixture/failed-mount coverage promise is the assigned in-range defect. Caller-provided discovery-neighbours.json independently records the same interface under g135/l2 and g083/l1; preserve l1 locally and consolidate only at the parent, with no drop or lowered consequence. Other supplied interface findings concern terminal transport/encoding, not a novel premise in this assigned test patch, and are not expanded into this group."
+          }
+        }
+      ],
+      "latest": {
+        "line": 8,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l1",
+          "state": "open",
+          "summary": "Failed-grid-mount test bypasses the production view getter that throws",
+          "location": "crates/farhelm-ui/js-tests/terminal-files.test.js:838",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. Synthesis checked through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: When a terminal component fails to start, cleanup can replace the useful startup error with an undefined-component TypeError. The rewritten failed-mount test claims to cover that lifecycle but supplies a different view, so it cannot catch the failure. The test change introduces ineffective lifecycle coverage; it does not introduce a new product exception. Details: the assigned change rewrites terminal-files.test.js:615-678 to claim 'hosted the way the grid hosts it: a view whose element may not exist yet' and changes 834-848 to say 'Failed mounts must also dispose safely'. The fixture getter at 674 returns host.element; host exists at 671 even when opened=false, so failedMount safely yields undefined. The production getter in assets/terminal.js:945-950 instead evaluates getGrid().element. createGridSurface at 4302-4313 passes getGrid: () => created before assigning created from farhelmGridTerminal.create; if creation throws, catch at 4356-4358 invokes gridLinks.dispose while created is undefined. FileLinks.dispose at assets/terminal-files.js:641-645 calls clearHover, whose line 467 evaluates this.view?.element and throws from the getter before the catch can rethrow the original error. Optional chaining guards the view, not exceptions inside its accessor. The outer mount catch at terminal.js:4698-4743 still handles rollback and displays Failed to start terminal using the replacement TypeError. Established impact is ineffective test coverage and loss of the original startup diagnostic; no additional resource leak, failed retry, permanent inability to mount, security impact or loss of user work is established. Contract: createGridSurface's documentation at terminal.js:4288-4292 promises failed-build rollback and disposal of links even when the component never exists; the revised test's own 834-836 comment specifically asserts that failed-mount lifecycle. The test needs to exercise the actual deferred component accessor or createGridLinks failure path, alongside making the production accessor safe for an absent component. Source checks: entire assigned patch and resulting test, both fixture versions, FileLinks teardown, real grid view and construction catch, and outer error handling. Parent f560058da19e02716e6f943883a9508b447aff4e^ already has the unsafe getter at terminal.js:1199-1204 and construction catch at 5971-6017. git log over f560058da19e02716e6f943883a9508b447aff4e..00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db for terminal.js, terminal-files.js and terminal-files.test.js returned no commits; pinned-tip source directly retains the getter, catch, outer banner and fixture at the same lines. No later repair to these paths exists through that tip. Suggested bucket: other (test fidelity and masked diagnostics; the original exception already prevents startup). Confidence: confirmed by source; no runtime execution or reproduction. proposed_drop: false. possible_cover: none; prohibited coverage sources not consulted. Could-be-highest: false on established source consequences. Interface ownership: g135 owns FileLinks/helper deletions; g079/g083 own actual terminal surface phases. They should receive the getter/rollback input; this group does not claim full source coverage of their phases. Further synthesis source checks: terminal.js:3275-3276 initializes the outer grid and ws to null; 3389-3390 assigns grid only after createGridSurface returns, and 3424 creates WebSocket later. Thus, on the specific constructor-throw route, the outer catch has no returned component or new socket to dispose. FileLinks constructor at terminal-files.js:298-324 stores state without registering DOM listeners or starting a request; the helper bug itself has no established outstanding transfer/listener leak at this boundary. grid-terminal.js:310-389 creates the model and DOM before returning its public component (end at 2142); its normal onDispose callback at 2138 is not a constructor-failure finally. These checks support the narrow masked-diagnostic consequence, not a new resource-loss claim. Test repair should exercise the actual production view/provider boundary or a shared extracted view factory; copying a separately safe deferred getter into the fixture would retain the same source-divergence blind spot. The remaining c1-c3 interaction checks produced no changes: recognition and allowlist tests remain, live ASCII repaint rows still reach admission, and cell fixtures retain wrap/width and suffix-growth checks. Discovery-pass attribution check now includes the full range baseline, not only the assigned commit parent: at exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a, terminal.js:1194-1215 already defines getGrid().element, and 5981-6044 already closes over unassigned created and calls gridLinks.dispose before rethrow in the creation catch. Thus the production weakness predates the whole pinned review range; the repurposed fixture/failed-mount coverage promise is the assigned in-range defect. Caller-provided discovery-neighbours.json independently records the same interface under g135/l2 and g083/l1; preserve l1 locally and consolidate only at the parent, with no drop or lowered consequence. Other supplied interface findings concern terminal transport/encoding, not a novel premise in this assigned test patch, and are not expanded into this group."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g136/findings.jsonl",
+        "id": "l1",
+        "line": 8,
+        "disposition": "duplicate",
+        "group": "file-links-failed-grid-mount-fixture-getter-mismatch",
+        "reason": "Parent read complete claims085 and canonical g083/l1 plus g135/l2. Exact same failed-mount test/getter counterexample, not another source defect: changed test safely returns host.element while production dereferences unassigned created via getGrid().element before rethrow. Preserve optional-chaining-inside-getter limit, original error masking, unchanged pre-range production structure and same-tip test. One other-priority item; no observed runtimefailure, extraresourceleak/permanentmountloss/security/workloss. All introduced fixture provenance and prior narrowedseverity retained."
+      },
+      "accepted_parent_decision": {
+        "key": "g136/l1",
+        "line": 8,
+        "disposition": "duplicate",
+        "group": "file-links-failed-grid-mount-fixture-getter-mismatch",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "needs_independent_drop_check": false,
+        "reason": "Parent read complete claims085 and canonical g083/l1 plus g135/l2. Exact same failed-mount test/getter counterexample, not another source defect: changed test safely returns host.element while production dereferences unassigned created via getGrid().element before rethrow. Preserve optional-chaining-inside-getter limit, original error masking, unchanged pre-range production structure and same-tip test. One other-priority item; no observed runtimefailure, extraresourceleak/permanentmountloss/security/workloss. All introduced fixture provenance and prior narrowedseverity retained."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-085",
+          "key": "g136/l1",
+          "latest_line": 8,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "failed-grid-mount-test-safe-alternate-view",
+          "aliases": [
+            "g135/l2"
+          ],
+          "target_queue_file": null,
+          "why": "The changed test claims production failed-mount coverage while substituting an accessor that succeeds in the exact absent-component state where production throws. This test defect is in-range and persists at the pinned tip.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e:terminal-files.test.js:615-678 always constructs host and returns host.element; :834-848 explicitly claims failed mounts dispose safely. terminal.js:945-950 uses getGrid().element; :4302-4313 binds getGrid to unassigned created; :4356-4358 calls gridLinks.dispose before throw err. Its dispose:1121-1125 invokes FileLinks.dispose; terminal-files.js:641-645 calls clearHover, whose :467 getter evaluation throws before optional chaining can protect the absent element.",
+            "Same revision terminal.js:4698-4743 rolls back outer state and displays the replacement error. Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:terminal.js:1194-1215,5981-6044 already has this production structure: the product diagnostic bug is pre-range. 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db retains getter, catch and changed test at the same lines. Source only, not reproduced."
+          ],
+          "coverage_checked": [
+            "SPEC.md Terminal experience and SPEC_impl.md:3513-3614 require normal terminal/file behavior but do not accept false lifecycle coverage. The reviewed createGridSurface comment:4288-4292 promises disposal even if the component never exists; this is source contract evidence, not external coverage.",
+            "TODO.md:25 Planned empty; plans/queue/INDEX has no unlanded entries. Retained removal plans do not specifically fix absent-component accessor/test fidelity. BUGS has only SSH-helper hang. Targeted queue INDEX and active ledger searches found no failed-grid-mount/absent-component oracle item; changed-file-hover-test-clicks-before-stat-readiness.md is a different test trigger. FILTER's rare-diagnostic rule does not encompass inaccurate lifecycle test coverage, and creation-failure rarity is unestablished. No archive read."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "None for the fixture mismatch or conditional diagnostic replacement. No additional resource leak, failed retry, permanent mount failure, security impact or loss of user work is established; a constructor failure already prevents that mount.",
+          "original_stronger_consequence": "Cleanup can replace the useful startup exception with an undefined-component TypeError while the repurposed failed-mount test passes. The retained claim is ineffective lifecycle coverage plus conditional masked diagnosis, other; no highest consequence was alleged.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain the in-range test-fidelity defect, consolidate g135/l2, and explicitly distinguish the pre-range production diagnostic weakness. Repair should exercise the production view/provider boundary or a shared view factory, not copy another separately safe getter."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "file-links-failed-grid-mount-fixture-getter-mismatch",
+        "destination": "trailing-file-links-failed-grid-mount-fixture-getter-mismatch.md"
+      }
+    },
+    {
+      "key": "g136/c3",
+      "owner": "g136",
+      "id": "c3",
+      "domain": "terminal-link-file-actions",
+      "purpose": "terminal-link-file-actions: crates/farhelm-ui/js-tests/terminal-files.test.js; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Stricter cursor-setter fixture still tests the declared teardown contract",
+            "location": "crates/farhelm-ui/js-tests/terminal-files.test.js:577",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: Considered whether retaining the old terminal's cursor-setter model after retiring that terminal creates a substantive incorrect test. The grid now protects its setter too, but the FileLinks no-deferred-cursor-write contract still warrants the isolated test. Details: terminal-files.test.js:577-596 models a cursor setter that would affect the current cursor if teardown writes late; production grid-terminal.js:1384-1420 installs setters before the hover callback and guards writes with hoverLink === link at 1402. Thus the changed comment overstates the grid setter's hazard and the test is deliberately stricter than this implementation. It nevertheless asserts the independent FileLinks invariant declared verbatim in SPEC_impl.md, Session-host file reads: 'Teardown never writes cursor decorations: by then another link may be the hovered one, and the cursor is that link’s to set.' (Source uses the ASCII apostrophe in link's.) FileLinks.leave/clearHover at terminal-files.js:447-469 performs the synchronous write and defers only abort/hide, matching the test. The ready-restoration test at 481-505 also simulates post-callback accessors, whereas the grid installs them beforehand; both still distinguish late writes to retired links and preserve the same contract. Suggested bucket: other. Confidence: confirmed by source, no execution. proposed_drop: no substantive correctness failure; model is stricter than the grid but tests the explicit helper teardown contract; only comment accuracy remains. possible_cover: SPEC_impl.md, Session-host file reads, quoted above. Could-be-highest: false; this is fixture/comment fidelity with no established user harm. Caveat: not a claim that all grid cursor behavior was reviewed."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c3",
+            "state": "open",
+            "summary": "Cursor teardown comment attributes retired accessor behavior to the grid",
+            "location": "crates/farhelm-ui/js-tests/terminal-files.test.js:577",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: The changed test comment gives future maintainers the wrong explanation of the grid's cursor ownership. The test still protects a valid helper invariant, but that does not make its newly grid-specific explanation accurate. Details: the assigned patch changes the comment's subject from xterm to the grid at terminal-files.test.js:577-578: 'The grid’s cursor accessors write to its current link, not necessarily the object that carries them.' (ASCII apostrophe in source.) The grid implementation in assets/grid-terminal.js:1384-1404 stores pointerCursor in the decorated link's own closure, and at 1402 updates the visible element only if hoverLink === link. An accessor on a retired link does not redirect to whichever unrelated link is now current. The test at 580-596 instead models the old hazard with a setter writing a reassigned external cursor object. It remains a legitimate stronger isolated test of FileLinks' no-deferred-cursor-write invariant, but its mock must be described as that defensive contract rather than the actual grid accessor mechanism. Contract: SPEC_impl.md, Session-host file reads, says: 'Teardown never writes cursor decorations: by then another link may be the hovered one, and the cursor is that link's to set.' The exact source uses an apostrophe at link's. FileLinks.leave/clearHover at assets/terminal-files.js:447-469 writes synchronously on leave and defers only abort/hide. Preserve c3's original consequence and earlier assessment: the fixture is stricter than the production grid and no runtime cursor corruption or security/loss-of-work route is established; the separate post-callback restoration test at 481-505 also remains a defensive helper test. This revision supersedes c3's proposed drop only for the newly false grid-specific documentation. Earlier reason that the test checks a valid helper invariant refutes a test-oracle defect, not this distinct documentation defect. Suggested fix: explain that the mock deliberately makes stale setter writes observable to pin the FileLinks contract, and name the grid's current-link guard accurately. Suggested bucket: other (documentation accuracy, no observed product malfunction). Confidence: confirmed from the assigned changed comment, test fixture and production guarded setter; no runtime execution or reproduction. proposed_drop: false for the documentation defect. possible_cover: none; the quoted specification accepts the helper invariant, not the incorrect statement about grid setters. Could-be-highest: false on this established consequence. No existing candidate event was removed; the original stricter-fixture rationale remains valid only for the separate test-oracle concern."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c3",
+            "state": "open",
+            "summary": "Cursor teardown comment attributes retired accessor behavior to the grid",
+            "location": "crates/farhelm-ui/js-tests/terminal-files.test.js:577",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: The changed test comment gives future maintainers the wrong explanation of the grid's cursor ownership. The test still protects a valid helper invariant, but that does not make its newly grid-specific explanation accurate. Details: the assigned patch changes the comment's subject from xterm to the grid at terminal-files.test.js:577-578: 'The grid's cursor accessors write to its current link, not necessarily the object that carries them.' (ASCII apostrophe in source.) The grid implementation in assets/grid-terminal.js:1384-1404 stores pointerCursor in the decorated link's own closure, and at 1402 updates the visible element only if hoverLink === link. An accessor on a retired link does not redirect to whichever unrelated link is now current. The test at 580-596 instead models the old hazard with a setter writing a reassigned external cursor object. It remains a legitimate stronger isolated test of FileLinks' no-deferred-cursor-write invariant, but its mock must be described as that defensive contract rather than the actual grid accessor mechanism. Contract: SPEC_impl.md, Session-host file reads, says: 'Teardown never writes cursor decorations: by then another link may be the hovered one, and the cursor is that link's to set.' The exact source uses an apostrophe at link's. FileLinks.leave/clearHover at assets/terminal-files.js:447-469 writes synchronously on leave and defers only abort/hide. Preserve c3's original consequence and earlier assessment: the fixture is stricter than the production grid and no runtime cursor corruption or security/loss-of-work route is established; the separate post-callback restoration test at 481-505 also remains a defensive helper test. This revision supersedes c3's proposed drop only for the newly false grid-specific documentation. Earlier reason that the test checks a valid helper invariant refutes a test-oracle defect, not this distinct documentation defect. Suggested fix: explain that the mock deliberately makes stale setter writes observable to pin the FileLinks contract, and name the grid's current-link guard accurately. Suggested bucket: other (documentation accuracy, no observed product malfunction). Confidence: confirmed from the assigned changed comment, test fixture and production guarded setter; no runtime execution or reproduction. proposed_drop: false for the documentation defect. possible_cover: none; the quoted specification accepts the helper invariant, not the incorrect statement about grid setters. Could-be-highest: false on this established consequence. No existing candidate event was removed; the original stricter-fixture rationale remains valid only for the separate test-oracle concern. Discovery source recheck: terminal-files.test.js:577-596, grid-terminal.js:1384-1421 and SPEC_impl.md:3667-3684 directly confirm the distinction. The assigned patch changes the subject from xterm to the grid, so the inaccurate attribution is introduced by this assigned commit; it is not a defect independently sought in the retired implementation. Later-range history and endpoint checks from synthesis establish no subsequent repair to this test through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. The discovery is a reclassification of existing candidate c3, not a second occurrence or a newly found runtime bug."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "c3",
+          "state": "open",
+          "summary": "Cursor teardown comment attributes retired accessor behavior to the grid",
+          "location": "crates/farhelm-ui/js-tests/terminal-files.test.js:577",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: The changed test comment gives future maintainers the wrong explanation of the grid's cursor ownership. The test still protects a valid helper invariant, but that does not make its newly grid-specific explanation accurate. Details: the assigned patch changes the comment's subject from xterm to the grid at terminal-files.test.js:577-578: 'The grid's cursor accessors write to its current link, not necessarily the object that carries them.' (ASCII apostrophe in source.) The grid implementation in assets/grid-terminal.js:1384-1404 stores pointerCursor in the decorated link's own closure, and at 1402 updates the visible element only if hoverLink === link. An accessor on a retired link does not redirect to whichever unrelated link is now current. The test at 580-596 instead models the old hazard with a setter writing a reassigned external cursor object. It remains a legitimate stronger isolated test of FileLinks' no-deferred-cursor-write invariant, but its mock must be described as that defensive contract rather than the actual grid accessor mechanism. Contract: SPEC_impl.md, Session-host file reads, says: 'Teardown never writes cursor decorations: by then another link may be the hovered one, and the cursor is that link's to set.' The exact source uses an apostrophe at link's. FileLinks.leave/clearHover at assets/terminal-files.js:447-469 writes synchronously on leave and defers only abort/hide. Preserve c3's original consequence and earlier assessment: the fixture is stricter than the production grid and no runtime cursor corruption or security/loss-of-work route is established; the separate post-callback restoration test at 481-505 also remains a defensive helper test. This revision supersedes c3's proposed drop only for the newly false grid-specific documentation. Earlier reason that the test checks a valid helper invariant refutes a test-oracle defect, not this distinct documentation defect. Suggested fix: explain that the mock deliberately makes stale setter writes observable to pin the FileLinks contract, and name the grid's current-link guard accurately. Suggested bucket: other (documentation accuracy, no observed product malfunction). Confidence: confirmed from the assigned changed comment, test fixture and production guarded setter; no runtime execution or reproduction. proposed_drop: false for the documentation defect. possible_cover: none; the quoted specification accepts the helper invariant, not the incorrect statement about grid setters. Could-be-highest: false on this established consequence. No existing candidate event was removed; the original stricter-fixture rationale remains valid only for the separate test-oracle concern. Discovery source recheck: terminal-files.test.js:577-596, grid-terminal.js:1384-1421 and SPEC_impl.md:3667-3684 directly confirm the distinction. The assigned patch changes the subject from xterm to the grid, so the inaccurate attribution is introduced by this assigned commit; it is not a defect independently sought in the retired implementation. Later-range history and endpoint checks from synthesis establish no subsequent repair to this test through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. The discovery is a reclassification of existing candidate c3, not a second occurrence or a newly found runtime bug."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g136/findings.jsonl",
+        "id": "c3",
+        "line": 10,
+        "disposition": "verified",
+        "group": "terminal-files-cursor-teardown-comment-misattributes-global-setter-to-grid",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-086 after inspecting it. The changed test comment incorrectly describes the shipped grid's cursor ownership. The stronger isolated fixture remains valid; its validity does not establish the comment's claim about production setters. Retain the source-confirmed documentation defect as other. Preserve the earlier test-oracle refutation and proposed drop as a narrower historical disposition, not as coverage for the inaccurate comment. No exact named-claim or existing-queue alias found. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/js-tests/terminal-files.test.js:577-596 says grid accessors can write another current link, and models that hazard with a setter closing over a reassigned external cursor object.\",\"f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/assets/grid-terminal.js:1384-1404 instead closes over the decorated link's own pointerCursor and touches the visible cursor only when hoverLink === link. Lines 1407-1421 install accessors before calling hover. A retired link's setter cannot redirect to an unrelated current link through this code.\",\"The f560058da19e02716e6f943883a9508b447aff4e patch changes the comment's subject from xterm to the grid. This inaccurate production attribution is introduced inside the review range.\",\"00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:crates/farhelm-ui/js-tests/terminal-files.test.js:577-596 retains the comment and fixture; its assets/grid-terminal.js:1382-1418 retains the guarded setter and accessor-before-hover ordering.\",\"f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/assets/terminal-files.js:441-469 clears cursor admission synchronously on leave and reserves deferred teardown for abort, timers and disclosure. SPEC_impl.md:3673-3674 at that revision explicitly requires no teardown cursor writes. The fixture and the separate restoration test at terminal-files.test.js:481-505 can therefore remain defensive helper-contract tests.\",\"Source inspection only. No runtime cursor corruption, security consequence or loss of user-owned work was demonstrated or claimed in the supplied history.\"] Current coverage/results: [\"Current SPEC.md terminal file-path paragraph (:3130-3168) and SPEC_impl.md, Session-host file reads (:3514-3614), searched and matching paragraphs read: they define file-link recognition and cursor/teardown contracts, but do not accept an incorrect description of grid setters.\",\"TODO.md Planned bucket (:25-26) is empty. BUGS.md contains only the SSH-helper provisioning hang, unrelated to these claims.\",\"plans/queue searched for cursor, teardown, FileLinks, terminal-files, cut paths, file links and comments. The potential tmux comment-sweep match in tmux-drop-from-docs.md:68-74,87-99 is broad, and plans/REPORTS.md:32 records that plan already landed. tmux-end-old-terminals also landed (:29). Neither supplies an unlanded exact repair of this surviving grid-attribution error.\",\"INDEX.md and queue Markdown searched for the actual setter, teardown, fixture, cut-path and file-link claims. transition-accessor-comment.md was read: it concerns Transition::pane in a supervisor store test, a different underlying defect. changed-file-hover-test-clicks-before-stat-readiness.md and joined-link-spec-omits-cursor-tail-exception.md were also read; their readiness and hyperlink-comparison contracts do not cover this comment. Other file-hover/container matches concern admission or redraw behavior, not this setter explanation.\",\"Active TRIAGE_OUTCOMES.md searched for cursor, teardown, terminal files, file links, accessors, comments and vacuity; no matching decision. Archive not read.\",\"FILTER.md read in full. No filter's entire boundary matches a persistent inaccurate source comment; the rare diagnostic/display filter does not apply.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Line 5 considered whether retaining the retired renderer's cursor-setter model made the test substantively incorrect, then proposed dropping that test-oracle concern because the fixture checks an independent helper invariant. It already noted that the comment overstates the grid hazard. Lines 9-10 retain only the introduced false grid-specific explanation. Neither the earlier concern nor the latest claim establishes product cursor corruption, security impact or loss of work; the separate restoration test remains a valid defensive helper test.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g136/c3",
+        "line": 10,
+        "disposition": "verified",
+        "group": "terminal-files-cursor-teardown-comment-misattributes-global-setter-to-grid",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-086 after inspecting it. The changed test comment incorrectly describes the shipped grid's cursor ownership. The stronger isolated fixture remains valid; its validity does not establish the comment's claim about production setters. Retain the source-confirmed documentation defect as other. Preserve the earlier test-oracle refutation and proposed drop as a narrower historical disposition, not as coverage for the inaccurate comment. No exact named-claim or existing-queue alias found. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/js-tests/terminal-files.test.js:577-596 says grid accessors can write another current link, and models that hazard with a setter closing over a reassigned external cursor object.\",\"f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/assets/grid-terminal.js:1384-1404 instead closes over the decorated link's own pointerCursor and touches the visible cursor only when hoverLink === link. Lines 1407-1421 install accessors before calling hover. A retired link's setter cannot redirect to an unrelated current link through this code.\",\"The f560058da19e02716e6f943883a9508b447aff4e patch changes the comment's subject from xterm to the grid. This inaccurate production attribution is introduced inside the review range.\",\"00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:crates/farhelm-ui/js-tests/terminal-files.test.js:577-596 retains the comment and fixture; its assets/grid-terminal.js:1382-1418 retains the guarded setter and accessor-before-hover ordering.\",\"f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/assets/terminal-files.js:441-469 clears cursor admission synchronously on leave and reserves deferred teardown for abort, timers and disclosure. SPEC_impl.md:3673-3674 at that revision explicitly requires no teardown cursor writes. The fixture and the separate restoration test at terminal-files.test.js:481-505 can therefore remain defensive helper-contract tests.\",\"Source inspection only. No runtime cursor corruption, security consequence or loss of user-owned work was demonstrated or claimed in the supplied history.\"] Current coverage/results: [\"Current SPEC.md terminal file-path paragraph (:3130-3168) and SPEC_impl.md, Session-host file reads (:3514-3614), searched and matching paragraphs read: they define file-link recognition and cursor/teardown contracts, but do not accept an incorrect description of grid setters.\",\"TODO.md Planned bucket (:25-26) is empty. BUGS.md contains only the SSH-helper provisioning hang, unrelated to these claims.\",\"plans/queue searched for cursor, teardown, FileLinks, terminal-files, cut paths, file links and comments. The potential tmux comment-sweep match in tmux-drop-from-docs.md:68-74,87-99 is broad, and plans/REPORTS.md:32 records that plan already landed. tmux-end-old-terminals also landed (:29). Neither supplies an unlanded exact repair of this surviving grid-attribution error.\",\"INDEX.md and queue Markdown searched for the actual setter, teardown, fixture, cut-path and file-link claims. transition-accessor-comment.md was read: it concerns Transition::pane in a supervisor store test, a different underlying defect. changed-file-hover-test-clicks-before-stat-readiness.md and joined-link-spec-omits-cursor-tail-exception.md were also read; their readiness and hyperlink-comparison contracts do not cover this comment. Other file-hover/container matches concern admission or redraw behavior, not this setter explanation.\",\"Active TRIAGE_OUTCOMES.md searched for cursor, teardown, terminal files, file links, accessors, comments and vacuity; no matching decision. Archive not read.\",\"FILTER.md read in full. No filter's entire boundary matches a persistent inaccurate source comment; the rare diagnostic/display filter does not apply.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Line 5 considered whether retaining the retired renderer's cursor-setter model made the test substantively incorrect, then proposed dropping that test-oracle concern because the fixture checks an independent helper invariant. It already noted that the comment overstates the grid hazard. Lines 9-10 retain only the introduced false grid-specific explanation. Neither the earlier concern nor the latest claim establishes product cursor corruption, security impact or loss of work; the separate restoration test remains a valid defensive helper test.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-086",
+          "key": "g136/c3",
+          "latest_line": 10,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "terminal-files-cursor-teardown-comment-misattributes-global-setter-to-grid",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The changed test comment incorrectly describes the shipped grid's cursor ownership. The stronger isolated fixture remains valid; its validity does not establish the comment's claim about production setters.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/js-tests/terminal-files.test.js:577-596 says grid accessors can write another current link, and models that hazard with a setter closing over a reassigned external cursor object.",
+            "f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/assets/grid-terminal.js:1384-1404 instead closes over the decorated link's own pointerCursor and touches the visible cursor only when hoverLink === link. Lines 1407-1421 install accessors before calling hover. A retired link's setter cannot redirect to an unrelated current link through this code.",
+            "The f560058da19e02716e6f943883a9508b447aff4e patch changes the comment's subject from xterm to the grid. This inaccurate production attribution is introduced inside the review range.",
+            "00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:crates/farhelm-ui/js-tests/terminal-files.test.js:577-596 retains the comment and fixture; its assets/grid-terminal.js:1382-1418 retains the guarded setter and accessor-before-hover ordering.",
+            "f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/assets/terminal-files.js:441-469 clears cursor admission synchronously on leave and reserves deferred teardown for abort, timers and disclosure. SPEC_impl.md:3673-3674 at that revision explicitly requires no teardown cursor writes. The fixture and the separate restoration test at terminal-files.test.js:481-505 can therefore remain defensive helper-contract tests.",
+            "Source inspection only. No runtime cursor corruption, security consequence or loss of user-owned work was demonstrated or claimed in the supplied history."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md terminal file-path paragraph (:3130-3168) and SPEC_impl.md, Session-host file reads (:3514-3614), searched and matching paragraphs read: they define file-link recognition and cursor/teardown contracts, but do not accept an incorrect description of grid setters.",
+            "TODO.md Planned bucket (:25-26) is empty. BUGS.md contains only the SSH-helper provisioning hang, unrelated to these claims.",
+            "plans/queue searched for cursor, teardown, FileLinks, terminal-files, cut paths, file links and comments. The potential tmux comment-sweep match in tmux-drop-from-docs.md:68-74,87-99 is broad, and plans/REPORTS.md:32 records that plan already landed. tmux-end-old-terminals also landed (:29). Neither supplies an unlanded exact repair of this surviving grid-attribution error.",
+            "INDEX.md and queue Markdown searched for the actual setter, teardown, fixture, cut-path and file-link claims. transition-accessor-comment.md was read: it concerns Transition::pane in a supervisor store test, a different underlying defect. changed-file-hover-test-clicks-before-stat-readiness.md and joined-link-spec-omits-cursor-tail-exception.md were also read; their readiness and hyperlink-comparison contracts do not cover this comment. Other file-hover/container matches concern admission or redraw behavior, not this setter explanation.",
+            "Active TRIAGE_OUTCOMES.md searched for cursor, teardown, terminal files, file links, accessors, comments and vacuity; no matching decision. Archive not read.",
+            "FILTER.md read in full. No filter's entire boundary matches a persistent inaccurate source comment; the rare diagnostic/display filter does not apply."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Line 5 considered whether retaining the retired renderer's cursor-setter model made the test substantively incorrect, then proposed dropping that test-oracle concern because the fixture checks an independent helper invariant. It already noted that the comment overstates the grid hazard. Lines 9-10 retain only the introduced false grid-specific explanation. Neither the earlier concern nor the latest claim establishes product cursor corruption, security impact or loss of work; the separate restoration test remains a valid defensive helper test.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain the source-confirmed documentation defect as other. Preserve the earlier test-oracle refutation and proposed drop as a narrower historical disposition, not as coverage for the inaccurate comment. No exact named-claim or existing-queue alias found."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "terminal-files-cursor-teardown-comment-misattributes-global-setter-to-grid",
+        "destination": "trailing-terminal-files-cursor-teardown-comment-misattributes-global-setter-to-grid.md"
+      }
+    },
+    {
+      "key": "g136/l2",
+      "owner": "g136",
+      "id": "l2",
+      "domain": "terminal-link-file-actions",
+      "purpose": "terminal-link-file-actions: crates/farhelm-ui/js-tests/terminal-files.test.js; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l2",
+            "state": "open",
+            "summary": "Check attribution of a vacuous negative path-boundary assertion",
+            "location": "crates/farhelm-ui/js-tests/terminal-files.test.js:343",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: In the changed cut-path test loop, requiring every returned link to stay on one row also passes if the recognizer returns no links. That may leave individual conservative-boundary cases without an oracle for preserved valid single-row targets. Current source basis: terminal-files.test.js:331-344 uses pathLinks(...).every(start.abs === end.abs); positive fit and wide-path checks follow at 348-358, and plain-word cases separately assert exact paths at 366-375. The assigned patch retains the negative predicate while removing only the retired adapter iteration. No new timing, parser or user-visible regression is established. Readily checkable remaining premise: whether this oracle already existed unchanged at the exclusive range baseline, and whether the assigned change removes any distinct nonvacuous assertion for these cases. Next check: baseline test source and the two file patches in range, limited to this assertion. Suggested bucket: other if an in-range test-oracle defect is established. Confidence: source-supported attribution question, not a runtime observation. proposed_drop: false pending the full-range source check. possible_cover: none; prohibited coverage sources not searched. Could-be-highest: false for this test-oracle question; no shipped security/loss-of-work route alleged. No reproduction performed."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l2",
+            "state": "open",
+            "summary": "Negative cut-path assertion retains its pre-range no-join contract",
+            "location": "crates/farhelm-ui/js-tests/terminal-files.test.js:343",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: Considered whether the changed negative cut-path loop loses a nonvacuous oracle for valid links. Full-range source checks show the same deliberately narrow no-multirow assertion already covered the surviving fixture, and the assigned change removes no distinct positive assertion. Original concern preserved: every(start.abs === end.abs) permits an empty result, so this assertion alone cannot certify preservation of valid single-row links in its negative cases. Checks/results: exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:terminal-files.test.js:342-377 already contains the same row fixtures, per-row every predicate at 358, fit-boundary controls at 364-366 and exact wide-path oracle at 372-375. Its first adapter view is already lines(rows), exactly the retained fixture. The only earlier in-range file patch, 04d85f0c98a9b635709d00b056719a0baa7fd3fc, starts changing source after that test (first hunk at old395) and leaves the assertion unchanged. The assigned f560058 patch removes xtermLines iteration while retaining every predicate for lines(rows), fit controls and exact width mapping. The retained test's declared contract at new328-329 is: 'The exception must not join unrelated lines, URI fragments or a chain of three hard-broken rows. Its fit check uses terminal columns, not UTF-16.' The empty-result observation does not violate that no-join oracle; a separate stronger preservation contract was not introduced or claimed there. The neighboring plain-word test still asserts exact valid paths at 366-375. Suggested bucket: other for the considered test-coverage limitation. Confidence: confirmed source attribution and oracle scope; no execution. proposed_drop: no new assigned test-oracle defect established; the surviving no-join assertion and contract are unchanged from the exclusive base, and no nonvacuous preservation assertion was removed. This disposition does not rely on production correctness and does not claim the assertion alone proves all path behavior. possible_cover: none; no prohibited coverage sources consulted. Could-be-highest: false for this narrow test-coverage question; no shipped security/loss-of-work route alleged. Lead l2 is resolved as candidate; no missing premise remains. Broader independent review of unchanged tests was not performed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 12,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l2",
+          "state": "open",
+          "summary": "Negative cut-path assertion retains its pre-range no-join contract",
+          "location": "crates/farhelm-ui/js-tests/terminal-files.test.js:343",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: Considered whether the changed negative cut-path loop loses a nonvacuous oracle for valid links. Full-range source checks show the same deliberately narrow no-multirow assertion already covered the surviving fixture, and the assigned change removes no distinct positive assertion. Original concern preserved: every(start.abs === end.abs) permits an empty result, so this assertion alone cannot certify preservation of valid single-row links in its negative cases. Checks/results: exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:terminal-files.test.js:342-377 already contains the same row fixtures, per-row every predicate at 358, fit-boundary controls at 364-366 and exact wide-path oracle at 372-375. Its first adapter view is already lines(rows), exactly the retained fixture. The only earlier in-range file patch, 04d85f0c98a9b635709d00b056719a0baa7fd3fc, starts changing source after that test (first hunk at old395) and leaves the assertion unchanged. The assigned f560058 patch removes xtermLines iteration while retaining every predicate for lines(rows), fit controls and exact width mapping. The retained test's declared contract at new328-329 is: 'The exception must not join unrelated lines, URI fragments or a chain of three hard-broken rows. Its fit check uses terminal columns, not UTF-16.' The empty-result observation does not violate that no-join oracle; a separate stronger preservation contract was not introduced or claimed there. The neighboring plain-word test still asserts exact valid paths at 366-375. Suggested bucket: other for the considered test-coverage limitation. Confidence: confirmed source attribution and oracle scope; no execution. proposed_drop: no new assigned test-oracle defect established; the surviving no-join assertion and contract are unchanged from the exclusive base, and no nonvacuous preservation assertion was removed. This disposition does not rely on production correctness and does not claim the assertion alone proves all path behavior. possible_cover: none; no prohibited coverage sources consulted. Could-be-highest: false for this narrow test-coverage question; no shipped security/loss-of-work route alleged. Lead l2 is resolved as candidate; no missing premise remains. Broader independent review of unchanged tests was not performed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g136/findings.jsonl",
+        "id": "l2",
+        "line": 12,
+        "disposition": "excluded",
+        "group": "terminal-files-cut-path-negative-no-join-oracle-predates-range",
+        "reason": "Parent explicitly accepted named out-of-range proposal from claims-086 after inspecting it. The empty-result limitation is real as a property of every(), but the same negative oracle and fixture existed at the excluded baseline. The reviewed change preserves the surviving renderer's assertions and does not introduce the stronger preservation promise suggested by the initial lead. Exclude this narrow limitation from this review range because its oracle and retained fixture predate the exclusive baseline. The initial claim that the assigned patch loses distinct positive coverage is source-refuted; no independent review of the unchanged baseline test is assigned. This recommendation preserves the withdrawal and the original empty-result caveat. Checked source/results: [\"6e423e30068b62c6cfa276c6d720ee35bb70387a:crates/farhelm-ui/js-tests/terminal-files.test.js:342-377 already declares the no-join/two-row contract, includes the same seven row fixtures and every(start.abs === end.abs) assertion (:358), and has the fit-boundary and exact wide-path controls (:364-375). Its first adapter view is lines(rows), the fixture retained after renderer retirement.\",\"git log over the explicit review range for terminal-files.test.js lists only 04d85f0c98a9b635709d00b056719a0baa7fd3fc and f560058da19e02716e6f943883a9508b447aff4e. The 04d85f0 patch's first changed hunk is after this test (old line 397 with one line of context), so it does not introduce this oracle.\",\"The f560058da19e02716e6f943883a9508b447aff4e patch removes only the xtermLines adapter iteration from this test and preserves the lines(rows) every predicate, fit controls, and exact wide-path assertion. Its terminal-files.test.js:328-358 retains the stated negative contract. The neighboring positive path-preservation test remains at :361-375.\",\"00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:crates/farhelm-ui/js-tests/terminal-files.test.js:328-358 has the same retained assertions. This does not claim that every() alone proves positive recognition, or that production correctness refutes a test defect.\",\"Source inspection only; no runtime parser failure, timing regression, security impact or loss of user-owned work was alleged or demonstrated.\"] Current coverage/results: [\"Current SPEC.md:3130-3141 and SPEC_impl.md:3564-3577 were searched and read in their full matching paragraphs. They require conservative path recognition and the isolated two-row exception; they do not require this particular negative assertion to prove all valid single-row links. The out-of-range basis is baseline attribution, not specification coverage.\",\"TODO.md Planned is empty; BUGS.md has only the unrelated SSH-helper provisioning hang. Searches of plans/queue for cut paths, single-row, no-join, hard-broken rows and terminal-files found no exact unlanded test-oracle repair. Broad renderer-removal and comment-sweep plans already landed according to plans/REPORTS.md:29,32.\",\"INDEX.md and queue Markdown searched for cut-path, no-join, terminal-files, vacuity and related file-link tests. No exact item or useful same-root extension found. The read changed-file-hover readiness item concerns an asynchronous browser click oracle, not this baseline no-join assertion; the read joined-link specification item concerns OSC warning comparison, not printed file-path recognition.\",\"Active TRIAGE_OUTCOMES.md searched for the assertion's behavior and terminology; no matching decision. Archive not read.\",\"FILTER.md supplies no exact exclusion. The proposed disposition does not depend on a filter or on rarity.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Line 11 raised a possible loss of a nonvacuous preservation oracle: every() accepts no links and therefore cannot by itself certify valid single-row targets. Line 12 explicitly resolves the attribution question and proposes dropping the in-range test-defect claim, while preserving that mathematical limitation. No new positive-preservation assertion was removed; no broader review of unchanged tests or shipped loss/security route was claimed.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g136/l2",
+        "line": 12,
+        "disposition": "excluded",
+        "group": "terminal-files-cut-path-negative-no-join-oracle-predates-range",
+        "bucket": "other",
+        "recording": "out-of-range",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named out-of-range proposal from claims-086 after inspecting it. The empty-result limitation is real as a property of every(), but the same negative oracle and fixture existed at the excluded baseline. The reviewed change preserves the surviving renderer's assertions and does not introduce the stronger preservation promise suggested by the initial lead. Exclude this narrow limitation from this review range because its oracle and retained fixture predate the exclusive baseline. The initial claim that the assigned patch loses distinct positive coverage is source-refuted; no independent review of the unchanged baseline test is assigned. This recommendation preserves the withdrawal and the original empty-result caveat. Checked source/results: [\"6e423e30068b62c6cfa276c6d720ee35bb70387a:crates/farhelm-ui/js-tests/terminal-files.test.js:342-377 already declares the no-join/two-row contract, includes the same seven row fixtures and every(start.abs === end.abs) assertion (:358), and has the fit-boundary and exact wide-path controls (:364-375). Its first adapter view is lines(rows), the fixture retained after renderer retirement.\",\"git log over the explicit review range for terminal-files.test.js lists only 04d85f0c98a9b635709d00b056719a0baa7fd3fc and f560058da19e02716e6f943883a9508b447aff4e. The 04d85f0 patch's first changed hunk is after this test (old line 397 with one line of context), so it does not introduce this oracle.\",\"The f560058da19e02716e6f943883a9508b447aff4e patch removes only the xtermLines adapter iteration from this test and preserves the lines(rows) every predicate, fit controls, and exact wide-path assertion. Its terminal-files.test.js:328-358 retains the stated negative contract. The neighboring positive path-preservation test remains at :361-375.\",\"00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:crates/farhelm-ui/js-tests/terminal-files.test.js:328-358 has the same retained assertions. This does not claim that every() alone proves positive recognition, or that production correctness refutes a test defect.\",\"Source inspection only; no runtime parser failure, timing regression, security impact or loss of user-owned work was alleged or demonstrated.\"] Current coverage/results: [\"Current SPEC.md:3130-3141 and SPEC_impl.md:3564-3577 were searched and read in their full matching paragraphs. They require conservative path recognition and the isolated two-row exception; they do not require this particular negative assertion to prove all valid single-row links. The out-of-range basis is baseline attribution, not specification coverage.\",\"TODO.md Planned is empty; BUGS.md has only the unrelated SSH-helper provisioning hang. Searches of plans/queue for cut paths, single-row, no-join, hard-broken rows and terminal-files found no exact unlanded test-oracle repair. Broad renderer-removal and comment-sweep plans already landed according to plans/REPORTS.md:29,32.\",\"INDEX.md and queue Markdown searched for cut-path, no-join, terminal-files, vacuity and related file-link tests. No exact item or useful same-root extension found. The read changed-file-hover readiness item concerns an asynchronous browser click oracle, not this baseline no-join assertion; the read joined-link specification item concerns OSC warning comparison, not printed file-path recognition.\",\"Active TRIAGE_OUTCOMES.md searched for the assertion's behavior and terminology; no matching decision. Archive not read.\",\"FILTER.md supplies no exact exclusion. The proposed disposition does not depend on a filter or on rarity.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Line 11 raised a possible loss of a nonvacuous preservation oracle: every() accepts no links and therefore cannot by itself certify valid single-row targets. Line 12 explicitly resolves the attribution question and proposes dropping the in-range test-defect claim, while preserving that mathematical limitation. No new positive-preservation assertion was removed; no broader review of unchanged tests or shipped loss/security route was claimed.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-086",
+          "key": "g136/l2",
+          "latest_line": 12,
+          "recommendation": "out-of-range",
+          "bucket": "other",
+          "underlying_key": "terminal-files-cut-path-negative-no-join-oracle-predates-range",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The empty-result limitation is real as a property of every(), but the same negative oracle and fixture existed at the excluded baseline. The reviewed change preserves the surviving renderer's assertions and does not introduce the stronger preservation promise suggested by the initial lead.",
+          "checks": [
+            "6e423e30068b62c6cfa276c6d720ee35bb70387a:crates/farhelm-ui/js-tests/terminal-files.test.js:342-377 already declares the no-join/two-row contract, includes the same seven row fixtures and every(start.abs === end.abs) assertion (:358), and has the fit-boundary and exact wide-path controls (:364-375). Its first adapter view is lines(rows), the fixture retained after renderer retirement.",
+            "git log over the explicit review range for terminal-files.test.js lists only 04d85f0c98a9b635709d00b056719a0baa7fd3fc and f560058da19e02716e6f943883a9508b447aff4e. The 04d85f0 patch's first changed hunk is after this test (old line 397 with one line of context), so it does not introduce this oracle.",
+            "The f560058da19e02716e6f943883a9508b447aff4e patch removes only the xtermLines adapter iteration from this test and preserves the lines(rows) every predicate, fit controls, and exact wide-path assertion. Its terminal-files.test.js:328-358 retains the stated negative contract. The neighboring positive path-preservation test remains at :361-375.",
+            "00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:crates/farhelm-ui/js-tests/terminal-files.test.js:328-358 has the same retained assertions. This does not claim that every() alone proves positive recognition, or that production correctness refutes a test defect.",
+            "Source inspection only; no runtime parser failure, timing regression, security impact or loss of user-owned work was alleged or demonstrated."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:3130-3141 and SPEC_impl.md:3564-3577 were searched and read in their full matching paragraphs. They require conservative path recognition and the isolated two-row exception; they do not require this particular negative assertion to prove all valid single-row links. The out-of-range basis is baseline attribution, not specification coverage.",
+            "TODO.md Planned is empty; BUGS.md has only the unrelated SSH-helper provisioning hang. Searches of plans/queue for cut paths, single-row, no-join, hard-broken rows and terminal-files found no exact unlanded test-oracle repair. Broad renderer-removal and comment-sweep plans already landed according to plans/REPORTS.md:29,32.",
+            "INDEX.md and queue Markdown searched for cut-path, no-join, terminal-files, vacuity and related file-link tests. No exact item or useful same-root extension found. The read changed-file-hover readiness item concerns an asynchronous browser click oracle, not this baseline no-join assertion; the read joined-link specification item concerns OSC warning comparison, not printed file-path recognition.",
+            "Active TRIAGE_OUTCOMES.md searched for the assertion's behavior and terminology; no matching decision. Archive not read.",
+            "FILTER.md supplies no exact exclusion. The proposed disposition does not depend on a filter or on rarity."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Line 11 raised a possible loss of a nonvacuous preservation oracle: every() accepts no links and therefore cannot by itself certify valid single-row targets. Line 12 explicitly resolves the attribution question and proposes dropping the in-range test-defect claim, while preserving that mathematical limitation. No new positive-preservation assertion was removed; no broader review of unchanged tests or shipped loss/security route was claimed.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Exclude this narrow limitation from this review range because its oracle and retained fixture predate the exclusive baseline. The initial claim that the assigned patch loses distinct positive coverage is source-refuted; no independent review of the unchanged baseline test is assigned. This recommendation preserves the withdrawal and the original empty-result caveat."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "terminal-files-cut-path-negative-no-join-oracle-predates-range",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial pass complete; all 319 assigned patch lines reviewed.\n\nRecorded `l1` (`other`): the revised failed-mount test bypasses the production accessor that can mask the original startup error. The production bug predates this commit.\n\nThree candidates recorded and set aside. No open leads or unread assigned scope. Source-only review; no tests or reproductions run."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised `l1`: confirmed the changed test’s ineffective failed-mount coverage and the pre-existing masked startup error. No repair appears through the pinned tip. Additional source checks establish no further leak or loss-of-work consequence.\n\nNo new findings. Unresolved lead IDs: none."
+    },
+    {
+      "turn": 3,
+      "reply": "Checked the full assigned diff, fixture mutation, wrap/width assertions, transfer oracles, timers, and range attribution.\n\n- Newly verified: `c3`, reclassified as a documentation defect.\n- Revised: `l1` attribution against the range baseline.\n- New unverified IDs: none.\n- Open leads: none.\n\nNo additional issues found beyond the `c3` reclassification. Source-only; no execution."
+    },
+    {
+      "turn": 4,
+      "reply": "Checked cell mapping, wrap/cut boundaries, modifier matrices, scheme assertions, and baseline test oracles. Resolved `l2` as a candidate with no in-scope defect.\n\nNew verified findings: none. New unverified findings: none. Open leads: none.\n\nNothing new found. Source-only; no execution."
+    }
+  ],
+  "progress": "g136: initialized, awaiting initial source review.\n\nInitial review turn 1: group g136, terminal-link-file-actions. Findings log exists and is empty. Complete inventory commits field read; coverage metadata not read. Governing review instructions read. Source-only review; no runtime tests or reproductions. Next: read both assigned patch packets, locate complete pinned specification sections, inspect test harness and production contracts. No source scope read yet. Interface assumptions pending inspection. Discovery-pass count: 0. New verified/unverified IDs: none.\n\nInitial review turn 1 complete. Assigned patch 01099-000.patch fully delivered through evidence reads 1-180 and 181-319 (319/319 lines), reviewed at f560058da19e02716e6f943883a9508b447aff4e. Entire resulting terminal-files.test.js read, lines 1-919. No assigned material unread. Complete commits field read earlier; excluded coverage metadata never read. No checkout changes, helper agents, tests, builds or reproductions.\n\nDurable records: c1 (retired adapter-test deletion refuted), c2 (live repaint fixture concern refuted), c3 (stricter cursor fixture retains the helper contract; wording caveat), l1 revised from lead to finding (failed-mount fixture bypasses the production accessor that masks the original startup error). New verified IDs this pass: l1. New unverified IDs: none. Open leads: none. l1 is other priority and explicitly distinguishes the newly migrated test premise from the pre-existing production bug; no additional leak or loss-of-work consequence established.\n\nInterface assumptions: FileLinks receives a view at construction; link lines are queried live, with exclusive end columns and explicit cell widths; actual grid view dereferences getGrid().element, unlike the failedMount mock. Grid provider synchronously orders OSC/text/file links; OSC scheme boundary stays explicit. String-only fixtures are ASCII and intentionally bypass printed-path re-recognition for the supplied OSC-like range. Wrapped/hard-broken printed-path tests retain cell fixtures and all native/browser combinations. Browser geometry remains integration responsibility. Grid cursor setters guard current link identity and are installed before hover; the isolated fixtures test a stricter helper contract. FileLinks cleanup must work when its terminal component never became available.\n\nContext read at pinned commit: SPEC.md Terminal experience 2855-3177 (3050-3177 was part of 3050-3190 read); SPEC_impl.md Answers bind to what was drawn and surrounding context 1060-1105, terminal link interface/OSC context 1760-1835, complete Session-host file reads 3585-3686 (delivered in 3560-3695); assets/terminal-files.js full commit patch and resulting 290-657; terminal-links.js 30-55 and 488-520; grid-buffer.js 592-680; terminal.js 920-1135, 4280-4380, 4640-4745; grid-terminal.js 1368-1423. Parent context: terminal-files.js 648-707 and terminal.js targeted view/create/catch ranges around 1194-1218 and 5966-6038. Search outputs used only to locate context; mandatory assigned patch read with evidence tool.\n\nRecording tool rejected the first c1 append because state closed is invalid; corrected it to open and successfully appended before reading further source. No findings were lost or logs truncated.\n\nTurn type/count: initial/1. Discovery-pass count: 0 (later discovery not performed inside initial turn). Next action: await caller's separate synthesis/discovery prompt; parent should coordinate l1 with terminal.js owner and perform coverage checks. No coverage sources consulted.\n\nLater-turn synthesis complete (turn 2; discovery-pass count remains 0). Revisited l1 against the exact changed fixture and failed-mount comments, the pre-existing deferred component accessor, constructor failure catch, outer rollback and diagnostic presentation. Revised l1 twice under its original ID to preserve and narrow established impact: ineffective test coverage plus replacement of the original startup error; this commit introduces no new product exception. No drop proposed or accepted. Verified no subsequent commits touch terminal.js, terminal-files.js or terminal-files.test.js between f560058da19e02716e6f943883a9508b447aff4e and pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db; direct pinned-tip source and empty endpoint diff confirm no later repair to these paths.\n\nAdditional caller check: outer grid/ws remain null until createGridSurface returns and before WebSocket construction, respectively. FileLinks constructor has no active DOM listeners or transfers. No extra resource-leak, retry failure, permanent outage or loss-of-work consequence established. Proper test repair should share or call the production view/provider boundary rather than copy a safe getter into the mock. c1-c3 interactions remain unchanged: retained scheme/recognition tests, live repaint state, wrap/column fidelity and stricter helper cursor contract. Interface findings are for g135 and g079/g083 coordination by the parent.\n\nNew context reads this turn: pinned-tip terminal.js targeted view/create/catch/banner blocks at same original lines; pinned-tip terminal-files.test.js 615-680 and 830-855; original grid-terminal.js 284-425 and 2060-2165; original terminal.js 3260-3300 and 3365-3435; source searches for creation throws, disposal, callbacks and socket construction. git log and git diff checked the three related paths over the later range. No excluded coverage metadata or queue coverage sources read. No execution, tests, reproductions or checkout modifications.\n\nTurn type/count: synthesis/2. Newly discovered IDs: none. Revised verified IDs: l1. Unverified IDs: none. Unresolved lead IDs: none. Assigned material unread: none. Next action: await caller's discovery prompt or final disposition.\n\nDiscovery pass 1 complete (turn 3, separate from prior synthesis). Read discovery-neighbours.json fully in bounded ranges 1-160 and 161-164 before new source searches; read all seven prior local events. No pending named questions. Supplied g135/l2 and g083/l1 corroborate the known lifecycle finding; other supplied transport/encoding records remain outside this assigned test patch and were not expanded into this group.\n\nSearch checks/results: reread the full assigned test diff with five context lines; rechecked retained width/combining/wrap and hard-cut assertions, the new stringLines helper and every call, setLines state replacement and same-array row clearing, native/browser matrices, extension-growth positive/negative oracles, timer receiver isolation, and absence of stale addon.term/xterm adapter references. Live ASCII helper inputs remain appropriate; cell fixtures retain wide and combining cases; modified transfer tests still have successful controls and reject changed/missing evidence. No additional test-oracle or runtime defect established.\n\nRevised l1 under its original ID with whole-range attribution: direct exclusive-base source 6e423e30068b62c6cfa276c6d720ee35bb70387a:terminal.js 1190-1218 and 5974-6050 confirms that the unsafe accessor/catch predates the entire review range. The changed test promise remains the in-range finding. git log for the assigned file over the whole range identifies 04d85f0c98a9b635709d00b056719a0baa7fd3fc and assigned f560058da19e02716e6f943883a9508b447aff4e; no unrelated patch was claimed as this group's source credit.\n\nReclassified original candidate c3 as a finding for its distinct changed documentation defect, preserving the earlier valid defensive-test rationale and no-runtime-harm caveat. Production's correct guarded setter refutes the old hazard as a statement about the grid; it does not refute the documentation defect. New source read/recheck: terminal-files.test.js 264-375, 577-596, 648-678 and 750-832; grid-terminal.js 1384-1421; SPEC_impl.md 3667-3684. Revised c3 again to preserve exact ASCII quoted source and record commit attribution/tip status. This is a newly retained finding under an existing candidate ID, not a duplicate or new runtime discovery. No finding drop or lowering accepted or applied.\n\nTurn type/count: discovery/3. Discovery-pass count: 1. Newly verified finding IDs: c3 (reclassification). New independent IDs: none. Revised known verified ID: l1 (whole-range attribution only). New unverified-after-investigation IDs: none. Open lead IDs: none. Assigned material unread: none. Anything new found: a distinct documentation defect retained from earlier candidate c3; no additional issue beyond that reclassification. No runtime tests, reproductions, builds, live-install actions, checkout changes or prohibited coverage searches. Next action: await caller's later synthesis/discovery prompt; this pass alone does not perform the next turn's protocol.\n\nDiscovery pass 2 complete (turn 4). Read refreshed discovery-neighbours.json fully in bounded ranges 1-100, 101-140, 141-180, 181-215 and 216-243 before new source checks. No named pending question. Newly supplied g135/l3 concerns the earlier 04d85f0c timing test that this assigned patch deletes; it is the neighbour's historical test-oracle finding, not new discovery credit here. Other new interface records concern CSS/terminal rendering and transport outside this assigned test patch. No existing finding was dropped or lowered.\n\nNew search focused on assertion and cell-interface boundaries beyond recorded issues: read production terminal-files.js 1-200 and 200-290 to compare pure token recognition, hard-cut neighbor/chain checks, UTF-16 owning-cell mapping, soft-wrap mapping, scheme boundaries and bounded-body semantics with the modified fixture shape. Rechecked assigned test source 1-12, 120-193, 254-292 and 307-376 for surviving imports, platform modifier matrices, forbidden schemes, cell widths, hard-cut margins and exact path/range controls. No new mismatch established.\n\nConcrete new lead l2 was immediately recorded for whether the negative no-cross-row every predicate loses an effective preservation oracle. Resolved under original l2 as candidate after reading exclusive-base test 340-400 and the earlier in-range file patch 04d85f0c98a9b635709d00b056719a0baa7fd3fc. The predicate, surviving lines(rows) fixture, fit controls and exact wide-path checks all predate the range; the earlier patch starts after this test, and f560058 only removes the retired view iteration. Its stated contract is no spurious hard-cut joining, not complete preservation proof for every negative case. No positive preservation assertion removed. Original vacuity limitation remains in the record; disposition rests on test contract and full-range attribution, not production correctness. This contextual read does not claim assignment credit for the neighbour's earlier patch.\n\nTurn type/count: discovery/4. Discovery-pass count: 2. New verified finding IDs: none. New unverified-after-investigation IDs: none. New considered/resolved candidate ID: l2. Remaining lead IDs: none. Anything new found: no new reportable finding. Known findings unchanged. Assigned material unread: none. No runtime tests, reproductions, builds, live-install actions, checkout modifications or prohibited coverage searches. Next action: await caller's next prompt or final disposition.\n"
+}

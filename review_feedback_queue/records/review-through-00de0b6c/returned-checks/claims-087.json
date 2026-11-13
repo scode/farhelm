@@ -1,0 +1,252 @@
+[
+  {
+    "key": "g137/c1",
+    "latest_line": 7,
+    "recommendation": "covered",
+    "bucket": "other",
+    "underlying_key": "retired-container-positive-path-test-removal",
+    "aliases": ["g138/c1"],
+    "target_queue_file": null,
+    "why": "The specification accepts retiring the old positive execution paths and their tests. This proposed disposition covers that narrow concern only. Legacy refusal and confirmed Delete remain required; the separate lost Delete oracle is retained as g137/f1.",
+    "checks": [
+      "04d85f0c98a9b635709d00b056719a0baa7fd3fc:SPEC.md:4816-4823 and SPEC_impl.md:8642-8656 explicitly retire the outside-supervisor model while retaining Delete.",
+      "At that revision, crates/farhelm/tests/e2e/containerized_sessions.rs:45-105 seeds an ordinary true session, rewrites its launch, restarts and asserts the old launch loaded; :135-208 checks retired refusals. It creates no Podman object.",
+      "service/core.rs:9273-9281 requires an active launch before recovery/direct admitted creation; service/teardown.rs:533-577 derives cleanup from the stored launch and awaits guarded removal with propagated errors.",
+      "container.rs:176-191 invokes rm and requires exists status 1, or accepts missing Podman. These source observations establish neither all refusal routes nor real-engine cleanup in execution."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Current :4892-4900 keeps the same narrow retirement acceptance and retained Delete contract.",
+      "SPEC_impl.md": "Current :8312-8326 allows removing retired positive paths only once nothing can create or open them; it requires legacy removal and confirmed absence.",
+      "TODO.md Planned": "Empty bucket at :24-26; no coverage.",
+      "plans/queue": "podman-environments retirement section :284-295 matches retirement, but plans/REPORTS.md:21 identifies that plan as landed. No unlanded restoration/removal-oracle work found. The matching tmux plans are also landed (:29-30).",
+      "BUGS.md": "Only SSH-helper install/update hang; no matching concern.",
+      "INDEX.md and queue": "Targeted legacy/container/oracle/cleanup searches found no exact item. container-template-replacement-test-reuses-old-config.md concerns template replacement, not these tests.",
+      "TRIAGE_OUTCOMES.md": "No exact retirement-test decision found; archive not read.",
+      "FILTER.md": "No full filter boundary matches this test-removal/security hypothesis."
+    },
+    "exact_cover_quotes": [
+      "SPEC.md, Retired containerized sessions: 'Existing sessions support Delete only. Opening terminals or tabs, exec, Stop, Restart, Clone, Replace and Replace with are refused.'",
+      "SPEC_impl.md, Rootless Podman sessions: 'Remove creation helpers, account selection, launch fields and switches, hooks-off branches, special tab/attach and file-confinement paths once nothing can create or open these sessions.'"
+    ],
+    "missing_premise": "A shipped reachable retired execution route that exposes host files or credentials has not been established. This bounded check does not certify every route or the new environment model.",
+    "original_stronger_consequence": "Removing isolation/account/wrapper/tab/download-confinement tests could conceal host-file or credential exposure if retired outside-supervisor execution remains reachable. The original security concern remains conditional; its rarity would not reduce impact.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Narrow specification acceptance of obsolete positive-path tests, conditional on execution retirement; not acceptance of missing refusal or Delete tests. Parent must independently check the potentially highest drop."
+  },
+  {
+    "key": "g137/c2",
+    "latest_line": 5,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "codex-outage-fixture-testdir-owner-retained",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Removing the tmux-only field does not remove these fixtures' terminal-host cleanup owner or end hosts during their intended supervisor outage.",
+    "checks": [
+      "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:crates/farhelm/tests/e2e/harness.rs:1059-1088 retains state as TestDir before the semaphore permit.",
+      "At that revision codex_identity.rs:757-803 moves state through handoff into the rebuilt Harness; :1599-1670 holds state across supervisor teardown, hook activity and the new supervisor. boot_id_durable_outcome.rs:84-105 holds both state and permit.",
+      "At that revision crates/farhelm-teststate/src/lib.rs:794-818 calls end_hosts before removing the directory and retains it when cleanup cannot be confirmed. Bounded cleanup is an attempt, not proof of success under load."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Durability and resume, current :3436-3456, requires sessions to survive supervisor restart. This is compatible context, not blanket acceptance of fixture leaks.",
+      "SPEC_impl.md": "Terminal host, current :1891 onward and :2159-2177, describes host terminals and harness substrate; no explicit acceptance of a cleanup defect.",
+      "TODO.md Planned": "Empty; no coverage.",
+      "plans/queue": "No matching TestDir/outage/guard defect work found; tmux-end-old-terminals is landed per plans/REPORTS.md:29.",
+      "BUGS.md": "No matching fixture-lifetime bug.",
+      "INDEX.md and queue": "No exact codex_identity/boot_id/TestDir/guard item found. mac-fixture-cleanup-stop-budget.md was read and concerns a different remote cleanup deadline.",
+      "TRIAGE_OUTCOMES.md": "No matching fixture-lifetime decision found; archive not read.",
+      "FILTER.md": "No filter used; source refutation is the basis."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "No cleanup failure or runtime pass measured. Unrelated legacy migration and arbitrary supervisor ownership patterns remain outside this narrow claim.",
+    "original_stronger_consequence": "Removed tmux guards might have weakened cleanup or fixture ownership. The recorded concern was confined to maintainer fixtures, with no catastrophic or user-work-loss route established.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutes loss of the cleanup owner at the named move/destructuring sites; preserve the bounded-cleanup caveat."
+  },
+  {
+    "key": "g137/c3",
+    "latest_line": 6,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "sentinel-fixture-host-end-is-not-outcome-reconciliation",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The shutdown receipt establishes host end without consuming the sentinel or writing the session outcome before the fixture's explicit reconciliation.",
+    "checks": [
+      "04d85f0c98a9b635709d00b056719a0baa7fd3fc:crates/farhelm/tests/e2e/launch_sentinel_error_status.rs:527-584 asserts ended/Gone, corrupt evidence retention, durable Running after failed reconciliation and exit after repair. :594-641 preserves the same planted error across live and gone observations.",
+      "At that revision service/core.rs:18423-18436 clones the existing host runtime. hosts/terminal.rs:4142-4189 sends shutdown, waits for host end, publishes Gone before the receipt and has no session-store write or sentinel read.",
+      "harness.rs:1251-1260 uses handle_connection directly; service/ticker.rs:31-39 and service/core.rs:8669-8687 locate ticker startup in serve, which these fixtures do not run. Thus a liveness notification does not introduce a serving ticker observation here."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Durability/status sections provide context; no permission to weaken this sentinel oracle found.",
+      "SPEC_impl.md": "Current terminal switch points :2134-2159 distinguish gone from unreadable; unreadable records no durable sentinel outcome. This supports the fixture boundary, not a waiver.",
+      "TODO.md Planned": "Empty; no coverage.",
+      "plans/queue": "No matching sentinel/oracle/owning-runtime work found; tmux plans are landed per plans/REPORTS.md:29-30.",
+      "BUGS.md": "No matching sentinel fixture defect.",
+      "INDEX.md and queue": "No exact launch_sentinel/sentinel-reconciliation item in targeted searches.",
+      "TRIAGE_OUTCOMES.md": "No exact matching decision found; archive not read.",
+      "FILTER.md": "No filter used. A test-oracle concern is not itself a session-status filter match."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "No runtime execution or timeout-under-load measurement. This does not judge the separately deleted denied-directory test.",
+    "original_stronger_consequence": "Shutdown might reconcile early or consume the sentinel and make a misleading maintainer test pass. No catastrophic or shipped user-work-loss consequence was claimed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutes early outcome recording/consumption in this fixture and preserves its explicit assertions."
+  },
+  {
+    "key": "g137/f1",
+    "latest_line": 10,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "legacy-container-delete-existing-object-removal-oracle-lost",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The removed tests distinguished deletion of an existing stopped container from absence-only handling. The replacement and focused fake-engine matrix cannot distinguish omission of rm. This is a maintainer regression-oracle gap, not a demonstrated product cleanup failure.",
+    "checks": [
+      "04d85f0c98a9b635709d00b056719a0baa7fd3fc^:crates/farhelm/tests/e2e/containerized_sessions.rs:820-827 stops the object, proves exited, deletes and requires Podman exists status 1. This proves an existing-stopped-object oracle, not Delete on a still-running container.",
+      "04d85f0c98a9b635709d00b056719a0baa7fd3fc:containerized_sessions.rs:45-105 creates no container, and :211-227 only checks row disappearance. container.rs:274-293 returns a fixed exists result independent of rm; rm itself always exits 125, with no invocation assertion. Removing rm preserves all matrix expectations by source analysis.",
+      "git log over the entire pinned range shows only 04d85f0c and 1ed482dd for these two files; the reviewed-revision-to-tip diff changes only one container.rs comment. The defective oracles remain through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db.",
+      "At pinned tip, service/core.rs:27207-27322 is a pending-retry refusal test requiring that removal was not dispatched. e2e/tests/retired-container-sessions.spec.ts:1-4 creates no old container and :68-70 intercepts Delete with 409. Targeted legacy/retired/ContainerRuntime/remove_with_podman searches found no equivalent existing-object removal test.",
+      "Production container.rs:176-191 still invokes rm and checks absence, and service/teardown.rs:533-577 propagates cleanup failure. Correct production code does not replace the lost oracle. No test, mutation or reproduction was executed."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Current :4892-4900 retains legacy Delete and confirmed absence; it does not accept losing its existing-object regression check.",
+      "SPEC_impl.md": "Current :8312-8326 expressly retains podman rm -f and confirmed absence. Positive-path retirement is not coverage of this independent retained contract.",
+      "TODO.md Planned": "Empty. Near-term agent-started Podman stopping at :68 onward concerns marked agent subprocesses, not this legacy Delete oracle.",
+      "plans/queue": "podman-environments :284-295 and :453-468 require retirement/Delete and replacement tests, but the plan is landed per plans/REPORTS.md:21. No unlanded plan promising this exact oracle was found.",
+      "BUGS.md": "No matching cleanup-oracle acceptance.",
+      "INDEX.md and queue": "No exact existing-object Delete oracle item found. Read container-template-replacement-test-reuses-old-config.md: different template-apply oracle. Read mac-fixture-cleanup-stop-budget.md: different deadline defect. Neither covers this finding.",
+      "TRIAGE_OUTCOMES.md": "No exact legacy Delete oracle decision found; archive not read.",
+      "FILTER.md": "No filter covers persistent missing test discrimination; neither safe retry nor status-after-crash boundaries match."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "No current product removal failure, security impact or user-work-loss route established. Existing-running Delete coverage was not demonstrated by the deleted successful Delete assertions. A bounded alternative-test search found no replacement, but this consultation is not a new repository-wide inventory.",
+    "original_stronger_consequence": "The initial lead described removal of a running container. Later source analysis corrected that to deletion of an existing stopped container; a running predecessor was removed only by the separately retired failed-Create retry path. The potentially highest isolation concern remains under g137/c1, not this test-only finding.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain the narrow source-verified test-oracle defect as other. A stateful fake requiring correctly named rm to change existing to absent, or a real-object Delete test, could restore the distinction. No fix authorized."
+  },
+  {
+    "key": "g137/c4",
+    "latest_line": 11,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "legacy-fixture-launch-rewrite-not-clobbered-by-outcome",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The inspected outcome/confirmation writes do not overwrite session_launch, and the fixture checks that its rewritten launch loaded after restart.",
+    "checks": [
+      "04d85f0c98a9b635709d00b056719a0baa7fd3fc:crates/farhelm/tests/e2e/containerized_sessions.rs:45-105 writes the stored old launch then restarts and asserts exact equality.",
+      "At that revision store.rs:5099-5161 writes terminal_address and outcome columns only. store.rs:5216-5247 documents and implements the generation-fenced Restart-with-only launch update; this fixture requests no Restart with.",
+      "The reloaded-value assertion fails if the seed is lost; it does not silently proceed against an ordinary row. No source-supported race from the ordinary session's fast exit was established."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Retired containerized sessions requires readable old configuration, not acceptance of fixture races.",
+      "SPEC_impl.md": "Rootless Podman sessions preserves stored decoding; no fixture-race waiver found.",
+      "TODO.md Planned": "Empty; no coverage.",
+      "plans/queue": "No matching stored-launch fixture-clobber work found; retirement plan landed per plans/REPORTS.md:21.",
+      "BUGS.md": "No matching fixture mutation race.",
+      "INDEX.md and queue": "No exact containerized_sessions rewrite/outcome item found. Template configuration replacement item is a different trigger and assertion.",
+      "TRIAGE_OUTCOMES.md": "No matching decision found; archive not read.",
+      "FILTER.md": "No filter used; source refutation is the basis."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "No runtime flake measurement and no certification of arbitrary direct database mutation patterns.",
+    "original_stronger_consequence": "A setup race might invalidate or flake the maintainer fixture. No security or shipped user-owned-work consequence was claimed; f1's Delete oracle remains separate.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "The named outcome write path does not modify the seeded column and the restart assertion witnesses the premise."
+  },
+  {
+    "key": "g138/c1",
+    "latest_line": 10,
+    "recommendation": "covered",
+    "bucket": "other",
+    "underlying_key": "retired-container-positive-path-test-removal",
+    "aliases": ["g137/c1"],
+    "target_queue_file": null,
+    "why": "Same narrow retirement acceptance as g137/c1. The history's claim that the fake-engine matrix settled Delete coverage was expressly corrected; it must not dispose of g137/f1.",
+    "checks": [
+      "04d85f0c98a9b635709d00b056719a0baa7fd3fc:SPEC.md:4816-4823 retires positive launch/Stop support but keeps Delete; SPEC_impl.md:8647-8656 retains removal and confirmed absence.",
+      "At that revision containerized_sessions.rs:45-105 seeds an old stored launch without a Podman object, :135-208 checks retired errors and :215-227 checks deletion of that absent-object fixture.",
+      "container.rs:274-293 fixes the exists result independently of rm. service/teardown.rs:533-577 proves production cleanup dispatch/order, not a test that detects omitting removal. The latest correction is supported."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Current Retired containerized sessions :4892-4900 explicitly accepts removing positive paths; no acceptance for the independent Delete oracle gap.",
+      "SPEC_impl.md": "Current Rootless Podman sessions :8312-8326 contains the same conditional retirement rule and retained removal contract.",
+      "TODO.md Planned": "Empty; no coverage.",
+      "plans/queue": "Matching podman-environments retirement work is landed per plans/REPORTS.md:21, not an unlanded promise to restore this oracle.",
+      "BUGS.md": "No exact acceptance.",
+      "INDEX.md and queue": "No exact legacy retirement/retained Delete oracle item found. Existing template replacement test finding is distinct.",
+      "TRIAGE_OUTCOMES.md": "No exact matching decision found; archive not read.",
+      "FILTER.md": "No filter applied."
+    },
+    "exact_cover_quotes": [
+      "SPEC.md, Retired containerized sessions: 'Existing sessions support Delete only. Opening terminals or tabs, exec, Stop, Restart, Clone, Replace and Replace with are refused.'",
+      "SPEC_impl.md, Rootless Podman sessions: 'Retain only the legacy `podman rm -f` removal, confirmed-absence check and lock/ticket handling still required to serialize deletion with an already-started creator.'"
+    ],
+    "missing_premise": "No demonstrated shipped security or loss-of-work route from positive-path test retirement. All refusal paths and real-engine cleanup are not certified here.",
+    "original_stronger_consequence": "The record initially considered removing launch/Stop/Delete tests together and later claimed focused tests settled cleanup. Its final correction preserves the distinct lost Delete oracle as g137/f1; the alias g137/c1 also preserves the conditional host-file/credential-exposure concern.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Accept only obsolete positive-launch/Stop test retirement. Do not treat the earlier broad cleanup conclusion as current or as a parent-accepted drop."
+  },
+  {
+    "key": "g138/c2",
+    "latest_line": 9,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "real-agent-capture-panic-cleanup-owner-retained",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The migration retains a bounded panic-time cleanup mechanism and correct declaration order. This refutes absence of a cleanup guard, not every possible surviving subprocess or unavailable-host outcome.",
+    "checks": [
+      "70bc66a9f285cc2a9984924f389834d118b7cfdc:crates/farhelm/tests/e2e/real_agent_capture.rs:448-454, :633-639 and :777-784 declare work before state; :992-999 declares Harness after work/probe state. Normal unwind therefore reaches the terminal-host owner before work removal and permit release.",
+      "At that revision harness.rs:1139-1173 stores TestDir before its permit; farhelm-teststate/src/lib.rs:794-818 attempts host end and retains its state directory if unconfirmed. hosts.rs:107-165 requires confirmed end/Gone and socket disappearance, with bounded scans.",
+      "real_agent_capture.rs:596-603 explicitly awaits end_all_terminals before removing state/work and releasing the slot. harness.rs:2368-2382 asserts all_stopped. hook_identity.rs:240-263 awaits ServeTask cancellation on explicit stop, while Drop only requests cancellation.",
+      "The panic-time TestDir helper can take over the host connection even if a supervisor reference lingers. Retention protects only its state directory; work can still be removed and the slot released after an unconfirmed attempt. No subprocess-tree termination was observed."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Durability and resume :3436-3456 explains that supervisor death does not end sessions; no acceptance of orphaned vendor fixtures.",
+      "SPEC_impl.md": "Terminal host/current test substrate :2159-2177 supplies context, not an exemption from cleanup.",
+      "TODO.md Planned": "Empty; no coverage.",
+      "plans/queue": "tmux-end-old-terminals mentions porting real_agent_capture but is landed per plans/REPORTS.md:29. No unlanded panic-cleanup fix found.",
+      "BUGS.md": "No matching cleanup mechanism defect.",
+      "INDEX.md and queue": "No exact real_agent_capture/TestDir panic item found. mac-fixture-cleanup-stop-budget.md concerns remote cleanup's outer deadline, not absence of this owner.",
+      "TRIAGE_OUTCOMES.md": "No matching decision found; archive not read.",
+      "FILTER.md": "No filter used."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "No observed orphan or failed cleanup. Source establishes an attempt and normal-success ordering, not unconditional vendor process-tree death on every OS/failure.",
+    "original_stronger_consequence": "Removing TmuxServerGuard might leave real vendor agents alive after a panic. The history later narrowed this to refuting absence of a mechanism, acknowledging unconfirmed cleanup can retain only state while work/permit drop. Harm is confined to opt-in maintainer tests; no catastrophic route established.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Refute only missing panic-time cleanup mechanism. Preserve the recorded failure-path limitations instead of claiming hosts invariably end."
+  },
+  {
+    "key": "g138/c3",
+    "latest_line": 3,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "removed-tmux-cwd-fallback-route-no-longer-created",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The removed test deliberately selected the old tmux constructor. Current create starts a host whose child exits on chdir failure before exec, so the old HOME fallback route is not established for current creates.",
+    "checks": [
+      "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 diff for crates/farhelm/tests/e2e/launch_sentinel_error_status.rs removes create_records_error_when_the_session_directory_cannot_be_entered, which explicitly called harness_believing_boot_tmux and asserted its marker executable never ran in the fallback folder.",
+      "At that revision crates/terminal-host/src/spawn.rs:548-553 writes errno then exits; :577-581 calls chdir, fails before execve on error. SPEC_impl.md:2024-2034 states every create starts its agent in a host.",
+      "Current SPEC_impl.md:2173-2177 documents a separate known difference: denied-directory create is refused at host start rather than recorded as the launch error. That is not a route to executing in another folder."
+    ],
+    "coverage_checked": {
+      "SPEC.md": "Current :3725-3727 requires a working directory for every launch; it does not accept execution in a fallback directory.",
+      "SPEC_impl.md": "Current Terminal host :1891-1906 requires host creates; :2173-2177 preserves the narrower refusal/error-classification known gap. No wrong-folder acceptance found.",
+      "TODO.md Planned": "Empty; no coverage.",
+      "plans/queue": "No unlanded denied-directory/fallback test work found; tmux-end-old-terminals is landed per plans/REPORTS.md:29.",
+      "BUGS.md": "No matching wrong-folder behavior.",
+      "INDEX.md and queue": "No exact deleted cwd-fallback test item found. agent-screen-refusal-missing-path.md was read: invalid-UTF-8 capture diagnostic, a different trigger and consequence.",
+      "TRIAGE_OUTCOMES.md": "Read matching folder-refusal-classifier entry :137 onward: a UI diagnostic matching path text, not execution in a fallback folder; no exact coverage. Archive not read.",
+      "FILTER.md": "No filter used; a potential wrong-folder user-work consequence would be outside ordinary diagnostic filters."
+    },
+    "exact_cover_quotes": [],
+    "missing_premise": "No current shipped create route executing after a failed chdir has been shown. This does not certify every cwd identity or permission race, nor claim equivalent denied-directory regression coverage remains.",
+    "original_stronger_consequence": "An agent running in a fallback folder could damage unrelated user work. The removed old-terminal fixture guarded that route; its current reachability is not established.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Source refutes this deleted fixture's tmux HOME-fallback route for current host creates. Independent check is still required before disposing of the potentially highest hypothesis."
+  }
+]

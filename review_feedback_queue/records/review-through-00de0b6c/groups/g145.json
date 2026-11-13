@@ -1,0 +1,519 @@
+{
+  "group": {
+    "id": "g145",
+    "domain": "rust-test-fixtures",
+    "purpose": "rust-test-fixtures: crates/farhelm/tests/e2e/harness.rs, crates/farhelm-teststate/src/lib.rs, crates/farhelm/tests/e2e/harness/tmux_guard.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g001",
+      "g007",
+      "g008",
+      "g009",
+      "g093",
+      "g094",
+      "g137",
+      "g138",
+      "g139",
+      "g140",
+      "g141",
+      "g142",
+      "g143",
+      "g144",
+      "g146",
+      "g151",
+      "g152",
+      "g153",
+      "g154",
+      "g155",
+      "g156",
+      "g157",
+      "g158",
+      "g159",
+      "g160",
+      "g161",
+      "g162",
+      "g163",
+      "g164",
+      "g165",
+      "g166",
+      "g167",
+      "g168",
+      "g169",
+      "g170",
+      "g171",
+      "g172",
+      "g173"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00972-000.patch",
+        "ranges": [
+          [
+            1,
+            1232
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/harness.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,58482)",
+        "lines": 1232,
+        "bytes": 58546,
+        "start": 0,
+        "end": 58482,
+        "original": "[private-run]/prep/originals/00972.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01458-000.patch",
+        "ranges": [
+          [
+            1,
+            54
+          ]
+        ],
+        "original_path": "crates/farhelm-teststate/src/lib.rs",
+        "commit": "303a1264b7bd791e8f6f6de2c7bb6136c08e8bab",
+        "notes": "patch header; patch character offsets [0,3312)",
+        "lines": 54,
+        "bytes": 3324,
+        "start": 0,
+        "end": 3312,
+        "original": "[private-run]/prep/originals/01458.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01460-000.patch",
+        "ranges": [
+          [
+            1,
+            52
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/harness/tmux_guard.rs",
+        "commit": "303a1264b7bd791e8f6f6de2c7bb6136c08e8bab",
+        "notes": "patch header; patch character offsets [0,2441)",
+        "lines": 52,
+        "bytes": 2441,
+        "start": 0,
+        "end": 2441,
+        "original": "[private-run]/prep/originals/01460.patch"
+      }
+    ],
+    "lines": 1338,
+    "bytes": 64311
+  },
+  "records": [
+    {
+      "key": "g145/c1",
+      "owner": "g145",
+      "id": "c1",
+      "domain": "rust-test-fixtures",
+      "purpose": "rust-test-fixtures: crates/farhelm/tests/e2e/harness.rs, crates/farhelm-teststate/src/lib.rs, crates/farhelm/tests/e2e/harness/tmux_guard.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Host-only fixture helpers do not strand supported old-terminal callers",
+            "location": "crates/farhelm/tests/e2e/harness.rs:1156",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered whether removing the tmux branches from shared readiness, identity, exit and terminal-ending fixtures would break tests of sessions left by earlier releases. Details: harness.rs:1156-1185, 1204-1277, 1289-1349, 1714-1740 and 1819-1944 now require terminal hosts or end only hosts. The old-terminal fixture has its own server/guard and raw tmux access (old_terminals.rs:25-115); its shared wait_for_agent_ready call at :375 follows Restart and an explicit Host-row assertion at :367-374. Source-wide caller search at this revision found no shared readiness/end helper used to operate a still-tmux terminal. Exact governing contract, SPEC_impl.md, Terminal host, Every new terminal in a host (:2236-2238): 'A supervisor creates every terminal in a terminal host; nothing selects tmux, and the supervisor never starts a tmux server'. SPEC_impl.md, Terminal substrate: private tmux server (:2904-2906): 'The reload then takes every old-kind row as having no terminal, in any state, without looking its recorded pane id up'. The helper narrowing therefore follows the removed driver's replacement contract; no report proposed. Suggested bucket: other (test-tooling correctness if there were a route). Confidence: confirmed from source and contract, no runtime observation. proposed_drop: source refutation and quoted specification acceptance; the production supervisor no longer serves tmux terminals and the surviving migration caller uses a host after Restart. Could-be-highest: no; the considered consequence is fixture failure, with no established loss-of-work or security route. possible_cover: none; coverage sources not searched. Caveat: this is limited to the assigned fixture narrowing, not a review of the production retirement implementation."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Host-only fixture helpers do not strand supported old-terminal callers",
+            "location": "crates/farhelm/tests/e2e/harness.rs:1156",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered whether deleting tmux query/termination helpers and narrowing readiness, identity, exit and terminal-ending fixtures would break tests of sessions left by earlier releases. Original possible consequence remains a fixture failing or failing to clean up the terminal it created. Details: the coverage-repair packet 00972-000.patch:1-180 was delivered directly through the corrected evidence manifest; its hash is unchanged. A new pinned git grep over crates/farhelm/tests for tmux_query, tmux_query_before_deadline, kill_tmux_server_and_wait, pane_id_of and row_agent_host returned no matches, so none of the deleted entry points leaves an unresolved test caller. The host-only helpers are harness.rs:1156-1185, 1204-1277, 1289-1349, 1714-1740 and 1819-1944. The surviving old-terminal fixture owns its own server/guard and raw tmux access (old_terminals.rs:25-115); its shared wait_for_agent_ready call at :375 follows Restart and an explicit Host-row assertion at :367-374. Exact governing contract, SPEC_impl.md, Terminal host, Every new terminal in a host (:2236-2238): 'A supervisor creates every terminal in a terminal host; nothing selects tmux, and the supervisor never starts a tmux server'. SPEC_impl.md, Terminal substrate: private tmux server (:2904-2906): 'The reload then takes every old-kind row as having no terminal, in any state, without looking its recorded pane id up'. The narrowing matches that replacement contract. Suggested bucket: other (test-tooling correctness if a route existed). Confidence: confirmed from source and contract, no execution. proposed_drop: source refutation and quoted specification acceptance; no surviving caller requires a still-tmux terminal through the deleted helpers. This is a proposed non-finding, not a parent-accepted drop. Could-be-highest: no; no established security or user-work loss route. possible_cover: none; coverage sources not searched. Caveat: limited to the assigned fixture removal and its caller compatibility; no conclusion about independent defects in the production retirement implementation."
+          }
+        }
+      ],
+      "latest": {
+        "line": 7,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Host-only fixture helpers do not strand supported old-terminal callers",
+          "location": "crates/farhelm/tests/e2e/harness.rs:1156",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered whether deleting tmux query/termination helpers and narrowing readiness, identity, exit and terminal-ending fixtures would break tests of sessions left by earlier releases. Original possible consequence remains a fixture failing or failing to clean up the terminal it created. Details: the coverage-repair packet 00972-000.patch:1-180 was delivered directly through the corrected evidence manifest; its hash is unchanged. A new pinned git grep over crates/farhelm/tests for tmux_query, tmux_query_before_deadline, kill_tmux_server_and_wait, pane_id_of and row_agent_host returned no matches, so none of the deleted entry points leaves an unresolved test caller. The host-only helpers are harness.rs:1156-1185, 1204-1277, 1289-1349, 1714-1740 and 1819-1944. The surviving old-terminal fixture owns its own server/guard and raw tmux access (old_terminals.rs:25-115); its shared wait_for_agent_ready call at :375 follows Restart and an explicit Host-row assertion at :367-374. Exact governing contract, SPEC_impl.md, Terminal host, Every new terminal in a host (:2236-2238): 'A supervisor creates every terminal in a terminal host; nothing selects tmux, and the supervisor never starts a tmux server'. SPEC_impl.md, Terminal substrate: private tmux server (:2904-2906): 'The reload then takes every old-kind row as having no terminal, in any state, without looking its recorded pane id up'. The narrowing matches that replacement contract. Suggested bucket: other (test-tooling correctness if a route existed). Confidence: confirmed from source and contract, no execution. proposed_drop: source refutation and quoted specification acceptance; no surviving caller requires a still-tmux terminal through the deleted helpers. This is a proposed non-finding, not a parent-accepted drop. Could-be-highest: no; no established security or user-work loss route. possible_cover: none; coverage sources not searched. Caveat: limited to the assigned fixture removal and its caller compatibility; no conclusion about independent defects in the production retirement implementation."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g145/findings.jsonl",
+        "id": "c1",
+        "line": 7,
+        "disposition": "excluded",
+        "group": "host-only-fixture-helper-caller-compatibility",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-092 after inspecting it. Deleted tmux helper entry points have no remaining test callers. The surviving migration test calls shared readiness only after Restart has established a host terminal. Propose dropping only the named helper/caller-compatibility concern. Do not merge away g144/c3's separately established cleanup owner lifetime. Checked source/results: [\"Pinned git grep at 1ed482dde220452e424973faf38a5e1318986333 over crates/farhelm/tests found no tmux_query, kill_tmux_server_and_wait, pane_id_of or row_agent_host uses.\",\"Same revision old_terminals.rs:25-115 has an independent explicit old-server fixture; :367-375 restarts the session, asserts its stored terminal is Host, then calls wait_for_agent_ready. The host-only restriction does not strand that supported caller.\",\"The independently retained g144/c3 failure is about directory/guard ownership across consumed restart, not the readiness/identity/termination helper narrowing. No runtime observation.\"] Current coverage/results: [\"SPEC_impl.md Every terminal in a host (:2160-2173 current) and Ending the old private tmux server (:2800 onward current) explicitly establish new hosts and terminal-less old rows; SPEC.md Terminal experience agrees. These contracts explain the narrowing, rather than accepting a stranded fixture caller.\",\"TODO.md Planned empty; no exact BUGS.md, active ledger or indexed queue item. Unlanded-plan search found no exact helper-compatibility fix; matching tmux plans landed per plans/REPORTS.md:29-32. FILTER.md not used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A test might fail or fail to clean up a terminal it created when tmux-specific helpers disappear.\"; \"No still-tmux terminal being operated through a deleted/narrowed shared helper is shown. This does not assess independent correctness of production terminal retirement.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g145/c1",
+        "line": 7,
+        "disposition": "excluded",
+        "group": "host-only-fixture-helper-caller-compatibility",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-092 after inspecting it. Deleted tmux helper entry points have no remaining test callers. The surviving migration test calls shared readiness only after Restart has established a host terminal. Propose dropping only the named helper/caller-compatibility concern. Do not merge away g144/c3's separately established cleanup owner lifetime. Checked source/results: [\"Pinned git grep at 1ed482dde220452e424973faf38a5e1318986333 over crates/farhelm/tests found no tmux_query, kill_tmux_server_and_wait, pane_id_of or row_agent_host uses.\",\"Same revision old_terminals.rs:25-115 has an independent explicit old-server fixture; :367-375 restarts the session, asserts its stored terminal is Host, then calls wait_for_agent_ready. The host-only restriction does not strand that supported caller.\",\"The independently retained g144/c3 failure is about directory/guard ownership across consumed restart, not the readiness/identity/termination helper narrowing. No runtime observation.\"] Current coverage/results: [\"SPEC_impl.md Every terminal in a host (:2160-2173 current) and Ending the old private tmux server (:2800 onward current) explicitly establish new hosts and terminal-less old rows; SPEC.md Terminal experience agrees. These contracts explain the narrowing, rather than accepting a stranded fixture caller.\",\"TODO.md Planned empty; no exact BUGS.md, active ledger or indexed queue item. Unlanded-plan search found no exact helper-compatibility fix; matching tmux plans landed per plans/REPORTS.md:29-32. FILTER.md not used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A test might fail or fail to clean up a terminal it created when tmux-specific helpers disappear.\"; \"No still-tmux terminal being operated through a deleted/narrowed shared helper is shown. This does not assess independent correctness of production terminal retirement.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-092",
+          "key": "g145/c1",
+          "latest_line": 7,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "host-only-fixture-helper-caller-compatibility",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Deleted tmux helper entry points have no remaining test callers. The surviving migration test calls shared readiness only after Restart has established a host terminal.",
+          "checks": [
+            "Pinned git grep at 1ed482dde220452e424973faf38a5e1318986333 over crates/farhelm/tests found no tmux_query, kill_tmux_server_and_wait, pane_id_of or row_agent_host uses.",
+            "Same revision old_terminals.rs:25-115 has an independent explicit old-server fixture; :367-375 restarts the session, asserts its stored terminal is Host, then calls wait_for_agent_ready. The host-only restriction does not strand that supported caller.",
+            "The independently retained g144/c3 failure is about directory/guard ownership across consumed restart, not the readiness/identity/termination helper narrowing. No runtime observation."
+          ],
+          "coverage_checked": [
+            "SPEC_impl.md Every terminal in a host (:2160-2173 current) and Ending the old private tmux server (:2800 onward current) explicitly establish new hosts and terminal-less old rows; SPEC.md Terminal experience agrees. These contracts explain the narrowing, rather than accepting a stranded fixture caller.",
+            "TODO.md Planned empty; no exact BUGS.md, active ledger or indexed queue item. Unlanded-plan search found no exact helper-compatibility fix; matching tmux plans landed per plans/REPORTS.md:29-32. FILTER.md not used."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No still-tmux terminal being operated through a deleted/narrowed shared helper is shown. This does not assess independent correctness of production terminal retirement.",
+          "original_stronger_consequence": "A test might fail or fail to clean up a terminal it created when tmux-specific helpers disappear.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Propose dropping only the named helper/caller-compatibility concern. Do not merge away g144/c3's separately established cleanup owner lifetime."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "host-only-fixture-helper-caller-compatibility",
+        "destination": null
+      }
+    },
+    {
+      "key": "g145/c2",
+      "owner": "g145",
+      "id": "c2",
+      "domain": "rust-test-fixtures",
+      "purpose": "rust-test-fixtures: crates/farhelm/tests/e2e/harness.rs, crates/farhelm-teststate/src/lib.rs, crates/farhelm/tests/e2e/harness/tmux_guard.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Optional trace boundary still isolates the guard's Drop evidence",
+            "location": "crates/farhelm/tests/e2e/harness/tmux_guard.rs:77",
+            "detail": "Reviewed commit: 303a1264b7bd791e8f6f6de2c7bb6136c08e8bab. TLDR: Considered whether removing the explicit diagnostic snapshot before teardown weakened the fixture test so it could pass on stale evidence. Details: harness/tmux_guard.rs:64-74 now independently asserts the owned session exists via has-session before dropping the guard. At :77-82 the boundary is None only when the assertion-safe capture contains no event; :115-139 then accepts all subsequent events in that empty case, or requires sequence greater than the last prior event. The capture preserves insertion order and assigns monotonically increasing sequence values under the collector lock (farhelm-testtrace/src/lib.rs:1363-1374, 1386-1414); snapshot/matching_events reject incomplete evidence (:598-628). Guard Drop collects and emits diagnostics before shutdown (farhelm-teststate/src/tmux/guard.rs:63-82). Therefore a previous iteration's events cannot satisfy the updated predicates; the first iteration no longer requires an unrelated earlier trace event. Contract: the supplied test-review checklist requires asserting the fixture premise before the action and an observable distinguishing the competing mechanisms. This test still asserts independent pre-Drop existence, post-boundary live-session diagnostics ordered before the shutdown event, and an independent post-Drop client failure. Suggested bucket: other. Confidence: confirmed by source, not execution. proposed_drop: source refutation; no stale-evidence route established. Could-be-highest: no; the considered effect is test coverage quality, without a catastrophic tooling or user-work route. possible_cover: none; coverage sources not searched. Caveat: existing reliance on a failing final list-sessions client as server absence is unchanged by this patch and is outside the new boundary logic."
+          }
+        }
+      ],
+      "latest": {
+        "line": 2,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Optional trace boundary still isolates the guard's Drop evidence",
+          "location": "crates/farhelm/tests/e2e/harness/tmux_guard.rs:77",
+          "detail": "Reviewed commit: 303a1264b7bd791e8f6f6de2c7bb6136c08e8bab. TLDR: Considered whether removing the explicit diagnostic snapshot before teardown weakened the fixture test so it could pass on stale evidence. Details: harness/tmux_guard.rs:64-74 now independently asserts the owned session exists via has-session before dropping the guard. At :77-82 the boundary is None only when the assertion-safe capture contains no event; :115-139 then accepts all subsequent events in that empty case, or requires sequence greater than the last prior event. The capture preserves insertion order and assigns monotonically increasing sequence values under the collector lock (farhelm-testtrace/src/lib.rs:1363-1374, 1386-1414); snapshot/matching_events reject incomplete evidence (:598-628). Guard Drop collects and emits diagnostics before shutdown (farhelm-teststate/src/tmux/guard.rs:63-82). Therefore a previous iteration's events cannot satisfy the updated predicates; the first iteration no longer requires an unrelated earlier trace event. Contract: the supplied test-review checklist requires asserting the fixture premise before the action and an observable distinguishing the competing mechanisms. This test still asserts independent pre-Drop existence, post-boundary live-session diagnostics ordered before the shutdown event, and an independent post-Drop client failure. Suggested bucket: other. Confidence: confirmed by source, not execution. proposed_drop: source refutation; no stale-evidence route established. Could-be-highest: no; the considered effect is test coverage quality, without a catastrophic tooling or user-work route. possible_cover: none; coverage sources not searched. Caveat: existing reliance on a failing final list-sessions client as server absence is unchanged by this patch and is outside the new boundary logic."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g145/findings.jsonl",
+        "id": "c2",
+        "line": 2,
+        "disposition": "excluded",
+        "group": "tmux-guard-optional-trace-boundary-stale-evidence",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-092 after inspecting it. An absent boundary means the capture contained no prior events. A present boundary excludes all prior iterations' events, so removing the explicit pre-Drop diagnostic does not admit stale evidence. Source refutes the introduced stale-boundary concern. Preserve the source-only and final-probe caveats. Checked source/results: [\"303a1264b7bd791e8f6f6de2c7bb6136c08e8bab:harness/tmux_guard.rs:64-82 independently probes has-session, then takes the last captured sequence if any. :115-139 requires subsequent live-session diagnostic events preceding the sole shutdown event; :141-149 independently probes server absence and counts shutdowns.\",\"Same revision farhelm-testtrace/src/lib.rs:1363-1374 preserves event insertion order, and :1386-1414 assigns sequences and appends under the state lock. A prior retained event necessarily supplies a boundary. tmux/guard.rs:79-98 collects diagnostics before shutdown. No execution.\"] Current coverage/results: [\"Both specifications searched for testing/trace/fixture behavior; no acceptance of stale evidence found. SPEC_impl.md Testing supports independent fixture evidence generally.\",\"TODO.md Planned empty; no exact BUGS.md, active ledger, INDEX/queue or unlanded-plan match for this boundary predicate. Matching tmux tooling plan is landed. FILTER.md not used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The guard regression might pass on diagnostic events emitted before this iteration's Drop.\"; \"No stale-event route survives the boundary predicate. The unchanged final list-sessions failure is not a universal proof of server death; that broader existing limitation is outside this named change.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g145/c2",
+        "line": 2,
+        "disposition": "excluded",
+        "group": "tmux-guard-optional-trace-boundary-stale-evidence",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-092 after inspecting it. An absent boundary means the capture contained no prior events. A present boundary excludes all prior iterations' events, so removing the explicit pre-Drop diagnostic does not admit stale evidence. Source refutes the introduced stale-boundary concern. Preserve the source-only and final-probe caveats. Checked source/results: [\"303a1264b7bd791e8f6f6de2c7bb6136c08e8bab:harness/tmux_guard.rs:64-82 independently probes has-session, then takes the last captured sequence if any. :115-139 requires subsequent live-session diagnostic events preceding the sole shutdown event; :141-149 independently probes server absence and counts shutdowns.\",\"Same revision farhelm-testtrace/src/lib.rs:1363-1374 preserves event insertion order, and :1386-1414 assigns sequences and appends under the state lock. A prior retained event necessarily supplies a boundary. tmux/guard.rs:79-98 collects diagnostics before shutdown. No execution.\"] Current coverage/results: [\"Both specifications searched for testing/trace/fixture behavior; no acceptance of stale evidence found. SPEC_impl.md Testing supports independent fixture evidence generally.\",\"TODO.md Planned empty; no exact BUGS.md, active ledger, INDEX/queue or unlanded-plan match for this boundary predicate. Matching tmux tooling plan is landed. FILTER.md not used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The guard regression might pass on diagnostic events emitted before this iteration's Drop.\"; \"No stale-event route survives the boundary predicate. The unchanged final list-sessions failure is not a universal proof of server death; that broader existing limitation is outside this named change.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-092",
+          "key": "g145/c2",
+          "latest_line": 2,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "tmux-guard-optional-trace-boundary-stale-evidence",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "An absent boundary means the capture contained no prior events. A present boundary excludes all prior iterations' events, so removing the explicit pre-Drop diagnostic does not admit stale evidence.",
+          "checks": [
+            "303a1264b7bd791e8f6f6de2c7bb6136c08e8bab:harness/tmux_guard.rs:64-82 independently probes has-session, then takes the last captured sequence if any. :115-139 requires subsequent live-session diagnostic events preceding the sole shutdown event; :141-149 independently probes server absence and counts shutdowns.",
+            "Same revision farhelm-testtrace/src/lib.rs:1363-1374 preserves event insertion order, and :1386-1414 assigns sequences and appends under the state lock. A prior retained event necessarily supplies a boundary. tmux/guard.rs:79-98 collects diagnostics before shutdown. No execution."
+          ],
+          "coverage_checked": [
+            "Both specifications searched for testing/trace/fixture behavior; no acceptance of stale evidence found. SPEC_impl.md Testing supports independent fixture evidence generally.",
+            "TODO.md Planned empty; no exact BUGS.md, active ledger, INDEX/queue or unlanded-plan match for this boundary predicate. Matching tmux tooling plan is landed. FILTER.md not used."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No stale-event route survives the boundary predicate. The unchanged final list-sessions failure is not a universal proof of server death; that broader existing limitation is outside this named change.",
+          "original_stronger_consequence": "The guard regression might pass on diagnostic events emitted before this iteration's Drop.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutes the introduced stale-boundary concern. Preserve the source-only and final-probe caveats."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "tmux-guard-optional-trace-boundary-stale-evidence",
+        "destination": null
+      }
+    },
+    {
+      "key": "g145/l1",
+      "owner": "g145",
+      "id": "l1",
+      "domain": "rust-test-fixtures",
+      "purpose": "rust-test-fixtures: crates/farhelm/tests/e2e/harness.rs, crates/farhelm-teststate/src/lib.rs, crates/farhelm/tests/e2e/harness/tmux_guard.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Moved drain helper bypasses grid transcript decoding",
+            "location": "crates/farhelm/tests/e2e/harness.rs:2079",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: The shared terminal-draining fixture may mix encoded grid messages into the readable transcript that later test assertions inspect. Details: moved drain_for at harness.rs:2067-2089 directly extends seen with TermEvent::Data bytes, whereas append_transcript at :135-149 and wait_until at :2032-2034 decode grid data through grid_text. Callers retain the same seen buffer for later assertions/waits, e.g. session_lifecycle.rs:678-686 and tab_lifecycle_edges.rs:271-289. Checks made: read complete assigned patch, moved function, current callers and the grid transcript contract. The function is textually the same as its parent-revision implementation in terminal_backpressure.rs:20-43, so this may be an existing issue merely relocated. Exact missing premise: whether a current caller's assertion can materially be invalidated or falsely satisfied by the encoded payload, and whether the move changes exposure. Next source checks: inspect grid encoding and all drain consumers' assertions and parent caller mappings. Suggested bucket: other (test-tooling correctness). Confidence: unverified lead under active investigation, no execution or reproduction. proposed_drop: false pending source checks. Could-be-highest: no established route; only test transcript correctness is implicated. possible_cover: none; coverage sources not searched. Caveat: no finding claimed until source checks settle the consequence and change relevance."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Raw grid bytes in moved drain do not establish a changed test failure",
+            "location": "crates/farhelm/tests/e2e/harness.rs:2079",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: The drain helper appends encoded grid data to otherwise readable test transcripts, but the reviewed relocation does not establish an incorrect test outcome. Original suspected consequence preserved: a later assertion might falsely match or miss text because its buffer contains binary framing or non-screen messages. Details and checks: compared the full function against parent terminal_backpressure.rs:20-43; the implementation is unchanged. Compared all four consumer files across the commit: drain imports move into harness, while the drain calls and their assertions stay unchanged. Read all six call sites. Four calls use the drain result only to assert no detach and send their unique round-trip marker after the drain (session_lifecycle.rs:678-686 and :818-826, session_rename.rs:591-597, tab_lifecycle_edges.rs:271-289). The remaining two calls test absence of short plain text emitted by the other terminal (terminal_tabs.rs:1366-1393); GridOutput uses binary row encoding (farhelm-proto/src/grid.rs:1251-1282), whose write_row preserves each run's raw UTF-8 text (grid/binary.rs:120-152), and the fake basic agent's line uses one cyan style for its whole marker (fake_agent.rs:1715). No current late-drain assertion over decoded row joins, styles, or non-screen metadata was found. Contract: harness.rs:135-149 defines append_transcript as decoding grid data; using it would maintain a cleaner transcript invariant, but a cleanup opportunity without a demonstrated consequence is not a correctness finding. Suggested bucket: other. Confidence: confirmed source observations and no established material consequence; no runtime observation. proposed_drop: unchanged relocation plus current caller analysis does not establish a failing or falsely passing assertion. Could-be-highest: no; the suspected effect remains test transcript correctness, not a security or user-work loss route. possible_cover: none; coverage sources not searched. Caveat: a future caller requiring decoded row concatenation must use append_transcript; no claim that this helper universally produces a valid text transcript. Lead settled as candidate; no missing source check remains for this initial pass."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Raw grid bytes in moved drain do not establish a changed test failure",
+            "location": "crates/farhelm/tests/e2e/harness.rs:2079",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: The drain helper mixes encoded grid payloads into otherwise readable test transcripts; a later assertion could falsely match or miss text because of binary framing, style-run boundaries or non-screen messages. That original possible wrong-assertion consequence remains, but no such consequence is established for this patch's current callers. Exact unchanged-implementation proof: parent terminal_backpressure.rs:20-43 and reviewed harness.rs:2067-2089 have the same deadline, receive loop, raw seen.extend_from_slice, ReplayComplete handling and detach/closure/timeout returns. The four consumer files retain the same drain calls and assertions while changing imports. Current-caller proof: session_lifecycle.rs:678-686 and :818-826, session_rename.rs:591-597 and tab_lifecycle_edges.rs:271-289 assert no detach, then send their unique round-trip markers after the drain returns. Thus the raw bytes accumulated before those sends cannot provide those later marker responses. The two terminal_tabs.rs:1384-1385 drains precede absence checks for the other terminal's short plain marker (:1366-1393). GridOutput's row encoding preserves each run's UTF-8 text (farhelm-proto/src/grid/binary.rs:120-152); the fake basic agent's echo emits the whole marker in one cyan style (fake_agent.rs:1715), and the tab marker is plain text. The investigated current assertions do not require joining differently styled runs, interpreting grid state, or excluding clipboard/title metadata. Contract: harness.rs:135-149 explicitly uses append_transcript to decode a grid stream into text. Raw grid bytes are not universally valid text, and this helper does not satisfy that general text-transcript contract. Source checks did not establish a current assertion made wrong by this unchanged relocation. Suggested bucket: other (test-tooling correctness). Confidence: confirmed source facts; no material wrong-assertion route established and no runtime observation. proposed_drop: unchanged implementation and unchanged current assertion exposure, with the caller-specific reasoning above; this remains a proposal, not an accepted parent drop. Could-be-highest: no established security or loss-of-work route; the suspected consequence is test correctness. possible_cover: caller supplied g144/c4 independently confirms relocation and absence of stale module callers, expressly not decoded transcript semantics; no coverage sources searched. Caveats: preserving an individual run's text does not make the entire binary stream a text transcript or prove arbitrary needles safe. A future caller that needs decoded row joins or screen-only text must use append_transcript. Lead settled as candidate after available source checks; synthesis preserves the original possible wrong assertion consequence."
+          }
+        }
+      ],
+      "latest": {
+        "line": 6,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l1",
+          "state": "open",
+          "summary": "Raw grid bytes in moved drain do not establish a changed test failure",
+          "location": "crates/farhelm/tests/e2e/harness.rs:2079",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: The drain helper mixes encoded grid payloads into otherwise readable test transcripts; a later assertion could falsely match or miss text because of binary framing, style-run boundaries or non-screen messages. That original possible wrong-assertion consequence remains, but no such consequence is established for this patch's current callers. Exact unchanged-implementation proof: parent terminal_backpressure.rs:20-43 and reviewed harness.rs:2067-2089 have the same deadline, receive loop, raw seen.extend_from_slice, ReplayComplete handling and detach/closure/timeout returns. The four consumer files retain the same drain calls and assertions while changing imports. Current-caller proof: session_lifecycle.rs:678-686 and :818-826, session_rename.rs:591-597 and tab_lifecycle_edges.rs:271-289 assert no detach, then send their unique round-trip markers after the drain returns. Thus the raw bytes accumulated before those sends cannot provide those later marker responses. The two terminal_tabs.rs:1384-1385 drains precede absence checks for the other terminal's short plain marker (:1366-1393). GridOutput's row encoding preserves each run's UTF-8 text (farhelm-proto/src/grid/binary.rs:120-152); the fake basic agent's echo emits the whole marker in one cyan style (fake_agent.rs:1715), and the tab marker is plain text. The investigated current assertions do not require joining differently styled runs, interpreting grid state, or excluding clipboard/title metadata. Contract: harness.rs:135-149 explicitly uses append_transcript to decode a grid stream into text. Raw grid bytes are not universally valid text, and this helper does not satisfy that general text-transcript contract. Source checks did not establish a current assertion made wrong by this unchanged relocation. Suggested bucket: other (test-tooling correctness). Confidence: confirmed source facts; no material wrong-assertion route established and no runtime observation. proposed_drop: unchanged implementation and unchanged current assertion exposure, with the caller-specific reasoning above; this remains a proposal, not an accepted parent drop. Could-be-highest: no established security or loss-of-work route; the suspected consequence is test correctness. possible_cover: caller supplied g144/c4 independently confirms relocation and absence of stale module callers, expressly not decoded transcript semantics; no coverage sources searched. Caveats: preserving an individual run's text does not make the entire binary stream a text transcript or prove arbitrary needles safe. A future caller that needs decoded row joins or screen-only text must use append_transcript. Lead settled as candidate after available source checks; synthesis preserves the original possible wrong assertion consequence."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g145/findings.jsonl",
+        "id": "l1",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "raw-grid-drain-helper-current-caller-exposure",
+        "reason": "Parent disagrees with claims092 retain-unverified suggestion after reading complete actualownercandidate. Ownerevent6 has already investigated every current caller, directly supports no changed wrong assertion and settles lead as candidate. General raw-byte-versus-text mismatch alone supplies no concrete supported false assertion or in-range change; current short ASCII single-style markers and post-drain fresh witnesses do not need arbitrary decoded run joining. Preserve original hypothetical wrong matches and generic contract limitation; future styled/screen-only callers must decode, but unsupported hypothetical exposure does not require retention as UAI. Same bounded root as144c4, not universal decoder correctness."
+      },
+      "accepted_parent_decision": {
+        "key": "g145/l1",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "raw-grid-drain-helper-current-caller-exposure",
+        "bucket": "other",
+        "recording": "parent-rejects-unestablished-uncertainty",
+        "needs_independent_drop_check": false,
+        "reason": "Parent disagrees with claims092 retain-unverified suggestion after reading complete actualownercandidate. Ownerevent6 has already investigated every current caller, directly supports no changed wrong assertion and settles lead as candidate. General raw-byte-versus-text mismatch alone supplies no concrete supported false assertion or in-range change; current short ASCII single-style markers and post-drain fresh witnesses do not need arbitrary decoded run joining. Preserve original hypothetical wrong matches and generic contract limitation; future styled/screen-only callers must decode, but unsupported hypothetical exposure does not require retention as UAI. Same bounded root as144c4, not universal decoder correctness."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-092",
+          "key": "g145/l1",
+          "latest_line": 6,
+          "recommendation": "retain-unverified",
+          "bucket": "other",
+          "underlying_key": "raw-grid-drain-helper-current-caller-exposure",
+          "aliases": [
+            "g144/c4"
+          ],
+          "target_queue_file": null,
+          "why": "Raw binary grid payloads really enter the shared seen buffer. The relocation alone does not introduce that mismatch, and current-caller checks did not establish a wrong assertion. Retain the narrowly investigated uncertainty if the parent treats the general collector contract as a finding; do not record an established test failure.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333:harness.rs:2079 appends raw bytes, unlike :135-174's decoded text path. Parent terminal_backpressure.rs:20-43 is identical, so unchanged relocation is established.",
+            "The six reviewed callers at session_lifecycle.rs:678,818; session_rename.rs:592; tab_lifecycle_edges.rs:271; terminal_tabs.rs:1384-1385 were read. Four send fresh markers only after draining. The remaining two assert absence of short single-style/plain markers; grid/binary.rs:120-152 preserves each run's text and fake_agent.rs:1715 does not split the marker's style.",
+            "Source establishes the raw-transcript limitation, not a current wrong assertion, arbitrary-needle safety, decoded row semantics, or a runtime failure. The original stronger potential consequence remains conditional."
+          ],
+          "coverage_checked": [
+            "SPEC.md Terminal experience and SPEC_impl.md Every terminal in a host/Testing describe grid text helpers but do not expressly accept mixing binary control/frame data into a text collector.",
+            "TODO.md Planned empty; BUGS.md and active ledger have no exact matching claim. INDEX.md plus grid-text-omits-blank-columns.md and grid-row-is-not-program-line.md cover other decoded-row observer defects, not raw drain Data appends. They do not fully cover this root or establish its consequence.",
+            "g144/c4 is an exact alias for the raw-drain limitation, with an additional distinct removed-ceiling concern. No unlanded exact plan found; tmux plans landed per plans/REPORTS.md:29-32. FILTER.md has no applicable whole boundary."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "A reachable current assertion whose result is invalidated by encoded payloads, plus attribution to another in-range change if claiming a regression rather than relocation. Unchanged implementation alone is not enough to refute the wider reviewed range.",
+          "original_stronger_consequence": "A later test assertion might falsely match or miss terminal text because seen contains binary framing, style-run boundaries or non-screen messages. The later candidate proposed dropping this as no demonstrated changed assertion; no security/user-work-loss consequence was alleged.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Recommend retaining the investigated uncertainty instead of broad refutation of the raw collector contract. Parent may keep one narrow record under the shared key; it must not assert a failing or falsely passing current test. The relocation/non-broken-caller part of g144/c4 remains source-refuted."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "raw-grid-drain-helper-current-caller-exposure",
+        "destination": null
+      }
+    },
+    {
+      "key": "g145/c3",
+      "owner": "g145",
+      "id": "c3",
+      "domain": "rust-test-fixtures",
+      "purpose": "rust-test-fixtures: crates/farhelm/tests/e2e/harness.rs, crates/farhelm-teststate/src/lib.rs, crates/farhelm/tests/e2e/harness/tmux_guard.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Removing tmux timeout floors does not shorten a surviving fixture budget",
+            "location": "crates/farhelm/tests/e2e/harness.rs:1964",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered whether deleting the suite's generous tmux timeout floors reintroduced failures under machine load. Details: the assigned patch removes floor_suite_timeouts, suite_timeouts and suite_supervisor_with_timeouts and passes caller-supplied SupervisorTimeouts directly to the supervisor at harness.rs:1964-1972. Checked the full current SupervisorTimeouts definition at farhelm-supervisor/src/service/core.rs:362-436 and searched the supervisor source for tmux_exchange, tmux_pane_list and sink_ready: all three floored fields have been removed with their tmux consumers, so no remaining budget changes. Surviving stall, writer, upload, relay and host-end budgets are independent fields, which the old floor function left untouched. Contract: SPEC_impl.md, Terminal substrate: private tmux server (:2887-2889), states 'The running supervisor runs no tmux at all, and its driver of the old terminals is gone'. Suggested bucket: other (test-tooling failures, if a route existed). Confidence: confirmed by source, not execution. proposed_drop: source refutation; the floored fields and operations no longer exist, and surviving caller overrides pass through unchanged. Could-be-highest: no; the considered consequence is test reliability without catastrophic tooling or user-work loss. possible_cover: none; coverage sources not searched. Caveat: no timing or load measurements were taken, and this does not assert the surviving host-specific budgets are sufficient under every machine load."
+          }
+        }
+      ],
+      "latest": {
+        "line": 5,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Removing tmux timeout floors does not shorten a surviving fixture budget",
+          "location": "crates/farhelm/tests/e2e/harness.rs:1964",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Considered whether deleting the suite's generous tmux timeout floors reintroduced failures under machine load. Details: the assigned patch removes floor_suite_timeouts, suite_timeouts and suite_supervisor_with_timeouts and passes caller-supplied SupervisorTimeouts directly to the supervisor at harness.rs:1964-1972. Checked the full current SupervisorTimeouts definition at farhelm-supervisor/src/service/core.rs:362-436 and searched the supervisor source for tmux_exchange, tmux_pane_list and sink_ready: all three floored fields have been removed with their tmux consumers, so no remaining budget changes. Surviving stall, writer, upload, relay and host-end budgets are independent fields, which the old floor function left untouched. Contract: SPEC_impl.md, Terminal substrate: private tmux server (:2887-2889), states 'The running supervisor runs no tmux at all, and its driver of the old terminals is gone'. Suggested bucket: other (test-tooling failures, if a route existed). Confidence: confirmed by source, not execution. proposed_drop: source refutation; the floored fields and operations no longer exist, and surviving caller overrides pass through unchanged. Could-be-highest: no; the considered consequence is test reliability without catastrophic tooling or user-work loss. possible_cover: none; coverage sources not searched. Caveat: no timing or load measurements were taken, and this does not assert the surviving host-specific budgets are sufficient under every machine load."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g145/findings.jsonl",
+        "id": "c3",
+        "line": 5,
+        "disposition": "excluded",
+        "group": "removed-tmux-timeout-floors-no-surviving-fields",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-092 after inspecting it. The three floored fields and their consumers are gone. Removing those floors cannot shorten an independent surviving timeout. Source-refuted for the named budget shortening. Do not claim a measured reliability result. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333:harness.rs diff removes only tmux_exchange/tmux_pane_list/sink_ready adjustments from floor_suite_timeouts and passes the caller's timeouts through.\",\"Same revision service/core.rs:362-436 defines the remaining SupervisorTimeouts fields without those three fields. Pinned git grep across supervisor source found no tmux_exchange, tmux_pane_list or sink_ready references. No timing/load experiment.\"] Current coverage/results: [\"SPEC.md Terminal experience and SPEC_impl.md Every terminal in a host/Ending the old private tmux server describe the retired running driver. No spec promise that all surviving host budgets tolerate every load is inferred.\",\"TODO.md Planned empty; no exact BUGS.md, ledger, INDEX/queue or unlanded-plan match for removed floors. Landed tmux driver/tooling plans are historical context, not future cover. FILTER.md not used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing generous tmux floors might reintroduce maintainer-test failures under machine load.\"; \"No surviving timeout modified by the removed function is shown. Sufficiency of unrelated host-specific budgets under arbitrary load was not assessed.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g145/c3",
+        "line": 5,
+        "disposition": "excluded",
+        "group": "removed-tmux-timeout-floors-no-surviving-fields",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-092 after inspecting it. The three floored fields and their consumers are gone. Removing those floors cannot shorten an independent surviving timeout. Source-refuted for the named budget shortening. Do not claim a measured reliability result. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333:harness.rs diff removes only tmux_exchange/tmux_pane_list/sink_ready adjustments from floor_suite_timeouts and passes the caller's timeouts through.\",\"Same revision service/core.rs:362-436 defines the remaining SupervisorTimeouts fields without those three fields. Pinned git grep across supervisor source found no tmux_exchange, tmux_pane_list or sink_ready references. No timing/load experiment.\"] Current coverage/results: [\"SPEC.md Terminal experience and SPEC_impl.md Every terminal in a host/Ending the old private tmux server describe the retired running driver. No spec promise that all surviving host budgets tolerate every load is inferred.\",\"TODO.md Planned empty; no exact BUGS.md, ledger, INDEX/queue or unlanded-plan match for removed floors. Landed tmux driver/tooling plans are historical context, not future cover. FILTER.md not used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing generous tmux floors might reintroduce maintainer-test failures under machine load.\"; \"No surviving timeout modified by the removed function is shown. Sufficiency of unrelated host-specific budgets under arbitrary load was not assessed.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-092",
+          "key": "g145/c3",
+          "latest_line": 5,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "removed-tmux-timeout-floors-no-surviving-fields",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The three floored fields and their consumers are gone. Removing those floors cannot shorten an independent surviving timeout.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333:harness.rs diff removes only tmux_exchange/tmux_pane_list/sink_ready adjustments from floor_suite_timeouts and passes the caller's timeouts through.",
+            "Same revision service/core.rs:362-436 defines the remaining SupervisorTimeouts fields without those three fields. Pinned git grep across supervisor source found no tmux_exchange, tmux_pane_list or sink_ready references. No timing/load experiment."
+          ],
+          "coverage_checked": [
+            "SPEC.md Terminal experience and SPEC_impl.md Every terminal in a host/Ending the old private tmux server describe the retired running driver. No spec promise that all surviving host budgets tolerate every load is inferred.",
+            "TODO.md Planned empty; no exact BUGS.md, ledger, INDEX/queue or unlanded-plan match for removed floors. Landed tmux driver/tooling plans are historical context, not future cover. FILTER.md not used."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No surviving timeout modified by the removed function is shown. Sufficiency of unrelated host-specific budgets under arbitrary load was not assessed.",
+          "original_stronger_consequence": "Removing generous tmux floors might reintroduce maintainer-test failures under machine load.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source-refuted for the named budget shortening. Do not claim a measured reliability result."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "removed-tmux-timeout-floors-no-surviving-fields",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete: all 1,338 assigned patch lines reviewed at their recorded revisions.\n\nNo reportable findings. Recorded candidates `c1`, `c2`, `c3`; investigated lead `l1` and closed it as a candidate. No unresolved leads or unread assigned scope.\n\nUpdated `findings.jsonl` and `progress.md`. No tests or reproductions run."
+    },
+    {
+      "turn": 2,
+      "reply": "Coverage repaired: all 1,338 assigned lines are delivered through the evidence manifest; none remain unread.\n\nSynthesis found no new reportable issue. Revised `c1` and `l1`, preserving the possible wrong-assertion consequence and caller-specific reasoning. No open leads; no proposed drops treated as parent-accepted.\n\nProgress updated. No execution or reproductions performed."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 complete. Nothing new found.\n\n- Checked readiness/replay boundaries, listing budgets, exit-code semantics, sweep documentation and guard-test paths at pinned revisions.\n- Compared relevant harness changes across the whole pinned range.\n- New verified IDs: none.\n- New unverified IDs: none.\n- Open leads: none.\n\nProgress updated; findings history unchanged. No runtime execution."
+    }
+  ],
+  "progress": "g145 rust-test-fixtures: initial review complete, turn 1. Discovery passes: 0.\n\nCoverage: read all 1,338 assigned patch lines through the evidence reader: 00972-000.patch 1-1232, 01458-000.patch 1-54, and 01460-000.patch 1-52. Read the brief fully and the complete inventory commits field only. No assigned material remains unread. Reviewed changes at their original commits, 1ed482dde220452e424973faf38a5e1318986333 and 303a1264b7bd791e8f6f6de2c7bb6136c08e8bab, including the moved helper's parent implementation.\n\nContracts and source checks: read required priority buckets and feedback-file format; pinned terminal-host creation, old-terminal retirement, terminal experience, testing/tooling, and answers-bind-to-render contracts. Checked remaining shared helper callers, old-terminal test's post-Restart Host assertion, host-only terminal-ending helpers, removed timeout fields against current SupervisorTimeouts, drain consumers and grid binary encoding, sweep documentation against its bounded walk, guard Drop ordering and trace collector sequence/completeness semantics. A combined context output clipped; the relevant harness source was re-read separately, and the guard implementation and trace collector were read separately in full relevant ranges. One exploratory service.rs lookup named a nonexistent path; located and read service/core.rs instead. No runtime observations are claimed.\n\nDurable record: c1, c2 and c3 are non-findings with source/specification bases. l1 was recorded immediately as a lead and then revised to a candidate after encoding, caller and parent-diff checks. No finding IDs verified or retained unverified in this pass. No leads remain open. Candidate records use state open to preserve them for the parent's independent synthesis/drop handling.\n\nInterface assumptions: supervisors create/serve terminal hosts only; old tmux fixtures own separate guards and call shared readiness only after Restart changes their row to Host. Shared readiness still requires post-exec marker evidence; raw boundary helpers remain available for deliberately unsettled tests. Guard diagnostic assertions require complete capture, increasing sequence, and snapshot-before-shutdown ordering. Drain's existing raw-byte transcript caveat is preserved in l1; no changed or materially affected assertion established.\n\nNo checkout changes, helper scripts, builds, tests, reproductions, live-install access or coverage-source searches. Only private group artifacts were written. Next action: return initial-pass result to caller; wait for the caller's later synthesis/discovery prompt. This turn did not perform the later-turn protocol.\n\nTurn 2 in progress: coverage repair followed by synthesis, as explicitly requested by the caller. Discovery passes remain 0. Re-read corrected brief fully and preserved all five existing events. Parent audit recognizes 1,158 mandatory lines and identifies only 00972-000.patch:1-180 as missing from supported delivery; the previous all-lines coverage claim was therefore premature. Source bytes/hashes are unchanged. Current unread evidence-delivery scope: that 180-line packet. Next: deliver it directly through the corrected manifest, reconsider its helper deletions against existing contracts, then synthesize. Interface feedback supplied by caller: g144/c4 confirms relocation and absence of stale module callers only, not decoded transcript semantics; g139/g142 independently agree the timeout floor affected only retired fields. No proposed drop has been accepted by the parent.\n\nTurn 2 complete: coverage repair and caller-requested synthesis. Discovery passes: 0. Delivered 00972-000.patch:1-180 as its own shell call with direct stdout through the corrected manifest, within 200 lines/24 KB. Combined with the parent's previously supported 1,158 lines, all 1,338 assigned lines are now delivered. No unread assigned scope remains; source hash unchanged.\n\nNew checks/results: pinned search across crates/farhelm/tests found no references to the five deleted query, termination, identity or row-helper names. Rechecked current consumer diffs: the drain call sites and assertion semantics remain unchanged by relocation; the rename file changes only its import. Synthesis retains c2's complete-capture/sequence argument and c3's retired-field argument. Parent-provided g139/g142 agreement supports only the retired timeout-field conclusion. No new issue emerged from the repaired packet or synthesis.\n\nEvents revised this turn: c1 (coverage-repair packet and deleted-caller search) and l1 (exact unchanged implementation/current caller proof, explicit preservation of possible false-match/missed-text consequence, and narrow interpretation of g144/c4). No new IDs. No verified or unverified findings retained. No open leads. All candidate proposed drops remain subject to parent judgment; none is described as accepted.\n\nInterface assumptions remain unchanged: shared helpers serve terminal-host sessions; migration fixtures own their old server and use shared readiness after Host conversion. Binary grid payloads are not a general text transcript; l1's reasoning is limited to the current unchanged callers, not arbitrary markers, style joins, title/clipboard content or future uses. No execution, reproduction, checkout change or excluded coverage search.\n\nNext action: return delta and repaired coverage status; await caller direction. No discovery pass was performed.\n\nTurn 3 in progress: separate discovery pass 1. Read discovery-neighbours.json completely in bounded 55-line chunks (1-556), after an initial combined 1-180 read clipped; all clipped content was re-read. These supplied records are interface/novelty context only, not mandatory source credit or accepted dispositions. No named pending questions. Existing full finding/candidate history remains unchanged. New search will stay within the three assigned patches and check remaining helper contracts, readiness/exit semantics and modified documentation beyond c1/c2/c3/l1. Neighbour g144 owns the distinct consumed-Harness/restart guard drop-order route; no duplicate is being commissioned here. No runtime tests or reproductions.\n\nTurn 3 complete: discovery pass 1; empty result. All supplied neighbour records were read, including the final JSON closing lines. Original mandatory coverage remains 1,338/1,338; no unread assigned scope.\n\nUseful new checks/results: re-read pinned harness listing/readiness contracts and implementations at 1405-1702, the viewer helpers and readiness status loop at 1280-1408, marker-boundary implementation at 2158-2208, and normalizer contract/body at 2210-2302. The marker observation and stronger replay/prompt barriers remain distinct in source; ordinary listing polling has its separate overall request budget, and readiness viewers retain the non-displacing attach operation. Cross-checked the changed exit-code documentation with HostStatus::exit_code and ChildExit conversion at hosts/terminal.rs:853-890: numeric code versus signal-to-None semantics agree. Re-read changed teststate sweep documentation with actual reap at lib.rs:503-556; it retains both host shutdown and bounded tmux-socket collection before removal. Re-read the assigned guard test's setup and teardown paths at harness/tmux_guard.rs:30-150. Compared relevant harness contracts across the whole exclusive-base-to-reviewed range, rather than assuming a concern predating the assigned commit predates the range. Path history identifies the earlier host-switch/startup-retirement and later comment-cleanup changes, but those other patches were not added to this group's review scope.\n\nNo distinct substantive lead, documentation defect or test-oracle defect emerged from these checks. No finding/candidate/lead events were appended or revised in this discovery pass; inventing a new ID for a routine successful check would misrepresent the result. New verified finding IDs: none. New unverified-after-investigation IDs: none. Remaining open lead IDs: none. Prior consequences and proposed-drop bases are unchanged, and no parent acceptance is assumed.\n\nInterface assumptions remain unchanged. Supplied neighbour retirement, missing-oracle and consumed-Harness guard-lifetime findings were used to avoid duplication, not as proof of correctness or accepted exclusion. No tests, builds, reproductions, live-install actions, checkout edits or prohibited coverage-source reads. Next: return the explicit empty discovery result and await caller direction.\n"
+}

@@ -1,0 +1,400 @@
+{
+  "group": {
+    "id": "g034",
+    "domain": "gui-shell-integration",
+    "purpose": "gui-shell-integration: crates/farhelm-ui/src/desktop.rs, crates/farhelm-ui/src/desktop/tmux_preflight.rs, crates/farhelm-ui/src/tmux_probe.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g005",
+      "g012",
+      "g032",
+      "g033"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/01238-000.patch",
+        "ranges": [
+          [
+            1,
+            228
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/desktop.rs",
+        "commit": "17a3fe858c5511a24b7403af15dd41c93bf69fd7",
+        "notes": "patch header; patch character offsets [0,12584)",
+        "lines": 228,
+        "bytes": 12602,
+        "start": 0,
+        "end": 12584,
+        "original": "[private-run]/prep/originals/01238.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01239-000.patch",
+        "ranges": [
+          [
+            1,
+            775
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/desktop/tmux_preflight.rs",
+        "commit": "17a3fe858c5511a24b7403af15dd41c93bf69fd7",
+        "notes": "patch header; patch character offsets [0,37481)",
+        "lines": 775,
+        "bytes": 37556,
+        "start": 0,
+        "end": 37481,
+        "original": "[private-run]/prep/originals/01239.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01241-000.patch",
+        "ranges": [
+          [
+            1,
+            125
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/tmux_probe.rs",
+        "commit": "17a3fe858c5511a24b7403af15dd41c93bf69fd7",
+        "notes": "patch header; patch character offsets [0,6240)",
+        "lines": 125,
+        "bytes": 6258,
+        "start": 0,
+        "end": 6240,
+        "original": "[private-run]/prep/originals/01241.patch"
+      }
+    ],
+    "lines": 1128,
+    "bytes": 56416
+  },
+  "records": [
+    {
+      "key": "g034/c1",
+      "owner": "g034",
+      "id": "c1",
+      "domain": "gui-shell-integration",
+      "purpose": "gui-shell-integration: crates/farhelm-ui/src/desktop.rs, crates/farhelm-ui/src/desktop/tmux_preflight.rs, crates/farhelm-ui/src/tmux_probe.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Inherited FARHELM_TMUX does not leak into session children",
+            "location": "crates/farhelm-ui/src/desktop.rs:1200",
+            "detail": "Reviewed commit: 17a3fe858c5511a24b7403af15dd41c93bf69fd7\nTLDR: Considered whether removing desktop tmux configuration while retaining ambient inheritance could send a stale tmux setting into new sessions. Source refutes this consequence.\nDetails: The desktop spawn at desktop.rs:1175–1200 removes app-only variables but no longer sets or removes FARHELM_TMUX. A git grep at the reviewed revision found no UI use and only the supervisor child-environment scrub as a runtime occurrence of FARHELM_TMUX in the inspected runtime trees. service/core/host_launch.rs:108–115 includes FARHELM_TMUX in NOT_INHERITED, and host_child_env at :141–147 removes it after merging both supervisor environment and launch overrides. SPEC_impl.md, Terminal substrate: private tmux server, says exactly: `Nothing this release starts or renders sets it, but a supervisor unit an earlier release wrote keeps setting it until its next setup or Update; the supervisor ignores it.`\nSuggested bucket: other (refuted consequence). Confidence: confirmed by source, not runtime execution. proposed_drop: source refutation; child assembly removes the variable even if ambient supervisor inheritance retains it. Could-be-highest: no established security or loss-of-work route; the considered consequence was obsolete session configuration only. possible_cover: none; coverage sources not searched. Caveat: this is a removal-impact check, not an independent review of the entire child-environment implementation."
+          }
+        },
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Inherited FARHELM_TMUX does not leak into session children",
+            "location": "crates/farhelm-ui/src/desktop.rs:1200",
+            "detail": "Reviewed commit: 17a3fe858c5511a24b7403af15dd41c93bf69fd7\nTLDR: Considered whether removing desktop tmux configuration while retaining ambient inheritance could send a stale tmux setting into new sessions. Source refutes this consequence.\nDetails: The desktop spawn at desktop.rs:1175–1200 removes app-only variables but no longer sets or removes FARHELM_TMUX. A git grep at the reviewed revision found no UI use and only the supervisor child-environment scrub as a runtime occurrence of FARHELM_TMUX in the inspected runtime trees. service/core/host_launch.rs:108–115 includes FARHELM_TMUX in NOT_INHERITED, and host_child_env at :141–147 removes it after merging both supervisor environment and launch overrides. SPEC_impl.md, Terminal substrate: private tmux server, says exactly: `Nothing this release starts or renders sets it, but a supervisor unit an earlier release wrote keeps setting it until its next setup or Update; the supervisor ignores it.`\nSuggested bucket: other (refuted consequence). Confidence: confirmed by source, not runtime execution. proposed_drop: source refutation; child assembly removes the variable even if ambient supervisor inheritance retains it. Could-be-highest: no established security or loss-of-work route; the considered consequence was obsolete session configuration only. possible_cover: none; coverage sources not searched. Caveat: this is a removal-impact check, not an independent review of the entire child-environment implementation.\nSynthesis revision: confirmed the helper is used by actual shipped agent and tab callers, rather than only available as an unused utility. service/core/host_launch.rs:490–518 puts host_child_env output into the agent ChildSpec; service/core/host_tabs.rs:594–606 does the same for tab shells. hosts/spawn.rs:350–356 starts the host itself with env_clear, so the ambient value cannot reach the host process outside the scrubbed child spec. Both caller paths only inject the managed GitHub token after the scrub. Original consequence and proposed_drop unchanged; source-confirmed, no execution."
+          }
+        }
+      ],
+      "latest": {
+        "line": 3,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Inherited FARHELM_TMUX does not leak into session children",
+          "location": "crates/farhelm-ui/src/desktop.rs:1200",
+          "detail": "Reviewed commit: 17a3fe858c5511a24b7403af15dd41c93bf69fd7\nTLDR: Considered whether removing desktop tmux configuration while retaining ambient inheritance could send a stale tmux setting into new sessions. Source refutes this consequence.\nDetails: The desktop spawn at desktop.rs:1175–1200 removes app-only variables but no longer sets or removes FARHELM_TMUX. A git grep at the reviewed revision found no UI use and only the supervisor child-environment scrub as a runtime occurrence of FARHELM_TMUX in the inspected runtime trees. service/core/host_launch.rs:108–115 includes FARHELM_TMUX in NOT_INHERITED, and host_child_env at :141–147 removes it after merging both supervisor environment and launch overrides. SPEC_impl.md, Terminal substrate: private tmux server, says exactly: `Nothing this release starts or renders sets it, but a supervisor unit an earlier release wrote keeps setting it until its next setup or Update; the supervisor ignores it.`\nSuggested bucket: other (refuted consequence). Confidence: confirmed by source, not runtime execution. proposed_drop: source refutation; child assembly removes the variable even if ambient supervisor inheritance retains it. Could-be-highest: no established security or loss-of-work route; the considered consequence was obsolete session configuration only. possible_cover: none; coverage sources not searched. Caveat: this is a removal-impact check, not an independent review of the entire child-environment implementation.\nSynthesis revision: confirmed the helper is used by actual shipped agent and tab callers, rather than only available as an unused utility. service/core/host_launch.rs:490–518 puts host_child_env output into the agent ChildSpec; service/core/host_tabs.rs:594–606 does the same for tab shells. hosts/spawn.rs:350–356 starts the host itself with env_clear, so the ambient value cannot reach the host process outside the scrubbed child spec. Both caller paths only inject the managed GitHub token after the scrub. Original consequence and proposed_drop unchanged; source-confirmed, no execution."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g034/findings.jsonl",
+        "id": "c1",
+        "line": 3,
+        "disposition": "excluded",
+        "group": "desktop-tmux-removal-inherited-farhelm-tmux-child-scrub",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-020 after inspecting it. The desktop can pass an ambient FARHELM_TMUX into its supervisor, but both shipped session-child paths remove it after merging the environment. The host process itself starts with an empty environment. The claim that the deletion leaks this obsolete setting into session children is source-refuted. Propose dismissal of FARHELM_TMUX reaching session children through the removed desktop handoff, on the post-merge scrub, both production callers and the host's empty environment. Checked source/results: [\"17a3fe858c5511a24b7403af15dd41c93bf69fd7 is inside the supplied review range (git rev-list membership checked).\",\"Same revision:crates/farhelm-ui/src/desktop.rs:1175-1200 no longer sets or removes FARHELM_TMUX when spawning the supervisor. Ambient supervisor inheritance is therefore possible; this premise is preserved.\",\"Same revision:crates/farhelm-supervisor/src/service/core/host_launch.rs:108-115 lists FARHELM_TMUX in NOT_INHERITED; :135-147 removes it after base and launch environments are merged.\",\"Same revision:host_launch.rs:490-518 puts the scrubbed result into the agent ChildSpec; service/core/host_tabs.rs:594-606 does the same for tab shells. Their post-scrub addition is the managed GitHub token, not FARHELM_TMUX.\",\"Same revision:crates/farhelm-supervisor/src/hosts/spawn.rs:350-356 invokes the terminal host with env_clear. Pinned git grep across crates/scripts/.github/e2e found the scrub as the runtime use of FARHELM_TMUX; other hits are comments and tests. No runtime execution was performed.\"] Current coverage/results: [\"Both specifications were searched. Current SPEC.md:2900-2904 requires terminal identity variables without tmux identity; SPEC_impl.md:7996-8001 explicitly says FARHELM_TMUX is not passed to terminal-host children and older units may keep setting it until setup/Update. This corroborates the scrub contract rather than accepting leakage.\",\"TODO.md Planned is empty (:25-27). Its Mid term phase-3 removal entry (:225-233) describes eventually removing the scrub once old units are irrelevant; it is not Planned coverage for a current leak. BUGS.md and active TRIAGE_OUTCOMES.md have no matching inherited-variable disposition. Archive not read.\",\"plans/queue/tmux-end-old-terminals.md criterion 1 requires the scrub; tmux-drop-from-install.md criterion 1 relies on it. Both plans landed (plans/REPORTS.md:29-30). No matching unlanded repair found.\",\"INDEX.md and queue text were searched for FARHELM_TMUX, tmux, environment and inheritance. version-agreement-lifetime-doc.md's index entry concerns retained TERM_PROGRAM_VERSION after adoption, not the scrubbed obsolete selector. No exact alias, coverage or extension found.\",\"FILTER.md read in full. No filter is used; no qualifying second rare upgrade condition was established or needed for the source refutation.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The original concern was obsolete session configuration inherited after desktop tmux handoff removal. Both history entries propose refutation and report no established security or work-loss route. The later entry adds actual caller and env_clear evidence without changing consequence or disposition.\"; \"A shipped child caller bypassing the scrub, or adding FARHELM_TMUX after it, was not found in the inspected agent/tab paths. This is not an independent review of the whole child-environment implementation.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g034/c1",
+        "line": 3,
+        "disposition": "excluded",
+        "group": "desktop-tmux-removal-inherited-farhelm-tmux-child-scrub",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-020 after inspecting it. The desktop can pass an ambient FARHELM_TMUX into its supervisor, but both shipped session-child paths remove it after merging the environment. The host process itself starts with an empty environment. The claim that the deletion leaks this obsolete setting into session children is source-refuted. Propose dismissal of FARHELM_TMUX reaching session children through the removed desktop handoff, on the post-merge scrub, both production callers and the host's empty environment. Checked source/results: [\"17a3fe858c5511a24b7403af15dd41c93bf69fd7 is inside the supplied review range (git rev-list membership checked).\",\"Same revision:crates/farhelm-ui/src/desktop.rs:1175-1200 no longer sets or removes FARHELM_TMUX when spawning the supervisor. Ambient supervisor inheritance is therefore possible; this premise is preserved.\",\"Same revision:crates/farhelm-supervisor/src/service/core/host_launch.rs:108-115 lists FARHELM_TMUX in NOT_INHERITED; :135-147 removes it after base and launch environments are merged.\",\"Same revision:host_launch.rs:490-518 puts the scrubbed result into the agent ChildSpec; service/core/host_tabs.rs:594-606 does the same for tab shells. Their post-scrub addition is the managed GitHub token, not FARHELM_TMUX.\",\"Same revision:crates/farhelm-supervisor/src/hosts/spawn.rs:350-356 invokes the terminal host with env_clear. Pinned git grep across crates/scripts/.github/e2e found the scrub as the runtime use of FARHELM_TMUX; other hits are comments and tests. No runtime execution was performed.\"] Current coverage/results: [\"Both specifications were searched. Current SPEC.md:2900-2904 requires terminal identity variables without tmux identity; SPEC_impl.md:7996-8001 explicitly says FARHELM_TMUX is not passed to terminal-host children and older units may keep setting it until setup/Update. This corroborates the scrub contract rather than accepting leakage.\",\"TODO.md Planned is empty (:25-27). Its Mid term phase-3 removal entry (:225-233) describes eventually removing the scrub once old units are irrelevant; it is not Planned coverage for a current leak. BUGS.md and active TRIAGE_OUTCOMES.md have no matching inherited-variable disposition. Archive not read.\",\"plans/queue/tmux-end-old-terminals.md criterion 1 requires the scrub; tmux-drop-from-install.md criterion 1 relies on it. Both plans landed (plans/REPORTS.md:29-30). No matching unlanded repair found.\",\"INDEX.md and queue text were searched for FARHELM_TMUX, tmux, environment and inheritance. version-agreement-lifetime-doc.md's index entry concerns retained TERM_PROGRAM_VERSION after adoption, not the scrubbed obsolete selector. No exact alias, coverage or extension found.\",\"FILTER.md read in full. No filter is used; no qualifying second rare upgrade condition was established or needed for the source refutation.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The original concern was obsolete session configuration inherited after desktop tmux handoff removal. Both history entries propose refutation and report no established security or work-loss route. The later entry adds actual caller and env_clear evidence without changing consequence or disposition.\"; \"A shipped child caller bypassing the scrub, or adding FARHELM_TMUX after it, was not found in the inspected agent/tab paths. This is not an independent review of the whole child-environment implementation.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-020",
+          "key": "g034/c1",
+          "latest_line": 3,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "desktop-tmux-removal-inherited-farhelm-tmux-child-scrub",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The desktop can pass an ambient FARHELM_TMUX into its supervisor, but both shipped session-child paths remove it after merging the environment. The host process itself starts with an empty environment. The claim that the deletion leaks this obsolete setting into session children is source-refuted.",
+          "checks": [
+            "17a3fe858c5511a24b7403af15dd41c93bf69fd7 is inside the supplied review range (git rev-list membership checked).",
+            "Same revision:crates/farhelm-ui/src/desktop.rs:1175-1200 no longer sets or removes FARHELM_TMUX when spawning the supervisor. Ambient supervisor inheritance is therefore possible; this premise is preserved.",
+            "Same revision:crates/farhelm-supervisor/src/service/core/host_launch.rs:108-115 lists FARHELM_TMUX in NOT_INHERITED; :135-147 removes it after base and launch environments are merged.",
+            "Same revision:host_launch.rs:490-518 puts the scrubbed result into the agent ChildSpec; service/core/host_tabs.rs:594-606 does the same for tab shells. Their post-scrub addition is the managed GitHub token, not FARHELM_TMUX.",
+            "Same revision:crates/farhelm-supervisor/src/hosts/spawn.rs:350-356 invokes the terminal host with env_clear. Pinned git grep across crates/scripts/.github/e2e found the scrub as the runtime use of FARHELM_TMUX; other hits are comments and tests. No runtime execution was performed."
+          ],
+          "coverage_checked": [
+            "Both specifications were searched. Current SPEC.md:2900-2904 requires terminal identity variables without tmux identity; SPEC_impl.md:7996-8001 explicitly says FARHELM_TMUX is not passed to terminal-host children and older units may keep setting it until setup/Update. This corroborates the scrub contract rather than accepting leakage.",
+            "TODO.md Planned is empty (:25-27). Its Mid term phase-3 removal entry (:225-233) describes eventually removing the scrub once old units are irrelevant; it is not Planned coverage for a current leak. BUGS.md and active TRIAGE_OUTCOMES.md have no matching inherited-variable disposition. Archive not read.",
+            "plans/queue/tmux-end-old-terminals.md criterion 1 requires the scrub; tmux-drop-from-install.md criterion 1 relies on it. Both plans landed (plans/REPORTS.md:29-30). No matching unlanded repair found.",
+            "INDEX.md and queue text were searched for FARHELM_TMUX, tmux, environment and inheritance. version-agreement-lifetime-doc.md's index entry concerns retained TERM_PROGRAM_VERSION after adoption, not the scrubbed obsolete selector. No exact alias, coverage or extension found.",
+            "FILTER.md read in full. No filter is used; no qualifying second rare upgrade condition was established or needed for the source refutation."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "A shipped child caller bypassing the scrub, or adding FARHELM_TMUX after it, was not found in the inspected agent/tab paths. This is not an independent review of the whole child-environment implementation.",
+          "original_stronger_consequence": "The original concern was obsolete session configuration inherited after desktop tmux handoff removal. Both history entries propose refutation and report no established security or work-loss route. The later entry adds actual caller and env_clear evidence without changing consequence or disposition.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Propose dismissal of FARHELM_TMUX reaching session children through the removed desktop handoff, on the post-merge scrub, both production callers and the host's empty environment."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "desktop-tmux-removal-inherited-farhelm-tmux-child-scrub",
+        "destination": null
+      }
+    },
+    {
+      "key": "g034/c2",
+      "owner": "g034",
+      "id": "c2",
+      "domain": "gui-shell-integration",
+      "purpose": "gui-shell-integration: crates/farhelm-ui/src/desktop.rs, crates/farhelm-ui/src/desktop/tmux_preflight.rs, crates/farhelm-ui/src/tmux_probe.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Removing the tmux preflight leaves no runtime tmux dependency",
+            "location": "crates/farhelm-ui/src/desktop.rs:1149",
+            "detail": "Reviewed commit: 17a3fe858c5511a24b7403af15dd41c93bf69fd7\nTLDR: Considered whether the app could now fail to start, or launch sessions against an unsupported tmux, because its missing/below-floor tmux checks and prefix search were deleted. The replacement uses Farhelm's own terminal-host program, so these deletions remove checks for a dependency no longer used.\nDetails: desktop.rs:440–550 still discovers or starts the supervisor and waits until it answers; :1149–1157 preserves the session-program-path prerequisite before :533 stops an owned predecessor. service/core.rs:6116–6184 opens the store and ends/reloads old terminals without resolving tmux. service/core/old_terminals.rs:176–202 connects directly to the old server's Unix socket, and :223–231 signals its pinned process; it does not execute a tmux binary. New terminal hosts are selected from the supervisor's own executable by service/core/host_launch.rs:388–390. tmux.rs:1–11 describes the remaining module as the provisioning version parser. Full-revision grep for tmux_probe, tmux_preflight, find_tmux_in_prefixes, run_tmux_preflight_or_exit and resolve_supervisor_tmux across crates, scripts, .github and e2e returned no occurrences, so the deleted modules have no dangling references there. SPEC_impl.md:2786–2791 states: `Neither the desktop app nor farhelm helm setup requires, looks for or names a tmux, and neither does the installer.` (Inline code formatting omitted in this quotation.)\nSuggested bucket: other (refuted removal regression). Confidence: confirmed by source, not observed execution. proposed_drop: source refutation; the deleted executable search and bounded version probe have no runtime consumer at this revision. Could-be-highest: the historical purpose included preventing unsupported tmux crashes that could lose sessions, but no shipped path was found that executes a selected tmux for sessions after this change; there is no established highest route. This conclusion rests on removal of that runtime path, not only on a specification acceptance. possible_cover: none; coverage sources not searched. Caveats: no runtime startup or builds run; this is not an independent review of old-terminal cleanup or provisioning."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Removing the tmux preflight leaves no runtime tmux dependency",
+            "location": "crates/farhelm-ui/src/desktop.rs:1149",
+            "detail": "Reviewed commit: 17a3fe858c5511a24b7403af15dd41c93bf69fd7\nTLDR: Considered whether the app could now fail to start, or launch sessions against an unsupported tmux, because its missing/below-floor tmux checks and prefix search were deleted. The replacement uses Farhelm's own terminal-host program, so these deletions remove checks for a dependency no longer used.\nDetails: desktop.rs:440–550 still discovers or starts the supervisor and waits until it answers; :1149–1157 preserves the session-program-path prerequisite before :533 stops an owned predecessor. service/core.rs:6116–6184 opens the store and ends/reloads old terminals without resolving tmux. service/core/old_terminals.rs:176–202 connects directly to the old server's Unix socket, and :223–231 signals its pinned process; it does not execute a tmux binary. New terminal hosts are selected from the supervisor's own executable by service/core/host_launch.rs:388–390. tmux.rs:1–11 describes the remaining module as the provisioning version parser. Full-revision grep for tmux_probe, tmux_preflight, find_tmux_in_prefixes, run_tmux_preflight_or_exit and resolve_supervisor_tmux across crates, scripts, .github and e2e returned no occurrences, so the deleted modules have no dangling references there. SPEC_impl.md:2786–2791 states: `Neither the desktop app nor farhelm helm setup requires, looks for or names a tmux, and neither does the installer.` (Inline code formatting omitted in this quotation.)\nSuggested bucket: other (refuted removal regression). Confidence: confirmed by source, not observed execution. proposed_drop: source refutation; the deleted executable search and bounded version probe have no runtime consumer at this revision. Could-be-highest: the historical purpose included preventing unsupported tmux crashes that could lose sessions, but no shipped path was found that executes a selected tmux for sessions after this change; there is no established highest route. This conclusion rests on removal of that runtime path, not only on a specification acceptance. possible_cover: none; coverage sources not searched. Caveats: no runtime startup or builds run; this is not an independent review of old-terminal cleanup or provisioning.\nSynthesis revision: traced both production caller paths through the replacement, not only host_program selection. Agent launch passes self.host_program() and its assembled ChildSpec into hosts::start_host at service/core/host_launch.rs:508–543; tab launch does the same at service/core/host_tabs.rs:603–622. hosts/spawn.rs:350–356 executes that program with internal terminal-host --socket and an empty host environment. The CLI implements that command at crates/farhelm/src/main.rs:1920–1926 through terminal_host::main_entry without a tmux executable lookup. Cross-version caller premise checked: desktop/bundle.rs:298–310 selects the app own version folder in the installed side-by-side layout and refuses a missing program rather than selecting the forwarder; :264–267 holds that version before bootstrap discovery. A developer override can intentionally supply another CLI, but this is not evidence of a shipped app/CLI mismatch caused by these removals. Original startup/session-crash consequences, bucket, confidence and proposed_drop remain unchanged. Source analysis only, no execution."
+          }
+        }
+      ],
+      "latest": {
+        "line": 4,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Removing the tmux preflight leaves no runtime tmux dependency",
+          "location": "crates/farhelm-ui/src/desktop.rs:1149",
+          "detail": "Reviewed commit: 17a3fe858c5511a24b7403af15dd41c93bf69fd7\nTLDR: Considered whether the app could now fail to start, or launch sessions against an unsupported tmux, because its missing/below-floor tmux checks and prefix search were deleted. The replacement uses Farhelm's own terminal-host program, so these deletions remove checks for a dependency no longer used.\nDetails: desktop.rs:440–550 still discovers or starts the supervisor and waits until it answers; :1149–1157 preserves the session-program-path prerequisite before :533 stops an owned predecessor. service/core.rs:6116–6184 opens the store and ends/reloads old terminals without resolving tmux. service/core/old_terminals.rs:176–202 connects directly to the old server's Unix socket, and :223–231 signals its pinned process; it does not execute a tmux binary. New terminal hosts are selected from the supervisor's own executable by service/core/host_launch.rs:388–390. tmux.rs:1–11 describes the remaining module as the provisioning version parser. Full-revision grep for tmux_probe, tmux_preflight, find_tmux_in_prefixes, run_tmux_preflight_or_exit and resolve_supervisor_tmux across crates, scripts, .github and e2e returned no occurrences, so the deleted modules have no dangling references there. SPEC_impl.md:2786–2791 states: `Neither the desktop app nor farhelm helm setup requires, looks for or names a tmux, and neither does the installer.` (Inline code formatting omitted in this quotation.)\nSuggested bucket: other (refuted removal regression). Confidence: confirmed by source, not observed execution. proposed_drop: source refutation; the deleted executable search and bounded version probe have no runtime consumer at this revision. Could-be-highest: the historical purpose included preventing unsupported tmux crashes that could lose sessions, but no shipped path was found that executes a selected tmux for sessions after this change; there is no established highest route. This conclusion rests on removal of that runtime path, not only on a specification acceptance. possible_cover: none; coverage sources not searched. Caveats: no runtime startup or builds run; this is not an independent review of old-terminal cleanup or provisioning.\nSynthesis revision: traced both production caller paths through the replacement, not only host_program selection. Agent launch passes self.host_program() and its assembled ChildSpec into hosts::start_host at service/core/host_launch.rs:508–543; tab launch does the same at service/core/host_tabs.rs:603–622. hosts/spawn.rs:350–356 executes that program with internal terminal-host --socket and an empty host environment. The CLI implements that command at crates/farhelm/src/main.rs:1920–1926 through terminal_host::main_entry without a tmux executable lookup. Cross-version caller premise checked: desktop/bundle.rs:298–310 selects the app own version folder in the installed side-by-side layout and refuses a missing program rather than selecting the forwarder; :264–267 holds that version before bootstrap discovery. A developer override can intentionally supply another CLI, but this is not evidence of a shipped app/CLI mismatch caused by these removals. Original startup/session-crash consequences, bucket, confidence and proposed_drop remain unchanged. Source analysis only, no execution."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g034/findings.jsonl",
+        "id": "c2",
+        "line": 4,
+        "disposition": "under-investigation",
+        "group": "g034-c2",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-020",
+          "key": "g034/c2",
+          "latest_line": 4,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "desktop-tmux-preflight-removal-session-runtime-dependency",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The deleted tmux search/version checks no longer guard the program used for shipped session launches. Agents and tabs start Farhelm terminal hosts. Startup's old-terminal cleanup connects to the old socket and signals its pinned peer without executing a selected tmux. This supports the proposed narrow source refutation, subject to the independent drop check for the original session-loss concern.",
+          "checks": [
+            "17a3fe858c5511a24b7403af15dd41c93bf69fd7 is inside the supplied review range (git rev-list membership checked).",
+            "Same revision:crates/farhelm-ui/src/desktop.rs:440-550 retains supervisor discovery/start and readiness waits. :1149-1157 checks the session-program path; the replacement branch performs this at :510 before stopping its owned predecessor at :533.",
+            "Same revision:crates/farhelm-supervisor/src/service/core.rs:6116-6184 opens the store, ends old terminals and reloads sessions. service/core/old_terminals.rs:176-202 connects to the old Unix socket and identifies its peer; :223-231 passes that pinned process to termination. No tmux executable is invoked in this path.",
+            "Same revision:service/core/host_launch.rs:388-390 selects the host program; :508-543 builds the agent ChildSpec and passes it to hosts::start_host. service/core/host_tabs.rs:603-622 does the same for tabs. hosts/spawn.rs:350-356 runs program internal terminal-host --socket with env_clear; crates/farhelm/src/main.rs:1920-1926 implements it through terminal_host::main_entry.",
+            "Same revision:crates/farhelm-ui/src/desktop/bundle.rs:264-267 holds the selected own-version CLI. :298-310 selects Contents/Versions/<app version>/farhelm and refuses its absence rather than selecting the forwarder. A deliberate developer override remains outside the ordinary shipped app/CLI-selection premise.",
+            "Same revision:crates/farhelm-supervisor/src/tmux.rs:1-11 identifies provisioning version policy as the remaining module role. Pinned git grep found no tmux_probe, tmux_preflight, find_tmux_in_prefixes, run_tmux_preflight_or_exit or resolve_supervisor_tmux in crates/scripts/.github/e2e. No startup, build or reproduction ran; old-terminal cleanup and provisioning were not independently reviewed."
+          ],
+          "coverage_checked": [
+            "Both specifications were searched. Reviewed SPEC_impl.md:2784-2796 explicitly says the desktop/setup/installer need no tmux, every terminal uses a terminal host, and old-server cleanup needs no tmux program. Current SPEC.md:5257-5258 says Farhelm neither requires nor looks for user tmux; current SPEC_impl.md:2780-2826 and :7996-8001 describe direct cleanup and no runtime tmux. These contracts corroborate source; they do not by themselves excuse a remaining dependency.",
+            "TODO.md Planned is empty (:25-27). Its later phase-3 cleanup entry is outside Planned and concerns eventual removal of the retained shutdown, not a runtime dependency after preflight removal. BUGS.md and active TRIAGE_OUTCOMES.md have no matching missing-preflight/session-crash disposition. Archive not read.",
+            "plans/queue/tmux-end-old-terminals.md criteria 1-2 and tmux-drop-from-install.md criterion 1 describe the replacement and deleted preflight. plans/REPORTS.md:29-30 marks both landed; tmux tooling/docs followups also landed (:31-32). No matching unlanded repair found.",
+            "INDEX.md and queue text searches for tmux, preflight, bootstrap, startup, inheritance and desktop smoke found no exact same-root item. The existing desktop-smoke path parsing and detached-supervisor cleanup findings were read and concern different triggers and consequences. No useful extension found.",
+            "FILTER.md read in full. No filter is the proposed basis, particularly no blanket upgrade/rarity exemption."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "The stronger route needs a shipped session-start path still executing a selected missing/unsupported tmux, or a shipped app/CLI mismatch caused by this deletion. The traced ordinary paths use terminal-host; neither premise was shown. Runtime behavior and arbitrary developer overrides were not tested.",
+          "original_stronger_consequence": "Deleting missing/below-floor tmux checks could make the app fail startup or start sessions on unsupported tmux. The historical unsupported-tmux crash concern could lose sessions and user-owned processes/work. Both history entries propose source refutation, not a runtime observation. The latest adds production launch/CLI-selection evidence; it does not erase the original crash/loss concern.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Propose a narrow source-refuted disposition because the protected runtime dependency has been replaced. Send the original unsupported-tmux session-crash/loss concern, this source chain and the preserved override/no-runtime caveats to the independent drop check before dismissing it."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-020.json",
+          "key": "g034/c2",
+          "proposal": "claim-checks/claims-020/result.json",
+          "parent_proposal": "source-refuted-deleted-desktop-tmux-preflight-runtime-dependency",
+          "final_independent_gate": "required-before-original-possible-highest-session-crash-drop",
+          "reason": "Parent read full020. OrdinaryownversionCLIselected/held, sessionprogramcheckedbeforeownedpredecessorstop, agents/tabsstartfarhelminternalterminal-hostwithenvclear; oldcleanupsocketverifiedpeernotprogram. Missing/unsupportedtmuxpreflightnolongerguardsactualsessionruntime. Narrowrefutationpreservesunsupportedruntimecrash/userprocesslossoriginal, arbitrarydevoverride/noexecutioncaveats; no blanketupgradefilter orclaimallcleanup/provisioningsafe. Freshgateexactproductionpath andappCLIselection."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "desktop-tmux-preflight-removal-session-runtime-dependency",
+        "destination": null
+      }
+    },
+    {
+      "key": "g034/c3",
+      "owner": "g034",
+      "id": "c3",
+      "domain": "gui-shell-integration",
+      "purpose": "gui-shell-integration: crates/farhelm-ui/src/desktop.rs, crates/farhelm-ui/src/desktop/tmux_preflight.rs, crates/farhelm-ui/src/tmux_probe.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Updated startup-diagnostic comment retains a matching smoke oracle",
+            "location": "crates/farhelm-ui/src/desktop.rs:1720",
+            "detail": "Reviewed commit: 17a3fe858c5511a24b7403af15dd41c93bf69fd7\nTLDR: Considered whether deleting the specialized tmux-refusal tests left the revised desktop comment falsely claiming that its ordinary startup-error shape was checked. A separate retained smoke leg checks that path.\nDetails: The assigned patch changes desktop.rs:1720–1722 from the old exact multi-line tmux-refusal oracle to `The stderr line (farhelm-desktop: <error>) and exit status 1 remain the primary contract; scripts/desktop-smoke.sh checks that shape.` (Inline code punctuation omitted in this quotation.) At the same revision scripts/desktop-smoke.sh:718–724 launches the desktop against a private state path that is a regular file, :725–728 requires status exactly 1 and the farhelm-desktop: stderr prefix, and :729–733 rejects panic/backtrace text. These are independent of the deleted tmux preflight legs and inspect ordinary bootstrap refusal. desktop.rs:138–142 still routes bootstrap errors through refuse_and_exit, whose :1723–1738 prints the message and exits 1. This source check distinguishes a documentation/test-oracle concern from production correctness.\nSuggested bucket: other (refuted documentation claim). Confidence: confirmed by source, not execution. proposed_drop: source refutation; the named smoke script retains an ordinary-bootstrap diagnostic oracle matching the changed comment. Could-be-highest: false; the considered issue was a stale validation claim, with no security or loss-of-work route. possible_cover: none; prohibited coverage sources not searched. Caveats: the oracle checks prefix/status and absence of panic text rather than the OS-specific complete diagnostic or a count of all stderr lines; the changed comment promises shape, not byte-for-byte comparison. No test or reproduction run."
+          }
+        }
+      ],
+      "latest": {
+        "line": 5,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Updated startup-diagnostic comment retains a matching smoke oracle",
+          "location": "crates/farhelm-ui/src/desktop.rs:1720",
+          "detail": "Reviewed commit: 17a3fe858c5511a24b7403af15dd41c93bf69fd7\nTLDR: Considered whether deleting the specialized tmux-refusal tests left the revised desktop comment falsely claiming that its ordinary startup-error shape was checked. A separate retained smoke leg checks that path.\nDetails: The assigned patch changes desktop.rs:1720–1722 from the old exact multi-line tmux-refusal oracle to `The stderr line (farhelm-desktop: <error>) and exit status 1 remain the primary contract; scripts/desktop-smoke.sh checks that shape.` (Inline code punctuation omitted in this quotation.) At the same revision scripts/desktop-smoke.sh:718–724 launches the desktop against a private state path that is a regular file, :725–728 requires status exactly 1 and the farhelm-desktop: stderr prefix, and :729–733 rejects panic/backtrace text. These are independent of the deleted tmux preflight legs and inspect ordinary bootstrap refusal. desktop.rs:138–142 still routes bootstrap errors through refuse_and_exit, whose :1723–1738 prints the message and exits 1. This source check distinguishes a documentation/test-oracle concern from production correctness.\nSuggested bucket: other (refuted documentation claim). Confidence: confirmed by source, not execution. proposed_drop: source refutation; the named smoke script retains an ordinary-bootstrap diagnostic oracle matching the changed comment. Could-be-highest: false; the considered issue was a stale validation claim, with no security or loss-of-work route. possible_cover: none; prohibited coverage sources not searched. Caveats: the oracle checks prefix/status and absence of panic text rather than the OS-specific complete diagnostic or a count of all stderr lines; the changed comment promises shape, not byte-for-byte comparison. No test or reproduction run."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g034/findings.jsonl",
+        "id": "c3",
+        "line": 5,
+        "disposition": "excluded",
+        "group": "desktop-refusal-comment-retained-bootstrap-smoke-oracle",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-020 after inspecting it. The revised comment promises a diagnostic shape, and the retained ordinary-bootstrap smoke leg asserts the exit status and stderr prefix. Removal of tmux-specific smoke legs does not remove that oracle. This is a source conclusion about a documentation/test claim, not a runtime pass. Propose dismissal of the stale coverage-comment suspicion on the retained, matching ordinary-bootstrap smoke assertions. Preserve the oracle's exact scope and lack of runtime execution. Checked source/results: [\"17a3fe858c5511a24b7403af15dd41c93bf69fd7 is inside the supplied review range (git rev-list membership checked).\",\"Same revision:crates/farhelm-ui/src/desktop.rs:1720-1722 names the farhelm-desktop error line and exit status 1 as the primary contract and says desktop-smoke.sh checks that shape. :138-142 routes bootstrap failures into refuse_and_exit; :1723-1738 prints the supplied message and exits 1.\",\"Same revision:scripts/desktop-smoke.sh:718-724 creates a regular file as the private state path and launches the desktop against it. :725-728 requires exactly exit 1 and the farhelm-desktop: prefix; :729-733 rejects panicked and RUST_BACKTRACE text. These assertions remain independent of the deleted tmux refusal cases.\",\"The oracle does not compare the complete OS-specific diagnostic, require exactly one stderr line or exercise every bootstrap refusal. The changed comment says shape, not byte-for-byte comparison. No smoke test, build or reproduction was run.\"] Current coverage/results: [\"Both specifications were searched for startup diagnostics, desktop refusals and smoke validation. Current SPEC_impl.md:7282-7283 states the one-line stderr/exit-1/native-alert product contract, but does not accept a false claim of test coverage. No exact specification acceptance was used.\",\"TODO.md Planned is empty (:25-27). BUGS.md and active TRIAGE_OUTCOMES.md have no matching missing ordinary-bootstrap oracle. Archive not read.\",\"plans/queue/tmux-drop-from-install.md criterion 1 removes tmux preflight smoke legs; plans/REPORTS.md:30 marks the plan landed. This does not assert removal of ordinary bootstrap diagnostics. No matching unlanded repair found.\",\"INDEX.md and matching desktop-smoke queue files were searched/read. desktop-smoke-misparses-space-bearing-run-path.md concerns a listener parser; desktop-smoke-supervisor-precedes-cleanup-record.md concerns detached supervisor cleanup. Neither matches this comment/oracle claim, and no useful extension was found.\",\"FILTER.md read in full. No filter applies: this is a claim about retained test coverage, not a qualifying rare product diagnostic.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Deleting specialized tmux-refusal tests might leave the revised comment falsely claiming ordinary startup-error coverage. The only record proposes refutation, explicitly limits the oracle to prefix/status/no-panic shape and claims no security or work-loss route.\"; \"The named retained script would have to lack the ordinary refusal shape assertion for the stale-comment suspicion to hold. That assertion remains. Its successful execution and exhaustive refusal coverage were not established.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g034/c3",
+        "line": 5,
+        "disposition": "excluded",
+        "group": "desktop-refusal-comment-retained-bootstrap-smoke-oracle",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-020 after inspecting it. The revised comment promises a diagnostic shape, and the retained ordinary-bootstrap smoke leg asserts the exit status and stderr prefix. Removal of tmux-specific smoke legs does not remove that oracle. This is a source conclusion about a documentation/test claim, not a runtime pass. Propose dismissal of the stale coverage-comment suspicion on the retained, matching ordinary-bootstrap smoke assertions. Preserve the oracle's exact scope and lack of runtime execution. Checked source/results: [\"17a3fe858c5511a24b7403af15dd41c93bf69fd7 is inside the supplied review range (git rev-list membership checked).\",\"Same revision:crates/farhelm-ui/src/desktop.rs:1720-1722 names the farhelm-desktop error line and exit status 1 as the primary contract and says desktop-smoke.sh checks that shape. :138-142 routes bootstrap failures into refuse_and_exit; :1723-1738 prints the supplied message and exits 1.\",\"Same revision:scripts/desktop-smoke.sh:718-724 creates a regular file as the private state path and launches the desktop against it. :725-728 requires exactly exit 1 and the farhelm-desktop: prefix; :729-733 rejects panicked and RUST_BACKTRACE text. These assertions remain independent of the deleted tmux refusal cases.\",\"The oracle does not compare the complete OS-specific diagnostic, require exactly one stderr line or exercise every bootstrap refusal. The changed comment says shape, not byte-for-byte comparison. No smoke test, build or reproduction was run.\"] Current coverage/results: [\"Both specifications were searched for startup diagnostics, desktop refusals and smoke validation. Current SPEC_impl.md:7282-7283 states the one-line stderr/exit-1/native-alert product contract, but does not accept a false claim of test coverage. No exact specification acceptance was used.\",\"TODO.md Planned is empty (:25-27). BUGS.md and active TRIAGE_OUTCOMES.md have no matching missing ordinary-bootstrap oracle. Archive not read.\",\"plans/queue/tmux-drop-from-install.md criterion 1 removes tmux preflight smoke legs; plans/REPORTS.md:30 marks the plan landed. This does not assert removal of ordinary bootstrap diagnostics. No matching unlanded repair found.\",\"INDEX.md and matching desktop-smoke queue files were searched/read. desktop-smoke-misparses-space-bearing-run-path.md concerns a listener parser; desktop-smoke-supervisor-precedes-cleanup-record.md concerns detached supervisor cleanup. Neither matches this comment/oracle claim, and no useful extension was found.\",\"FILTER.md read in full. No filter applies: this is a claim about retained test coverage, not a qualifying rare product diagnostic.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Deleting specialized tmux-refusal tests might leave the revised comment falsely claiming ordinary startup-error coverage. The only record proposes refutation, explicitly limits the oracle to prefix/status/no-panic shape and claims no security or work-loss route.\"; \"The named retained script would have to lack the ordinary refusal shape assertion for the stale-comment suspicion to hold. That assertion remains. Its successful execution and exhaustive refusal coverage were not established.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-020",
+          "key": "g034/c3",
+          "latest_line": 5,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "desktop-refusal-comment-retained-bootstrap-smoke-oracle",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The revised comment promises a diagnostic shape, and the retained ordinary-bootstrap smoke leg asserts the exit status and stderr prefix. Removal of tmux-specific smoke legs does not remove that oracle. This is a source conclusion about a documentation/test claim, not a runtime pass.",
+          "checks": [
+            "17a3fe858c5511a24b7403af15dd41c93bf69fd7 is inside the supplied review range (git rev-list membership checked).",
+            "Same revision:crates/farhelm-ui/src/desktop.rs:1720-1722 names the farhelm-desktop error line and exit status 1 as the primary contract and says desktop-smoke.sh checks that shape. :138-142 routes bootstrap failures into refuse_and_exit; :1723-1738 prints the supplied message and exits 1.",
+            "Same revision:scripts/desktop-smoke.sh:718-724 creates a regular file as the private state path and launches the desktop against it. :725-728 requires exactly exit 1 and the farhelm-desktop: prefix; :729-733 rejects panicked and RUST_BACKTRACE text. These assertions remain independent of the deleted tmux refusal cases.",
+            "The oracle does not compare the complete OS-specific diagnostic, require exactly one stderr line or exercise every bootstrap refusal. The changed comment says shape, not byte-for-byte comparison. No smoke test, build or reproduction was run."
+          ],
+          "coverage_checked": [
+            "Both specifications were searched for startup diagnostics, desktop refusals and smoke validation. Current SPEC_impl.md:7282-7283 states the one-line stderr/exit-1/native-alert product contract, but does not accept a false claim of test coverage. No exact specification acceptance was used.",
+            "TODO.md Planned is empty (:25-27). BUGS.md and active TRIAGE_OUTCOMES.md have no matching missing ordinary-bootstrap oracle. Archive not read.",
+            "plans/queue/tmux-drop-from-install.md criterion 1 removes tmux preflight smoke legs; plans/REPORTS.md:30 marks the plan landed. This does not assert removal of ordinary bootstrap diagnostics. No matching unlanded repair found.",
+            "INDEX.md and matching desktop-smoke queue files were searched/read. desktop-smoke-misparses-space-bearing-run-path.md concerns a listener parser; desktop-smoke-supervisor-precedes-cleanup-record.md concerns detached supervisor cleanup. Neither matches this comment/oracle claim, and no useful extension was found.",
+            "FILTER.md read in full. No filter applies: this is a claim about retained test coverage, not a qualifying rare product diagnostic."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "The named retained script would have to lack the ordinary refusal shape assertion for the stale-comment suspicion to hold. That assertion remains. Its successful execution and exhaustive refusal coverage were not established.",
+          "original_stronger_consequence": "Deleting specialized tmux-refusal tests might leave the revised comment falsely claiming ordinary startup-error coverage. The only record proposes refutation, explicitly limits the oracle to prefix/status/no-panic shape and claims no security or work-loss route.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Propose dismissal of the stale coverage-comment suspicion on the retained, matching ordinary-bootstrap smoke assertions. Preserve the oracle's exact scope and lack of runtime execution."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "desktop-refusal-comment-retained-bootstrap-smoke-oracle",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review blocked by an invalid evidence manifest. It requires line ends 229/776/126; the snapshots contain 228/775/125 lines. The helper rejects the entire manifest before delivering patches.\n\nRead the brief, complete commits field, and governing contracts. No findings recorded; all assigned patches remain unread. Details are in `g034/progress.md`.\n\nCorrect the manifest or authorize manual inspection to resume."
+    },
+    {
+      "turn": 2,
+      "reply": "Initial source-review pass complete. All 1,128 mandatory patch lines read through the corrected evidence manifest; no unread scope.\n\nNo findings or unresolved leads. Recorded refuted candidates `c1` and `c2` with source evidence. Progress log updated. No tests, builds, or reproductions run."
+    },
+    {
+      "turn": 3,
+      "reply": "Revised `c1` and `c2` with caller evidence covering agent/tab environment scrubbing, terminal-host dispatch, and desktop/CLI version pairing. Both remain refuted.\n\nNo new findings. Unresolved lead IDs: none."
+    },
+    {
+      "turn": 4,
+      "reply": "Discovery pass found no new defect. Checked startup ownership/prerequisite ordering, changed test construction, and diagnostic documentation against the retained smoke oracle. Added refuted candidate `c3`.\n\nNew verified IDs: none. New unverified IDs: none. Open leads: none. No runtime execution."
+    }
+  ],
+  "progress": "Group g034 — gui-shell-integration.\nTurn 1: initial source-review pass BLOCKED before assigned patch delivery.\nFindings log verified present; remains empty. No findings, candidates or substantive source leads were established.\nComplete inventory commits field read; excluded coverage metadata not read.\nMandatory evidence read attempted for 01238-000.patch lines 1–180. Helper failed: PERSISTENT_REVIEW_TOOL_FAILED: Invalid source range. No coverage is certified by this invocation.\nCause checked without reading patch content: manifest requires ends 229/776/126, but the three immutable snapshots have 228/775/125 actual lines, respectively. evidence.ts validates every manifest range before delivering any packet. wc and Deno using the helper's own line-splitting regex agree. No snapshot or manifest was modified.\nAll assigned patch content remains unread and uncertified (01238, 01239, 01241). No substitution through bulk inspection was attempted. Parent must correct its manifest (and brief ranges), or authorize manual inspection per tooling.md, before source review can proceed.\nRead instructions: injected root AGENTS.md has End sentinel; skillette trigger table; machine.md; Priority buckets; recording.md What goes in a feedback file; evidence tooling.md; scode-voice; skillette-scripts.\nGoverning contracts read at pinned revision 17a3fe858c5511a24b7403af15dd41c93bf69fd7: SPEC_impl.md Terminal substrate: private tmux server (2784–2876), Native app packaging (7247–7321), GUI Answers bind to what was drawn (1050–1100 context); SPEC.md complete Terminal experience (2851–3174). A previously clipped combined context result was reread as separate bounded outputs where needed.\nInterface assumptions for eventual source pass: desktop must no longer require/look for tmux; local supervisor spawning still needs correct CLI discovery; terminal-host rollout removes tmux runtime dependence. These are contracts to trace, not defect claims.\nNext action: repair evidence manifest under parent ownership, resume all mandatory patch reads, then analyze at original revision and trace callers/removal implications.\nTurn count: 1. Turn type: initial. Discovery-pass count: 0. New verified/unverified IDs: none. Open lead IDs: none. No runtime tests or reproductions run; source-only charter.\n\nTurn 2: coverage repair and initial source review resumed after parent corrected range endpoints. Brief reread fully. Existing empty findings log preserved. All three patches pending; contracts remain in context. Discovery-pass count remains 0.\n\nTurn 2 completed: coverage repair and assigned initial source-review pass.\nMandatory delivery complete through corrected manifest, unchanged source hashes:\n- 01238-000.patch: 1–180, 181–228.\n- 01239-000.patch: 1–180, 181–370, 371–560, 561–750, 751–775.\n- 01241-000.patch: 1–125.\nTotal: all 1,128 assigned lines read. No assigned material unread. Parent owns the delivery audit.\nSource/contract checks at 17a3fe858c5511a24b7403af15dd41c93bf69fd7: desktop bootstrap/replacement order, preserved session-program prerequisite, detached supervisor spawn, ordinary fatal diagnostics and native refusal path; supervisor store/startup and old-terminal socket cleanup; production host executable selection (Linux /proc/self/exe, Mac versioned own program); child environment removes FARHELM_TMUX after overrides. Full-revision symbol search across crates/scripts/.github/e2e found no deleted preflight/probe symbols. Inspected changed surviving test fixture construction and deleted tests under supplied checklist; deleted tests cover only removed tmux selection/refusal behavior. No changed confirmation handler exists in the assigned patches. A clipped combined context response was reread narrowly for the child-environment evidence cited in c1; all mandatory evidence packets were delivered independently without clipping.\nRecords appended immediately: c1 (ambient FARHELM_TMUX leakage refuted by child environment scrub), c2 (missing/unsupported tmux removal regression refuted by terminal-host replacement and direct socket cleanup). Findings: none. New verified/unverified finding IDs: none. Open lead IDs: none. Candidate details preserve consequence, source evidence, contract, confidence, bucket, proposed_drop, possible_cover, highest-route judgment and caveats.\nInterface assumptions checked: desktop needs no tmux executable; new terminal hosts come from Farhelm itself; old cleanup needs no tmux executable; deleted helpers have no dangling runtime references. No runtime behavior claimed. No tests/builds/reproductions run, as assigned source-only review.\nTurn count: 2 (turn 1 blocked before source; turn 2 repaired and completed initial pass). Turn type: coverage repair + initial review, not synthesis or discovery. Discovery-pass count: 0.\nNext action: return to parent for later synthesis/discovery instruction. No checkout files modified; only private g034 artifacts written. Inventory excluded metadata and queue coverage sources not read.\n\nTurn 3 in progress: later-turn synthesis requested after delivery audit. Revisit cross-patch removal interactions and callers at pinned commit, strengthen c1/c2 premises where source permits. No open leads at entry; discovery-pass count remains 0.\n\nTurn 3 complete: later-turn synthesis.\nRevised c1 under original ID: traced the real agent and tab callers into host_child_env, then into ChildSpec; host process starts with env_clear. No alternative inherited environment bypass was found in these paths.\nRevised c2 under original ID: traced agent and tab host_program -> start_host -> internal terminal-host dispatch. Confirmed the installed desktop selects and holds its own version's CLI, refusing a missing version instead of falling back to the forwarder. The default production replacement therefore needs neither tmux discovery nor a separately installed host executable. Developer overrides remain an explicit caveat, not evidence of a shipped mismatch.\nNo new findings/candidates/leads. Both candidates remain source-refuted with original consequences preserved. Open lead IDs: none; no readily checkable premise left unresolved for these records. No runtime tests, builds or reproductions; all results are source-supported.\nCoverage unchanged: all 1,128 assigned mandatory lines previously delivered and parent-audited; no unread assigned scope. No checkout writes.\nTurn count: 3. Turn type: synthesis. Discovery-pass count: 0. New verified/unverified finding IDs: none. Revisions: c1, c2. Next: parent-directed discovery or completion handling; no discovery pass performed during synthesis.\n\nTurn 4 in progress: separate discovery pass 1 under original group charter after verified delivery and synthesis. No pending interface questions. Read exact latest neighbour records first, then inspect assigned changed startup/comment/test boundaries beyond c1/c2; preserve existing records and scope. No runtime work authorized.\n\nTurn 4 complete: separate discovery pass 1.\nRead discovery-neighbours.json in full (82 lines / 26,973 bytes, direct bounded output). No named pending questions. Neighbour findings concern retirement/spec/GUI operations outside the assigned shell integration changes; none establishes a new in-group lead or changes c1/c2.\nDiscovery checks beyond known records: revisited every desktop.rs patch hunk as a per-commit diff; inspected startup's Reuse/Spawn/Replace ownership plan and preserved prerequisite ordering; checked all SpawnInputs constructions and deleted helper names; inspected the retained desktop smoke diagnostic oracle against the newly edited refusal comment. Inspected pinned-range history and base-to-reviewed desktop hunk boundaries when considering attribution, rather than treating the assigned commit's parent as the range start. No new production defect or test-oracle/documentation defect established.\nAppended c3 immediately on refutation: updated startup-diagnostic comment has a retained ordinary-bootstrap smoke oracle (status 1, farhelm-desktop stderr prefix, no panic/backtrace). This is a source-based candidate, not a runtime pass. Existing c1/c2 records unchanged this turn.\nNew verified finding IDs: none. New unverified-after-investigation IDs: none. New candidate IDs: c3. Remaining lead IDs: none. Explicit result: nothing new found to report as a defect; no unresolved concrete lead. No tests, builds, reproductions or live-install actions.\nTurn count: 4. Turn type: discovery. Discovery-pass count: 1. Coverage remains complete and previously parent-audited; no unread assigned material. Only private g034 artifacts written. Next: return discovery delta to parent; no additional pass inside this turn.\n"
+}

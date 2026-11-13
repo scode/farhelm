@@ -1,0 +1,88 @@
+[
+  {
+    "key": "g148/c1",
+    "latest_line": 6,
+    "recommendation": "out-of-range",
+    "bucket": "other",
+    "underlying_key": "docs-stop-callout-overpromises-descendant-cleanup",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The intermediate screenshot source does overpromise descendant cleanup, but both the broad wording and its conflicting cleanup exception exist at the exclusive range base. The reviewed change adds tab closure, not the overpromise. The later repair is corroboration, not the attribution basis.",
+    "checks": [
+      "6e423e30068b62c6cfa276c6d720ee35bb70387a:e2e/docs-shots/stop-restart-resume.spec.ts:53-56 already says Stop ends the agent and everything it started.",
+      "The same exclusive base's SPEC.md:2024-2057 explicitly limits process cleanup, including user-tmux jobs at 2038-2039 and detached processes with hidden/overwritten environments at 2048-2057.",
+      "2c5a1d5a8ebe7c0d0889ac5db40b272d75ae02cb changes the row-menu sentence only by adding shell-tab closure; its new header sentence does not promise that every descendant ends. The test only opens menus and adds annotations.",
+      "53d618e4a033749efc9f9f10adef168643737b99 corrects this exact row-menu sentence to acknowledge detached Linux jobs. Bounded full-range git log shows only these two changes to this capture file.",
+      "No runtime, screenshot capture or user reliance was observed. No security or user-work-loss route is established by the named wording claim."
+    ],
+    "coverage_checked": [
+      "SPEC.md:2069-2104 and SPEC_impl.md process-tree ownership discussion at 4791-4805 and 4890-4943 accept cleanup limitations; they do not accept inaccurate documentation of them.",
+      "TODO.md Planned bucket at 25-26 is empty. Searches of plans/queue for Stop wording, everything-started promises, detached jobs and capture annotations found no exact unlanded fix. tmux-drop-from-docs is reported landed in plans/REPORTS.md:32 and is not unlanded-plan coverage.",
+      "BUGS.md contains only an SSH provisioning-pipe hang, not this documentation error. Searches of active TRIAGE_OUTCOMES.md found no matching callout decision; archive not read.",
+      "INDEX.md read fully; container-tab-close-overpromises-process-termination.md read fully. It concerns container tab Close warnings/protocol text, not this screenshot's session Stop promise. Different trigger and scope; no exact alias or extension proposed.",
+      "FILTER.md read fully. No filter covers a standing inaccurate screenshot explanation merely because some surviving jobs are unusual."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "None for pre-range attribution. A security or loss-of-work consequence caused by relying on this screenshot has not been shown.",
+    "original_stronger_consequence": "The intermediate generated screenshot tells readers Stop ends everything the agent started although detached jobs may remain. Earlier records first relied on the immediate parent and later repair; the latest record supplies whole-range base proof. That inaccurate-prose consequence is preserved.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Exclude only this pre-range documentation defect, using the exact exclusive-base contradiction. Do not use acceptable production cleanup, ordinary-docs scope exclusion or subsequent repair as a substitute. Flagged conservatively for independent judgment because dismissal concerns a process-termination guarantee, although only documentation correctness is established."
+  },
+  {
+    "key": "g148/c2",
+    "latest_line": 4,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "capture-terminal-target-offscreen-row-premise",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The original overscan premise is source-refuted. Exit clipping is real, but the inspected annotation and hover callers use staged live terminals. The record does not establish a failing capture in its actual callers.",
+    "checks": [
+      "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:crates/farhelm-ui/assets/grid-terminal.js:631-646 creates exactly model.rows DOM rows, not offscreen history overscan; paint at 912-932 paints the clamped viewport into those rows.",
+      "At that revision grid-terminal.js:868-885 can lift and clip rows after exit. overlay.ts:305-318 does not inspect clipping; this remains a helper limitation rather than a general guarantee of visibility.",
+      "Pinned git grep finds Director.terminalText callers only at capture.spec.ts:117,127 and first-session.spec.ts:55. capture.spec.ts:73,110-130 targets migrate auth tokens before answering its input-gated menu; docs/readme-video/scenario.json5:40-47 sets waiting then quiet, and transcripts/migrate.txt:20 gates progress at that menu. first-session.spec.ts:40-60 uses the open docs session, declared running at docs/docs-shots/scenario.json5:30-39.",
+      "visual-review.spec.ts:451-512 targets only the original open session and terminal-review session, declared running and idle at docs/docs-shots/scenario.json5:30-39,73-82. stage.ts:73-75 maps these statuses to spin/quiet rather than exit.",
+      "The plain-text character-to-cell limitation is explicit in overlay.ts:294-296 and predates the migration. No capture or runtime reproduction was run."
+    ],
+    "coverage_checked": [
+      "Both specifications searched for row rendering, clipping, overscan and capture annotation behavior. SPEC_impl.md The grid client at 1836-1889 describes one element per visible row; it does not accept a broken annotation. The historical section at 647f0227:1948-2002 states the same row-rendering design.",
+      "TODO.md Planned at 25-26 is empty. Searches of plans/queue, BUGS.md and active TRIAGE_OUTCOMES.md for the actual helper, offscreen annotation and clipping claim found no exact coverage; archive not read.",
+      "INDEX.md read fully; exit-notice-hides-oldest-scrollback-row.md read fully. That item covers actual exited-terminal history viewing, not a capture helper used on live staged sessions. It corroborates the clipping mechanism, but is neither an exact duplicate nor a substantive extension supplied by this record.",
+      "FILTER.md read fully. No filter is needed for source refutation, and none grants a blanket exception for capture-target mistakes."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A shipped capture caller targeting an exited terminal whose matching text is clipped. Actual named callers supply no such premise; future callers would need rechecking.",
+    "original_stronger_consequence": "An annotation or hover could select hidden text and fail or point at the wrong visible location. Initial offscreen-history overscan was refuted; a later exit-clipping lead was explicitly investigated and closed for the current callers, not erased.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Refute the alleged reachable capture failure narrowly: no overscan rows and no exited-terminal premise in the examined callers. Preserve the clipping limitation and the existing plain-text geometry assumption. All alleged consequences are confined to noncatastrophic maintainer capture correctness."
+  },
+  {
+    "key": "g148/f1",
+    "latest_line": 8,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "capture-terminaltext-stale-no-row-dom-rationale",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The migration makes the helper's public reason for its tracking element false: it says terminal lines have no elements while its implementation now measures a DOM element per visible row. The helper remains useful for a substring; its explanation needs that distinction.",
+    "checks": [
+      "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:e2e/readme-video/overlay.ts:442-447 states the no-element-per-line rationale. In the same revision, 286-296 documents one .grid-terminal-row per visible row and 310-316 measures those row elements.",
+      "Pinned grid-terminal.js:631-646 constructs the row elements and 919-922 paints model.rows visible rows. Historical SPEC_impl.md The grid client, 1948-2002, expressly describes one element per visible row and direct grid mounting for new terminals.",
+      "Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:overlay.ts:303-315 uses xterm buffer geometry; its identical public explanation is at 440-445. Immediate-parent start-stack.sh:150-165 explicitly selects tmux/xterm for capture supervisors. The reviewed migration removes that selector and changes the helper to grid DOM geometry.",
+      "Bounded full-range git log shows 647f0227 as the only overlay.ts change. Recording-time main 24bc058066fd57848e788b465719b0e6da2f98f7:overlay.ts:442-447 still contains the stale explanation.",
+      "No broken annotation, rendering regression, security consequence or user-work loss is established. This is source-comment correctness within changed executable capture tooling, not an independent ordinary-docs review target."
+    ],
+    "coverage_checked": [
+      "Both specifications searched for the helper, tracking elements and row rendering. SPEC_impl.md The grid client:1836-1889 confirms row DOM rendering; neither specification accepts the false public rationale.",
+      "TODO.md Planned:25-26 is empty. plans/queue searched for terminalText, terminalAnchor, tracking element, no-row rationale and capture/grid cleanup. tmux-drop-from-docs criteria 3 and 5 concern stale rationales generally, but do not name this claim; plans/REPORTS.md:32 reports that plan landed in #3381-#3385. It is not current unlanded coverage, and the stale comment remains on recording-time main.",
+      "BUGS.md has no capture-helper item. Active TRIAGE_OUTCOMES.md searched for helper and rationale terms without an exact decision; archive not read.",
+      "INDEX.md read fully and queue text searched for overlay.ts, terminalText, terminalAnchor, no-row DOM and tracking elements. No exact queue item or useful extension found. g148/c2 is distinct: target visibility rather than the helper's explanation. The supplied mention of g092/l1 concerns a different async-write rationale and was not treated as an alias.",
+      "FILTER.md read fully. A permanently false source explanation does not match the rare-diagnostic or self-correcting-glitch boundary; no other filter matches."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "No stronger runtime consequence was claimed. The initial lead asked whether whole-range attribution and old-renderer callers made the explanation valid; the later source checks resolve both and retain inaccurate maintenance guidance as the finding.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Record a verified other-priority source-documentation finding at overlay.ts:445, with the renderer migration as attribution. Explain the substring anchor's purpose using row geometry; do not claim the helper is unnecessary or that captures fail."
+  }
+]

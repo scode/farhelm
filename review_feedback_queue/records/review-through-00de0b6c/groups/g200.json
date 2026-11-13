@@ -1,0 +1,799 @@
+{
+  "group": {
+    "id": "g200",
+    "domain": "test-evidence-recorder",
+    "purpose": "test-evidence-recorder: scripts/record-test-run.py, scripts/test-record-test-run.py, scripts/test-test-run-inventory.py, scripts/test-test-run-summary.py, scripts/test_run_summary.py; phases complete small per-commit changes",
+    "interfaces": [
+      "g007",
+      "g093",
+      "g094"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/01421-000.patch",
+        "ranges": [
+          [
+            1,
+            208
+          ]
+        ],
+        "original_path": "scripts/record-test-run.py",
+        "commit": "d751ff1633bb479c7bf53920f2e4ea4ba932a1c2",
+        "notes": "patch header; patch character offsets [0,9102)",
+        "lines": 208,
+        "bytes": 9102,
+        "start": 0,
+        "end": 9102,
+        "original": "[private-run]/prep/originals/01421.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01432-000.patch",
+        "ranges": [
+          [
+            1,
+            264
+          ]
+        ],
+        "original_path": "scripts/test-record-test-run.py",
+        "commit": "d751ff1633bb479c7bf53920f2e4ea4ba932a1c2",
+        "notes": "patch header; patch character offsets [0,13752)",
+        "lines": 264,
+        "bytes": 13752,
+        "start": 0,
+        "end": 13752,
+        "original": "[private-run]/prep/originals/01432.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01434-000.patch",
+        "ranges": [
+          [
+            1,
+            12
+          ]
+        ],
+        "original_path": "scripts/test-test-run-inventory.py",
+        "commit": "d751ff1633bb479c7bf53920f2e4ea4ba932a1c2",
+        "notes": "patch header; patch character offsets [0,888)",
+        "lines": 12,
+        "bytes": 888,
+        "start": 0,
+        "end": 888,
+        "original": "[private-run]/prep/originals/01434.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01435-000.patch",
+        "ranges": [
+          [
+            1,
+            44
+          ]
+        ],
+        "original_path": "scripts/test-test-run-summary.py",
+        "commit": "d751ff1633bb479c7bf53920f2e4ea4ba932a1c2",
+        "notes": "patch header; patch character offsets [0,2587)",
+        "lines": 44,
+        "bytes": 2587,
+        "start": 0,
+        "end": 2587,
+        "original": "[private-run]/prep/originals/01435.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01437-000.patch",
+        "ranges": [
+          [
+            1,
+            59
+          ]
+        ],
+        "original_path": "scripts/test_run_summary.py",
+        "commit": "d751ff1633bb479c7bf53920f2e4ea4ba932a1c2",
+        "notes": "patch header; patch character offsets [0,3696)",
+        "lines": 59,
+        "bytes": 3696,
+        "start": 0,
+        "end": 3696,
+        "original": "[private-run]/prep/originals/01437.patch"
+      }
+    ],
+    "lines": 587,
+    "bytes": 30025
+  },
+  "records": [
+    {
+      "key": "g200/l1",
+      "owner": "g200",
+      "id": "l1",
+      "domain": "test-evidence-recorder",
+      "purpose": "test-evidence-recorder: scripts/record-test-run.py, scripts/test-record-test-run.py, scripts/test-test-run-inventory.py, scripts/test-test-run-summary.py, scripts/test_run_summary.py; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Check whether ignoring historical tmux evidence hides required coverage gaps",
+            "location": "scripts/test_run_summary.py:175",
+            "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. TLDR: retained test results may lose the explanation that they ran against a different or unidentified terminal backend. Source basis: the assigned summary patch deletes pinned_substrate_not_established and deliberately ignores every legacy tmux field; the new test requires matched, mismatched and malformed legacy values to equal a current record. Contract check pending: determine whether historical substrate identity remains required by the pinned specification or evidence documentation, and whether other evidence preserves a refusal. Suggested bucket: other (maintainer evidence tooling); could-be-highest: no established catastrophic or shipped-product route. Confidence: unresolved lead, not a validated defect. proposed_drop: false pending contract analysis. possible_cover: none; no coverage sources searched. No execution performed. Next checks: read governing pinned specification sections and evidence documentation, then trace summary consumers and recorder outcomes. Exact missing premise: whether ignoring historical mismatch is an accepted contract or materially misleading classification."
+          }
+        },
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Historical tmux evidence is deliberately ignored under the documented schema contract",
+            "location": "scripts/test_run_summary.py:175",
+            "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. TLDR considered: retained test results lose the explanation that they ran against a different or unidentified terminal backend. Source basis: scripts/test_run_summary.py removes the legacy substrate class and pinned_substrate_not_established gap; scripts/test-test-run-summary.py:119 requires current-equivalent summaries for matched, mismatched and malformed legacy fields. Contract result: docs/test-run-evidence.md:328-329 explicitly says, \"Records written before the recorder's tmux mode was removed also carry a `tmux` field, the evidence of a check against a pinned test tmux that no longer exists. Readers ignore it; the summary below treats such a record as a current one.\" SPEC_impl.md:2786-2791 states that every terminal runs in a terminal host and the running supervisor runs no tmux. The commit's stated purpose also explicitly removes historical tmux summary reporting. Suggested bucket if policy were different: other, maintainer evidence tooling; could-be-highest: no established catastrophic or shipped-product route. Confidence: confirmed contract acceptance, source-only. proposed_drop: the exact documented schema rule above explicitly accepts ignoring retained tmux identity. possible_cover: none; no coverage sources searched. Checks made: full assigned summary and fixture patches, pinned schema documentation, pinned terminal-substrate section, commit rationale. Original suspected consequence remains true as a policy choice, not a defect. No execution performed; lead closed as candidate."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Synthesis retains the proposed historical-tmux drop under the explicit schema rule",
+            "location": "scripts/test_run_summary.py:177",
+            "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. Original and latest TLDR consequence: retained test results lose the explanation that they ran against a different or unidentified terminal backend. This consequence remains true; it has not been lowered or refuted as behavior. Rechecked exact source: scripts/test_run_summary.py:177-180 explicitly ignores old tmux identity, :210-214 still preserves child/recorder/outcome facts, and :230-251 independently retains source, console, output, trace and cleanup gaps. Mandatory patches 01435 and 01437 were redelivered through the canonical evidence manifest this turn. Exact acceptance text, docs/test-run-evidence.md:328-329: \"Records written before the recorder's tmux mode was removed also carry a `tmux` field, the evidence of a check against a pinned test tmux that no longer exists. Readers ignore it; the summary below treats such a record as a current one.\" This is an explicit contract for historical records, rather than an inference that old mismatches did not matter at execution time. Suggested bucket remains other (maintainer evidence tooling); could-be-highest: no established catastrophic or shipped-product security/loss-of-work route. Confidence: confirmed source behavior and explicit acceptance. proposed_drop: the quoted historical-record rule expressly accepts the original consequence; this remains a reviewer proposal, with no parent drop accepted or presumed. possible_cover: none; forbidden coverage sources were not searched. Checks/results: numbered pinned schema and full summary classification/aggregation read; actual command failures and refusals remain independent. No execution, reproduction, or runtime observation. No unresolved premise for this candidate."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Resolve whether the historical-identity omission rule has governing contract authority",
+            "location": "scripts/test_run_summary.py:177",
+            "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. Original and latest TLDR consequence preserved: retained test results lose the explanation that they ran against a different or unidentified terminal backend. Source behavior is established by the assigned patch and summary source. Parent input challenges the authority of the existing proposed-drop basis, not the behavior: docs/test-run-evidence.md:328-329 says \"Records written before the recorder's tmux mode was removed also carry a `tmux` field, the evidence of a check against a pinned test tmux that no longer exists. Readers ignore it; the summary below treats such a record as a current one.\" That existing proposed drop is retained as a proposal, with no parent acceptance presumed. Open check: find an authoritative pinned SPEC/root-contract delegation to this schema document, or explicit governing acceptance of historical identity loss; if absent, retain a narrow other finding with the documented proposed-drop rule and unresolved authority. Suggested bucket remains other; could-be-highest: no established catastrophic or shipped-product loss-of-work/security route from maintainer reporting. Confidence: confirmed behavior, authority unresolved pending actual source searches. proposed_drop: exact document rule quoted above, under authority investigation. possible_cover: none. No runtime observations or reproductions. Next useful checks: pinned SPEC/SPEC_impl and root instruction references to evidence schema/contract, following their mandatory documentation pointers. No new discovery is asserted by reopening this existing ID."
+          }
+        },
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Root instruction chain delegates recorder schema to the document that explicitly omits historical tmux identity",
+            "location": "scripts/test_run_summary.py:177",
+            "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. Original and latest TLDR consequence unchanged: retained test results lose the explanation that they ran against a different or unidentified terminal backend. This is a real source behavior, not refuted by correct current status aggregation. Parent authority question investigated before discovery: pinned AGENTS.md:13-14 says \"It holds the rules for any task and a map of every flow; the procedures live in the files it names.\" AGENTS.md:261-264 mandates reading .agents/test-evidence.md in full for test evidence work. That named instruction file's :3-7 identifies its text as the root evidence rules moved unchanged, and :26 explicitly delegates: \"Storage, schema, interruption limits, and examples are in `docs/test-run-evidence.md`.\" The delegated schema document's :328-329 explicitly says \"Records written before the recorder's tmux mode was removed also carry a `tmux` field, the evidence of a check against a pinned test tmux that no longer exists. Readers ignore it; the summary below treats such a record as a current one.\" These are a pinned root-instruction-to-schema contract chain, not only a code comment or commit intention. Targeted searches of pinned SPEC.md/SPEC_impl.md for the recorder, summary, evidence-document and historical-identity terms found no distinct recorder schema contract or competing preservation rule. The root's general no-inferred-pass requirement at :242 and runtime-skip rule at :246-249 remain applicable, but neither demands exporting the retired tmux field; .agents/test-evidence.md:23-26 asks for actual available substrate evidence and then delegates schema. Suggested bucket remains other; could-be-highest: no established catastrophic or shipped security/loss-of-work route. Confidence: confirmed behavior and root-delegated schema rule; the delegation is established by the exact quoted chain, while final acceptance of the proposed drop remains the parent's judgment. proposed_drop: the exact delegated schema rule accepts the original historical-identity omission. All earlier proposed-drop bases and original/latest consequences are preserved; no parent drop or lowering is accepted or presumed. possible_cover: none; forbidden coverage sources not searched. Checks made: full pinned .agents/test-evidence.md, numbered root map and validation rules, targeted SPEC/root reference searches (broad initial search clipped; replaced by narrow complete search). No execution or reproduction. Authority lead closed to candidate; no missing readily checkable premise retained."
+          }
+        }
+      ],
+      "latest": {
+        "line": 13,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l1",
+          "state": "open",
+          "summary": "Root instruction chain delegates recorder schema to the document that explicitly omits historical tmux identity",
+          "location": "scripts/test_run_summary.py:177",
+          "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. Original and latest TLDR consequence unchanged: retained test results lose the explanation that they ran against a different or unidentified terminal backend. This is a real source behavior, not refuted by correct current status aggregation. Parent authority question investigated before discovery: pinned AGENTS.md:13-14 says \"It holds the rules for any task and a map of every flow; the procedures live in the files it names.\" AGENTS.md:261-264 mandates reading .agents/test-evidence.md in full for test evidence work. That named instruction file's :3-7 identifies its text as the root evidence rules moved unchanged, and :26 explicitly delegates: \"Storage, schema, interruption limits, and examples are in `docs/test-run-evidence.md`.\" The delegated schema document's :328-329 explicitly says \"Records written before the recorder's tmux mode was removed also carry a `tmux` field, the evidence of a check against a pinned test tmux that no longer exists. Readers ignore it; the summary below treats such a record as a current one.\" These are a pinned root-instruction-to-schema contract chain, not only a code comment or commit intention. Targeted searches of pinned SPEC.md/SPEC_impl.md for the recorder, summary, evidence-document and historical-identity terms found no distinct recorder schema contract or competing preservation rule. The root's general no-inferred-pass requirement at :242 and runtime-skip rule at :246-249 remain applicable, but neither demands exporting the retired tmux field; .agents/test-evidence.md:23-26 asks for actual available substrate evidence and then delegates schema. Suggested bucket remains other; could-be-highest: no established catastrophic or shipped security/loss-of-work route. Confidence: confirmed behavior and root-delegated schema rule; the delegation is established by the exact quoted chain, while final acceptance of the proposed drop remains the parent's judgment. proposed_drop: the exact delegated schema rule accepts the original historical-identity omission. All earlier proposed-drop bases and original/latest consequences are preserved; no parent drop or lowering is accepted or presumed. possible_cover: none; forbidden coverage sources not searched. Checks made: full pinned .agents/test-evidence.md, numbered root map and validation rules, targeted SPEC/root reference searches (broad initial search clipped; replaced by narrow complete search). No execution or reproduction. Authority lead closed to candidate; no missing readily checkable premise retained."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g200/findings.jsonl",
+        "id": "l1",
+        "line": 13,
+        "disposition": "excluded",
+        "group": "recorder-retired-tmux-identity-omission",
+        "reason": "Parent explicitly accepted named covered proposal from claims-124 after inspecting it. Historical tmux identity disappears from portable summaries, as originally suspected. The latest authority claim is established: root instructions delegate the recorder schema to the document that expressly requires this behavior. This proposes acceptance under that delegated tooling contract, not a claim that the omission did not happen or that old mismatches were harmless when executed. Covered by the explicit root-delegated tooling schema contract. Neither a direct SPEC acceptance nor an unlanded plan is claimed. Parent must decide whether this delegated contract suffices under the recording rule's coverage categories. Checked source/results: [\"At d751ff1633bb479c7bf53920f2e4ea4ba932a1c2, scripts/test_run_summary.py:169-181 expressly ignores legacy tmux; :186-214 preserves child, recorder and outcome facts; :230-251 preserves independent evidence gaps.\",\"At the same revision, scripts/test-test-run-summary.py:119-142 requires equal full summaries for absent, matched, mismatched and malformed legacy fields.\",\"At that revision, AGENTS.md:13-14 locates task rules and named procedures; :261-264 mandates .agents/test-evidence.md. The latter's opening identifies the moved root evidence rules, and :26 explicitly delegates storage and schema to docs/test-run-evidence.md. Its :328-329 accepts the precise historical omission. Current docs retain the identical rule at :328-329.\",\"Targeted pinned SPEC.md/SPEC_impl.md searches found no recorder-summary schema or competing historical-identity preservation rule. Current SPEC_impl.md Testing describes the current terminal/testing architecture, without imposing a historical tmux-summary requirement.\",\"The five assigned paths changed only in d751ff1633bb479c7bf53920f2e4ea4ba932a1c2 within the review range. No execution or reproduction performed.\"] Current coverage/results: [\"SPEC.md and SPEC_impl.md: no direct acceptance or prohibition of historical recorder tmux identity omission; root-delegated schema contract is the proposed basis instead.\",\"TODO.md Planned: empty at current recording tree, lines 25-27.\",\"plans/queue: exact tmux-drop-from-tooling acceptance criterion 2 and planner proposal at lines 120-122 require omission. plans/REPORTS.md:31 establishes that plan already landed, so it is context, not unlanded-plan coverage.\",\"BUGS.md: only the local ssh-output provisioning hang; different trigger and consequence.\",\"INDEX.md and matching queue files: timing-history-can-retain-failed-recorder-success concerns publication ordering, runtime-recorder-guidance-conflict concerns recorder bypass guidance, and outer-recorder-deletes-nested-failure-evidence concerns cleanup deletion. None covers retired identity classification.\",\"Active TRIAGE_OUTCOMES.md: recorder-success and sticky-parent decisions have different causes; no exact identity-omission decision found. Archive not read.\",\"FILTER.md: no filter used. Deliberate treatment of all historical records is not a rare self-correcting glitch.\"] Exact cited cover: [\".agents/test-evidence.md:26 at reviewed revision: Storage, schema, interruption limits, and examples are in `docs/test-run-evidence.md`.\",\"docs/test-run-evidence.md:328-329, reviewed revision and current: Records written before the recorder's tmux mode was removed also carry a `tmux` field, the evidence of a check against a pinned test tmux that no longer exists. Readers ignore it; the summary below treats such a record as a current one.\"] Original stronger consequence and missing premise remain preserved: \"Retained test results lose the explanation that they ran against a different or unidentified terminal backend. This behavior remains true. The initial proposed drop was reopened for governing-authority analysis, then restored on the root-to-schema delegation; no parent approval or withdrawal of the original consequence is inferred.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g200/l1",
+        "line": 13,
+        "disposition": "excluded",
+        "group": "recorder-retired-tmux-identity-omission",
+        "bucket": "other",
+        "recording": "covered",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named covered proposal from claims-124 after inspecting it. Historical tmux identity disappears from portable summaries, as originally suspected. The latest authority claim is established: root instructions delegate the recorder schema to the document that expressly requires this behavior. This proposes acceptance under that delegated tooling contract, not a claim that the omission did not happen or that old mismatches were harmless when executed. Covered by the explicit root-delegated tooling schema contract. Neither a direct SPEC acceptance nor an unlanded plan is claimed. Parent must decide whether this delegated contract suffices under the recording rule's coverage categories. Checked source/results: [\"At d751ff1633bb479c7bf53920f2e4ea4ba932a1c2, scripts/test_run_summary.py:169-181 expressly ignores legacy tmux; :186-214 preserves child, recorder and outcome facts; :230-251 preserves independent evidence gaps.\",\"At the same revision, scripts/test-test-run-summary.py:119-142 requires equal full summaries for absent, matched, mismatched and malformed legacy fields.\",\"At that revision, AGENTS.md:13-14 locates task rules and named procedures; :261-264 mandates .agents/test-evidence.md. The latter's opening identifies the moved root evidence rules, and :26 explicitly delegates storage and schema to docs/test-run-evidence.md. Its :328-329 accepts the precise historical omission. Current docs retain the identical rule at :328-329.\",\"Targeted pinned SPEC.md/SPEC_impl.md searches found no recorder-summary schema or competing historical-identity preservation rule. Current SPEC_impl.md Testing describes the current terminal/testing architecture, without imposing a historical tmux-summary requirement.\",\"The five assigned paths changed only in d751ff1633bb479c7bf53920f2e4ea4ba932a1c2 within the review range. No execution or reproduction performed.\"] Current coverage/results: [\"SPEC.md and SPEC_impl.md: no direct acceptance or prohibition of historical recorder tmux identity omission; root-delegated schema contract is the proposed basis instead.\",\"TODO.md Planned: empty at current recording tree, lines 25-27.\",\"plans/queue: exact tmux-drop-from-tooling acceptance criterion 2 and planner proposal at lines 120-122 require omission. plans/REPORTS.md:31 establishes that plan already landed, so it is context, not unlanded-plan coverage.\",\"BUGS.md: only the local ssh-output provisioning hang; different trigger and consequence.\",\"INDEX.md and matching queue files: timing-history-can-retain-failed-recorder-success concerns publication ordering, runtime-recorder-guidance-conflict concerns recorder bypass guidance, and outer-recorder-deletes-nested-failure-evidence concerns cleanup deletion. None covers retired identity classification.\",\"Active TRIAGE_OUTCOMES.md: recorder-success and sticky-parent decisions have different causes; no exact identity-omission decision found. Archive not read.\",\"FILTER.md: no filter used. Deliberate treatment of all historical records is not a rare self-correcting glitch.\"] Exact cited cover: [\".agents/test-evidence.md:26 at reviewed revision: Storage, schema, interruption limits, and examples are in `docs/test-run-evidence.md`.\",\"docs/test-run-evidence.md:328-329, reviewed revision and current: Records written before the recorder's tmux mode was removed also carry a `tmux` field, the evidence of a check against a pinned test tmux that no longer exists. Readers ignore it; the summary below treats such a record as a current one.\"] Original stronger consequence and missing premise remain preserved: \"Retained test results lose the explanation that they ran against a different or unidentified terminal backend. This behavior remains true. The initial proposed drop was reopened for governing-authority analysis, then restored on the root-to-schema delegation; no parent approval or withdrawal of the original consequence is inferred.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-124",
+          "key": "g200/l1",
+          "latest_line": 13,
+          "recommendation": "covered",
+          "bucket": "other",
+          "underlying_key": "recorder-retired-tmux-identity-omission",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Historical tmux identity disappears from portable summaries, as originally suspected. The latest authority claim is established: root instructions delegate the recorder schema to the document that expressly requires this behavior. This proposes acceptance under that delegated tooling contract, not a claim that the omission did not happen or that old mismatches were harmless when executed.",
+          "checks": [
+            "At d751ff1633bb479c7bf53920f2e4ea4ba932a1c2, scripts/test_run_summary.py:169-181 expressly ignores legacy tmux; :186-214 preserves child, recorder and outcome facts; :230-251 preserves independent evidence gaps.",
+            "At the same revision, scripts/test-test-run-summary.py:119-142 requires equal full summaries for absent, matched, mismatched and malformed legacy fields.",
+            "At that revision, AGENTS.md:13-14 locates task rules and named procedures; :261-264 mandates .agents/test-evidence.md. The latter's opening identifies the moved root evidence rules, and :26 explicitly delegates storage and schema to docs/test-run-evidence.md. Its :328-329 accepts the precise historical omission. Current docs retain the identical rule at :328-329.",
+            "Targeted pinned SPEC.md/SPEC_impl.md searches found no recorder-summary schema or competing historical-identity preservation rule. Current SPEC_impl.md Testing describes the current terminal/testing architecture, without imposing a historical tmux-summary requirement.",
+            "The five assigned paths changed only in d751ff1633bb479c7bf53920f2e4ea4ba932a1c2 within the review range. No execution or reproduction performed."
+          ],
+          "coverage_checked": [
+            "SPEC.md and SPEC_impl.md: no direct acceptance or prohibition of historical recorder tmux identity omission; root-delegated schema contract is the proposed basis instead.",
+            "TODO.md Planned: empty at current recording tree, lines 25-27.",
+            "plans/queue: exact tmux-drop-from-tooling acceptance criterion 2 and planner proposal at lines 120-122 require omission. plans/REPORTS.md:31 establishes that plan already landed, so it is context, not unlanded-plan coverage.",
+            "BUGS.md: only the local ssh-output provisioning hang; different trigger and consequence.",
+            "INDEX.md and matching queue files: timing-history-can-retain-failed-recorder-success concerns publication ordering, runtime-recorder-guidance-conflict concerns recorder bypass guidance, and outer-recorder-deletes-nested-failure-evidence concerns cleanup deletion. None covers retired identity classification.",
+            "Active TRIAGE_OUTCOMES.md: recorder-success and sticky-parent decisions have different causes; no exact identity-omission decision found. Archive not read.",
+            "FILTER.md: no filter used. Deliberate treatment of all historical records is not a rare self-correcting glitch."
+          ],
+          "exact_cover_quotes": [
+            ".agents/test-evidence.md:26 at reviewed revision: Storage, schema, interruption limits, and examples are in `docs/test-run-evidence.md`.",
+            "docs/test-run-evidence.md:328-329, reviewed revision and current: Records written before the recorder's tmux mode was removed also carry a `tmux` field, the evidence of a check against a pinned test tmux that no longer exists. Readers ignore it; the summary below treats such a record as a current one."
+          ],
+          "missing_premise": null,
+          "original_stronger_consequence": "Retained test results lose the explanation that they ran against a different or unidentified terminal backend. This behavior remains true. The initial proposed drop was reopened for governing-authority analysis, then restored on the root-to-schema delegation; no parent approval or withdrawal of the original consequence is inferred.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Covered by the explicit root-delegated tooling schema contract. Neither a direct SPEC acceptance nor an unlanded plan is claimed. Parent must decide whether this delegated contract suffices under the recording rule's coverage categories."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "recorder-retired-tmux-identity-omission",
+        "destination": null
+      }
+    },
+    {
+      "key": "g200/c2",
+      "owner": "g200",
+      "id": "c2",
+      "domain": "test-evidence-recorder",
+      "purpose": "test-evidence-recorder: scripts/record-test-run.py, scripts/test-record-test-run.py, scripts/test-test-run-inventory.py, scripts/test-test-run-summary.py, scripts/test_run_summary.py; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "No stale recorder option or removed-helper consumers found in maintained caller paths",
+            "location": "scripts/record-test-run.py:224",
+            "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. TLDR considered: removing --tmux or its helper functions could refuse maintained test commands or break imports and summary consumers. Check actually made: pinned git grep across scripts, .github, e2e, docs, .agents, deflake and crates for capture_tmux, parse_tmux_pin, hash_file calls, --tmux, pinned_substrate and substrate/substrates key accesses. The only matches are explicit refusal tests and documentation of removal; no maintained invocation, removed-helper reference, or deleted-summary-key reader was found. Historical coverage files were not searched. Contract: docs/test-run-evidence.md:96-99 says, \"Any other option the recorder does not know is refused with exit 125 before a run directory exists. That includes `--tmux`, which selected a check against a pinned test tmux that no longer exists; commands kept in historical records ... still pass it and need it removed before they are rerun.\" Suggested bucket: other; could-be-highest: no, this concern is confined to maintainer command compatibility without a catastrophic route. Confidence: source-refuted within maintained paths searched. proposed_drop: no maintained broken caller found and historical command refusal is explicitly documented as accepted. possible_cover: none. No execution performed. This does not claim exhaustive caller coverage beyond the named paths."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Synthesis finds no broken maintained recorder caller after option removal",
+            "location": "scripts/record-test-run.py:238",
+            "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. Original and latest suspected TLDR consequence: removing --tmux or its helpers could refuse maintained test commands or break imports and summary consumers. No such route was established. Repeated pinned search across scripts, .github, e2e, docs, .agents, deflake, crates, README.md, SPEC.md and SPEC_impl.md for --tmux, capture_tmux, parse_tmux_pin, hash_file calls, pinned_substrate and substrate/substrates key accesses: only intentional refusal assertions and removal documentation remain; no live recorder invocation or deleted-key consumer matched. Inspected actual maintained callers rather than relying only on absence: scripts/test_hunt.py:201-208 builds recorder_args with current options and calls recorder.run; .github/dist-build-setup.yml:265-273 and :279-294 invoke both nextest and generic modes without --tmux; scripts/tensorlake/run-rust-shard.sh:104-109 does likewise. Their passed options remain parser registrations in the pinned source. Exact compatibility contract, docs/test-run-evidence.md:97-99: \"Any other option the recorder does not know is refused with exit 125 before a run directory exists. That includes `--tmux`, which selected a check against a pinned test tmux that no longer exists; commands kept in historical records (older `FLAKES.md` entries, `plans/`, `lore/`) still pass it and need it removed before they are rerun.\" Suggested bucket remains other; could-be-highest: no, no catastrophic route from this maintainer command compatibility concern is established. Confidence: source-refuted within maintained paths checked. proposed_drop: no broken maintained caller found and historical refusal is explicitly accepted by the exact quoted rule; no parent drop is presumed. possible_cover: none. Caveat: arbitrary external commands were not inspected and may need the documented historical-option removal. No forbidden coverage-source search or execution performed. Original possible consequence is preserved, not lowered."
+          }
+        },
+        {
+          "line": 15,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Discovery also finds no stale manifest-field requirement in export or timing consumers",
+            "location": "scripts/record-test-run.py:1726",
+            "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. Original/latest suspected TLDR consequence preserved: removing --tmux or its helpers could refuse maintained test commands or break imports and summary consumers. Discovery extended the actual consumer check to removal of the top-level tmux field without a schema bump: pinned .github/dist-build-setup.yml:565-596 copies manifest.json as an opaque file and its fixed collectors use runner-config/trace locations, not tmux identity; scripts/test_run_timings.py:112-124 selects source, command, outcome, recorder and labels, with no tmux requirement. Complete literal tmux/substrate searches over the tracked recorder/summary/inventory/runner/trace/timing test-run scripts show only intentional legacy documentation/tests, general skip wording and unrelated socket cleanup text, no stale required field. The tracked-file listing was checked so nonexistent guessed collector names are not treated as reviewed consumers. These checks add schema/export compatibility evidence without asserting arbitrary external consumers are compatible. Suggested bucket remains other; could-be-highest: no established catastrophic route. Confidence: source-refuted within maintained checked callers. proposed_drop: no broken maintained option/helper/manifest-field consumer was found; historical command refusal and identity omission remain governed by the exact docs/test-run-evidence.md:97-99 and :328-329 rules already preserved in this ID's history and l1's root-delegation check. No parent drop or lowering accepted or presumed. possible_cover: none. No execution or reproduction. No separate defect or unresolved premise discovered."
+          }
+        }
+      ],
+      "latest": {
+        "line": 15,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Discovery also finds no stale manifest-field requirement in export or timing consumers",
+          "location": "scripts/record-test-run.py:1726",
+          "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. Original/latest suspected TLDR consequence preserved: removing --tmux or its helpers could refuse maintained test commands or break imports and summary consumers. Discovery extended the actual consumer check to removal of the top-level tmux field without a schema bump: pinned .github/dist-build-setup.yml:565-596 copies manifest.json as an opaque file and its fixed collectors use runner-config/trace locations, not tmux identity; scripts/test_run_timings.py:112-124 selects source, command, outcome, recorder and labels, with no tmux requirement. Complete literal tmux/substrate searches over the tracked recorder/summary/inventory/runner/trace/timing test-run scripts show only intentional legacy documentation/tests, general skip wording and unrelated socket cleanup text, no stale required field. The tracked-file listing was checked so nonexistent guessed collector names are not treated as reviewed consumers. These checks add schema/export compatibility evidence without asserting arbitrary external consumers are compatible. Suggested bucket remains other; could-be-highest: no established catastrophic route. Confidence: source-refuted within maintained checked callers. proposed_drop: no broken maintained option/helper/manifest-field consumer was found; historical command refusal and identity omission remain governed by the exact docs/test-run-evidence.md:97-99 and :328-329 rules already preserved in this ID's history and l1's root-delegation check. No parent drop or lowering accepted or presumed. possible_cover: none. No execution or reproduction. No separate defect or unresolved premise discovered."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g200/findings.jsonl",
+        "id": "c2",
+        "line": 15,
+        "disposition": "excluded",
+        "group": "recorder-retired-tmux-consumer-compatibility",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-124 after inspecting it. No broken maintained option, helper, summary-key or manifest-field consumer is established. Historical commands containing the retired option are deliberately refused. This is a bounded source refutation of the named maintained-caller hypothesis, not a promise about arbitrary external scripts. Bounded source refutation for maintained consumers checked. Keep the documented external/historical-command caveat; identity omission itself remains separately preserved in g200/l1. Checked source/results: [\"At d751ff1633bb479c7bf53920f2e4ea4ba932a1c2, git grep over scripts, .github, e2e, docs, .agents, deflake, crates, README.md and both specifications found capture_tmux/parse_tmux_pin/pinned_substrate and retired-option matches only in intentional removal/refusal documentation and tests. The remaining substrate classifier name labels latent-flake causes, not a manifest key consumer.\",\"scripts/test_hunt.py:201-208, .github/dist-build-setup.yml:265-294 and scripts/tensorlake/run-rust-shard.sh:104-109 use registered current recorder options and no --tmux.\",\".github/dist-build-setup.yml:565-596 copies manifest.json opaquely and invokes fixed-location nextest/trace collectors. scripts/test_run_timings.py:112-127 reads source, outcome, recorder, labels and timing fields without requiring tmux.\",\"scripts/test_run_inventory.py:243-276 and scripts/summarize-test-runs.py:55-70 consume the remaining summary interface. No deleted-key lookup appears in these paths.\",\"docs/test-run-evidence.md:97-99 explicitly requires removing --tmux from historical commands before rerunning them. No runtime validation performed.\"] Current coverage/results: [\"Both specifications: no recorder caller compatibility rule requiring this retired option or field.\",\"TODO.md Planned empty; BUGS.md has no recorder compatibility item.\",\"plans/queue/tmux-drop-from-tooling.md criterion 2 and lines 120-122 explicitly prescribe removal and legacy-reader tolerance; plan already landed per plans/REPORTS.md:31, so not unlanded coverage.\",\"Full INDEX and matching recorder queue files checked: timing publication, sticky parent, nested cleanup and runtime-recorder guidance items have distinct roots; no exact alias or useful extension identified.\",\"Active TRIAGE_OUTCOMES.md searched for retired options, helpers, manifest and summary identities; no exact decision found. Archive not read.\",\"FILTER.md: no filter used; source refutation and the documented historical refusal rule are the bases.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing --tmux or its helpers could refuse maintained test commands or break imports and summary consumers. Later schema/export checks extended that same compatibility hypothesis; no stronger catastrophic or product-work consequence was claimed, and no parent drop is inferred.\"; \"A maintained caller or consumer that actually uses the removed interface; none found in the named paths. Arbitrary external commands were not inventoried.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g200/c2",
+        "line": 15,
+        "disposition": "excluded",
+        "group": "recorder-retired-tmux-consumer-compatibility",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-124 after inspecting it. No broken maintained option, helper, summary-key or manifest-field consumer is established. Historical commands containing the retired option are deliberately refused. This is a bounded source refutation of the named maintained-caller hypothesis, not a promise about arbitrary external scripts. Bounded source refutation for maintained consumers checked. Keep the documented external/historical-command caveat; identity omission itself remains separately preserved in g200/l1. Checked source/results: [\"At d751ff1633bb479c7bf53920f2e4ea4ba932a1c2, git grep over scripts, .github, e2e, docs, .agents, deflake, crates, README.md and both specifications found capture_tmux/parse_tmux_pin/pinned_substrate and retired-option matches only in intentional removal/refusal documentation and tests. The remaining substrate classifier name labels latent-flake causes, not a manifest key consumer.\",\"scripts/test_hunt.py:201-208, .github/dist-build-setup.yml:265-294 and scripts/tensorlake/run-rust-shard.sh:104-109 use registered current recorder options and no --tmux.\",\".github/dist-build-setup.yml:565-596 copies manifest.json opaquely and invokes fixed-location nextest/trace collectors. scripts/test_run_timings.py:112-127 reads source, outcome, recorder, labels and timing fields without requiring tmux.\",\"scripts/test_run_inventory.py:243-276 and scripts/summarize-test-runs.py:55-70 consume the remaining summary interface. No deleted-key lookup appears in these paths.\",\"docs/test-run-evidence.md:97-99 explicitly requires removing --tmux from historical commands before rerunning them. No runtime validation performed.\"] Current coverage/results: [\"Both specifications: no recorder caller compatibility rule requiring this retired option or field.\",\"TODO.md Planned empty; BUGS.md has no recorder compatibility item.\",\"plans/queue/tmux-drop-from-tooling.md criterion 2 and lines 120-122 explicitly prescribe removal and legacy-reader tolerance; plan already landed per plans/REPORTS.md:31, so not unlanded coverage.\",\"Full INDEX and matching recorder queue files checked: timing publication, sticky parent, nested cleanup and runtime-recorder guidance items have distinct roots; no exact alias or useful extension identified.\",\"Active TRIAGE_OUTCOMES.md searched for retired options, helpers, manifest and summary identities; no exact decision found. Archive not read.\",\"FILTER.md: no filter used; source refutation and the documented historical refusal rule are the bases.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing --tmux or its helpers could refuse maintained test commands or break imports and summary consumers. Later schema/export checks extended that same compatibility hypothesis; no stronger catastrophic or product-work consequence was claimed, and no parent drop is inferred.\"; \"A maintained caller or consumer that actually uses the removed interface; none found in the named paths. Arbitrary external commands were not inventoried.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-124",
+          "key": "g200/c2",
+          "latest_line": 15,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "recorder-retired-tmux-consumer-compatibility",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "No broken maintained option, helper, summary-key or manifest-field consumer is established. Historical commands containing the retired option are deliberately refused. This is a bounded source refutation of the named maintained-caller hypothesis, not a promise about arbitrary external scripts.",
+          "checks": [
+            "At d751ff1633bb479c7bf53920f2e4ea4ba932a1c2, git grep over scripts, .github, e2e, docs, .agents, deflake, crates, README.md and both specifications found capture_tmux/parse_tmux_pin/pinned_substrate and retired-option matches only in intentional removal/refusal documentation and tests. The remaining substrate classifier name labels latent-flake causes, not a manifest key consumer.",
+            "scripts/test_hunt.py:201-208, .github/dist-build-setup.yml:265-294 and scripts/tensorlake/run-rust-shard.sh:104-109 use registered current recorder options and no --tmux.",
+            ".github/dist-build-setup.yml:565-596 copies manifest.json opaquely and invokes fixed-location nextest/trace collectors. scripts/test_run_timings.py:112-127 reads source, outcome, recorder, labels and timing fields without requiring tmux.",
+            "scripts/test_run_inventory.py:243-276 and scripts/summarize-test-runs.py:55-70 consume the remaining summary interface. No deleted-key lookup appears in these paths.",
+            "docs/test-run-evidence.md:97-99 explicitly requires removing --tmux from historical commands before rerunning them. No runtime validation performed."
+          ],
+          "coverage_checked": [
+            "Both specifications: no recorder caller compatibility rule requiring this retired option or field.",
+            "TODO.md Planned empty; BUGS.md has no recorder compatibility item.",
+            "plans/queue/tmux-drop-from-tooling.md criterion 2 and lines 120-122 explicitly prescribe removal and legacy-reader tolerance; plan already landed per plans/REPORTS.md:31, so not unlanded coverage.",
+            "Full INDEX and matching recorder queue files checked: timing publication, sticky parent, nested cleanup and runtime-recorder guidance items have distinct roots; no exact alias or useful extension identified.",
+            "Active TRIAGE_OUTCOMES.md searched for retired options, helpers, manifest and summary identities; no exact decision found. Archive not read.",
+            "FILTER.md: no filter used; source refutation and the documented historical refusal rule are the bases."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "A maintained caller or consumer that actually uses the removed interface; none found in the named paths. Arbitrary external commands were not inventoried.",
+          "original_stronger_consequence": "Removing --tmux or its helpers could refuse maintained test commands or break imports and summary consumers. Later schema/export checks extended that same compatibility hypothesis; no stronger catastrophic or product-work consequence was claimed, and no parent drop is inferred.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Bounded source refutation for maintained consumers checked. Keep the documented external/historical-command caveat; identity omission itself remains separately preserved in g200/l1."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "recorder-retired-tmux-consumer-compatibility",
+        "destination": null
+      }
+    },
+    {
+      "key": "g200/c3",
+      "owner": "g200",
+      "id": "c3",
+      "domain": "test-evidence-recorder",
+      "purpose": "test-evidence-recorder: scripts/record-test-run.py, scripts/test-record-test-run.py, scripts/test-test-run-inventory.py, scripts/test-test-run-summary.py, scripts/test_run_summary.py; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Replacement Git guard establishes probe scrubbing without changing the test process environment",
+            "location": "scripts/test-record-test-run.py:1308",
+            "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. TLDR considered: replacing the tmux guard might leave the privacy test passing without exercising the metadata probes. Source checks: scripts/test-record-test-run.py:1308-1340 installs a PATH-first shell guard, quotes the real Git path and invocation-log path with shlex.quote, logs every call, refuses the controlled FARHELM_SECRET name with exit 97, and execs real Git otherwise. Lines 1342-1386 supply FARHELM_SECRET through an explicit child environment, require both a nonempty guard log and complete source identity, check absence of the secret from command output and metadata, and assert retained/removed variable names. scripts/record-test-run.py:1052-1127 derives complete identity from successful Git probes; :1783-1848 passes controlled_environment's copy to discovery and capture_source. No change to os.environ in this test, no background fixture or readiness boundary is introduced, and no leak or vacuous guard route was found. Suggested bucket if a gap existed: other, maintainer test quality; could-be-highest: no established catastrophic route. Confidence: source-refuted. proposed_drop: the guard-reached and source-complete assertions distinguish guarded scrubbed probes from failed or bypassed probes under the current implementation. possible_cover: none. Caveat: this is source-contract review, not execution or a mutation proof; it does not claim resistance to arbitrary future per-probe executable-path changes."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Synthesis confirms the Git guard tests the controlled probe environment",
+            "location": "scripts/test-record-test-run.py:1308",
+            "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. Original and latest suspected TLDR consequence: replacing the tmux guard might leave the privacy test passing without exercising metadata probes. Rechecked the canonical assigned patch and numbered pinned source: scripts/test-record-test-run.py:1321-1338 creates a PATH-first Git guard with quoted real-Git/log paths, an invocation log and exit 97 on FARHELM_SECRET; :1350-1355 passes only a child-environment copy, :1373-1387 requires secret=False, keep=True, a nonempty guard log, complete source identity and exact variable-name classifications. Clarification of the prior record: the command reports variable membership, rather than searching stdout for the literal secret value; the literal-value exclusion is asserted against manifest JSON at :1382-1383. The original suspected consequence and bucket are unchanged. scripts/record-test-run.py:1801-1802 and :1841 use one controlled_environment copy for discovery/capture; :1050-1070 resolves all current source commands through Git on that environment's PATH, and :1112-1113 requires successful components for complete source. Exact contract, docs/test-run-evidence.md:380-382: \"The child environment is copied from the recorder, then every `FARHELM_*` variable is removed except names supplied with `--keep-farhelm-env`. An absent requested name remains absent. The same controlled environment is used for the Git metadata probes.\" Suggested bucket remains other (test-quality concern); could-be-highest: no established catastrophic route from this fixture concern. Confidence: source-refuted for the current implementation, no runtime claim. proposed_drop: guard log plus source-complete assertion and the actual current probe dispatch establish the intended observation; no parent drop presumed. possible_cover: none. Caveat retained: this is not an arbitrary-future-change mutation proof; a future change selectively bypassing the guard would require its own review. No process-environment mutation, new peer/readiness boundary, runtime test or reproduction in this review."
+          }
+        },
+        {
+          "line": 16,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Discovery confirms the new guard and its log do not contaminate the fixture's captured source tree",
+            "location": "scripts/test-record-test-run.py:1323",
+            "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. Original/latest suspected TLDR consequence preserved: replacing the tmux guard might leave the privacy test passing without exercising metadata probes. Discovery checked the separate fixture assumption that running the new guard/log while source identity is captured could make the complete-source assertion invalid or flaky: scripts/test-record-test-run.py:198-221 creates one private base, a committed repository only at base/repo and a sibling evidence directory; :1323-1326 places guard-bin and git-guard-runs.log directly under base, outside that repository. The test's synchronous invoke at :847-854 completes before its :1380 log read; it introduces no asynchronous peer readiness or background-writer oracle. Source identity's Git commands are rooted at the test repo, so the growing guard log is outside the captured tree. This refutes that additional fixture-contamination concern without using production correctness to excuse a test-oracle defect. Existing log-reached/source-complete proof and caveats remain as previously recorded, under the exact docs/test-run-evidence.md:380-382 controlled-environment contract. Suggested bucket remains other; could-be-highest: no established catastrophic route. Confidence: source-refuted for current fixture layout and dispatch. proposed_drop: explicit fixture path separation and synchronous completion settle this considered oracle premise; no parent drop or lowering presumed. possible_cover: none. No runtime test, reproduction or forbidden coverage search. No new substantive defect or open premise found."
+          }
+        }
+      ],
+      "latest": {
+        "line": 16,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Discovery confirms the new guard and its log do not contaminate the fixture's captured source tree",
+          "location": "scripts/test-record-test-run.py:1323",
+          "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. Original/latest suspected TLDR consequence preserved: replacing the tmux guard might leave the privacy test passing without exercising metadata probes. Discovery checked the separate fixture assumption that running the new guard/log while source identity is captured could make the complete-source assertion invalid or flaky: scripts/test-record-test-run.py:198-221 creates one private base, a committed repository only at base/repo and a sibling evidence directory; :1323-1326 places guard-bin and git-guard-runs.log directly under base, outside that repository. The test's synchronous invoke at :847-854 completes before its :1380 log read; it introduces no asynchronous peer readiness or background-writer oracle. Source identity's Git commands are rooted at the test repo, so the growing guard log is outside the captured tree. This refutes that additional fixture-contamination concern without using production correctness to excuse a test-oracle defect. Existing log-reached/source-complete proof and caveats remain as previously recorded, under the exact docs/test-run-evidence.md:380-382 controlled-environment contract. Suggested bucket remains other; could-be-highest: no established catastrophic route. Confidence: source-refuted for current fixture layout and dispatch. proposed_drop: explicit fixture path separation and synchronous completion settle this considered oracle premise; no parent drop or lowering presumed. possible_cover: none. No runtime test, reproduction or forbidden coverage search. No new substantive defect or open premise found."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g200/findings.jsonl",
+        "id": "c3",
+        "line": 16,
+        "disposition": "under-investigation",
+        "group": "g200-c3",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-124",
+          "key": "g200/c3",
+          "latest_line": 16,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "recorder-git-privacy-guard-oracle",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The current test exercises the guarded Git probes and distinguishes contaminated probes from scrubbed ones. Fixture guard writes are outside the captured repository, and invocation finishes before the log is inspected. This settles the named oracle premises without treating production correctness as a substitute for a test observation.",
+          "checks": [
+            "At d751ff1633bb479c7bf53920f2e4ea4ba932a1c2, scripts/test-record-test-run.py:1308-1338 installs a PATH-first Git guard, logs invocations, rejects FARHELM_SECRET with exit 97, and execs the quoted real Git otherwise.",
+            "Test :1350-1387 passes a child-only environment copy, checks secret=False and keep=True, requires a nonempty guard log and complete captured source, excludes the literal secret from manifest JSON and checks exact variable-name classifications. The history's correction is preserved: stdout assertions check membership, not literal secret-value absence.",
+            "Recorder :1050-1070 dispatches the current source probes through Git on the supplied environment PATH; :1112-1113 requires their successful components for complete source. :1801-1802 and :1841 use the same controlled environment for discovery and capture.",
+            "Test setup :198-221 creates repo at base/repo; :1323-1326 puts guard-bin and git-guard-runs.log at base, outside repo. :847-854 invokes synchronously before :1380 reads the log.",
+            "docs/test-run-evidence.md:380-382 requires the same controlled environment for metadata probes. No process-environment mutation or runtime experiment performed."
+          ],
+          "coverage_checked": [
+            "Both specifications searched: no rule accepting a vacuous privacy guard. SPEC_impl.md Testing's single-user assumption is not used to excuse the named oracle defect.",
+            "TODO.md Planned empty; BUGS.md no matching test-oracle item; unlanded plans contain no fix for this specific guard observation.",
+            "Full INDEX and matching queue files checked. checkout-fixture-inherits-git-repository-selector concerns inherited Git repository selectors in other named fixtures, not whether this new privacy guard observes scrubbed probes. No exact coverage or extension established.",
+            "Active TRIAGE_OUTCOMES.md: no exact FARHELM_SECRET/Git-guard oracle decision. Archive not read.",
+            "FILTER.md: no filter used. A test sensitivity concern is not excused merely because production currently works."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "None for the current fixture and dispatch. This does not prove sensitivity to every hypothetical future selective bypass of the guard.",
+          "original_stronger_consequence": "Replacing the tmux guard might leave the privacy test passing without exercising metadata probes. The later fixture-contamination question extends that oracle concern. No actual leaked credential, product regression or catastrophic tooling harm was claimed; earlier proposed drops remain proposals.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Refuted for the current privacy-test oracle by guard-reached, source-complete and path-separation evidence. Conservatively send the dismissal through independent checking because the named oracle protects credential-bearing environment values, despite no established disclosure route and the other tooling bucket."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "recorder-git-privacy-guard-oracle",
+        "destination": null
+      }
+    },
+    {
+      "key": "g200/c4",
+      "owner": "g200",
+      "id": "c4",
+      "domain": "test-evidence-recorder",
+      "purpose": "test-evidence-recorder: scripts/record-test-run.py, scripts/test-record-test-run.py, scripts/test-test-run-inventory.py, scripts/test-test-run-summary.py, scripts/test_run_summary.py; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Removing substrate totals preserves independent failure and evidence-gap classifications",
+            "location": "scripts/test_run_summary.py:281",
+            "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. TLDR considered: dropping the substrate category might break aggregation, conceal failed historical required-mode refusals, or turn incomplete evidence into a pass. Source checks: full pinned scripts/test_run_summary.py shows manifest_summary still derives child and recorder classes directly from child_status and recorder.exit_code, retains refused/running outcomes, and independently checks date, report, source, console, output, traces and cleanup. aggregate_runs removes both the substrates dictionary and its iteration entry together; no surviving deleted-key access was found in the maintained caller search (c2). scripts/test-test-run-summary.py's changed fixture omits tmux but preserves the remaining completeness fields; its new legacy test compares the full summaries. scripts/test-test-run-inventory.py's one-line deletion likewise updates only the retired field. docs/test-run-evidence.md, Manual evidence summary, says \"Child failures remain failures when a later attempt passes; unavailable child results do not count as successful observations.\" The removal does not change those classifications. Suggested bucket if a defect existed: other; could-be-highest: no established catastrophic route outside maintainer evidence tooling. Confidence: source-refuted for these hypotheses. proposed_drop: failure, refusal and independent gap paths remain intact, while omitting the substrate category is expressly documented (l1). possible_cover: none. No execution performed."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Synthesis finds no failure-classification or aggregation regression in maintained summary consumers",
+            "location": "scripts/test_run_summary.py:278",
+            "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. Original and latest suspected TLDR consequence: dropping the substrate category might break aggregation, conceal failed historical required-mode refusals, or turn incomplete evidence into a pass. Rechecked numbered pinned summary source :186-214, :230-251, :278-309 and canonical mandatory patches: the new manifest fixture removes only tmux, and aggregate_runs removes the substrate destination and source-key iteration together. Child status, recorder exit, refused outcome and independent completeness gaps are unchanged. Actual maintained consumer check: scripts/test_run_inventory.py:243-276 calls manifest_summary, adds output/report-retention observations, and stores it without asking for substrate; scripts/summarize-test-runs.py:55-70 passes those records into aggregate_runs and returns its result without a deleted-key lookup. Repeated maintained-path search found no deleted-key reader. Exact contract, docs/test-run-evidence.md:501-502: \"Child failures remain failures when a later attempt passes; unavailable child results do not count as successful observations.\" The historical tmux-identity loss is real and remains preserved under l1 rather than being refuted here; docs/test-run-evidence.md:329 expressly says \"Readers ignore it; the summary below treats such a record as a current one.\" Suggested bucket remains other; could-be-highest: no established catastrophic route from maintainer reporting. Confidence: source-refuted for aggregation/status corruption, confirmed explicit contract for identity omission. proposed_drop: the exact current producer/consumer interface does not require the deleted key, and failure/refusal/gap classifications remain independent; no parent drop is presumed. possible_cover: none. No runtime observation or reproduction; no forbidden coverage source was read. Original and latest impact are unchanged; no lowering."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c4",
+          "state": "open",
+          "summary": "Synthesis finds no failure-classification or aggregation regression in maintained summary consumers",
+          "location": "scripts/test_run_summary.py:278",
+          "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. Original and latest suspected TLDR consequence: dropping the substrate category might break aggregation, conceal failed historical required-mode refusals, or turn incomplete evidence into a pass. Rechecked numbered pinned summary source :186-214, :230-251, :278-309 and canonical mandatory patches: the new manifest fixture removes only tmux, and aggregate_runs removes the substrate destination and source-key iteration together. Child status, recorder exit, refused outcome and independent completeness gaps are unchanged. Actual maintained consumer check: scripts/test_run_inventory.py:243-276 calls manifest_summary, adds output/report-retention observations, and stores it without asking for substrate; scripts/summarize-test-runs.py:55-70 passes those records into aggregate_runs and returns its result without a deleted-key lookup. Repeated maintained-path search found no deleted-key reader. Exact contract, docs/test-run-evidence.md:501-502: \"Child failures remain failures when a later attempt passes; unavailable child results do not count as successful observations.\" The historical tmux-identity loss is real and remains preserved under l1 rather than being refuted here; docs/test-run-evidence.md:329 expressly says \"Readers ignore it; the summary below treats such a record as a current one.\" Suggested bucket remains other; could-be-highest: no established catastrophic route from maintainer reporting. Confidence: source-refuted for aggregation/status corruption, confirmed explicit contract for identity omission. proposed_drop: the exact current producer/consumer interface does not require the deleted key, and failure/refusal/gap classifications remain independent; no parent drop is presumed. possible_cover: none. No runtime observation or reproduction; no forbidden coverage source was read. Original and latest impact are unchanged; no lowering."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g200/findings.jsonl",
+        "id": "c4",
+        "line": 10,
+        "disposition": "excluded",
+        "group": "recorder-summary-status-aggregation-after-tmux-removal",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-124 after inspecting it. Deleting substrate totals does not erase child/recorder failures, refusals or the remaining evidence gaps, and maintained aggregation consumers do not request the deleted field. The real historical identity loss is preserved under g200/l1, rather than being refuted here. Refuted conditional status/aggregation regression, with l1's distinct real omission explicitly excluded from this refutation. Maintainer evidence tooling has no established catastrophic or shipped-product harm route. Checked source/results: [\"At d751ff1633bb479c7bf53920f2e4ea4ba932a1c2, scripts/test_run_summary.py:186-214 independently validates and exports child status, recorder exit and outcome, including refused/running. :230-251 preserves source, console, output, trace and cleanup gaps.\",\"The commit diff removes both the aggregate substrates destination and substrate iteration pair. Current pinned :278-309 consistently aggregates remaining keys.\",\"scripts/test_run_inventory.py:243-276 augments manifest_summary without requiring substrate. scripts/summarize-test-runs.py:55-70 calls aggregate_runs and explains unavailable results and incomplete coverage.\",\"The summary/inventory fixture diffs delete only retired tmux fields; the summary's legacy test :119-142 compares complete results. Existing failure/gap test :144-155 keeps failed child and independent gaps visible.\",\"docs/test-run-evidence.md:501-502 retains the command-failure/unavailable-result contract. No runtime execution performed.\"] Current coverage/results: [\"Both specifications: no direct summary aggregation exception or acceptance relevant to failed attempts.\",\"TODO.md Planned empty; BUGS.md no summary classification entry; no unlanded plan fixes a remaining aggregation defect. Landed tmux-drop-from-tooling explains deliberate field removal only.\",\"Full INDEX and matching timing-history-can-retain-failed-recorder-success file checked: that item concerns publishing permanent timing history before a required manifest write fails, not summary aggregation of retained status fields. No exact duplicate or useful extension.\",\"Active TRIAGE_OUTCOMES.md:25-45 settles that timing-publication defect, with a different trigger and consequence. No exact aggregation decision found; archive not read.\",\"FILTER.md: no filter used. Success reported for failed work would fall outside the rare-diagnostic filter if established.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Dropping the substrate category might break aggregation, conceal failed historical required-mode refusals, or turn incomplete evidence into a pass. This hypothesis is source-refuted within the checked paths; its independent identity-omission component remains under l1. No parent drop or consequence lowering is inferred.\"; \"No failed-status erasure or broken aggregation path found in the current producer/consumer interface. Historical tmux identity omission is real but is g200/l1's distinct claim.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g200/c4",
+        "line": 10,
+        "disposition": "excluded",
+        "group": "recorder-summary-status-aggregation-after-tmux-removal",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-124 after inspecting it. Deleting substrate totals does not erase child/recorder failures, refusals or the remaining evidence gaps, and maintained aggregation consumers do not request the deleted field. The real historical identity loss is preserved under g200/l1, rather than being refuted here. Refuted conditional status/aggregation regression, with l1's distinct real omission explicitly excluded from this refutation. Maintainer evidence tooling has no established catastrophic or shipped-product harm route. Checked source/results: [\"At d751ff1633bb479c7bf53920f2e4ea4ba932a1c2, scripts/test_run_summary.py:186-214 independently validates and exports child status, recorder exit and outcome, including refused/running. :230-251 preserves source, console, output, trace and cleanup gaps.\",\"The commit diff removes both the aggregate substrates destination and substrate iteration pair. Current pinned :278-309 consistently aggregates remaining keys.\",\"scripts/test_run_inventory.py:243-276 augments manifest_summary without requiring substrate. scripts/summarize-test-runs.py:55-70 calls aggregate_runs and explains unavailable results and incomplete coverage.\",\"The summary/inventory fixture diffs delete only retired tmux fields; the summary's legacy test :119-142 compares complete results. Existing failure/gap test :144-155 keeps failed child and independent gaps visible.\",\"docs/test-run-evidence.md:501-502 retains the command-failure/unavailable-result contract. No runtime execution performed.\"] Current coverage/results: [\"Both specifications: no direct summary aggregation exception or acceptance relevant to failed attempts.\",\"TODO.md Planned empty; BUGS.md no summary classification entry; no unlanded plan fixes a remaining aggregation defect. Landed tmux-drop-from-tooling explains deliberate field removal only.\",\"Full INDEX and matching timing-history-can-retain-failed-recorder-success file checked: that item concerns publishing permanent timing history before a required manifest write fails, not summary aggregation of retained status fields. No exact duplicate or useful extension.\",\"Active TRIAGE_OUTCOMES.md:25-45 settles that timing-publication defect, with a different trigger and consequence. No exact aggregation decision found; archive not read.\",\"FILTER.md: no filter used. Success reported for failed work would fall outside the rare-diagnostic filter if established.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Dropping the substrate category might break aggregation, conceal failed historical required-mode refusals, or turn incomplete evidence into a pass. This hypothesis is source-refuted within the checked paths; its independent identity-omission component remains under l1. No parent drop or consequence lowering is inferred.\"; \"No failed-status erasure or broken aggregation path found in the current producer/consumer interface. Historical tmux identity omission is real but is g200/l1's distinct claim.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-124",
+          "key": "g200/c4",
+          "latest_line": 10,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "recorder-summary-status-aggregation-after-tmux-removal",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Deleting substrate totals does not erase child/recorder failures, refusals or the remaining evidence gaps, and maintained aggregation consumers do not request the deleted field. The real historical identity loss is preserved under g200/l1, rather than being refuted here.",
+          "checks": [
+            "At d751ff1633bb479c7bf53920f2e4ea4ba932a1c2, scripts/test_run_summary.py:186-214 independently validates and exports child status, recorder exit and outcome, including refused/running. :230-251 preserves source, console, output, trace and cleanup gaps.",
+            "The commit diff removes both the aggregate substrates destination and substrate iteration pair. Current pinned :278-309 consistently aggregates remaining keys.",
+            "scripts/test_run_inventory.py:243-276 augments manifest_summary without requiring substrate. scripts/summarize-test-runs.py:55-70 calls aggregate_runs and explains unavailable results and incomplete coverage.",
+            "The summary/inventory fixture diffs delete only retired tmux fields; the summary's legacy test :119-142 compares complete results. Existing failure/gap test :144-155 keeps failed child and independent gaps visible.",
+            "docs/test-run-evidence.md:501-502 retains the command-failure/unavailable-result contract. No runtime execution performed."
+          ],
+          "coverage_checked": [
+            "Both specifications: no direct summary aggregation exception or acceptance relevant to failed attempts.",
+            "TODO.md Planned empty; BUGS.md no summary classification entry; no unlanded plan fixes a remaining aggregation defect. Landed tmux-drop-from-tooling explains deliberate field removal only.",
+            "Full INDEX and matching timing-history-can-retain-failed-recorder-success file checked: that item concerns publishing permanent timing history before a required manifest write fails, not summary aggregation of retained status fields. No exact duplicate or useful extension.",
+            "Active TRIAGE_OUTCOMES.md:25-45 settles that timing-publication defect, with a different trigger and consequence. No exact aggregation decision found; archive not read.",
+            "FILTER.md: no filter used. Success reported for failed work would fall outside the rare-diagnostic filter if established."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No failed-status erasure or broken aggregation path found in the current producer/consumer interface. Historical tmux identity omission is real but is g200/l1's distinct claim.",
+          "original_stronger_consequence": "Dropping the substrate category might break aggregation, conceal failed historical required-mode refusals, or turn incomplete evidence into a pass. This hypothesis is source-refuted within the checked paths; its independent identity-omission component remains under l1. No parent drop or consequence lowering is inferred.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Refuted conditional status/aggregation regression, with l1's distinct real omission explicitly excluded from this refutation. Maintainer evidence tooling has no established catastrophic or shipped-product harm route."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "recorder-summary-status-aggregation-after-tmux-removal",
+        "destination": null
+      }
+    },
+    {
+      "key": "g200/c5",
+      "owner": "g200",
+      "id": "c5",
+      "domain": "test-evidence-recorder",
+      "purpose": "test-evidence-recorder: scripts/record-test-run.py, scripts/test-record-test-run.py, scripts/test-test-run-inventory.py, scripts/test-test-run-summary.py, scripts/test_run_summary.py; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c5",
+            "state": "open",
+            "summary": "Unknown-option refusal remains before probes, evidence creation and child spawn",
+            "location": "scripts/record-test-run.py:224",
+            "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. TLDR considered: removing the tmux option might silently run an old command without its requested check, or create misleading evidence before refusing it. Source checks: scripts/record-test-run.py:224-283 splits at the explicit -- boundary and uses parser.parse_args; RefusingArgumentParser.error raises UsageRefusal. run calls parse_args before require_wait_ownership, discover_checkout, prepare_root, run-directory creation and run_command; the UsageRefusal handler at :2019 returns 125 and prints the refusal without finalizing a nonexistent manifest. The removed --tmux has no surviving parser registration or similarly named option. scripts/test-record-test-run.py:2140-2168 checks unknown options both with and without a following value, requires a refusal mentioning the option, checks no command marker and no run directories, then proves the same marker command runs without the option. The helper supplies all required labels and a fixture output root. Suggested bucket: other; could-be-highest: no established catastrophic route. Confidence: source-refuted for the considered compatibility/refusal defect. proposed_drop: retained parser and refusal ordering implement the documented fail-loudly contract; the new test's marker baseline avoids mistaking an unusable child command for refusal evidence. possible_cover: none. Caveat: the test names a synthetic unknown option rather than the retired --tmux spelling, but the source establishes --tmux is rejected. No execution performed."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c5",
+            "state": "open",
+            "summary": "Synthesis confirms refusal ordering and the unknown-option test's distinguishing assertions",
+            "location": "scripts/record-test-run.py:223",
+            "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. Original and latest suspected TLDR consequence: removing the tmux option might silently run an old command without its requested check, or create misleading evidence before refusing it. Rechecked numbered exact pinned source and canonical patch: scripts/record-test-run.py:231-254 registers no --tmux option, splits before the command boundary and calls parse_args rather than parse_known_args; :93-97 turns argument errors into UsageRefusal. run at :1798 parses before :1802 discovery, :1804 storage preparation and :1807 run creation; :2019-2041 prints the refusal and returns 125 with no manifest to finalize. The retired spelling is not a prefix of any current registered long option. Actual fixture caller scripts/test-record-test-run.py:819-855 supplies valid required labels, root, command boundary and a bounded child invocation. The new test :2152-2164 requires exit 125, an option-specific refusal, absent marker and no run directories for both unknown-option forms, then proves the marker command succeeds without the option. Exact contract, docs/test-run-evidence.md:97-99: \"Any other option the recorder does not know is refused with exit 125 before a run directory exists. That includes `--tmux`, which selected a check against a pinned test tmux that no longer exists; commands kept in historical records (older `FLAKES.md` entries, `plans/`, `lore/`) still pass it and need it removed before they are rerun.\" Suggested bucket remains other; could-be-highest: no established catastrophic route in this maintainer tooling concern. Confidence: source-refuted for silent acceptance or evidence-before-refusal. proposed_drop: the exact current parser and caller ordering enforce the quoted rule; no parent drop presumed. possible_cover: none. Caveat retained: the new test uses a synthetic unknown option, so its source assertion alone does not pin the retired spelling against a future accidental reintroduction; current source does establish its refusal. No execution or reproduction; original/latest consequence is unchanged, without lowering."
+          }
+        }
+      ],
+      "latest": {
+        "line": 11,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c5",
+          "state": "open",
+          "summary": "Synthesis confirms refusal ordering and the unknown-option test's distinguishing assertions",
+          "location": "scripts/record-test-run.py:223",
+          "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. Original and latest suspected TLDR consequence: removing the tmux option might silently run an old command without its requested check, or create misleading evidence before refusing it. Rechecked numbered exact pinned source and canonical patch: scripts/record-test-run.py:231-254 registers no --tmux option, splits before the command boundary and calls parse_args rather than parse_known_args; :93-97 turns argument errors into UsageRefusal. run at :1798 parses before :1802 discovery, :1804 storage preparation and :1807 run creation; :2019-2041 prints the refusal and returns 125 with no manifest to finalize. The retired spelling is not a prefix of any current registered long option. Actual fixture caller scripts/test-record-test-run.py:819-855 supplies valid required labels, root, command boundary and a bounded child invocation. The new test :2152-2164 requires exit 125, an option-specific refusal, absent marker and no run directories for both unknown-option forms, then proves the marker command succeeds without the option. Exact contract, docs/test-run-evidence.md:97-99: \"Any other option the recorder does not know is refused with exit 125 before a run directory exists. That includes `--tmux`, which selected a check against a pinned test tmux that no longer exists; commands kept in historical records (older `FLAKES.md` entries, `plans/`, `lore/`) still pass it and need it removed before they are rerun.\" Suggested bucket remains other; could-be-highest: no established catastrophic route in this maintainer tooling concern. Confidence: source-refuted for silent acceptance or evidence-before-refusal. proposed_drop: the exact current parser and caller ordering enforce the quoted rule; no parent drop presumed. possible_cover: none. Caveat retained: the new test uses a synthetic unknown option, so its source assertion alone does not pin the retired spelling against a future accidental reintroduction; current source does establish its refusal. No execution or reproduction; original/latest consequence is unchanged, without lowering."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g200/findings.jsonl",
+        "id": "c5",
+        "line": 11,
+        "disposition": "excluded",
+        "group": "recorder-retired-option-preflight-refusal",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-124 after inspecting it. The retired option is rejected before metadata probes, evidence creation or the command. The new synthetic-option test has a working-child baseline and distinguishes refusal from a command that could never run. Refuted by parser registration, preflight ordering and distinguishing test assertions. Overlaps c2's retired-option compatibility context, but c2 asks whether maintained consumers break and c5 asks whether unknown options silently run; these are separate hypotheses, not exact same-root defect aliases. Checked source/results: [\"At d751ff1633bb479c7bf53920f2e4ea4ba932a1c2, scripts/record-test-run.py:93-97 raises UsageRefusal on argparse errors. :231-254 registers no --tmux, splits at the command boundary, and uses parse_args. The spelling is not a prefix of any registered long option.\",\"run :1798 parses before wait-ownership checks, :1802 Git discovery, :1804 root preparation and :1807 run creation. :2019-2041 returns 125 with no manifest to finalize for an argument error.\",\"scripts/test-record-test-run.py:819-855 supplies valid labels, output root and explicit command boundary. :2152-2164 checks unknown options with/without a value, option-specific refusal, absent marker and no run directories, then proves the same marker command runs without the unknown option.\",\"docs/test-run-evidence.md:97-99 explicitly documents retired --tmux refusal. The test uses --no-such-option, so it does not pin the literal retired spelling against future reintroduction; current parser source establishes refusal. No runtime execution performed.\"] Current coverage/results: [\"Both specifications: no recorder unknown-option rule competing with the delegated CLI documentation.\",\"TODO.md Planned empty; BUGS.md no matching refusal-order entry; unlanded plans have no missing refusal-order fix. Landed tmux-drop-from-tooling prescribes retirement, but is not pending-plan coverage.\",\"Full INDEX and matching recorder files checked: no exact refusal-before-evidence item or useful extension.\",\"Active TRIAGE_OUTCOMES.md: no exact retired-option refusal/marker-oracle decision. Archive not read.\",\"FILTER.md: no filter used; the claimed silent acceptance is refuted rather than excused as rare.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing the tmux option might silently run an old command without its requested check, or create misleading evidence before refusing it. Source establishes the opposite ordering. The synthetic-option test caveat remains, with no parent drop inferred.\"; \"None for current parser behavior. A future accidental literal --tmux reintroduction is outside what the synthetic-option regression pins.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g200/c5",
+        "line": 11,
+        "disposition": "excluded",
+        "group": "recorder-retired-option-preflight-refusal",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-124 after inspecting it. The retired option is rejected before metadata probes, evidence creation or the command. The new synthetic-option test has a working-child baseline and distinguishes refusal from a command that could never run. Refuted by parser registration, preflight ordering and distinguishing test assertions. Overlaps c2's retired-option compatibility context, but c2 asks whether maintained consumers break and c5 asks whether unknown options silently run; these are separate hypotheses, not exact same-root defect aliases. Checked source/results: [\"At d751ff1633bb479c7bf53920f2e4ea4ba932a1c2, scripts/record-test-run.py:93-97 raises UsageRefusal on argparse errors. :231-254 registers no --tmux, splits at the command boundary, and uses parse_args. The spelling is not a prefix of any registered long option.\",\"run :1798 parses before wait-ownership checks, :1802 Git discovery, :1804 root preparation and :1807 run creation. :2019-2041 returns 125 with no manifest to finalize for an argument error.\",\"scripts/test-record-test-run.py:819-855 supplies valid labels, output root and explicit command boundary. :2152-2164 checks unknown options with/without a value, option-specific refusal, absent marker and no run directories, then proves the same marker command runs without the unknown option.\",\"docs/test-run-evidence.md:97-99 explicitly documents retired --tmux refusal. The test uses --no-such-option, so it does not pin the literal retired spelling against future reintroduction; current parser source establishes refusal. No runtime execution performed.\"] Current coverage/results: [\"Both specifications: no recorder unknown-option rule competing with the delegated CLI documentation.\",\"TODO.md Planned empty; BUGS.md no matching refusal-order entry; unlanded plans have no missing refusal-order fix. Landed tmux-drop-from-tooling prescribes retirement, but is not pending-plan coverage.\",\"Full INDEX and matching recorder files checked: no exact refusal-before-evidence item or useful extension.\",\"Active TRIAGE_OUTCOMES.md: no exact retired-option refusal/marker-oracle decision. Archive not read.\",\"FILTER.md: no filter used; the claimed silent acceptance is refuted rather than excused as rare.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing the tmux option might silently run an old command without its requested check, or create misleading evidence before refusing it. Source establishes the opposite ordering. The synthetic-option test caveat remains, with no parent drop inferred.\"; \"None for current parser behavior. A future accidental literal --tmux reintroduction is outside what the synthetic-option regression pins.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-124",
+          "key": "g200/c5",
+          "latest_line": 11,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "recorder-retired-option-preflight-refusal",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The retired option is rejected before metadata probes, evidence creation or the command. The new synthetic-option test has a working-child baseline and distinguishes refusal from a command that could never run.",
+          "checks": [
+            "At d751ff1633bb479c7bf53920f2e4ea4ba932a1c2, scripts/record-test-run.py:93-97 raises UsageRefusal on argparse errors. :231-254 registers no --tmux, splits at the command boundary, and uses parse_args. The spelling is not a prefix of any registered long option.",
+            "run :1798 parses before wait-ownership checks, :1802 Git discovery, :1804 root preparation and :1807 run creation. :2019-2041 returns 125 with no manifest to finalize for an argument error.",
+            "scripts/test-record-test-run.py:819-855 supplies valid labels, output root and explicit command boundary. :2152-2164 checks unknown options with/without a value, option-specific refusal, absent marker and no run directories, then proves the same marker command runs without the unknown option.",
+            "docs/test-run-evidence.md:97-99 explicitly documents retired --tmux refusal. The test uses --no-such-option, so it does not pin the literal retired spelling against future reintroduction; current parser source establishes refusal. No runtime execution performed."
+          ],
+          "coverage_checked": [
+            "Both specifications: no recorder unknown-option rule competing with the delegated CLI documentation.",
+            "TODO.md Planned empty; BUGS.md no matching refusal-order entry; unlanded plans have no missing refusal-order fix. Landed tmux-drop-from-tooling prescribes retirement, but is not pending-plan coverage.",
+            "Full INDEX and matching recorder files checked: no exact refusal-before-evidence item or useful extension.",
+            "Active TRIAGE_OUTCOMES.md: no exact retired-option refusal/marker-oracle decision. Archive not read.",
+            "FILTER.md: no filter used; the claimed silent acceptance is refuted rather than excused as rare."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "None for current parser behavior. A future accidental literal --tmux reintroduction is outside what the synthetic-option regression pins.",
+          "original_stronger_consequence": "Removing the tmux option might silently run an old command without its requested check, or create misleading evidence before refusing it. Source establishes the opposite ordering. The synthetic-option test caveat remains, with no parent drop inferred.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Refuted by parser registration, preflight ordering and distinguishing test assertions. Overlaps c2's retired-option compatibility context, but c2 asks whether maintained consumers break and c5 asks whether unknown options silently run; these are separate hypotheses, not exact same-root defect aliases."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "recorder-retired-option-preflight-refusal",
+        "destination": null
+      }
+    },
+    {
+      "key": "g200/c6",
+      "owner": "g200",
+      "id": "c6",
+      "domain": "test-evidence-recorder",
+      "purpose": "test-evidence-recorder: scripts/record-test-run.py, scripts/test-record-test-run.py, scripts/test-test-run-inventory.py, scripts/test-test-run-summary.py, scripts/test_run_summary.py; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 14,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c6",
+            "state": "open",
+            "summary": "Removed tmux lifecycle condition does not weaken the remaining metadata ownership gate",
+            "location": "scripts/record-test-run.py:1846",
+            "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. Discovery-pass TLDR considered: deleting the tmux probe and its lifecycle condition could allow a command to start after a remaining metadata probe loses process ownership, leaving cleanup or evidence untrustworthy. Source result: the assigned production patch removes only capture_tmux and its branch from the former source-or-tmux check; scripts/record-test-run.py:1073-1075 still computes source.lifecycle_complete from every current Git probe including top-level discovery, and :1844-1847 still refuses source lifecycle incompleteness before runner preparation or command startup. Changed tests at scripts/test-record-test-run.py:435-469 and :495-539 retain injected Git status ownership loss, no-marker/no-command assertions and recorder-error/lifecycle-incomplete evidence; their patch edits only remove --tmux none, whose deleted implementation returned before any probe. The unsupported wait-API test at :359-373 still asserts no Popen, and the shared-cancellation test at :299-326 still asserts interrupted status and no marker. Exact governing lifecycle contract previously read, docs/test-run-evidence.md:289-291: \"Losing child wait ownership records a recorder error; unavailable child exit status stays null rather than being inferred as success.\" Suggested bucket: other, maintainer recorder lifecycle/test quality; could-be-highest: no catastrophic or user-work route established from the considered gate regression. Confidence: source-refuted; no runtime claim. proposed_drop: all surviving metadata ownership failures still flow through source.lifecycle_complete and the retained refusal, with the distinguishing test assertions unchanged. possible_cover: none. Range attribution checked: git log for the five assigned paths over 6e423e30068b62c6cfa276c6d720ee35bb70387a..00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db returns only the reviewed commit; no new defect is attributed merely because nearby code predates it. No runtime execution, reproduction, forbidden coverage search or external-process action."
+          }
+        }
+      ],
+      "latest": {
+        "line": 14,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c6",
+          "state": "open",
+          "summary": "Removed tmux lifecycle condition does not weaken the remaining metadata ownership gate",
+          "location": "scripts/record-test-run.py:1846",
+          "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. Discovery-pass TLDR considered: deleting the tmux probe and its lifecycle condition could allow a command to start after a remaining metadata probe loses process ownership, leaving cleanup or evidence untrustworthy. Source result: the assigned production patch removes only capture_tmux and its branch from the former source-or-tmux check; scripts/record-test-run.py:1073-1075 still computes source.lifecycle_complete from every current Git probe including top-level discovery, and :1844-1847 still refuses source lifecycle incompleteness before runner preparation or command startup. Changed tests at scripts/test-record-test-run.py:435-469 and :495-539 retain injected Git status ownership loss, no-marker/no-command assertions and recorder-error/lifecycle-incomplete evidence; their patch edits only remove --tmux none, whose deleted implementation returned before any probe. The unsupported wait-API test at :359-373 still asserts no Popen, and the shared-cancellation test at :299-326 still asserts interrupted status and no marker. Exact governing lifecycle contract previously read, docs/test-run-evidence.md:289-291: \"Losing child wait ownership records a recorder error; unavailable child exit status stays null rather than being inferred as success.\" Suggested bucket: other, maintainer recorder lifecycle/test quality; could-be-highest: no catastrophic or user-work route established from the considered gate regression. Confidence: source-refuted; no runtime claim. proposed_drop: all surviving metadata ownership failures still flow through source.lifecycle_complete and the retained refusal, with the distinguishing test assertions unchanged. possible_cover: none. Range attribution checked: git log for the five assigned paths over 6e423e30068b62c6cfa276c6d720ee35bb70387a..00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db returns only the reviewed commit; no new defect is attributed merely because nearby code predates it. No runtime execution, reproduction, forbidden coverage search or external-process action."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g200/findings.jsonl",
+        "id": "c6",
+        "line": 14,
+        "disposition": "under-investigation",
+        "group": "g200-c6",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-124",
+          "key": "g200/c6",
+          "latest_line": 14,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "recorder-metadata-ownership-gate-after-tmux-removal",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The patch deletes only the retired tmux probe and its branch. Every remaining Git lifecycle failure still reaches the source lifecycle gate before runner preparation or command start. The tests retain distinguishing no-command and ownership-loss observations.",
+          "checks": [
+            "At d751ff1633bb479c7bf53920f2e4ea4ba932a1c2, scripts/record-test-run.py:1040-1047 starts with top-level discovery lifecycle status, and :1073-1075 combines every current Git probe. :1827-1828 catches initial ownership failure; :1844-1847 catches later source lifecycle incompleteness before :1860 runner preparation.",
+            "The exact production diff removes capture_tmux and the tmux branch from the source-or-tmux condition; it does not weaken the source branch. The removed capture_tmux(mode=none) returned before launching a probe.",
+            "scripts/test-record-test-run.py:435-474 injects real Git-status ownership loss and checks exit 125, no marker, recorder-error and lifecycle_complete false while preserving earlier source bytes. :490-545 checks initial/later loss with interruption, no post-interrupt spawns and no command call.",
+            "Test :359-373 still rejects a missing wait API before any Popen; :297-326 retains cancellation/no-marker assertions. The assigned test edits remove only --tmux none from these calls.",
+            "docs/test-run-evidence.md:289-291 keeps lost wait ownership as recorder error with unavailable status null. Only the named commit changes these assigned paths within the reviewed range. No runtime execution or reproduction performed."
+          ],
+          "coverage_checked": [
+            "Both specifications searched: no accepted bypass of metadata process ownership is asserted. SPEC_impl.md Testing's same-run PID policy does not establish or excuse this proposed gate regression.",
+            "TODO.md Planned empty; BUGS.md no metadata ownership entry; unlanded plans have no fix for this exact surviving gate.",
+            "Full INDEX and matching recorder files checked: timing publication, sticky-parent, nested-evidence cleanup and runtime-recorder guidance are distinct causes. No exact alias or useful extension.",
+            "Active TRIAGE_OUTCOMES.md searched: no exact lost-metadata-wait ownership/gate decision; archive not read.",
+            "FILTER.md: no filter used. Process-ownership consequences would require their own complete boundary analysis, not a rarity dismissal."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No surviving metadata probe whose lifecycle error is omitted from source.lifecycle_complete, or path reaching command start after that field is false, was found.",
+          "original_stronger_consequence": "Deleting the tmux probe and lifecycle condition could allow a command to start after a remaining metadata probe loses process ownership, leaving cleanup or evidence untrustworthy. No actual wrong-target signal, lost user-owned work or catastrophic tooling route was established, and no parent drop is inferred.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Refuted gate-regression hypothesis. Conservatively route dismissal through independent checking because the original uncertainty concerns process ownership and cleanup, even though the established scope remains maintainer tooling and no user-work-loss route was shown."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "recorder-metadata-ownership-gate-after-tmux-removal",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial pass complete: all 587 assigned patch lines reviewed at the pinned commit.\n\nNo reportable findings. Five candidate dispositions recorded; no unresolved leads. Findings log and progress file updated. Source-only review; no tests or reproductions run."
+    },
+    {
+      "turn": 2,
+      "reply": "Coverage repaired: all 587 assigned lines delivered in seven separate evidence packets; no unread ranges remain.\n\nSynthesis rechecked exact contracts, source, and maintained callers. Revised l1 and c2–c5 with unchanged proposed dispositions and preserved consequences; no parent drop presumed. No new findings.\n\nOpen lead IDs: none. Source-only; no execution."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 complete. Checked contract authority, downstream manifest consumers, lifecycle gates, fixture boundaries, and range attribution.\n\nRevised l1/c2/c3; added source-refuted candidate c6. No new substantive defect found.\n\nNew verified IDs: none. New unverified IDs: none. Open leads: none. No execution performed."
+    }
+  ],
+  "progress": "Group: g200 (test-evidence-recorder)\nTurn: initial review, count 1; discovery-pass count: 0.\nState: initial assigned pass complete; ready for caller's later synthesis turn.\n\nCoverage: read brief fully and the inventory commits field in full, without excluded coverage metadata. All 587 assigned patch lines read through the evidence command: 01421 lines 1-160 and 161-208; 01432 lines 1-160 and 161-264; 01434 lines 1-12; 01435 lines 1-44; 01437 lines 1-59. Every patch belongs to d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. No assigned material remains unread.\n\nContract/context checks: pinned SPEC_impl Testing section and private-tmux section; relevant SPEC terminal-host and old-terminal contract; GUI drawn-answer contract read (no GUI handler in assigned scope). Pinned docs/test-run-evidence.md schema, lifecycle, command refusal and manual-summary contracts. Pinned recorder parsing, source capture, environment handling, manifest/run/finalization context; changed test helpers and assertions; full pure summary module; inventory consumer's run classification and duplicate handling. Maintained caller/key/reference search across scripts, .github, e2e, docs, .agents, deflake and crates found no remaining production --tmux recorder call, removed helper use or deleted summary-key consumer. Historical coverage sources were not read.\n\nInterface assumptions: g007/g093/g094 own adjacent harness/tooling changes. This review checks recorder refusal and environment inputs, manifest output consumed by inventory, and portable aggregation. Historical tmux identity is explicitly ignored under the pinned schema contract; child/recorder status, output/trace/source gaps and duplicate identity handling remain separate. No external consumer of removed summary keys was established, and none is asserted safe beyond the maintained paths searched.\n\nDurable record: 0 reportable findings. l1 was appended as a lead and revised to a contract-accepted candidate; c2-c5 are source-refuted or accepted candidates. No lead remains open. New verified finding IDs this pass: none. New unverified finding IDs this pass: none. Candidate IDs this pass: l1, c2, c3, c4, c5. One attempted l1 revision used unsupported state closed; evidence record refused it, and the immediately corrected candidate event with state open was accepted. The original lead event was preserved.\n\nValidation: source and contract analysis only. No runtime tests, reproductions, builds, checkout edits, live-install actions or helper agents. Claims describe source-supported conclusions, not observed runtime behavior.\n\nNext action: return initial-pass delta; await the caller's later-turn protocol. No separate final report file was written.\n\nTurn 2: missing-packet coverage repair, followed by synthesis as expressly requested.\nPrior packet delivery earned zero supported coverage; all seven packets must be delivered again with raw stdout.\nFindings log retained. No source bytes or hashes changed. Next: mandatory evidence packets.\n\nTurn 2 complete: canonical missing-packet repair and expressly requested same-turn synthesis.\nSupported delivery this turn: seven separate direct-stdout evidence results, each below 200 lines and 24,000 encoded source bytes: 01421 1-160, 161-208; 01432 1-160, 161-264; 01434 1-12; 01435 1-44; 01437 1-59. Total 587 assigned lines. Earlier turn's unsupported coverage claim is superseded; no manifest or source modification was performed. No mandatory assigned range remains unread.\n\nSynthesis checks: re-read own durable records, exact numbered pinned legacy-schema and environment contracts, summary classification/aggregation, recorder parser/refusal ordering, guard fixture and assertions, and actual maintained repetition, release and sandbox callers. Also inspected the inventory-to-summary producer/consumer path. Repeated maintained-code option/helper/key search without forbidden coverage sources. Results support the existing proposed dispositions. l1's original real loss of historical identity remains explicit and accepted only under the exact historical-record rule; c2-c5 retain their original possible consequences and source-refutation bases. No parent drop has been accepted or presumed. Revisions appended immediately under l1, c2, c3, c4 and c5. c3 clarifies that stdout asserts variable membership and the literal-value exclusion applies to manifest JSON; no impact/bucket lowering.\n\nCurrent counts: verified findings added this pass: none; unverified findings added: none; new candidate IDs: none; revised IDs: l1, c2, c3, c4, c5. Open lead IDs: none. Discovery-pass count remains 0; this was repair plus synthesis, not a discovery pass.\n\nInterface assumptions: unchanged. Adjacent groups own the wider harness and tooling edits; maintained callers checked use current recorder options, inventory augments summary records without the removed substrate key, and the reporting CLI passes them to aggregation. External ad hoc consumers are outside the searched maintained paths and remain subject to the documented option/schema change.\n\nNo runtime tests, builds, reproductions, live-install actions, helper agents, checkout changes or forbidden coverage-source reads. Conclusions are source-supported, not observed execution. Next: return only delta checks/results and open lead IDs, then await the caller's next instruction. No separate report created.\n\nTurn 3 entering: discovery pass 1, preceded by required cross-group synthesis. Read discovery-neighbours.json in full (58 lines, 15,983 bytes). Adjacent findings concern old-terminal cleanup/confirmation, an intermediate Podman prerequisite mismatch, and ignored build residue; none is an assigned recorder finding. Parent l1 authority question must be settled before new discovery. Existing history is retained. All mandatory patch delivery was verified before this turn; no source-credit repair is pending.\n\nTurn 3 complete: cross-group synthesis followed by separate discovery pass 1.\n\nPending-input synthesis: read discovery-neighbours.json fully before source. No neighbour finding duplicates or changes the assigned recorder conclusions. Reopened l1 as an authority lead, then found the pinned root-instruction chain: AGENTS.md:13-20 and :261-264 require the named evidence instructions; .agents/test-evidence.md:26 expressly places storage/schema in docs/test-run-evidence.md; that document's :328-329 explicitly says to ignore the historical tmux field. Targeted pinned SPEC/root searches found no competing recorder schema rule. Revised l1 back to candidate with that exact chain and the original real historical-identity consequence preserved. No parent drop or lowering was accepted or presumed.\n\nDiscovery checks beyond known issues: checked tracked-file inventory and downstream release collection, timing, runner, trace and summary consumers for stale required manifest fields or helper use; release copies manifest bytes without a tmux requirement and timing selects unaffected fields. Checked changed ownership/cancellation tests and source.lifecycle_complete after removing the tmux lifecycle condition; no surviving probe-ownership gate is removed. Checked the new guard/log layout against source capture: they are siblings of the fixture repo and read only after synchronous completion. Verified the complete reviewed range has only d751ff1633bb479c7bf53920f2e4ea4ba932a1c2 touching the five assigned files. Broad initial authority search was clipped; the relevant instruction file was delivered fully and the narrow reference search was complete. No clipped output is claimed as exhaustive source evidence.\n\nDurable changes this turn: l1 reopened then revised after actual authority checks; c2 and c3 revised with downstream-consumer and fixture-boundary checks; c6 appended as a source-refuted lifecycle candidate. New verified finding IDs: none. New unverified-after-investigation finding IDs: none. New candidate ID: c6. Remaining lead IDs: none. Discovery result: no new substantive defect found. Discovery-pass count: 1.\n\nCoverage: all 587 mandatory assigned lines remain read under the verified direct-stdout delivery from turn 2; no unread assigned source. Interfaces unchanged: g007/g093/g094 input is context, not source-credit or authorization to broaden review. No runtime tests, builds, reproductions, live-install/process actions, helper agents, checkout modifications or forbidden coverage-source searches. All conclusions are source/contract analysis, not observed behavior.\n\nNext action: return discovery delta and await the caller. No separate report file created.\n"
+}

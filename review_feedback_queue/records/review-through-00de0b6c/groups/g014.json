@@ -1,0 +1,65 @@
+{
+  "group": {
+    "id": "g014",
+    "domain": "product-contracts",
+    "purpose": "product-contracts: SPEC_impl.md; phases complete small per-commit changes",
+    "interfaces": [
+      "g001",
+      "g003",
+      "g004",
+      "g005",
+      "g006",
+      "g007",
+      "g008",
+      "g009",
+      "g010",
+      "g011",
+      "g012",
+      "g013",
+      "g015",
+      "g016",
+      "g149"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/01473-000.patch",
+        "ranges": [
+          [
+            1,
+            550
+          ]
+        ],
+        "original_path": "SPEC_impl.md",
+        "commit": "f96dd4363d97dc7e07dea5b8947c96be6bf912e8",
+        "notes": "patch header; patch character offsets [0,59960)",
+        "lines": 550,
+        "bytes": 59974,
+        "start": 0,
+        "end": 59960,
+        "original": "[private-run]/prep/originals/01473.patch"
+      }
+    ],
+    "lines": 550,
+    "bytes": 59974
+  },
+  "records": [],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review is blocked: the manifest requires lines 1–551, but the snapshot contains 550 lines. The evidence helper rejected both reads.\n\nBrief and complete commits field read; excluded metadata untouched. Blocker recorded in `g014/progress.md`; findings log remains empty. All assigned source remains unread.\n\nCorrect the manifest range to `[1,550]`, then resume the initial review."
+    },
+    {
+      "turn": 2,
+      "reply": "Initial review complete: all mandatory lines 1–550 read through the corrected evidence manifest and checked against pinned contracts and relevant source.\n\nNo substantive findings or unresolved leads. Findings log remains empty; progress updated. No tests, reproductions, or checkout edits performed."
+    },
+    {
+      "turn": 3,
+      "reply": "Synthesis found no new issues. Source checks confirmed the shared tab environment, restart history/size behavior, and updated cross-references.\n\nNo records appended or revised. Unresolved lead IDs: none. Progress updated; mandatory coverage remains complete."
+    },
+    {
+      "turn": 4,
+      "reply": "Discovery pass complete; nothing new found. Checked port attribution, shared input-table assertions, query-table claims, and moved section boundaries against pinned source.\n\nNew verified IDs: none. New unverified IDs: none. Open leads: none. Progress updated; no runtime execution performed."
+    }
+  ],
+  "progress": "# g014 progress\n\nInitial review, turn 1; discovery passes: 0. Findings log exists and is empty. Scope: SPEC_impl.md patch in f96dd4363d97dc7e07dea5b8947c96be6bf912e8, mandatory lines 1–551. Complete inventory commits field read; excluded metadata not read. No source packets read yet. Next: read all mandatory packets, compare changed contracts with product specification and relevant implementation at the recorded revision. Interfaces: other groups own implementation patches; this group validates documentation changes and traces source where needed. No execution requested or performed.\n\nTurn 1 blocked before source review: both evidence reads (1–150 and 1–100) failed with PERSISTENT_REVIEW_TOOL_FAILED: Invalid source range. The manifest pins [1,551], but wc reports 550 newline-terminated lines, and evidence.ts source() does not count a trailing empty line. Its manifest() rejects end > item.lines.length before delivering any packet (evidence.ts:72–108). Original manifest and snapshot left unchanged. Required next action: caller correct manifest range to [1,550] and matching brief assignment, then resume initial review. No findings, candidates or substantive product leads exist; findings.jsonl remains empty. All assigned source remains unread. No runtime execution, reproduction or checkout edits occurred. Interface assumptions unchanged; turn type/count: initial/1; discovery-pass count: 0; new verified/unverified IDs: none.\n\nTurn 2: coverage repair and resumed initial review. Corrected brief read fully; mandatory range is now 1–550. Findings log verified present, empty. Next: deliver all mandatory packets, analyze contracts and source at f96dd4363d97dc7e07dea5b8947c96be6bf912e8. No later synthesis/discovery pass begun.\n\nTurn 2 completed: corrected evidence packets delivered mandatory patch lines 1–100, 101–200, 201–300, 301–400, 401–475 and 476–550. No unread assigned material. This completes the initial source-review pass, not a later synthesis or discovery pass. No substantive findings, ruled-out substantive candidates or unresolved leads arose; findings.jsonl remains empty. New verified/unverified IDs: none; open lead IDs: none.\n\nContract and context reads at f96dd4363d97dc7e07dea5b8947c96be6bf912e8: SPEC.md 2855–3170 (complete Terminal experience); SPEC_impl.md 1504–2824 (complete GUI sidebar section, terminal widget section, Terminal host section and old-server ending section), 1050–1115 (including complete Answers bind to what was drawn paragraph). Headings in both specifications searched to identify scope. Relevant implementation checked at the same revision: grid-terminal.js 1–150, 190–253, 445–505, plus targeted search for fit and renderer contracts; service/core/host_launch.rs 64–165 plus targeted environment search; terminal-emulator queries.rs 1–220 and screen.rs 1–180. Commit stat read to establish document-focused context; other groups own the rest of that commit.\n\nResult: assigned patch reorganizes the terminal section and removes historical tmux/xterm comparisons without removing fit/input, host launch/cleanup, restart, recovery or snapshot compatibility constraints. Cross-references point to the new old-server heading. Source checks support the retained fit formula, child environment and emulator screen/query descriptions. These conclusions are source analysis, not behavior observed in execution. No builds, runtime tests or reproductions run; no checkout files changed and no excluded coverage metadata or queue coverage sources read.\n\nInterface assumptions remain: g001/g003–g013/g015/g016/g149 own related implementation or remaining specification patches. No handoff lead identified. Next action: await caller's later synthesis/discovery prompt. Turn type/count: coverage-repair initial review/2; completed initial passes: 1; discovery-pass count: 0.\n\nTurn 3 completed, later-turn synthesis. Revisited the joins between grid/widget documentation, host child environments, tab hosts and restart snapshots. At the pinned revision, SPEC.md 1920–1965 and 2131–2175 confirm that restart preserves only retained history and that agent/tab shell startup differences remain intentional. host_tabs.rs 556–625 directly uses host_child_env with the tab environment, supporting the rewritten shared-environment wording. host_restart.rs 400–493 reads the old runtime's size and history seed and preserves the documented empty-seed fallback. Query-test and input-fixture searches confirm the table contracts remain represented in code. A targeted git grep across SPEC.md, SPEC_impl.md, crates and docs found no stale reference to the retired Terminal substrate heading.\n\nNo substantive discrepancy, new candidate, finding or unresolved lead arose. Findings log remains empty; no IDs appended or revised. Source-only conclusions; no runtime tests, builds or reproductions. No mandatory scope unread. Interface assumptions unchanged: related implementation patches remain other groups' review scope; no handoff lead identified. Turn type/count: synthesis/3; completed initial passes: 1; discovery-pass count: 0; new verified/unverified IDs: none; unresolved lead IDs: none. Next action: await caller's discovery prompt.\n\nTurn 4, discovery pass 1 started. Complete discovery-neighbours.json read in bounded ranges 1–48, 49–96, 97–150, 151–200, 201–240 and 241–271 after an oversized first read was clipped. Own findings history remains empty. Named pending cross-group questions: none. Interface context includes existing documentation-pointer, Shift+Enter wording and resized launch-excerpt findings; those are novelty context, not new g014 findings. No parent drop/lowering inferred. Next: independently search remaining changed descriptions and retained fixture/attribution contracts inside the assigned patch, without broadening to other specification patches.\n\nTurn 4 discovery pass 1 completed with an empty result. New search checked the changed provenance/fixture descriptions and section boundaries at f96dd4363d97dc7e07dea5b8947c96be6bf912e8: THIRD_PARTY_NOTICES.md search context confirms xterm.js/add-on/VS Code port attribution; grid_input/tests.rs 1–175 and grid-input-tables.js 1–180 plus grid-input-tables.test.js 1–160 confirm the retained key table is actually consumed by both implementations' checks and remains a frozen fixture contract. queries test source 1–135 confirms the retained device/status/color query table and clipboard-read omission. SPEC_impl.md 1488–1520 and 1680–1720 rechecked moved heading boundaries and surrounding text. Results support the assigned rewritten claims and expose no additional substantive discrepancy. These were source reads only, not test execution. Existing neighbouring findings were used for novelty and were neither duplicated nor adjudicated.\n\nFindings.jsonl remains empty. New verified IDs: none. New unverified-after-investigation IDs: none. Open lead IDs: none. No new findings or substantive candidates arose. No mandatory scope unread; no checkout edits, runtime tests, reproductions, live-install actions or prohibited coverage searches. Interface assumptions unchanged; named pending questions remain empty. Turn type/count: discovery/4; discovery-pass count: 1; result: nothing new found. Next action: return discovery delta to caller.\n"
+}

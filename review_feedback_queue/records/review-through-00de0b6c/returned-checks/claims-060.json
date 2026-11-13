@@ -1,0 +1,216 @@
+[
+  {
+    "key": "g091/c1",
+    "latest_line": 11,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "browser-fixture-removed-renderer-premise-watch",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Removing the dual-renderer premise watch cannot make this revision silently use the retired renderer: each attachment constructs a grid before its socket. This refutes the named fallback and protocol-selection concern, not every malformed-stream or key-encoding concern.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/assets/terminal.js:3387-3428 unconditionally constructs the grid surface before WebSocket construction; :4654-4668 publishes primary grid/socket/test globals and every island's grid/socket/test registry.",
+      "At the same revision, terminal.js:4495-4507 sends encoded grid input as binary data; grid-input.js:479-488 JSON-encodes one complete message per frame. e2e/tests/helpers/program-input.ts:21-30 collects binary sent frames, :75-105 decodes each independently. Their interfaces agree.",
+      "e2e/tests/helpers/terminal-readiness.ts:120-178 observes decoded session identity, exact tab selector, grid/socket/test presence, socket state, reveal and actual input focus; :272-354 keeps mounted/open/revealed/ready distinct. evidence.ts:33-67 still supplies timeline/context observation independently of the removed premise fixture.",
+      "Targeted git grep at f560058 found no host-premise, fabricatedTerminals, terminalKind, SocketKind or frame.socket.kind consumers in e2e. These are source checks only; no runtime validation or general teardown certification is claimed."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md, Terminal experience: every terminal runs in a terminal host; SPEC_impl.md:1692-1718 explicitly specifies the grid island. These corroborate the source refutation.",
+      "TODO.md Planned is empty. plans/queue/INDEX.md contains no unlanded plan; the tmux plan files remain on disk with reports and do not supply prospective coverage.",
+      "Searched BUGS.md, review_feedback_queue/INDEX.md and matching queue text, and active TRIAGE_OUTCOMES.md for removed host premise, renderer fallback, byte-reader and readiness claims. No exact trigger/consequence/scope match found. FILTER.md has no matching boundary."
+    ],
+    "exact_cover_quotes": [
+      "SPEC_impl.md:1694-1696: Every terminal runs in a terminal host (\"Terminal host\") and is interpreted by the supervisor's emulator, so the browser draws a grid stream with its own grid client"
+    ],
+    "missing_premise": null,
+    "original_stronger_consequence": "The initial candidate asked whether deleting the per-socket watch and openTerminal assertion could let browser tests pass on xterm instead of the required grid. Later source checks refuted that specific concern; no security or user-work-loss route was claimed. Malformed grid streams, all key encodings and all fixture teardown paths were expressly outside the conclusion.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutation of the narrowly named retired-renderer fallback and wire-selection concern. No parent drop acceptance is inferred."
+  },
+  {
+    "key": "g091/c2",
+    "latest_line": 8,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "host-menu-timeout-prelude-already-satisfied",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The shorter timeout covers the disappearing menu operations that motivated the change. The caller already opens Hosts, so the separately unbounded panel-opening prelude is not an established failure route for this caller.",
+    "checks": [
+      "350a4b33b6d4476f4a78e43cea124bc2b828f462:e2e/tests/helpers/fleet.ts:1211-1215 retains the 20-second Hosts-toggle wait; :1339-1401 documents and passes options to each menu operation, including evaluation and the measured-state poll; :1444 invokes showHostsPanel before these operations.",
+      "At that revision e2e/tests/provisioning.spec.ts:3747-3758 holds two backend actions, opens Hosts and captures rows by returned IDs. :3781 bounds the menu waits to one second inside an eight-second retry, and :3787-3798 independently observes each page-side running/completed premise.",
+      "crates/farhelm-helm/src/provisioning/e2e.rs:206-224 fails an action after its 30-second hold deadline. Per-operation timeouts and the retry do not prove the entire scenario fits that hold under arbitrary load. No execution or universal cleanup/deadline guarantee is claimed."
+    ],
+    "coverage_checked": [
+      "Searched both specifications for host-menu layout closure and timeout behavior. SPEC_impl.md:1027-1030 requires menu closure when layout could move its row; it does not promise an overall helper deadline.",
+      "TODO.md Planned is empty; plans/queue/INDEX.md has no unlanded plan. Searches of BUGS.md, INDEX.md, matching queue text and active TRIAGE_OUTCOMES.md found no exact menu-timeout/prelude item.",
+      "Read review_feedback_queue/host-menu-requested-index-survives-command-removal.md: it concerns keyboard navigation after command removal, not bounded test waits. FILTER.md does not establish a matching rare trigger and whole consequence."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A supported path that hides the whole Hosts panel during this already-open caller would be needed to establish the proposed prelude budget regression.",
+    "original_stronger_consequence": "The candidate considered a vanished panel consuming the provisioning test's retry budget despite the one-second override. The source preserves the distinction between the menu flyout and the whole Hosts panel. A future caller needing an overall opening deadline must bound showHostsPanel too; the 30-second hold and five separate observations are not guaranteed to finish under arbitrary load.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Refute the named new-caller route on its established panel premise and the documented per-operation timeout contract. Do not convert this into a claim of a universal overall deadline."
+  },
+  {
+    "key": "g091/c3",
+    "latest_line": 12,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "fresh-browser-stack-no-longer-creates-private-tmux",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Fresh browser stacks cannot create the retired terminal kind at this revision, so removing its selection and private-server cleanup does not strand a server this script creates.",
+    "checks": [
+      "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:crates/farhelm-supervisor/src/service/core.rs:11060-11074 assigns Host to Reserved::New/Unkeyed; service/status.rs:600-613 always reports host creation.",
+      "At that revision e2e/start-stack.sh:123 allocates fresh state; :686-707 creates its startup session through the API. :352-417 retains creator shutdown, creator-gone checks, host stopping, and removal of state only when both host stops succeed. An uncertain stop retains the socket/state directory.",
+      "e2e/playwright.config.ts:125-160 retains exec and a five-second SIGTERM grace. SPEC_impl.md:1974-1985 permits stop-terminal-hosts to take 30 seconds, so synchronous completion within that grace is not proved; an interrupted stop remains eligible for a later dead-run sweep.",
+      "e2e/tests/terminal-multihost.spec.ts:750-759 still puts --boot-id-file after the remote state path, satisfying start-stack.sh:312-323's replacement process pattern; :747-772 closes its log descriptor and records the replacement PID.",
+      "Targeted git grep at 647f0227 found only explanatory/documentation URL references to new-terminals and no suite-terminals imports in e2e and the checked product sources. No runtime execution occurred."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md, Terminal experience, and SPEC_impl.md, Terminal widget/Terminal host/Testing, specify host-backed terminals, host-only browser stacks and caller shutdown before the host scan.",
+      "TODO.md Planned and plans/queue/INDEX.md are empty. The tmux plan files are landed context, not unlanded coverage.",
+      "Searched BUGS.md, INDEX.md and matching queue text, and active TRIAGE_OUTCOMES.md for suite selector removal, retired-server leakage, fresh-stack wrong-kind selection and cleanup. No exact coverage or alias found. FILTER.md does not apply to this refuted creation premise."
+    ],
+    "exact_cover_quotes": [
+      "SPEC_impl.md:1981: Exit status 0 is the only success",
+      "SPEC_impl.md:1984-1985: callers stop the supervisor first"
+    ],
+    "missing_premise": null,
+    "original_stronger_consequence": "The candidate asked whether deleting --new-terminals flags, the old suite selector and tmux cleanup would cause wrong-kind test runs or retired-server resource leaks. It never claimed security or user-owned work loss. Product compatibility with already-existing old terminals still existed at this intermediate revision; lost old-renderer regression coverage is a separate concern. A slow host stop may exceed Playwright's grace, with state retained rather than proof of completed teardown.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Refute only the fresh-stack wrong-kind, removed-resource cleanup and stale replacement-argument routes. Preserve the interrupted host-stop caveat and separate old-renderer coverage issue."
+  },
+  {
+    "key": "g091/l1",
+    "latest_line": 10,
+    "recommendation": "out-of-range",
+    "bucket": "other",
+    "underlying_key": "global-setup-request-context-success-only-disposal",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The undisposed request context on setup failure is real in source, but its exact startup-wait route already exists at the exclusive base and is not expanded by the sole in-range change to this path.",
+    "checks": [
+      "6e423e30068b62c6cfa276c6d720ee35bb70387a:e2e/global-setup.ts:92 creates the context, :105 awaits expectStackTerminals, :117 disposes only on success; :143-149 already has the same failing GET/status assertion/JSON/startup-session poll.",
+      "Base e2e/playwright.config.ts:73,152-158 supplies valid suite-terminal metadata, so the ordinary main suite already enters that wait. 647f0227:e2e/global-setup.ts:86,99,111 preserves the lifetime while renaming/narrowing the startup helper.",
+      "git log over the complete reviewed base..tip range names only 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 for e2e/global-setup.ts. The full-range diff removes the extra kind assertion and preserves the same earlier startup failure route. No prompt reclamation or runner-resource lifetime was measured."
+    ],
+    "coverage_checked": [
+      "Searched both specifications for authenticateStack/startup-session/request-context cleanup; no explicit acceptance of success-only disposal found.",
+      "TODO.md Planned is empty and plans/queue/INDEX.md has no unlanded plans. Searches of BUGS.md, INDEX.md/queue text and active TRIAGE_OUTCOMES.md found no exact setup-context lifetime coverage.",
+      "FILTER.md supplies no exact matching boundary. The proposed exclusion rests on complete-range attribution, not coverage or desirability of the behavior."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "The initial lead said a failed startup wait could leave its explicitly created HTTP request context undisposed until runner exit. Later revisions withdrew regression attribution, first by immediate-parent comparison and then by exclusive-base plus full-path-history comparison. The resource leak is not denied; practical lifetime/reclamation is unmeasured, and the affected resource is isolated maintainer tooling.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Exclude as an unchanged pre-range cleanup gap, preserving the source-established consequence and the earlier insufficient immediate-parent-only basis in the record history."
+  },
+  {
+    "key": "g092/c1",
+    "latest_line": 7,
+    "recommendation": "covered",
+    "bucket": "other",
+    "underlying_key": "removed-byte-terminal-fixture-readers-outside-supported-contract",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The removed readers and byte-input cases target a terminal kind the reviewed revision explicitly retires. The retained readers use the exact grid/socket/test interface product code publishes. This is specification acceptance of that narrowing, not a claim that all remaining fixtures are correct.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e:SPEC.md:3002-3015 ends old terminals; SPEC_impl.md:1506-1508 specifies the grid island. Current SPEC.md:2899 onward and SPEC_impl.md:1694-1696,1859-1867,8193-8194 retain host/grid-only terminal and browser-stack contracts.",
+      "At f560058, terminal.js:3387-3428 constructs the grid and :4654-4668 publishes the precise handles read by e2e/tests/helpers/term.ts:22-80. terminalTextInPage:162-174 expressly excludes unapplied sliced history.",
+      "terminal-readiness.ts:120-178,272-354 keeps exact session/tab identity and distinct mount/open/reveal/focus boundaries. grid-input.js:479-488 emits complete JSON binary messages, matching program-input.ts:21-30,75-105. Targeted e2e grep found no deleted-kind/premise consumers.",
+      "No runtime observations are claimed. This does not certify unchanged encoders, all replay callers or all teardown paths; the histories' inspected-caller reports remain limited to the callers they name."
+    ],
+    "coverage_checked": [
+      "Exact coverage is the specifications' retirement of byte terminals and host/grid-only contract. Input is small JSON messages rather than terminal-encoded bytes; binary WebSocket transport does not contradict that semantic distinction.",
+      "TODO.md Planned is empty; plans/queue/INDEX.md has no unlanded plan. BUGS.md, INDEX.md/queue text and active TRIAGE_OUTCOMES.md searches found no additional exact reader-removal item. FILTER.md is unnecessary and has no whole matching boundary."
+    ],
+    "exact_cover_quotes": [
+      "SPEC_impl.md:1694-1696: Every terminal runs in a terminal host (\"Terminal host\") and is interpreted by the supervisor's emulator, so the browser draws a grid stream with its own grid client",
+      "SPEC_impl.md:1859: Input goes up as small JSON messages (keys, text, pastes, mouse and focus events), never as encoded bytes",
+      "SPEC_impl.md:8193-8194: the browser suite, which runs every terminal in a host on a real stack"
+    ],
+    "missing_premise": null,
+    "original_stronger_consequence": "The candidate considered losing supported coverage by deleting xterm readers, host-kind checks and byte-stream input cases, including prematurely consuming held replay. Later source checks completed initially pending checks and found compatible retained mount, input and caller boundaries. It remained a maintainer fixture-coverage concern with no product security or user-work-loss consequence. Related misleading helper documentation is not covered by production correctness.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Treat the narrowly named removal of unsupported byte-terminal fixture paths as specification-covered. g091/c1 overlaps in context but concerns the lost premise watch rather than the same reader defect; no exact alias is asserted."
+  },
+  {
+    "key": "g092/c2",
+    "latest_line": 6,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "terminal-suite-reset-retained-scrollback-comment",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "A new terminal instance on Restart can inherit old scrollback. The changed reset comment accurately explains why delete/recreate is used to get clean fixture history.",
+    "checks": [
+      "61e632323dbc6b4a35ed27bf5b9833102ffd5a4e:e2e/tests/helpers/terminal-suite.ts:154-195 still deletes the listed sessions and recreates the canonical session; :166-170 changes only its explanatory history rationale.",
+      "SPEC.md:1942-1952 explicitly preserves retained scrollback into the new run, with bounded/copy-failure/absent-terminal caveats. Those exceptions do not make Restart a clean-history operation. Current SPEC_impl.md:8193-8194 also distinguishes static grid-client checks from host-backed real stacks.",
+      "This is a comment-contract check, not execution evidence or proof that every teardown failure recovers. The reviewer histories' worker-isolation and normal-caller cleanup checks are limited to those inspected paths."
+    ],
+    "coverage_checked": [
+      "Both specifications searched for Restart, retained history and fixture isolation. SPEC.md's explicit retained-scrollback contract refutes the named misleading-comment allegation.",
+      "TODO.md Planned and plans/queue/INDEX.md are empty. BUGS.md, INDEX.md, matching queue text and active TRIAGE_OUTCOMES.md searches found no exact reset-rationale item.",
+      "Read history-fixture-reset-races-selection-save.md: it concerns preference writes racing server restoration, not terminal history carried by Restart. FILTER.md supplies no applicable boundary."
+    ],
+    "exact_cover_quotes": [
+      "SPEC.md:1942-1944: Restart keeps whatever scrollback the session's agent terminal retained: the terminal is replaced by a new one for each run, which starts with the old one's scrollback above a blank screen in default modes."
+    ],
+    "missing_premise": null,
+    "original_stronger_consequence": "The candidate considered misleading future fixture cleanup by claiming a host-backed Restart retains history. Its initial quotation used normalized apostrophes; later records supplied exact spelling and unchanged-reset/caller context. This never alleged a harmful product deletion path or user-work-loss route.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Refute the named documentation defect using the explicit retained-scrollback contract; keep the scope limited to that rationale."
+  },
+  {
+    "key": "g092/l1",
+    "latest_line": 11,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "replay-reveal-helper-retired-async-write-rationale",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The reveal helper still explains a synchronous grid reveal using a retired asynchronous write callback. Keep the source-confirmed documentation mismatch while the parent settles attribution: the ordinary-grid mismatch predates the range, but removal of the last actually applicable old-run caller occurs inside it.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e:e2e/tests/helpers/terminal-readiness.ts:38-39 says the reason is recorded one asynchronous write completion before reveal. The exact same text is present at exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a and recording-time main 24bc058066fd57848e788b465719b0e6da2f98f7.",
+      "At f560058 terminal.js:3893-3915 records reason and calls reveal synchronously; :3756-3785 may veto reveal during recovery, otherwise flushes and records revealed. grid-terminal.js:1997-2000 flush directly calls paint. History may still be pending at terminal.js:3774-3776, as SPEC_impl.md:1866 also allows.",
+      "At exclusive base, e2e/suite-terminals.ts:4-20 already puts ordinary callers on grids, but :10-18,62-74 provides a separate old-terminal run. terminal-replay-rename.spec.ts:715-777 has an actual OLD_TERMINAL_TAG caller after injecting nonempty byte replay (:764). Base terminal.js:5445,5467-5488 still records reason before writeBytes(joined, () => reveal(true)).",
+      "At in-range 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 the old suite/callers disappear while waitForReplayReveal remains at terminal-replay-rename.spec.ts:370,417,479,1072,1161,1416,1502. Full-range helper path history names 647f0227 and f560058. Thus assigned-commit-only attribution to f560058 is unsound; whole-suite loss of the last applicable caller is attributable to 647f0227. No runtime bug is alleged or reproduced."
+    ],
+    "coverage_checked": [
+      "Both specifications' grid/replay contracts explain synchronous paint and sliced history, not an asynchronous terminal-write callback. They do not accept inaccurate synchronization rationale.",
+      "TODO.md Planned is empty; plans/queue/INDEX.md has no unlanded plan. tmux-drop-from-docs.md's broad rationale sweep is already landed and the current helper still carries this text; it is not prospective coverage.",
+      "Searches of BUGS.md, INDEX.md and queue bodies, and active TRIAGE_OUTCOMES.md found no exact waitForReplayReveal/asynchronous-write-rationale item. FILTER.md does not cover persistent explanatory test documentation merely because it concerns a rare replay ending. The history's g089/l2 and g181/c2 references concern different locations/contracts; no exact alias is established from this batch."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "Parent classification of introduced-defect scope: is removal of the last old-run caller enough to record newly universal staleness, despite ordinary retained callers already being misdescribed at the exclusive base? Source facts on both sides are established; no new harm to an ordinary-grid caller is demonstrated.",
+    "original_stronger_consequence": "The initial lead/finding alleged misleading synchronization documentation, not broken reveal code, and initially attributed universal staleness to f560058. Latest record proposes dropping assigned-patch attribution because ordinary-grid harm already existed before the range, while expressly preserving the contrary fact that an actual old-run caller existed at base and was removed by in-range 647f0227. Do not erase that withdrawal proposal or treat production correctness as refuting the documentation defect. History drainage is not what this helper observes.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain the verified documentation mismatch with the attribution caveat for parent judgment. If retained as in-range newly universal staleness, cite 647f0227's caller-population transition rather than claiming f560058 first introduced ordinary-grid misinformation. No exact existing coverage was found."
+  },
+  {
+    "key": "g092/c3",
+    "latest_line": 10,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "terminal-suite-signal-death-exit-code-comment",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The host-backed status path deliberately represents a signal death without a numeric exit code. Removing the old tmux qualification leaves the fixture explanation accurate.",
+    "checks": [
+      "61e632323dbc6b4a35ed27bf5b9833102ffd5a4e:e2e/tests/helpers/terminal-suite.ts:66-78 says signal death has no exit code and permits numeric or unknown/absent codes in STOPPED_BADGE.",
+      "At that revision crates/terminal-host/src/host.rs:467-469 records WTERMSIG as ChildExit::Signal and WEXITSTATUS as ChildExit::Code. crates/farhelm-supervisor/src/hosts/terminal.rs:835-859 derives status from that record and documents None for signal death; :886-889 exhaustively maps Signal to None and Code to Some(code). No synthetic 128-plus-signal status is produced by this path.",
+      "These are source and contract checks, not execution observations. No product security or user-work-loss route is alleged."
+    ],
+    "coverage_checked": [
+      "Both specifications searched for signal/exit-code status. SPEC.md:2664-2674 requires known numeric evidence or explicit unknown, never a guess; SPEC_impl.md:2606 states the exit code comes from the host's exit record. The decisive refutation is the explicit source mapping.",
+      "TODO.md Planned and plans/queue/INDEX.md are empty. Searches of BUGS.md, INDEX.md/queue bodies and active TRIAGE_OUTCOMES.md found no exact signal-death fixture-comment item. FILTER.md is not needed and does not match this documentation allegation."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "The candidate asked whether removing the tmux qualification falsely says a host-backed signal death has no exit code and misleads future fixture authors. It was source-refuted on its only recorded turn; no broader product consequence was claimed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Refute the inaccurate-comment allegation with the exact ChildExit-to-optional-code conversion and host wait-status producer."
+  }
+]

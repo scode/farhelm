@@ -1,0 +1,101 @@
+[
+  {
+    "key": "g017/c1",
+    "latest_line": 6,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "http-host-golden-defaulted-trash-epoch",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The fast producer/consumer golden pair cannot distinguish a defaulted Trash epoch decoder from a working decoder. This is an established test-sensitivity gap, not an established current product failure. Browser coverage does exercise nonzero epochs and must remain acknowledged.",
+    "checks": [
+      "06d4b68f3a9e913f47cd426fedee5946a4eed77b:crates/farhelm-helm/src/http_contract_tests.rs:119-140 sets trash_epoch to zero in the common constructor; all twelve golden rows inherit it. The commit diff adds only zero-valued epochs to http-contract/host-list.json.",
+      "06d4b68f3a9e913f47cd426fedee5946a4eed77b:crates/farhelm-ui/src/api/http_contract_tests.rs:163-321 decodes the shared fixture and asserts host metadata/phases but never trash_epoch. lib.rs:824-827 defines a defaulted u64. A serde rename on that member therefore preserves successful decoding and all these assertions while substituting zero.",
+      "06d4b68f3a9e913f47cd426fedee5946a4eed77b:crates/farhelm-helm/src/http_contract_tests.rs:10-18 explicitly explains that defaulted values allow renames through the pair. Matching current producer/consumer names refute a claim of a current broken decoder, but do not refute this test defect.",
+      "06d4b68f3a9e913f47cd426fedee5946a4eed77b:e2e/tests/rail-notices.spec.ts:37-46 injects epoch values; :281-312 uses epochs 1 and 2 and asserts host-local refresh. This is real browser sensitivity, so the finding must not say there is no regression coverage anywhere.",
+      "The reviewed commit is a descendant of the exclusive range base and an ancestor of the inclusive tip. Current constructor still uses trash_epoch: 0 at crates/farhelm-helm/src/http_contract_tests.rs:138; current consumer golden has no epoch assertion. No runtime test or reproduction was run."
+    ],
+    "coverage_checked": [
+      "At recording main 24bc058066fd57848e788b465719b0e6da2f98f7, searched SPEC.md and SPEC_impl.md for Trash change/refresh/epoch and HTTP contract/golden terms. Read SPEC_impl.md:498-510 and :4039-4060: they require the shared golden boundary and change-driven idle refresh, and do not accept this test gap. SPEC.md supplied no exact acceptance.",
+      "TODO.md:25-26 has an empty Planned bucket. plans/queue/INDEX.md contains no unlanded plan entries. Search of retained plan files found bell-trash-reads.md; its goal and acceptance criteria describe the already implemented epoch behavior, not a promised repair of this golden gap.",
+      "Searched BUGS.md, review_feedback_queue/INDEX.md, matching queue text and active TRIAGE_OUTCOMES.md for trash_epoch, host-list, HTTP contract, golden and decoder/fixture terms. No exact trigger/consequence/scope match found. BUGS.md contains only the unrelated SSH-output hang. No archive was read.",
+      "FILTER.md: no complete match. A persistent test discrimination gap is not a rare self-correcting product display/diagnostic failure."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "None for the test gap. A current stale-Trash product defect from a decoder regression is not established; that product consequence remains hypothetical. The separate fleet-wake ordering defect mentioned in history was not checked and is not an alias.",
+    "original_stronger_consequence": "A decoder regression could silently default the Trash epoch and leave idle Trash stale while the fast contract pair passes. Initial line 1 proposed setting the candidate aside because current field names/types match; line 6 explicitly withdrew that proposed drop and retained the test-quality finding. Existing browser sensitivity and absence of reproduction remain caveats.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain as other/test quality. Pin a nonzero epoch in the producer golden and assert that exact value in the consumer test. Preserve the withdrawn proposed drop as history; do not report the hypothetical product decoder failure as present."
+  },
+  {
+    "key": "g017/c2",
+    "latest_line": 7,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "http-host-golden-omits-populated-environment",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Every producer golden row omits the newly added public environment projection, so the golden comparison cannot pin its outer JSON key or populated nested shape. Correct shared serde types do not protect that public serialized contract.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/http_contract_tests.rs:119-142 adds environment: None to the common host constructor. Tensorlake overrides at :239-265 set only tensorlake metadata and inherit None. No Podman row appears in this fixture.",
+      "56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/hosts.rs:69-71 omits environment when None. host_views at :534-558 populates it in production; HostKind::environment_view at :4260-4288 returns Some for bound Tensorlake and Podman resources.",
+      "56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-proto/src/environment.rs:143-155 defines the serde-derived name, place_name, target, tunnels and credential_warning fields. A serde rename of HostView.environment changes populated production JSON while leaving all-None golden serialization unchanged. The same fixture also cannot notice nested serialization changes.",
+      "The producer equality assertion compares only the constructed fixture with host-list.json; the test module's :10-18 rationale expressly explains why an unpopulated Option misses renames. The current UI need not have an environment decoder for this narrower producer-schema gap to exist.",
+      "The reviewed addition is within the pinned range. Current common constructor still has environment: None at crates/farhelm-helm/src/http_contract_tests.rs:117. No runtime tests or reproductions were run."
+    ],
+    "coverage_checked": [
+      "At recording main 24bc058066fd57848e788b465719b0e6da2f98f7, searched both specifications for environment host projections, HTTP contracts, goldens and serialization. Read SPEC_impl.md:498-510 and Environment rows and provider state (:5955-5980). These describe public host projection and contract tests; neither accepts leaving this shape unpinned. SPEC.md supplied no exact test-gap acceptance.",
+      "TODO.md Planned is empty and plans/queue/INDEX.md has no unlanded entries. Retained environment/podman plan search hits concern production projections and agent operations, not this producer golden omission; no unlanded coverage exists in the authoritative queue index.",
+      "Searched BUGS.md, review_feedback_queue/INDEX.md, queue text and active TRIAGE_OUTCOMES.md for EnvironmentHostView, environment JSON/serialization/fixture, HTTP contract and host golden terms. No same-root queue item or accepted outcome found. Unrelated environment and golden test findings do not match this trigger/consequence/scope. Archive not read.",
+      "FILTER.md: no complete boundary matches an ongoing producer-golden sensitivity gap."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "None for the producer golden omission. No malformed production serializer or existing UI environment decoder failure is established. This consultation does not independently establish the broader historical assertion that no other serialization test exists anywhere.",
+    "original_stronger_consequence": "Malformed container-host resource metadata or a renamed environment key could pass the HTTP golden check. Initial line 2 proposed dropping a product-bug interpretation because None is legitimately omitted and the nested type is shared; line 7 withdrew that drop and retained the narrower test-quality defect. No destructive/security route or observed production failure was claimed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain as other/test quality. Add a populated environment example to the producer golden while retaining ordinary None rows. This is distinct from c1: the failing contract field and necessary fixture/assertion repair differ."
+  },
+  {
+    "key": "g017/l1",
+    "latest_line": 10,
+    "recommendation": "retain-verified",
+    "bucket": "highest",
+    "underlying_key": "old-browser-raw-paste-decoded-as-grid-control",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "An old page can mount a fresh raw xterm surface against the new grid socket and paste a complete valid Text-shaped JSON message. The supervisor decodes its escaped control characters and sends the resulting bytes as ordinary Text, bypassing paste framing. This establishes a conditional input-authority/security route by source; no runtime occurrence was observed. The reload exception describes broken display and malformed-input rejection, not this successful reinterpretation.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e removes exactly agent_terminal, supervisor_creates_host_terminals and tabs[].kind from the session golden and matching consumer assertions. At its parent, UI lib.rs:520-527 defaults the first two; proto lib.rs:1818-1823 defaults tab kind. Thus missing fields need not fail the HTTP listing.",
+      "At f560058da19e02716e6f943883a9508b447aff4e^, session_view.rs:1771-1809 and :1826-1848 pass defaulted kinds into terminal specs; agent_spec_kind at :3839-3849 yields unknown/null when neither listing nor restart reply names a kind. terminal.js:4650-4665 chooses a fresh xterm surface for unknown kinds. The tab path supplies a shell surface without depending on an agent TUI's submission behavior.",
+      "At that parent, api.rs:2519-2522 calls skew::note_build only for its side effect. skew.rs:30-35 expressly declines blocking, refusal to render and automatic reload. reconnect.rs:185-225 disables unattended behavior on skew but explicitly leaves manual reconnect enabled. These inspected paths supply no global build-skew veto on this manual old-page route.",
+      "At that parent, terminal.js:2649-2673 handles an ordinary plain-text paste through insert; :2232-2235 sanitizes it then calls pasteText; :4628-4634 uses term.paste with an open-socket liveness check. term-bytes.js:48-56 removes literal ESC bytes/end markers only, so ASCII JSON escape sequences survive. terminal.js:4158-4159/:4191-4196 sends the xterm onData chunk as one binary WebSocket message.",
+      "Parent assets/vendor/xterm.js:1 is minified. Bounded substring reads show initial decPrivateModes has bracketedPasteMode:!1; its paste helper applies bracket markers only when that mode is enabled and calls triggerDataEvent once for the whole normalized text. Therefore a fresh xterm surface can send a small complete {\"t\":\"text\",\"data\":\"...\\r\"} document without paste markers. No vendored code was executed.",
+      "f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-helm/src/auth.rs:34-39 keeps the stable farhelm WebSocket subprotocol. terminal.rs:650-710 starts the outbound grid pump without a stream notice; :759-774 forwards binary input through send_grid_input. The old page's terminal.js:5718-5740 classifies first binary data without a notice as bytes, so it does not adopt the grid surface.",
+      "f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-proto/src/grid.rs:1565-1566 and :1610 define tagged Text JSON; :1650-1655 deserializes it; :1686-1693 bounds Text length without rejecting decoded CR. supervisor service/grid_stream.rs:1064-1089 decodes, encodes and queues it; grid_input.rs:175 sends Text data.as_bytes() without the Paste branch's wrapping. A literal backslash-r in pasted JSON therefore becomes a carriage return in terminal input.",
+      "The removal commit is within the pinned review range. All conclusions are conditional source conclusions: old bundle, fresh unknown-kind surface, live attachment, small valid Text-shaped JSON paste, and no earlier malformed input ending that attachment. Existing known-kind grid islands are outside this narrow route. No reproduction, test, build, process action or live-install action was performed."
+    ],
+    "coverage_checked": [
+      "Searched current SPEC.md/SPEC_impl.md for old-page, grid, stream notice, raw input, JSON paste and upgrade compatibility. Read SPEC_impl.md Grid streams opening (:2936-2970) and SPEC.md Upgrade compatibility and client scale (:5360-5415). The exact old-page exception names misdrawing and malformed-input detachment; it does not expressly accept successful reinterpretation of literal pasted JSON into control bytes. General per-feature compatibility policy also is not blanket permission for security or runtime work loss.",
+      "TODO.md Planned is empty. plans/queue/INDEX.md contains no unlanded plans. Retained tmux-removal plan text describes the completed protocol/renderer removal, not an unlanded repair of old-page input admission. Other plans' incompatible approval-card decoding is a different boundary.",
+      "Searched BUGS.md, review_feedback_queue/INDEX.md, queue text and active TRIAGE_OUTCOMES.md for old/legacy/stale page, old xterm, raw paste/input, GridInput, stream notice and valid JSON/paste terms. No exact same-root queued item or active decision found. The source-gap legacy static-server item and auth-skew remount items concern different defects. No archive was read.",
+      "FILTER.md: the older-release-plus-rare-condition filter expressly excludes security/trust-boundary consequences, and the other rare-display/race filters also exclude them. The full boundary therefore does not cover this retained successful-control interpretation route."
+    ],
+    "exact_cover_quotes": [
+      {
+        "source": "SPEC_impl.md Grid streams; f560058da19e02716e6f943883a9508b447aff4e:3021-3027; current main:2950-2955",
+        "quote": "A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.",
+        "scope": "Partial acceptance of old-page incompatibility. Read with the following description of misdrawing and malformed-input detachment; does not explicitly settle successful control-byte reinterpretation."
+      },
+      {
+        "source": "Same paragraph",
+        "quote": "Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy.",
+        "scope": "Preserve the earlier proposed drop of the ordinary broken-terminal consequence. Do not silently extend it to the later security consequence."
+      }
+    ],
+    "missing_premise": "No missing source premise remains for the narrow literal-JSON-to-control-byte route inspected here. Runtime admission/order was not exercised. Actual damage depends on the decoded bytes and program; successful conversion of escaped CR to unbracketed input already establishes the security boundary consequence supporting highest.",
+    "original_stronger_consequence": "The initial lead concerned old-page misdrawing and disconnecting on ordinary input after upgrade. Lines 4, 5 and 8 proposed dropping that narrow behavior under the explicit reload exception, including the assumption that input is rejected as malformed. Lines 9 and 10 withdrew the broader dismissal after the supplied g196/l1 route showed valid JSON can instead be decoded and submitted as control-bearing Text. Preserve both the earlier display/detachment acceptance and the later possible command submission/user-work consequence. The route needs an old page, fresh unknown-kind xterm mount, live socket and small valid Text-shaped JSON paste before a rejecting input or reload.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Retain the successful-control interpretation as highest. Keep the old proposed-drop history in the independent register: any decision to apply the reload exception or an upgrade filter to this strengthened route, or to lower it, needs an independent check. The record names g196/l1 as the interface owner; use underlying_key to reconcile it with that owner's batch rather than assuming a second defect or dropping either owner's caveats.",
+    "new_interface_evidence": "Independently corroborated the g196-supplied route at the named removal revision: parent term-bytes.js preserves literal JSON escapes; vendored xterm defaults paste mode off and emits the whole paste in one data event; new Text decoding and encoding turn escaped CR into raw terminal input. Parent shell-tab defaults and spec construction provide a fresh unknown-kind surface too. This is source evidence only, not a reproduction."
+  }
+]

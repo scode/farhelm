@@ -1,0 +1,508 @@
+{
+  "group": {
+    "id": "g006",
+    "domain": "product-contracts",
+    "purpose": "product-contracts: SPEC_impl.md, SPEC.md; phases complete small per-commit changes",
+    "interfaces": [
+      "g001",
+      "g002",
+      "g003",
+      "g004",
+      "g005",
+      "g007",
+      "g008",
+      "g009",
+      "g010",
+      "g011",
+      "g012",
+      "g013",
+      "g014",
+      "g015",
+      "g016",
+      "g030",
+      "g039",
+      "g042",
+      "g044",
+      "g045",
+      "g046",
+      "g047",
+      "g048",
+      "g053",
+      "g057",
+      "g061",
+      "g062",
+      "g072",
+      "g073",
+      "g079",
+      "g090",
+      "g091",
+      "g093",
+      "g097",
+      "g098",
+      "g100",
+      "g102",
+      "g105",
+      "g106",
+      "g107",
+      "g108",
+      "g117",
+      "g122",
+      "g129",
+      "g137",
+      "g138",
+      "g139",
+      "g140",
+      "g141",
+      "g143",
+      "g144",
+      "g147",
+      "g148",
+      "g149",
+      "g151",
+      "g152",
+      "g153",
+      "g154",
+      "g155",
+      "g156",
+      "g157",
+      "g159",
+      "g169",
+      "g174",
+      "g175",
+      "g176",
+      "g177",
+      "g178",
+      "g180",
+      "g181",
+      "g183"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00759-000.patch",
+        "ranges": [
+          [
+            1,
+            492
+          ]
+        ],
+        "original_path": "SPEC_impl.md",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,55043)",
+        "lines": 492,
+        "bytes": 55067,
+        "start": 0,
+        "end": 55043,
+        "original": "[private-run]/prep/originals/00759.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01262-000.patch",
+        "ranges": [
+          [
+            1,
+            84
+          ]
+        ],
+        "original_path": "SPEC.md",
+        "commit": "500548b9253b07a26fd03119679184b69544e31d",
+        "notes": "patch header; patch character offsets [0,8292)",
+        "lines": 84,
+        "bytes": 8292,
+        "start": 0,
+        "end": 8292,
+        "original": "[private-run]/prep/originals/01262.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01593-000.patch",
+        "ranges": [
+          [
+            1,
+            21
+          ]
+        ],
+        "original_path": "SPEC_impl.md",
+        "commit": "4b489b4f2eeade14f119b186ecb16eeaaf027021",
+        "notes": "patch header; patch character offsets [0,1884)",
+        "lines": 21,
+        "bytes": 1888,
+        "start": 0,
+        "end": 1884,
+        "original": "[private-run]/prep/originals/01593.patch"
+      }
+    ],
+    "lines": 597,
+    "bytes": 65247
+  },
+  "records": [
+    {
+      "key": "g006/f1",
+      "owner": "g006",
+      "id": "f1",
+      "domain": "product-contracts",
+      "purpose": "product-contracts: SPEC_impl.md, SPEC.md; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "f1",
+            "state": "open",
+            "summary": "Check the retained switch condition on migration",
+            "location": "SPEC_impl.md:2488",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: The implementation contract may still tell readers that moving an old terminal on Restart depends on a switch this change removes. Details: the assigned patch makes every create, tab open and Restart use a host (SPEC_impl.md:2294 onward), while a targeted heading search found the retained Moving an old session into a host paragraph beginning with 'with the internal switch' at line 2488. Need read the entire paragraph and the restart dispatcher before deciding whether this is a material contract error or harmless residual wording. Suggested bucket: other; no established security or loss-of-work consequence. Confidence: unresolved lead. proposed_drop: false. possible_cover: none. Could-be-highest: no established route; documentation-only maintenance ambiguity suspected. Source analysis only; no runtime observations."
+          }
+        },
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "f1",
+            "state": "open",
+            "summary": "Residual switch wording does not change the restart contract",
+            "location": "SPEC_impl.md:2488",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: One old migration paragraph retains obsolete switch wording, but the changed contract and shipped Restart path unconditionally use terminal hosts. Details: SPEC_impl.md:2488-2492 says 'with the internal switch on, a Restart ... starts the new launch in a terminal host'. This residual clause is imprecise after removal, but SPEC_impl.md:2294 explicitly establishes 'A supervisor creates every terminal in a terminal host; nothing selects tmux', and 2289-2292 says 'Every create, tab open and Restart makes a host terminal'. The dispatcher at crates/farhelm-supervisor/src/service/core.rs:12942-13018 distinguishes host versus tmux only for existing-agent evidence and migration; it has no substrate selector and unconditionally settles host starts before the launch. The initial concern was a misleading maintenance contract, not changed runtime behavior or a user instruction to perform a harmful action. Suggested bucket: other. Confidence: confirmed minor residual wording; not reported as a substantive security/correctness defect. proposed_drop: exact basis is the explicit unconditional contract quoted above and matching dispatcher, which resolve the apparent conditional. possible_cover: none. Could-be-highest: no; no security, data-loss or process-loss route established or suspected from this wording. Source-only conclusion; no execution. This revises and closes lead f1."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "f1",
+            "state": "open",
+            "summary": "Recheck attribution of obsolete migration condition",
+            "location": "SPEC_impl.md:2488",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: The authoritative migration paragraph still conditions Restart on a removed switch, potentially misleading a maintainer even though runtime migration is unconditional. Synthesis correction: the earlier candidate's quotations establish a contradiction; they do not refute the obsolete condition. Need verify the exact parent/reviewed patch relationship and whether removal makes this unchanged clause an in-scope misleading contract. Suggested bucket: other. Confidence: source mismatch confirmed; attribution/materiality being checked. proposed_drop: previous proposed drop is not accepted and is being reconsidered. possible_cover: none. Could-be-highest: no established security or loss-of-work route from the documentation error. Preserve original consequence: maintenance ambiguity about when an existing session moves to a host, with no observed runtime divergence. No execution."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f1",
+            "state": "open",
+            "summary": "Remove the obsolete condition from the migration contract",
+            "location": "SPEC_impl.md:2488",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: The authoritative instructions for moving an existing session to a new terminal still say Restart requires an internal switch that this change removes. A maintainer following that migration paragraph is given a nonexistent prerequisite and an incorrect description of when migration happens. Details: SPEC_impl.md:2488-2492 retains 'with the internal switch on, a Restart ... starts the new launch in a terminal host'. Attribution checked against the parent: identical wording was at parent SPEC_impl.md:2504-2508 and was valid there, because parent :2295-2333 defined SupervisorSeams::new_terminals and explicitly allowed Restart to remain in tmux with it off. This commit removes that selector, changes the assigned Every new terminal in a host and Creating agents in hosts paragraphs (:2294-2320), and even removes the same switch condition from Clone/Replace later in this migration paragraph (:2555), but leaves its opening conditional intact. The core.rs diff removes 'let into_host = host_agent || self.new_terminals() == NewTerminals::Host' and makes host settling unconditional (reviewed source :12973-12981); the new-host path therefore has no condition corresponding to the retained instruction. The root contract declares SPEC_impl.md authoritative for implementation choices, so correct nearby paragraphs expose the contradiction rather than refute it. Fix by making this paragraph's Restart/migration statement unconditional as the implementation and the other changed paragraphs already are. Suggested bucket: other, a documentation correctness defect; no shipped runtime divergence or security/data-loss route is established. Confidence: confirmed from parent/reviewed source and patch; no execution. proposed_drop: false. The earlier proposal to drop as minor or resolved by nearby correct statements is withdrawn; preserve its original consequence of misleading maintenance/migration instructions, without upgrading to hypothetical runtime harm. possible_cover: none; no coverage sources searched. Could-be-highest: no established or suspected route from this wording. This closes the synthesis lead under the original ID."
+          }
+        }
+      ],
+      "latest": {
+        "line": 6,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "f1",
+          "state": "open",
+          "summary": "Remove the obsolete condition from the migration contract",
+          "location": "SPEC_impl.md:2488",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: The authoritative instructions for moving an existing session to a new terminal still say Restart requires an internal switch that this change removes. A maintainer following that migration paragraph is given a nonexistent prerequisite and an incorrect description of when migration happens. Details: SPEC_impl.md:2488-2492 retains 'with the internal switch on, a Restart ... starts the new launch in a terminal host'. Attribution checked against the parent: identical wording was at parent SPEC_impl.md:2504-2508 and was valid there, because parent :2295-2333 defined SupervisorSeams::new_terminals and explicitly allowed Restart to remain in tmux with it off. This commit removes that selector, changes the assigned Every new terminal in a host and Creating agents in hosts paragraphs (:2294-2320), and even removes the same switch condition from Clone/Replace later in this migration paragraph (:2555), but leaves its opening conditional intact. The core.rs diff removes 'let into_host = host_agent || self.new_terminals() == NewTerminals::Host' and makes host settling unconditional (reviewed source :12973-12981); the new-host path therefore has no condition corresponding to the retained instruction. The root contract declares SPEC_impl.md authoritative for implementation choices, so correct nearby paragraphs expose the contradiction rather than refute it. Fix by making this paragraph's Restart/migration statement unconditional as the implementation and the other changed paragraphs already are. Suggested bucket: other, a documentation correctness defect; no shipped runtime divergence or security/data-loss route is established. Confidence: confirmed from parent/reviewed source and patch; no execution. proposed_drop: false. The earlier proposal to drop as minor or resolved by nearby correct statements is withdrawn; preserve its original consequence of misleading maintenance/migration instructions, without upgrading to hypothetical runtime harm. possible_cover: none; no coverage sources searched. Could-be-highest: no established or suspected route from this wording. This closes the synthesis lead under the original ID."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g006/findings.jsonl",
+        "id": "f1",
+        "line": 6,
+        "disposition": "rejected",
+        "group": "removed-terminal-selector-stale-migration-spec-condition",
+        "reason": "Parent accepts the factual checks in claims-003 for the historical documentation contradiction: removing the selector at647f0227 left SPEC_impl.md:2488-2492 referring to its internal switch. Nearby unconditional text did not refute that contradiction, and the withdrawn dismissal stays preserved. The later1ed482dd removes that migration subsection; current SPEC_impl.md:2160-2185 makes terminal-host use unconditional. This exact defect was repaired inside the pinned interval, so there is no unresolved current item to queue. This is a later-source repair decision, not an assertion that the historical finding was false; no user-work or security consequence was alleged. Bothspecs/currentPlanned/BUGS/queue/activeoutcomes and unlanded-plan checks found no separate unresolved remainder. All original events and the focused verification remain retained."
+      },
+      "accepted_parent_decision": {
+        "key": "g006/f1",
+        "line": 6,
+        "disposition": "rejected",
+        "group": "removed-terminal-selector-stale-migration-spec-condition",
+        "bucket": "other",
+        "recording": "repaired-in-range",
+        "needs_independent_drop_check": false,
+        "reason": "Parent accepts the factual checks in claims-003 for the historical documentation contradiction: removing the selector at647f0227 left SPEC_impl.md:2488-2492 referring to its internal switch. Nearby unconditional text did not refute that contradiction, and the withdrawn dismissal stays preserved. The later1ed482dd removes that migration subsection; current SPEC_impl.md:2160-2185 makes terminal-host use unconditional. This exact defect was repaired inside the pinned interval, so there is no unresolved current item to queue. This is a later-source repair decision, not an assertion that the historical finding was false; no user-work or security consequence was alleged. Bothspecs/currentPlanned/BUGS/queue/activeoutcomes and unlanded-plan checks found no separate unresolved remainder. All original events and the focused verification remain retained."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-003",
+          "key": "g006/f1",
+          "latest_line": 6,
+          "recommendation": "needs-parent",
+          "bucket": "other",
+          "underlying_key": "removed-terminal-selector-stale-migration-spec-condition",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The historical documentation defect is verified, but it was removed later inside this same review range. Do not resurrect the reviewer's withdrawn nearby-correct-text refutation: the contradiction really existed at 647f0227. The result enum has no repaired-in-range disposition, so the parent must record that factual resolution explicitly.",
+          "checks": [
+            "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:SPEC_impl.md:2488-2492 still says with the internal switch on while :2289-2320 makes creates, tab opens and Restart unconditional.",
+            "647f0227^:SPEC_impl.md:2295-2333 defines the selector and both Restart settings; :2504-2508 has the same migration clause. Removing the selector introduces the obsolete prerequisite, although the clause itself was not edited.",
+            "git log -S 'with the internal switch' over the explicit review range identifies 1ed482dde220452e424973faf38a5e1318986333 as removing the clause. That commit deletes the obsolete migration subsection. Current SPEC_impl.md:2160-2185 unconditionally specifies terminal hosts and has no internal-switch prerequisite.",
+            "No runtime divergence, security route or user-work loss was alleged. Correct implementation does not refute the historical documentation defect."
+          ],
+          "coverage_checked": [
+            "Both current specifications no longer describe the switch. Historical matching text and its parent were read rather than treating current wording as historical evidence.",
+            "Planned is empty. BUGS.md and active TRIAGE_OUTCOMES.md have no switch/migration-prerequisite item. INDEX.md's restart-unwind-omits-tree-sweep-failure.md was read and concerns a different missing unwind exception.",
+            "Matching plans/queue/tmux-end-old-terminals.md and tmux-drop-from-docs.md already landed per plans/REPORTS.md:29,32; this is a completed in-range removal, not promised future coverage. No exact queue alias or useful extension found. No filter applies to this documentation contradiction."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No historical defect premise missing. Parent must choose its recording disposition for a defect repaired later in the pinned range; retaining it as a current unresolved defect would be inaccurate.",
+          "original_stronger_consequence": "Misleading authoritative maintenance/migration instructions give a nonexistent prerequisite for moving an existing session to a host. The original proposal to dismiss as minor/resolved by nearby text was explicitly withdrawn. No higher security or loss-of-work consequence was claimed.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Verified historical defect introduced by removing the selector at 647f0227 and repaired by deleting the migration subsection at 1ed482dd, both within the review range."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "removed-terminal-selector-stale-migration-spec-condition",
+        "destination": "trailing-removed-terminal-selector-stale-migration-spec-condition.md"
+      }
+    },
+    {
+      "key": "g006/f2",
+      "owner": "g006",
+      "id": "f2",
+      "domain": "product-contracts",
+      "purpose": "product-contracts: SPEC_impl.md, SPEC.md; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "f2",
+            "state": "open",
+            "summary": "Offline uninstall can leave an old tmux server by explicit contract",
+            "location": "SPEC.md:214",
+            "detail": "Reviewed commit: 500548b9253b07a26fd03119679184b69544e31d. TLDR: Uninstall may leave an earlier release's private tmux server running if it had already outlived its stopped supervisor. Details: source inspection of crates/farhelm-helm/src/provisioning/backend.rs:3260-3360 confirms stop_supervisor checks ActiveState, skips systemctl stop for inactive/failed units, then explicitly ends terminal hosts only; no old tmux cleanup remains. This can leave old terminals/processes on an offline retry. The assigned product contract explicitly accepts this: SPEC.md:214-219 says 'Uninstall has no tmux step of its own: stopping the supervisor’s service ends whatever still runs under it, an earlier release’s private tmux server included, but one that outlived a supervisor stopped before uninstall (on a host never updated to a release that ends it at startup, say) keeps running, which the maintainer accepted on 2026-11-11.' SPEC_impl.md:7860-7863 likewise names the startup-failure plus later-stop route and accepts it. Suggested bucket: high if not accepted, since incomplete uninstall leaves resource usage and unreachable old terminals; other as a deliberate residual, not a reported defect. Confidence: confirmed source behavior and explicit acceptance. proposed_drop: exact acceptance quoted above. possible_cover: none; no coverage files searched. Could-be-highest: no established loss-of-work or security route from leaving these same-account processes alive; removal does not itself kill them. The existing confirmation-time activity checks still govern connected uninstall, and source-only inspection does not establish an additional destructive route. No runtime observations."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "f2",
+            "state": "open",
+            "summary": "Offline uninstall can leave an old tmux server by explicit contract",
+            "location": "SPEC.md:214",
+            "detail": "Reviewed commit: 500548b9253b07a26fd03119679184b69544e31d. TLDR: Uninstall may leave an earlier release's private tmux server running if it had already outlived its stopped supervisor. Details: crates/farhelm-helm/src/provisioning/backend.rs:3260-3360 checks ActiveState, skips systemctl stop for inactive/failed units, then explicitly ends terminal hosts only; old tmux cleanup is absent. This can leave old terminals/processes on an offline retry. Exact acceptance in SPEC.md:214-219: 'Uninstall has no tmux step of its own: stopping the supervisor's service ends whatever still runs under it, an earlier release's private tmux server included, but one that outlived a supervisor stopped before uninstall (on a host never updated to a release that ends it at startup, say) keeps running, which the maintainer accepted on 2026-11-11.' Line wrapping has been joined; words and punctuation are unchanged. SPEC_impl.md:7860-7863 also explicitly names the startup-failure plus later-stop route. Suggested bucket: high absent acceptance because incomplete uninstall leaves resource usage and unreachable old terminals; retained as a non-reportable contractual residual. Confidence: confirmed source behavior and explicit acceptance. proposed_drop: the exact specification acceptance quoted above. possible_cover: none; prohibited coverage files were not searched. Could-be-highest: no established loss-of-work or security route from leaving these same-account processes alive; removal does not itself kill them. Existing confirmation-time activity checks still govern connected uninstall; no additional destructive route established. Source-only conclusion; no execution. Revision corrects typographic apostrophes in the acceptance quote without changing the consequence or disposition."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "f2",
+            "state": "open",
+            "summary": "Accepted survivor residual does not establish destructive overreach",
+            "location": "SPEC.md:214",
+            "detail": "Reviewed commit: 500548b9253b07a26fd03119679184b69544e31d. TLDR: An old private tmux server can remain running after uninstall if it already outlived its stopped supervisor; this is incomplete survivor cleanup, not evidence that uninstall acts destructively on a target the user did not confirm. Original consequence preserved: surviving old terminals/processes can keep using resources and become unreachable through Farhelm after the host/install is removed. Suggested bucket absent acceptance: high for incomplete uninstall; no established security or loss-of-work route. Confidence: confirmed source behavior and explicit specification acceptance, source-only. Exact acceptance at SPEC.md:214-217 (line wrapping joined): 'Uninstall has no tmux step of its own: stopping the supervisor's service ends whatever still runs under it, an earlier release's private tmux server included, but one that outlived a supervisor stopped before uninstall (on a host never updated to a release that ends it at startup, say) keeps running, which the maintainer accepted on 2026-11-11.' proposed_drop: only this exact survivor residual is proposed for exclusion on that acceptance; no parent drop is accepted or assumed, and this is not permission to discard a wrong-target or excessive-destructive-action finding. Synthesis checks: backend.rs stop diff removes the frozen socket/client kill-server sequence rather than redirecting it; reviewed stop at :3260-3360 still skips systemctl stop for inactive/failed units and explicitly confirms terminal hosts stopped before later directory removal. plan.rs:941-1132 freezes the named service, binary, state directory and install directory; it refuses binary/state containment violations, and its Linux action order puts StopSupervisor before RemoveDirectory. service.rs:1710-1948 checks connected sessions and probed identity or, offline, absence plus gone unit and inactive service, and :2435-2454 requires unchanged registration and an identical replanned uninstall before execution. plan.rs:443-451 discloses stopping the supervisor/terminal hosts and removing the named install directory including anything else in it. backend.rs:3420-3475 refuses a directory that became a symlink or contains a mount before rm-rf. These checks establish no additional wrong-target or unconfirmed destructive route for f2; they do not assert exhaustive implementation coverage. Could-be-highest: no route established for this survivor-only consequence; unrelated or newly established destructive harm must be assessed separately and is not covered by the quoted acceptance. possible_cover: none; no prohibited coverage search. No reproduction or runtime observation. Revision preserves all earlier consequences and the proposed drop, narrowing that proposal to the accepted residual without treating acceptance as a lower severity for hypothetical harm."
+          }
+        }
+      ],
+      "latest": {
+        "line": 7,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "f2",
+          "state": "open",
+          "summary": "Accepted survivor residual does not establish destructive overreach",
+          "location": "SPEC.md:214",
+          "detail": "Reviewed commit: 500548b9253b07a26fd03119679184b69544e31d. TLDR: An old private tmux server can remain running after uninstall if it already outlived its stopped supervisor; this is incomplete survivor cleanup, not evidence that uninstall acts destructively on a target the user did not confirm. Original consequence preserved: surviving old terminals/processes can keep using resources and become unreachable through Farhelm after the host/install is removed. Suggested bucket absent acceptance: high for incomplete uninstall; no established security or loss-of-work route. Confidence: confirmed source behavior and explicit specification acceptance, source-only. Exact acceptance at SPEC.md:214-217 (line wrapping joined): 'Uninstall has no tmux step of its own: stopping the supervisor's service ends whatever still runs under it, an earlier release's private tmux server included, but one that outlived a supervisor stopped before uninstall (on a host never updated to a release that ends it at startup, say) keeps running, which the maintainer accepted on 2026-11-11.' proposed_drop: only this exact survivor residual is proposed for exclusion on that acceptance; no parent drop is accepted or assumed, and this is not permission to discard a wrong-target or excessive-destructive-action finding. Synthesis checks: backend.rs stop diff removes the frozen socket/client kill-server sequence rather than redirecting it; reviewed stop at :3260-3360 still skips systemctl stop for inactive/failed units and explicitly confirms terminal hosts stopped before later directory removal. plan.rs:941-1132 freezes the named service, binary, state directory and install directory; it refuses binary/state containment violations, and its Linux action order puts StopSupervisor before RemoveDirectory. service.rs:1710-1948 checks connected sessions and probed identity or, offline, absence plus gone unit and inactive service, and :2435-2454 requires unchanged registration and an identical replanned uninstall before execution. plan.rs:443-451 discloses stopping the supervisor/terminal hosts and removing the named install directory including anything else in it. backend.rs:3420-3475 refuses a directory that became a symlink or contains a mount before rm-rf. These checks establish no additional wrong-target or unconfirmed destructive route for f2; they do not assert exhaustive implementation coverage. Could-be-highest: no route established for this survivor-only consequence; unrelated or newly established destructive harm must be assessed separately and is not covered by the quoted acceptance. possible_cover: none; no prohibited coverage search. No reproduction or runtime observation. Revision preserves all earlier consequences and the proposed drop, narrowing that proposal to the accepted residual without treating acceptance as a lower severity for hypothetical harm."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g006/findings.jsonl",
+        "id": "f2",
+        "line": 7,
+        "disposition": "under-investigation",
+        "group": "g006-f2",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-003",
+          "key": "g006/f2",
+          "latest_line": 7,
+          "recommendation": "covered",
+          "bucket": "high",
+          "underlying_key": "offline-uninstall-old-private-tmux-survivor",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The exact surviving-server residual is explicitly accepted in both specifications. It is incomplete cleanup and unreachable retained terminal access, not a demonstrated wrong-target deletion or excessive destructive action. High describes the consequence absent its acceptance; acceptance is a recording basis, not a severity downgrade.",
+          "checks": [
+            "500548b9253b07a26fd03119679184b69544e31d:crates/farhelm-helm/src/provisioning/backend.rs:3252-3371 skips systemctl stop for inactive/failed service state and then explicitly ends terminal hosts only. There is no private-tmux cleanup step in this implementation.",
+            "Current SPEC.md:210-219 and SPEC_impl.md:7813-7832 expressly cover a server that outlived an already stopped supervisor, including a startup ending failure followed by stop.",
+            "The record's broader uninstall ownership/containment discussion was not converted into a new finding or an exhaustive uninstall review. No runtime observation, resource measurement or additional destructive route was established."
+          ],
+          "coverage_checked": [
+            "Exact current product and implementation acceptance read in full surrounding uninstall paragraphs. Planned is empty; BUGS.md is unrelated.",
+            "Matching tmux-drop-from-install plan is already landed per plans/REPORTS.md:30. No unlanded plan is needed as cover.",
+            "INDEX.md and active TRIAGE_OUTCOMES.md searches found only other uninstall issues, including final-scan mount and path-identity concerns. Their trigger/consequence differs from leaving this server alive; they are not exact aliases. No archive or new defect search. No filter needed."
+          ],
+          "exact_cover_quotes": [
+            "SPEC.md:212-216: Uninstall has no tmux step of its own: stopping the supervisor's service ends whatever still runs under it, an earlier release's private tmux server included, but one that outlived a supervisor stopped before uninstall (on a host never updated to a release that ends it at startup, say) keeps running, which the maintainer accepted on 2026-11-11.",
+            "SPEC_impl.md:7824-7827: Uninstall has no tmux step: a private tmux server that outlived a supervisor stopped before uninstall (a host never updated to a release that ends it at startup, or one whose startup ending failed and whose supervisor was later stopped) keeps running. The maintainer accepted that residual on 2026-11-11 when the step was removed."
+          ],
+          "missing_premise": "No missing premise for the accepted survivor behavior. No established security or work-loss route from leaving these same-account processes alive; unrelated destructive behavior is excluded from this basis.",
+          "original_stronger_consequence": "Old terminals/processes may keep consuming resources and become unreachable through Farhelm after the host/install is removed. The earlier high-if-unaccepted consequence remains preserved; no claim that the surviving process itself was killed or work lost.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Exact specification acceptance for survivor-only cleanup. Conservative independent check because user-owned processes and their access are involved; agreement must not cover hypothetical wrong-target removal or other uninstall defects."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-003.json",
+          "key": "g006/f2",
+          "proposal": "claim-checks/claims-003/result.json",
+          "parent_proposal": "covered",
+          "final_independent_gate": "required-before-drop",
+          "reason": "Full003offlineuninstallinactive/failedservicestopskipwithnoownprivatetmuxcleanup leavesoldserver/resourcesaliveandFarhelmaccessgone. ExactSPEC210-219/SPEC_impl7813-7832explicitlyaccept stopped-supervisor survivor includingstartupendingfailurethenstop. Preserve highifnotaccepted/inaccessibleworkcontext, noimplicitseveritydowngrade orwrongtarget/excessdestructionacceptance. Freshcheckexactsurvivoronlyexception; no runtime/ownershipbroadauditcertification."
+        }
+      ],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "offline-uninstall-old-private-tmux-survivor",
+        "destination": "trailing-offline-uninstall-old-private-tmux-survivor.md"
+      }
+    },
+    {
+      "key": "g006/f3",
+      "owner": "g006",
+      "id": "f3",
+      "domain": "product-contracts",
+      "purpose": "product-contracts: SPEC_impl.md, SPEC.md; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "f3",
+            "state": "open",
+            "summary": "Check legacy-retry rollback wording against allocated checkouts",
+            "location": "SPEC_impl.md:2315",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: The newly added contract may promise rolling back an interrupted old-terminal create even when its earlier attempt allocated a managed checkout that source deliberately retains with an error session. Details: assigned SPEC_impl.md Creating agents in hosts newly says a tmux retry claimed by takeover is 'refused before anything starts and rolled back like a launch whose spec never landed'. Previously inspected core.rs:15866-15924 distinguishes no-origin/planned rollback from an allocated or unreadable fresh origin, retained as a visible error to preserve ownership. Discovery check needed: exact wording and surrounding global creation/rollback contract, including what 'like a launch whose spec never landed' already encompasses, before concluding an independent documentation mismatch. Suggested bucket: other for potentially misleading maintenance/visible-error contract; no established runtime bug. Confidence: unresolved source/contract lead. proposed_drop: false. possible_cover: supplied interface g107/g107-l3 concerns retained private launch artifacts after removed-row retry, a different consequence; no duplicate inferred. Could-be-highest: no established security or loss-of-work route; the implementation retains ownership rather than deleting allocated work. Source-only; no reproduction or execution."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "f3",
+            "state": "open",
+            "summary": "Legacy retry uses the referenced spec-write failure policy",
+            "location": "SPEC_impl.md:2317",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: The new old-terminal-retry sentence uses 'rolled back like a launch whose spec never landed' as a reference to an existing failure policy; that policy already preserves a session owning an allocated checkout. The suspected missing-exception documentation defect is not established. Original concern preserved: a reader treating 'rolled back' as unconditional row deletion could expect no session when a retained error session actually appears. Checks/results: exact assigned text at SPEC_impl.md:2315-2319 compares the refusal with spec-not-landed cleanup, rather than explicitly promising deletion of every row or checkout. The complete Owned checkout admission and lifetime subsection's governing allocation paragraph (:4120-4125) expressly says 'A post-allocation failure atomically retains an error session and membership instead of losing the only deletion handle.' Product SPEC.md:1756-1762 says 'Once allocation has occurred, failures retain the session and its checkout association for inspection and Delete.' Source at core.rs:11827-11863 confirms that the referenced FailedStart::Spec policy deletes ordinary pre-effect rows but calls retain_create_refusal for allocated checkouts; the new refuse_retried_tmux_launch at :15866-15924 applies exactly that same distinction, rolling back only no-origin or Planned origins and retaining allocated or unreadable origins. Thus the referenced policy and its explicit governing exception agree; unlike f1, there is no removed prerequisite or false runtime condition here. Suggested bucket if the suspected wording defect existed: other; no user-work or security route established, and the actual implementation preserves checkout ownership. Confidence: confirmed source/contract refutation of a distinct mismatch; no execution. proposed_drop: exact cross-reference meaning plus the explicit allocation exceptions quoted above, not mere correct production behavior or low severity. possible_cover: supplied g107/g107-l3 concerns the separate leftover private-artifact timing after a removed-row refusal and does not refute or establish this wording concern. Could-be-highest: no established or suspected security/loss-of-work route from this sentence; do not interpret the wording as authorization to delete an allocated checkout contrary to the explicit governing contract. This closes lead f3 without a new verified or unverified finding. Parent owns disposition; no proposed drop is assumed accepted."
+          }
+        }
+      ],
+      "latest": {
+        "line": 9,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "f3",
+          "state": "open",
+          "summary": "Legacy retry uses the referenced spec-write failure policy",
+          "location": "SPEC_impl.md:2317",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: The new old-terminal-retry sentence uses 'rolled back like a launch whose spec never landed' as a reference to an existing failure policy; that policy already preserves a session owning an allocated checkout. The suspected missing-exception documentation defect is not established. Original concern preserved: a reader treating 'rolled back' as unconditional row deletion could expect no session when a retained error session actually appears. Checks/results: exact assigned text at SPEC_impl.md:2315-2319 compares the refusal with spec-not-landed cleanup, rather than explicitly promising deletion of every row or checkout. The complete Owned checkout admission and lifetime subsection's governing allocation paragraph (:4120-4125) expressly says 'A post-allocation failure atomically retains an error session and membership instead of losing the only deletion handle.' Product SPEC.md:1756-1762 says 'Once allocation has occurred, failures retain the session and its checkout association for inspection and Delete.' Source at core.rs:11827-11863 confirms that the referenced FailedStart::Spec policy deletes ordinary pre-effect rows but calls retain_create_refusal for allocated checkouts; the new refuse_retried_tmux_launch at :15866-15924 applies exactly that same distinction, rolling back only no-origin or Planned origins and retaining allocated or unreadable origins. Thus the referenced policy and its explicit governing exception agree; unlike f1, there is no removed prerequisite or false runtime condition here. Suggested bucket if the suspected wording defect existed: other; no user-work or security route established, and the actual implementation preserves checkout ownership. Confidence: confirmed source/contract refutation of a distinct mismatch; no execution. proposed_drop: exact cross-reference meaning plus the explicit allocation exceptions quoted above, not mere correct production behavior or low severity. possible_cover: supplied g107/g107-l3 concerns the separate leftover private-artifact timing after a removed-row refusal and does not refute or establish this wording concern. Could-be-highest: no established or suspected security/loss-of-work route from this sentence; do not interpret the wording as authorization to delete an allocated checkout contrary to the explicit governing contract. This closes lead f3 without a new verified or unverified finding. Parent owns disposition; no proposed drop is assumed accepted."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g006/findings.jsonl",
+        "id": "f3",
+        "line": 9,
+        "disposition": "under-investigation",
+        "group": "g006-f3",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-003",
+          "key": "g006/f3",
+          "latest_line": 9,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "legacy-create-retry-spec-failure-policy-allocation-exception",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The sentence references the existing spec-write-failure policy, whose governing allocation exception retains the checkout's owning error session. It does not promise unconditional row or checkout deletion. The original feared maintenance expectation is resolved by the explicit cross-contract exception.",
+          "checks": [
+            "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:SPEC_impl.md:2315-2319 says rolled back like a launch whose spec never landed; :4110-4135 explicitly retains an error session and membership after allocation. SPEC.md:1756-1762 independently requires the same retention.",
+            "Same revision:service/core.rs:11827-11863 applies FailedStart::Spec with an allocated-checkout exception; :15855-15930 refuses a retried tmux launch and deletes only no-origin/Planned cases, retaining allocated or unreadable origins. The compared policy and implementation agree.",
+            "Current SPEC_impl.md:2180-2185 and :3637-3660, SPEC.md:1761 onward still contain the comparison and governing retention rule. No runtime observation."
+          ],
+          "coverage_checked": [
+            "Both specifications' complete allocation/retention paragraphs and retry comparison read. Planned is empty and BUGS.md is unrelated.",
+            "Searched plans/queue, INDEX.md, matching queue and active TRIAGE_OUTCOMES.md for retry rollback, allocation, spec failure and old terminal terms. retained-refusal-can-clear-restart-delete-protection.md and its active discard outcome concern a generation race, not this reference's meaning. No exact duplicate, extension or unlanded repair found; archive not read.",
+            "The record's supplied g107/g107-l3 concerns leftover private launch artifacts after refusal, not the ownership-preserving policy. It is outside this batch and was not independently reconciled. No filter needed."
+          ],
+          "exact_cover_quotes": [
+            "647f0227:SPEC_impl.md:4120-4125: A post-allocation failure atomically retains an error session and membership instead of losing the only deletion handle.",
+            "647f0227:SPEC.md:1756-1762: Once allocation has occurred, failures retain the session and its checkout association for inspection and Delete."
+          ],
+          "missing_premise": "None for the contextual source conclusion. The feared unconditional-deletion reading contradicts the explicitly governing allocation exception.",
+          "original_stronger_consequence": "A reader taking rolled back as unconditional row deletion could expect no session while an allocated checkout correctly remains associated with a visible error session. No actual deletion of allocated work or security route was established. Preserve the initial lead and later context-refutation.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Explicit governing allocation exception plus identical referenced FailedStart::Spec and legacy-retry retention branches. Conservative independent check because the rejected reading concerns the ownership handle for a user checkout."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-003.json",
+          "key": "g006/f3",
+          "proposal": "claim-checks/claims-003/result.json",
+          "parent_proposal": "source-refuted-governing-allocation-exception",
+          "final_independent_gate": "required-before-drop",
+          "reason": "Full003legacyretry rolledbackLIKEspecneverlanded referencesexistingpolicy, whichfullSPEC/impl explicitlyretains errorrow/membership afterallocation; actualFailedStart::Specandoldretry branchesretainallocated/unreadableorigin anddeleteonlynoorigin/Planned. Refutesunconditionalcheckoutownershiphandledeletionreading, notsourcebehaviorrequiredjustbecauseproductioncorrect. Preservepossibleusercheckoutlossinterpretation andseparate107artifactsroot; freshcheckfullcrosscontractexception."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "legacy-create-retry-spec-failure-policy-allocation-exception",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review is blocked by invalid manifest ranges. All three patches appear to require one line beyond EOF, and the evidence reader rejects the manifest before delivering source.\n\nNo source coverage or findings claimed. The blocker and unread scope are recorded in `g006/progress.md`; `findings.jsonl` remains empty.\n\nThe evidence tooling requires a corrected manifest or explicit approval for manual inspection and audit."
+    },
+    {
+      "turn": 2,
+      "reply": "Initial source-review pass complete. All 597 mandatory lines delivered and reviewed; no assigned scope remains unread.\n\nNo substantive findings. Recorded candidates `f1` and `f2`; no open leads. Findings log and progress updated. No runtime execution or checkout changes."
+    },
+    {
+      "turn": 3,
+      "reply": "- `f1`: promoted to a confirmed `other` documentation finding. The switch-removal commit makes the retained migration condition obsolete; prior drop proposal withdrawn.\n- `f2`: revised with confirmation and target checks. Proposed exclusion applies only to the explicitly accepted survivor residual; no destructive overreach established.\n\nNo additional interaction findings. Unresolved lead IDs: none."
+    },
+    {
+      "turn": 4,
+      "reply": "Discovery pass 1 complete. Checked interface notes, retry cleanup contracts, provisioning paths, size handling and host initialization.\n\nNo new substantive defect found. `f3` resolved to a candidate with source and contract evidence.\n\nNew verified IDs: none. New unverified IDs: none. Open leads: none. Progress and findings log updated."
+    }
+  ],
+  "progress": "Group: g006 product-contracts\nState: initial source-review pass completed in turn 2 after coverage repair. Turn 1 was blocked before source delivery. Discovery passes: 0; no later synthesis/discovery pass performed.\n\nMandatory delivery: corrected evidence manifest successfully delivered 00759-000.patch lines 1-492 (packets 1-100, 101-200, 201-300, 301-400, 401-492), 01262-000.patch lines 1-84, and 01593-000.patch lines 1-21. All 597 assigned lines read; no unread or omitted assigned scope. Parent owns delivery audit. Complete inventory commits field was read in turn 1 without excluded coverage metadata.\n\nReview: judged each patch at 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513, 500548b9253b07a26fd03119679184b69544e31d, or 4b489b4f2eeade14f119b186ecb16eeaaf027021. Read governing product Terminal experience sections at the first two revisions, complete Topology and Supported user environments at 500548b9, complete Provisioning and private-tmux residual contract at 500548b9, complete CLI at 4b489b4f, and relevant full implementation paragraphs for new-host creation, tab creation, replies, migration, terminal widget and tmux adoption at 647f0227. Read Answers bind to what was drawn. No assigned GUI handlers or tests.\n\nSource checks: restart dispatcher unconditionally uses hosts; retried tmux launches refuse before allocation and retain an older allocated checkout; child environment describes Farhelm and strips tmux inheritance; reply classifier always reports new-host capability. Linux plan removes only lib_dir/tmux after enable/restart and before attachment, not a shared binary directory. Removal uses no-follow unlink, distinguishes lookup errors from absence, and degrades failures with explicit warnings. Uninstall stops the service when active and terminal hosts explicitly; the accepted already-inactive old-tmux residual remains. Local setup still uses shared unit renderer with binary-directory plus fixed-base PATH and no tmux input.\n\nInterfaces: implementations belong to their assigned groups; these checks validate the assigned contract changes, not independent coverage of those implementations. The 647f0227 transition still serves old terminals; 500548b9 follows their retirement, so differing tmux requirements across these revisions are intentional. The 4b489b4f deletion removes a redundant no-tmux sentence without weakening the remaining terminal/provisioning contract.\n\nRecords appended/revised this pass: f1 lead then candidate (obsolete conditional wording resolved by unconditional contract and source); f2 candidate, then wording-only revision for an exact acceptance quotation (old tmux residual explicitly accepted). Verified findings: none. Unverified findings: none. Open leads: none. Candidates: f1, f2. No substantive finding established.\n\nExecution: source-only; no runtime tests, builds or reproductions. No checkout changes; git status --short empty. Only own private artifacts written. An optional combined word-diff output clipped duplicate context; no coverage is claimed for extra unassigned hunks, and all assigned patch bytes were already delivered intact through evidence packets.\n\nNext action: return to parent for the separately requested synthesis/discovery turn. Keep findings.jsonl append-only.\n\nTurn 3 entering: later-turn synthesis requested by parent; delivery audited. Reopening f1 attribution/materiality and f2 survivor-versus-destructive-boundary checks. Discovery passes remain 0. No drops accepted by parent. Existing logs preserved.\n\nTurn 3 complete: later-turn synthesis, total turns 3 (turn 1 blocked, turn 2 repaired initial review, turn 3 synthesis). Discovery passes: 0.\nDelta: f1 reopened as a lead and promoted to a confirmed finding in bucket other. Parent source :2504 and prior switch definition :2295-2333 show the condition was correct before 647f0227; that commit removes the actual Restart selector but preserves the condition in reviewed SPEC_impl.md:2488. The previous drop proposal is withdrawn. Correct surrounding paragraphs do not refute an authoritative-contract contradiction. The implicated clause is unchanged text made false by this commit, in the same migration subsection whose Clone/Replace switch condition the assigned patch updates.\nf2 revised to preserve the high-if-unaccepted survivor consequence and exact acceptance while limiting the proposed exclusion to that residual. Additional source checks found frozen plan actions, connected-session/probed-identity checks or offline gone-unit/inactive-service checks, unchanged-registration plus equal-replan gate before execution, named directory-removal disclosure, stop-before-remove ordering, and symlink/mount refusals. Removal of the old kill-server sequence leaves survivors; it does not itself choose another target or perform an extra destructive action. No independent wrong-target or unconfirmed destructive route established by this review. Parent owns disposition; no drop accepted or assumed.\nCross-batch assessment: the first revision's tmux-serving transition, the second revision's retirement/provisioning removal, and the third revision's redundant CLI sentence deletion remain different historical phases. The third patch preserves the shared renderer's binary-directory plus fixed-base PATH contract and does not reintroduce a tmux prerequisite. No additional interaction finding established.\nNew verified finding this turn: f1 (same ID, promoted). New unverified findings: none. Revised candidate: f2. Open leads: none. Log now has seven events. All mandatory delivery remains complete and audited; no unread assigned scope. Source-only checks; no runtime execution or checkout mutations.\nNext: return synthesis delta to parent. A separate later discovery pass, if requested, remains outstanding; no discovery pass was folded into this synthesis turn.\n\nTurn 4 entering: separate discovery pass 1 under the original group charter; parent verified mandatory delivery and later-turn synthesis. Read discovery-neighbours.json in bounded chunks before new source searches. No pending named questions. Preserve f1/f2 history and all parent-unaccepted drop proposals. Scope remains the three assigned contract patches at their recorded revisions; no runtime work or prohibited coverage search.\n\nTurn 4 complete: separate discovery pass 1. Total turns 4; discovery-pass count 1. No new verified finding and no new unverified-after-investigation finding. New ID f3 was recorded immediately as a concrete contract lead, then resolved to a candidate after checking the referenced failure policy and explicit allocation exception. Open leads: none. No existing finding/candidate withdrawn and no parent disposition assumed.\n\nInterface input read: discovery-neighbours.json all lines 1-1118, in bounded chunks. Initial 1-160 output clipped; reread 1-45, 46-85, 86-125, 126-185, 186-245, 246-305, 306-355, 356-410, 411-465, 466-520, 521-575, 576-625, 626-670, 671-720, 721-770, 771-820, 821-870, 871-915, 916-960, 961-1005, 1006-1050, 1051-1090, 1091-1118. This is novelty/interface context, not mandatory source credit. No pending named questions. Related orphan-server records in g046/g057 match f2's narrow residual; their possible-highest consequences remain their own records, and are not accepted drops or lowerings. Other groups own distinct retirement consent, misleading assurance and lost test-oracle findings; none was duplicated or searched as coverage.\n\nNew source/contract checks beyond known f1/f2: (1) newly added legacy-retry rollback analogy versus core.rs:15866-15924, FailedStart::Spec :11827-11863, SPEC_impl.md Owned checkout admission/lifetime :4090-4137 and SPEC.md :1745-1778. The existing referenced spec-write failure already retains allocated checkout ownership, as the new retry does; recorded f3 candidate with precise basis and original suspected consequence. (2) private tmux deletion path follows private lib_dir even for a registered binary in a shared directory (plan.rs:685-780,1140-1215); prepared-image exception is explicit and skips removal/attachment/linger (snapshot_preparer.rs:103-125). (3) documented 0x0 attach behavior follows invalid host-size refusal: handlers forwards resize, Terminal::resize dispatches it and HostTerminal::resize validates it; no host-size clamping promise inferred from old tmux behavior. (4) directory admission verifies absolute existing directories before open; executable permission failures remain later host-start failures, consistent with the documented narrower known gap. (5) the retained xterm workaround really remains throttled and checks scrolled-away/alive state (terminal.js:4900-4942); removal of its named test reference is accurate as prose, while lost regression oracles remain other groups' findings. (6) glibc-only unit-host initializer and non-glibc refusal match test_program.rs:1-100. (7) the final setup sentence deletion retains the shared renderer/provisioning PATH and ownership contracts; no new installation prerequisite found.\n\nDiscovery result: no new substantive defect found. New candidate f3 only; log has nine events. All assigned mandatory delivery remains complete/audited, no unread assigned scope. Source-only review; no runtime tests, builds, reproductions, live-install actions, checkout changes, or prohibited coverage searches.\nNext: return discovery delta to parent; no further investigation presently required for an open lead.\n"
+}

@@ -1,0 +1,575 @@
+{
+  "group": {
+    "id": "g066",
+    "domain": "podman-environments",
+    "purpose": "podman-environments: crates/farhelm-helm/src/environment/podman/failure_tests.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g022",
+      "g023",
+      "g024",
+      "g025",
+      "g026",
+      "g027",
+      "g028",
+      "g029",
+      "g055",
+      "g056",
+      "g057",
+      "g058",
+      "g059",
+      "g060",
+      "g065",
+      "g067"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00180-000.patch",
+        "ranges": [
+          [
+            1,
+            1519
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/environment/podman/failure_tests.rs",
+        "commit": "56659839785691f76da3af5d8f51b511cff4ba8b",
+        "notes": "patch header; patch character offsets [0,58869)",
+        "lines": 1519,
+        "bytes": 58869,
+        "start": 0,
+        "end": 58869,
+        "original": "[private-run]/prep/originals/00180.patch"
+      }
+    ],
+    "lines": 1519,
+    "bytes": 58869
+  },
+  "records": [
+    {
+      "key": "g066/c1",
+      "owner": "g066",
+      "id": "c1",
+      "domain": "podman-environments",
+      "purpose": "podman-environments: crates/farhelm-helm/src/environment/podman/failure_tests.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Fixed container names stay inside each isolated command model",
+            "location": "crates/farhelm-helm/src/environment/podman/failure_tests.rs:1221",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: The fixed names used by these tests do not collide with other test runs or real containers. Details: failure_tests.rs uses fixed reserved names in absent-session, proxy-recovery, restart-failure and partial-admission tests (around lines 1089, 1221, 1398, 1460). Considered whether this violates the shared-machine naming contract or risks removing another run's resources. Fixture::new in provisioning/session_launch_failure_tests.rs:41-89 creates a separate Harness/store and constructs a new Commands instance per fixture; failure_tests.rs:135-146 gives that Commands its own State mutex, and PlaceCommands::run_bounded/run_with_input at lines 333-354 exclusively invoke the in-memory execute method. Container creation/removal at lines 531-547 and 684-687 mutate only this per-instance model. No real Podman process receives these names. Suggested bucket: other if it were a defect. Confidence: confirmed by source; no execution. proposed_drop: false positive, because each name is scoped to a separate in-memory command fake rather than shared Podman storage. possible_cover: none; coverage sources were not searched. Could-be-highest: false; no route to real resources or user work is present. Caveat: this conclusion covers the assigned fake's names, not unrelated runtime harnesses."
+          }
+        },
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Fixed container names stay inside each isolated command model",
+            "location": "crates/farhelm-helm/src/environment/podman/failure_tests.rs:1080",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: The fixed names used by these tests do not collide with other test runs or real containers. Details: Rechecked during synthesis and corrected original source coordinates. Fixed reserved names occur in failure_tests.rs:1080, 1251, 1395 and 1452. Considered shared-machine naming collisions and removal of another run's resource. Fixture::new in provisioning/session_launch_failure_tests.rs:41-89 creates a separate Harness/store and Commands instance; failure_tests.rs:135-146 gives that Commands its own State mutex. PlaceCommands::run_bounded/run_with_input at failure_tests.rs:333-354 exclusively invoke the in-memory execute method. Container creation/removal at failure_tests.rs:531-547 and 684-687 mutate only this per-instance model. The contextual transport is also scripted rather than real SSH/Podman: rest_harness.rs:372-438 constructs Tokio duplex streams and scripted peers. Suggested bucket: other if it were a defect. Confidence: confirmed by source; no execution. proposed_drop: false positive, because each name is scoped to a separate in-memory command fake rather than shared Podman storage. Parent has not accepted a drop; this remains the reviewer's proposed source refutation. possible_cover: none; coverage sources were not searched. Could-be-highest: false; no route to real resources or user work is present. Caveats: this conclusion covers only these fake names and does not provide real container lifecycle evidence; fixture lifetime is assessed separately in c2. Original considered consequence, collision or removal of another run's real resource, is unchanged and refuted within this narrow scope."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Fixed container names stay inside each isolated command model",
+            "location": "crates/farhelm-helm/src/environment/podman/failure_tests.rs:1080",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: The fixed names used by these tests do not collide with other test runs or real containers. Details: Rechecked during synthesis and corrected original source coordinates. Fixed reserved names occur in failure_tests.rs:1080, 1247, 1395 and 1452. Considered shared-machine naming collisions and removal of another run's resource. Fixture::new in provisioning/session_launch_failure_tests.rs:41-89 creates a separate Harness/store and Commands instance; failure_tests.rs:135-146 gives that Commands its own State mutex. PlaceCommands::run_bounded/run_with_input at failure_tests.rs:325-343 exclusively invoke the in-memory execute method. Container creation/removal at failure_tests.rs:520-536 and 674-677 mutate only this per-instance model. The contextual transport is also scripted rather than real SSH/Podman: rest_harness.rs:372-438 constructs Tokio duplex streams and scripted peers. Suggested bucket: other if it were a defect. Confidence: confirmed by source; no execution. proposed_drop: false positive, because each name is scoped to a separate in-memory command fake rather than shared Podman storage. Parent has not accepted a drop; this remains the reviewer's proposed source refutation. possible_cover: none; coverage sources were not searched. Could-be-highest: false; no route to real resources or user work is present. Caveats: this conclusion covers only these fake names and does not provide real container lifecycle evidence; fixture lifetime is assessed separately in c2. Original considered consequence, collision or removal of another run's real resource, is unchanged and refuted within this narrow scope."
+          }
+        }
+      ],
+      "latest": {
+        "line": 4,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Fixed container names stay inside each isolated command model",
+          "location": "crates/farhelm-helm/src/environment/podman/failure_tests.rs:1080",
+          "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: The fixed names used by these tests do not collide with other test runs or real containers. Details: Rechecked during synthesis and corrected original source coordinates. Fixed reserved names occur in failure_tests.rs:1080, 1247, 1395 and 1452. Considered shared-machine naming collisions and removal of another run's resource. Fixture::new in provisioning/session_launch_failure_tests.rs:41-89 creates a separate Harness/store and Commands instance; failure_tests.rs:135-146 gives that Commands its own State mutex. PlaceCommands::run_bounded/run_with_input at failure_tests.rs:325-343 exclusively invoke the in-memory execute method. Container creation/removal at failure_tests.rs:520-536 and 674-677 mutate only this per-instance model. The contextual transport is also scripted rather than real SSH/Podman: rest_harness.rs:372-438 constructs Tokio duplex streams and scripted peers. Suggested bucket: other if it were a defect. Confidence: confirmed by source; no execution. proposed_drop: false positive, because each name is scoped to a separate in-memory command fake rather than shared Podman storage. Parent has not accepted a drop; this remains the reviewer's proposed source refutation. possible_cover: none; coverage sources were not searched. Could-be-highest: false; no route to real resources or user work is present. Caveats: this conclusion covers only these fake names and does not provide real container lifecycle evidence; fixture lifetime is assessed separately in c2. Original considered consequence, collision or removal of another run's real resource, is unchanged and refuted within this narrow scope."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g066/findings.jsonl",
+        "id": "c1",
+        "line": 4,
+        "disposition": "under-investigation",
+        "group": "g066-c1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-042",
+          "key": "g066/c1",
+          "latest_line": 4,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "podman-failure-fake-fixed-name-cross-run-collision",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The fixed container names are scoped to a fresh per-fixture in-memory Commands model. The examined command and transport seams cannot send those names to real Podman storage.",
+          "checks": [
+            "56659839785691f76da3af5d8f51b511cff4ba8b:provisioning/session_launch_failure_tests.rs:41-90 creates a fresh store/harness and Commands instance, then injects PodmanPlaces::with_commands and the E2e provisioning backend.",
+            "environment/podman/failure_tests.rs:135-145 gives each Commands its own mutex state; PlaceCommands methods at 325-343 call execute only; 520-536 and 659-678 create/remove modeled containers. The fixed reserved session name at 1080 is therefore not a shared engine resource.",
+            "rest_harness.rs:372-434 connects scripted peers through Tokio duplex streams. No runtime execution or claim of real-container lifecycle coverage follows."
+          ],
+          "coverage_checked": {
+            "specifications": "SPEC_impl.md Podman places requires isolation in actual shared Podman storage. The injected model has no such shared storage. Both relevant specification sections were read; no separate acceptance is needed for the source refutation.",
+            "TODO.md Planned and plans": "Empty Planned bucket and no unlanded queue entries.",
+            "BUGS.md": "Read; no matching fixture-name issue.",
+            "queue and active triage": "Searched fixed container names, collisions and failure_tests/session_launch_failure_tests identifiers. No exact cover/alias found; other shared-resource harness findings do not concern this injected model.",
+            "FILTER.md": "No filter invoked."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "A route from these injected names to external Podman resources is absent and contradicted by the seams.",
+          "original_stronger_consequence": "Another test run's or real installation's container could collide or be removed. Earlier records label this other/no-highest, but the wording includes potentially user-owned real resources; preserve that original consequence for a cautious independent check. This only covers the assigned fake's names, not unrelated runtime harnesses or fixture lifetime.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Narrow source refutation by per-instance command state and scripted transport. Marked for independent drop review because the original considered removal of real resources despite the reviewer's other label."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-042.json",
+          "key": "g066/c1",
+          "proposal": "claim-checks/claims-042/result.json",
+          "parent_proposal": "source-refuted-injected-failure-model-fixed-name-external-collision",
+          "final_independent_gate": "required-by-conservative-real-resource-target-flag",
+          "reason": "Full042 each fixture injects its own Commands mutex model, E2e backend and duplex scripted transport; modeled run/remove names never reach real Podman storage. Fixed names are not shared external resources on this path. Preserve possible other-run/live-container deletion framing for fresh check despite no shown external route; do not claim runtime real-container lifecycle coverage or all harness names safe."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "podman-failure-fake-fixed-name-cross-run-collision",
+        "destination": null
+      }
+    },
+    {
+      "key": "g066/c2",
+      "owner": "g066",
+      "id": "c2",
+      "domain": "podman-environments",
+      "purpose": "podman-environments: crates/farhelm-helm/src/environment/podman/failure_tests.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Fixture failure cannot orphan a real container through these injected seams",
+            "location": "crates/farhelm-helm/src/provisioning/session_launch_failure_tests.rs:41",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: An assertion or setup failure in the assigned tests does not leave a real container or independently running supervisor behind. Details: Considered the lifetime risk from Fixture::prepare's ten-second timeout (session_launch_failure_tests.rs:152-174): it drops the preparation waiter, while podman.rs:985-1036 and tensorlake/build.rs:679-725 deliberately keep preparation in a spawned task. That timeout therefore is not evidence that the background operation has stopped. Source refutation of an escaped real-resource consequence: Fixture::new at lines 41-89 injects Commands and E2eProvisioningBackend before provider use; failure_tests.rs:318-355 and 357-749 implement command calls and mutations entirely in memory, and rest_harness.rs:372-438 implements transport with Tokio duplex streams and spawned scripted peers. Fixture and Harness own their temporary directories (session_launch_failure_tests.rs:18-27; rest_harness.rs:710-726). ConnectionManager Drop shuts down its actors (manager.rs:3137-3147); the farhelm_testtrace asynchronous wrapper owns and drops the per-test runtime even after a caught body unwind (farhelm-testtrace/src/lib.rs:994-1024), bounding detached async work to that test runtime. Suggested bucket: other if a tooling cleanup defect were established. Confidence: confirmed by source; no execution. proposed_drop: no established orphaned external resource, because the examined tasks have modeled command/backend/transport boundaries and a per-test runtime owner. possible_cover: none; excluded coverage sources were not read. Could-be-highest: false; no shipped user-work or security route is established. Caveats: this does not prove synchronous fixture draining before its temp directories drop, and it does not establish real Podman cleanup or behavior after real process termination. A timeout may leave the owned preparation task alive until test-runtime teardown; the claimed refutation is only of externally escaping container/supervisor state."
+          }
+        }
+      ],
+      "latest": {
+        "line": 2,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Fixture failure cannot orphan a real container through these injected seams",
+          "location": "crates/farhelm-helm/src/provisioning/session_launch_failure_tests.rs:41",
+          "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: An assertion or setup failure in the assigned tests does not leave a real container or independently running supervisor behind. Details: Considered the lifetime risk from Fixture::prepare's ten-second timeout (session_launch_failure_tests.rs:152-174): it drops the preparation waiter, while podman.rs:985-1036 and tensorlake/build.rs:679-725 deliberately keep preparation in a spawned task. That timeout therefore is not evidence that the background operation has stopped. Source refutation of an escaped real-resource consequence: Fixture::new at lines 41-89 injects Commands and E2eProvisioningBackend before provider use; failure_tests.rs:318-355 and 357-749 implement command calls and mutations entirely in memory, and rest_harness.rs:372-438 implements transport with Tokio duplex streams and spawned scripted peers. Fixture and Harness own their temporary directories (session_launch_failure_tests.rs:18-27; rest_harness.rs:710-726). ConnectionManager Drop shuts down its actors (manager.rs:3137-3147); the farhelm_testtrace asynchronous wrapper owns and drops the per-test runtime even after a caught body unwind (farhelm-testtrace/src/lib.rs:994-1024), bounding detached async work to that test runtime. Suggested bucket: other if a tooling cleanup defect were established. Confidence: confirmed by source; no execution. proposed_drop: no established orphaned external resource, because the examined tasks have modeled command/backend/transport boundaries and a per-test runtime owner. possible_cover: none; excluded coverage sources were not read. Could-be-highest: false; no shipped user-work or security route is established. Caveats: this does not prove synchronous fixture draining before its temp directories drop, and it does not establish real Podman cleanup or behavior after real process termination. A timeout may leave the owned preparation task alive until test-runtime teardown; the claimed refutation is only of externally escaping container/supervisor state."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g066/findings.jsonl",
+        "id": "c2",
+        "line": 2,
+        "disposition": "under-investigation",
+        "group": "g066-c2",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-042",
+          "key": "g066/c2",
+          "latest_line": 2,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "podman-failure-fixture-timeout-external-resource-escape",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Dropping the preparation waiter need not stop its owned background task, but the examined fixture injects command/backend/transport models and owns its runtime. No real container or independent supervisor escapes through those seams.",
+          "checks": [
+            "56659839785691f76da3af5d8f51b511cff4ba8b:provisioning/session_launch_failure_tests.rs:152-174 times out the waiter, not an explicit task join. Fixture construction at 41-90 injects Commands, E2eProvisioningBackend and payloads before provider use; fixture owns its TempDir at 18-27.",
+            "environment/podman/failure_tests.rs:325-343 invokes the in-memory executor; modeled run/remove at 520-536,659-678 affects no external engine. rest_harness.rs:372-434 uses duplex streams/scripted tasks, and Harness at 710-726 owns its directory.",
+            "manager.rs:3137-3145 shuts actors down on Drop. farhelm-testtrace/src/lib.rs:994-1024 owns the per-test runtime, catches body unwind and drops the runtime before finishing/resuming unwind. Detached asynchronous work is bounded by that owner, not by the waiter's timeout.",
+            "No reproduction ran. This does not prove synchronous draining before temp-directory drop or real-process termination semantics."
+          ],
+          "coverage_checked": {
+            "specifications": "Read the shared environment ownership and Podman lifecycle contracts; no product promise about an injected fake's task drain independently covers this candidate.",
+            "TODO.md Planned and plans": "Planned empty; no unlanded queue entries.",
+            "BUGS.md": "Read; its real escaped SSH-output helper is a different route.",
+            "queue and active triage": "Searched fixture preparation timeouts, orphan containers/supervisors and assigned source identifiers. No matching item or active decision found; unrelated fixture ownership-publication findings do not cover this injected fixture.",
+            "FILTER.md": "No filter invoked; source refutation is limited to external escape."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "The claimed external resource requires a real command/backend/transport escape that these seams do not provide. A task may remain alive until runtime teardown; early waiter completion alone does not establish task cessation.",
+          "original_stronger_consequence": "Assertion/setup failure or the ten-second timeout could orphan a real container or independently running supervisor. The original record calls this tooling/other and establishes no shipped user-work/security route. Keep the narrow external-escape scope and caveat that synchronous fixture draining is unproven.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Refute only external real-container/supervisor escape through these injected seams. Cautiously request independent review of the external-resource dismissal; do not generalize it into a claim that timeout joins background work."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-042.json",
+          "key": "g066/c2",
+          "proposal": "claim-checks/claims-042/result.json",
+          "parent_proposal": "source-refuted-injected-fixture-timeout-external-resource-escape",
+          "final_independent_gate": "required-by-conservative-external-resource-flag",
+          "reason": "Full042 waiter timeout does NOT join owned background task. Actual Commands/backend/duplex seams cannot create real container or independent supervisor, and per-test owned runtime eventually tears down detached async work. Do not claim synchronous drain before TempDir drop, prompt timeout cancellation or general manager Drop correctness (separate retained024l5 lifetime root). Refute only external escape through this injected fixture. Preserve original possible external-resource orphan concern for fresh gate, no real process termination proof."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "podman-failure-fixture-timeout-external-resource-escape",
+        "destination": null
+      }
+    },
+    {
+      "key": "g066/c3",
+      "owner": "g066",
+      "id": "c3",
+      "domain": "podman-environments",
+      "purpose": "podman-environments: crates/farhelm-helm/src/environment/podman/failure_tests.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Failure matrices distinguish requested boundaries from earlier setup errors",
+            "location": "crates/farhelm-helm/src/environment/podman/failure_tests.rs:821",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: These failure tests do not pass solely because setup failed at an unrelated earlier stage. Details: Considered whether prearming failures before preparation and asserting generic errors could conceal missing fixture prerequisites or skipped intended phases. The command matrix asserts both result.is_err and Commands::failed()==phase (failure_tests.rs:821-861); hit records failed only when the selected phase is actually reached and consumes that fault (lines 219-233). The backend matrix additionally asserts the exact canonical helper/event and absence of prepared publication (869-887); Fixture::fail_backend selects podman:<64-hex-id> and backend_reached compares both target and event (session_launch_failure_tests.rs:194-233). E2eProvisioningBackend::action records the event, then returns the selected failure (e2e.rs:208-236); production build.rs:95-114 and 294-369 propagate the backend/installer failures. The successful cold premise enumerates both phase sets before checking reuse (failure_tests.rs:779-814). The cleanup-refusal test lacks a separate failed()==packages assertion, but its fake refuses removal only after State.failed is set by the selected command fault; observing retained canonical helper plus cleanup failure therefore establishes that prerequisite through the fake's own fault gate (failure_tests.rs:657-669, 895-911). Lost/invalid commit tests assert the selected commit was visited (918-936), and their unique lost_commit configuration can return the intended injected error only after inserting the owned image and tag. Absent helper/session tests explicitly check failed()==selected and the absent-resource premise before retry/deletion assertions (1106-1136, 1156-1193). Suggested bucket: other if misleading test evidence were established. Confidence: confirmed by source; no execution. proposed_drop: the suspected unrelated-error false pass is refuted by phase/target assertions and the source fault gates for the assigned cases. possible_cover: none; excluded coverage sources were not read. Could-be-highest: false; no shipped security or loss-of-work route is established. Caveats: the evidence validates orchestration over modeled command/backend results, not real Podman, systemd, proxy-file bytes or remote filesystem effects. The production cleanup path runs reconcile_helpers then retire_images before publishing failure (build.rs:267-290); the model checks canonical removal, stopped-before-commit, durable tags-before-commit, and nonforced unused-image removal, while intentionally keeping absent uncertain sends pending. It does not simulate delayed external materialization; the assertions instead verify that uncertainty prevents immediate forgetting or retry."
+          }
+        }
+      ],
+      "latest": {
+        "line": 5,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Failure matrices distinguish requested boundaries from earlier setup errors",
+          "location": "crates/farhelm-helm/src/environment/podman/failure_tests.rs:821",
+          "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: These failure tests do not pass solely because setup failed at an unrelated earlier stage. Details: Considered whether prearming failures before preparation and asserting generic errors could conceal missing fixture prerequisites or skipped intended phases. The command matrix asserts both result.is_err and Commands::failed()==phase (failure_tests.rs:821-861); hit records failed only when the selected phase is actually reached and consumes that fault (lines 219-233). The backend matrix additionally asserts the exact canonical helper/event and absence of prepared publication (869-887); Fixture::fail_backend selects podman:<64-hex-id> and backend_reached compares both target and event (session_launch_failure_tests.rs:194-233). E2eProvisioningBackend::action records the event, then returns the selected failure (e2e.rs:208-236); production build.rs:95-114 and 294-369 propagate the backend/installer failures. The successful cold premise enumerates both phase sets before checking reuse (failure_tests.rs:779-814). The cleanup-refusal test lacks a separate failed()==packages assertion, but its fake refuses removal only after State.failed is set by the selected command fault; observing retained canonical helper plus cleanup failure therefore establishes that prerequisite through the fake's own fault gate (failure_tests.rs:657-669, 895-911). Lost/invalid commit tests assert the selected commit was visited (918-936), and their unique lost_commit configuration can return the intended injected error only after inserting the owned image and tag. Absent helper/session tests explicitly check failed()==selected and the absent-resource premise before retry/deletion assertions (1106-1136, 1156-1193). Suggested bucket: other if misleading test evidence were established. Confidence: confirmed by source; no execution. proposed_drop: the suspected unrelated-error false pass is refuted by phase/target assertions and the source fault gates for the assigned cases. possible_cover: none; excluded coverage sources were not read. Could-be-highest: false; no shipped security or loss-of-work route is established. Caveats: the evidence validates orchestration over modeled command/backend results, not real Podman, systemd, proxy-file bytes or remote filesystem effects. The production cleanup path runs reconcile_helpers then retire_images before publishing failure (build.rs:267-290); the model checks canonical removal, stopped-before-commit, durable tags-before-commit, and nonforced unused-image removal, while intentionally keeping absent uncertain sends pending. It does not simulate delayed external materialization; the assertions instead verify that uncertainty prevents immediate forgetting or retry."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g066/findings.jsonl",
+        "id": "c3",
+        "line": 5,
+        "disposition": "excluded",
+        "group": "podman-failure-matrix-unrelated-setup-error-false-pass",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-042 after inspecting it. The assigned failure matrices observe the selected phase/target, not just a generic error. Earlier unrelated setup failures cannot satisfy those reach assertions. Source-refute unrelated-earlier-error false passes in the named cases; preserve the modeled-substrate limitation and do not infer full real-engine coverage. Checked source/results: [\"56659839785691f76da3af5d8f51b511cff4ba8b:environment/podman/failure_tests.rs:220-229 records failed only upon consuming the selected phase. Command matrix at 821-861 asserts failed==phase; success prerequisite at 779-814 checks command/backend traversal and reuse.\",\"Backend matrix at 869-887 requires backend_reached(container,event), whose implementation at provisioning/session_launch_failure_tests.rs:194-233 matches the exact canonical target and event. provisioning/e2e.rs:208-235 records the event before the configured fault.\",\"Cleanup refusal at failure_tests.rs:659-666 requires a recorded fault before refusing rm; the test at 895-911 observes the retained canonical helper and cleanup failure. Lost/invalid commit and absent-create cases at 918-936,1106-1136,1156-1193 assert the selected phase and intended absent-resource premise.\"] Current coverage/results: {\"specifications\":\"Read relevant environment lifecycle/ownership sections in both specs; these require real production behavior but do not convert modeled tests into real-engine evidence.\",\"TODO.md Planned and plans\":\"Empty/no unlanded entries.\",\"BUGS.md\":\"Read; no matching failure-oracle issue.\",\"queue and active triage\":\"Searched phase/fault gates, generic/unrelated errors and assigned test/module names. No same-root item or active decision found.\",\"FILTER.md\":\"No filter invoked.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Tests might pass from an unrelated earlier setup error and falsely claim coverage of later failure boundaries. Scope remains test assurance only. The fake does not execute real Podman/systemd, verify private-file bytes or simulate delayed external materialization; uncertainty assertions retain pending ownership rather than proving real delayed cleanup.\"; \"The suspected false pass needs the selected phase/target assertion to succeed without visiting it, which the fault gate contradicts for these cases.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g066/c3",
+        "line": 5,
+        "disposition": "excluded",
+        "group": "podman-failure-matrix-unrelated-setup-error-false-pass",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-042 after inspecting it. The assigned failure matrices observe the selected phase/target, not just a generic error. Earlier unrelated setup failures cannot satisfy those reach assertions. Source-refute unrelated-earlier-error false passes in the named cases; preserve the modeled-substrate limitation and do not infer full real-engine coverage. Checked source/results: [\"56659839785691f76da3af5d8f51b511cff4ba8b:environment/podman/failure_tests.rs:220-229 records failed only upon consuming the selected phase. Command matrix at 821-861 asserts failed==phase; success prerequisite at 779-814 checks command/backend traversal and reuse.\",\"Backend matrix at 869-887 requires backend_reached(container,event), whose implementation at provisioning/session_launch_failure_tests.rs:194-233 matches the exact canonical target and event. provisioning/e2e.rs:208-235 records the event before the configured fault.\",\"Cleanup refusal at failure_tests.rs:659-666 requires a recorded fault before refusing rm; the test at 895-911 observes the retained canonical helper and cleanup failure. Lost/invalid commit and absent-create cases at 918-936,1106-1136,1156-1193 assert the selected phase and intended absent-resource premise.\"] Current coverage/results: {\"specifications\":\"Read relevant environment lifecycle/ownership sections in both specs; these require real production behavior but do not convert modeled tests into real-engine evidence.\",\"TODO.md Planned and plans\":\"Empty/no unlanded entries.\",\"BUGS.md\":\"Read; no matching failure-oracle issue.\",\"queue and active triage\":\"Searched phase/fault gates, generic/unrelated errors and assigned test/module names. No same-root item or active decision found.\",\"FILTER.md\":\"No filter invoked.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Tests might pass from an unrelated earlier setup error and falsely claim coverage of later failure boundaries. Scope remains test assurance only. The fake does not execute real Podman/systemd, verify private-file bytes or simulate delayed external materialization; uncertainty assertions retain pending ownership rather than proving real delayed cleanup.\"; \"The suspected false pass needs the selected phase/target assertion to succeed without visiting it, which the fault gate contradicts for these cases.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-042",
+          "key": "g066/c3",
+          "latest_line": 5,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "podman-failure-matrix-unrelated-setup-error-false-pass",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The assigned failure matrices observe the selected phase/target, not just a generic error. Earlier unrelated setup failures cannot satisfy those reach assertions.",
+          "checks": [
+            "56659839785691f76da3af5d8f51b511cff4ba8b:environment/podman/failure_tests.rs:220-229 records failed only upon consuming the selected phase. Command matrix at 821-861 asserts failed==phase; success prerequisite at 779-814 checks command/backend traversal and reuse.",
+            "Backend matrix at 869-887 requires backend_reached(container,event), whose implementation at provisioning/session_launch_failure_tests.rs:194-233 matches the exact canonical target and event. provisioning/e2e.rs:208-235 records the event before the configured fault.",
+            "Cleanup refusal at failure_tests.rs:659-666 requires a recorded fault before refusing rm; the test at 895-911 observes the retained canonical helper and cleanup failure. Lost/invalid commit and absent-create cases at 918-936,1106-1136,1156-1193 assert the selected phase and intended absent-resource premise."
+          ],
+          "coverage_checked": {
+            "specifications": "Read relevant environment lifecycle/ownership sections in both specs; these require real production behavior but do not convert modeled tests into real-engine evidence.",
+            "TODO.md Planned and plans": "Empty/no unlanded entries.",
+            "BUGS.md": "Read; no matching failure-oracle issue.",
+            "queue and active triage": "Searched phase/fault gates, generic/unrelated errors and assigned test/module names. No same-root item or active decision found.",
+            "FILTER.md": "No filter invoked."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "The suspected false pass needs the selected phase/target assertion to succeed without visiting it, which the fault gate contradicts for these cases.",
+          "original_stronger_consequence": "Tests might pass from an unrelated earlier setup error and falsely claim coverage of later failure boundaries. Scope remains test assurance only. The fake does not execute real Podman/systemd, verify private-file bytes or simulate delayed external materialization; uncertainty assertions retain pending ownership rather than proving real delayed cleanup.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source-refute unrelated-earlier-error false passes in the named cases; preserve the modeled-substrate limitation and do not infer full real-engine coverage."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "podman-failure-matrix-unrelated-setup-error-false-pass",
+        "destination": null
+      }
+    },
+    {
+      "key": "g066/l1",
+      "owner": "g066",
+      "id": "l1",
+      "domain": "podman-environments",
+      "purpose": "podman-environments: crates/farhelm-helm/src/environment/podman/failure_tests.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Exact-inheritance claim may exceed the proxy test's shared-serializer oracle",
+            "location": "crates/farhelm-helm/src/environment/podman/failure_tests.rs:14",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: the proxy privacy test may give false assurance that metacharacter/newline values are inherited exactly, because its expected prefix comes from the production serializer itself. Source basis: failure_tests.rs:14-16 says the secret proves exact inheritance rather than lossy sanitization; cold_build_sends_exact_proxy_values_only_as_private_input obtains expected exports from build::proxy_exports(&values), then compares private input with that prefix. The command model does not execute input, and the contextual backend install-byte method ignores content. Suspected consequence is an overstated exact-inheritance test oracle, separate from the correctly tested absence of a marker in argv and from g065/l1's confirmed production empty-variable persistence issue. Checks so far: full assigned patch and earlier backend implementation reads establish the shared helper and modeled I/O, but need targeted recheck of precise assertion scope, serializer transformation and in-range persistence before conclusion. Exact missing premise: whether another assertion in this test independently distinguishes lossy serialization of the metacharacter/newline value, or whether the claim is intentionally confined to transport serialization after that helper. Next source checks: read the full test, proxy_exports, and pinned-range history of the assigned file. Suggested bucket: other if confirmed; confidence: unresolved lead under active source investigation, no execution. proposed_drop: false pending investigation. possible_cover: caller-supplied g065/l1 concerns a different real environment.d parser consequence; no coverage sources searched. Could-be-highest: false for the test-oracle/documentation consequence; no shipped credential-exposure route is established."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Proxy test's shared serializer cannot prove its exact-inheritance claim",
+            "location": "crates/farhelm-helm/src/environment/podman/failure_tests.rs:991",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b.\n\n## TLDR\nThe new proxy privacy test claims to detect lossy handling of metacharacters and newlines, but computes its expected bytes with the same serializer as production. A regression that changes those values inside that serializer can pass, giving false assurance about exact inheritance. This is a test-oracle/documentation defect, not an observed production proxy or credential failure.\n\n## Details\nThe fixture value's comment explicitly promises that including shell metacharacters and a newline means a passing privacy test 'proves that exact inheritance was not replaced with lossy sanitization' (failure_tests.rs:12-14). The test cold_build_sends_exact_proxy_values_only_as_private_input creates the original value map at :987-990 but derives its expected prefix by calling build::proxy_exports(&values) at :991. Its exact-value assertion at :1027-1029 only checks input.starts_with(that prefix). Production Podman::script calls this same build::proxy_exports on the actual place values (environment/podman.rs:356). The serializer is implemented at environment/podman/build.rs:421-429 and supplies the shell quoting under examination.\n\nConcrete competing mechanism, derived from source without executing or modifying anything: if proxy_exports replaced newlines in each value with spaces before quoting, production's input and the test's expected prefix would both contain the changed value. The marker would still appear exactly once in bootstrap (:1032-1038); argv would still contain no marker (:999-1019); the PRIVATE_SCRIPT wrapper and import-environment name assertions (:1025, :1031, :1040-1058) would be unchanged. Thus every assertion in this test can pass while its original multiline proxy value is changed. The command fake parses phase-identifying script text and returns canned results instead of evaluating shell exports (failure_tests.rs exec arm around :552-601), so it contributes no independent value-preservation observation. The backend's install_bytes_checked also intentionally ignores _content (provisioning/e2e.rs:382-407). This does not invalidate the test's meaningful private-input-versus-argv assertions, or require this workflow test to execute a real container.\n\nContract: the supplied test-authoring checklist requires an observable that distinguishes competing mechanisms. The distinct test claim concerns exact inheritance versus lossy sanitization; production correctness today does not establish the claimed regression sensitivity. Use an independent expected literal/byte representation or a focused semantic round trip over the original value, or narrow the comment/assertion message to say this test verifies transport of the serializer's output.\n\nAttribution/persistence: git log of the assigned file over the complete exclusive 6e423e30068b62c6cfa276c6d720ee35bb70387a through inclusive 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db range shows only its introduction in 56659839785691f76da3af5d8f51b511cff4ba8b; no later patch changes this oracle or claim. Suggested bucket: other, for false test assurance and misleading claimed coverage. Confidence: confirmed by source and counterfactual assertion analysis; no execution, mutation, reproduction or runtime observation. proposed_drop: false. possible_cover: none established; caller-supplied g065/l1 is a distinct production empty-value persistence defect, not this shared-oracle consequence. Could-be-highest: false; no shipped security, credential exposure or loss-of-work route is claimed. Material caveats: the current serializer may be correct, and the test does catch loss introduced outside that shared helper as well as proxy values entering argv. This finding is restricted to the explicit stronger exact-inheritance claim and missing independent oracle for transformations inside the helper. Original lead's consequence is retained; all readily checkable premises are resolved and no uncertainty remains for this narrow finding."
+          }
+        }
+      ],
+      "latest": {
+        "line": 7,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l1",
+          "state": "open",
+          "summary": "Proxy test's shared serializer cannot prove its exact-inheritance claim",
+          "location": "crates/farhelm-helm/src/environment/podman/failure_tests.rs:991",
+          "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b.\n\n## TLDR\nThe new proxy privacy test claims to detect lossy handling of metacharacters and newlines, but computes its expected bytes with the same serializer as production. A regression that changes those values inside that serializer can pass, giving false assurance about exact inheritance. This is a test-oracle/documentation defect, not an observed production proxy or credential failure.\n\n## Details\nThe fixture value's comment explicitly promises that including shell metacharacters and a newline means a passing privacy test 'proves that exact inheritance was not replaced with lossy sanitization' (failure_tests.rs:12-14). The test cold_build_sends_exact_proxy_values_only_as_private_input creates the original value map at :987-990 but derives its expected prefix by calling build::proxy_exports(&values) at :991. Its exact-value assertion at :1027-1029 only checks input.starts_with(that prefix). Production Podman::script calls this same build::proxy_exports on the actual place values (environment/podman.rs:356). The serializer is implemented at environment/podman/build.rs:421-429 and supplies the shell quoting under examination.\n\nConcrete competing mechanism, derived from source without executing or modifying anything: if proxy_exports replaced newlines in each value with spaces before quoting, production's input and the test's expected prefix would both contain the changed value. The marker would still appear exactly once in bootstrap (:1032-1038); argv would still contain no marker (:999-1019); the PRIVATE_SCRIPT wrapper and import-environment name assertions (:1025, :1031, :1040-1058) would be unchanged. Thus every assertion in this test can pass while its original multiline proxy value is changed. The command fake parses phase-identifying script text and returns canned results instead of evaluating shell exports (failure_tests.rs exec arm around :552-601), so it contributes no independent value-preservation observation. The backend's install_bytes_checked also intentionally ignores _content (provisioning/e2e.rs:382-407). This does not invalidate the test's meaningful private-input-versus-argv assertions, or require this workflow test to execute a real container.\n\nContract: the supplied test-authoring checklist requires an observable that distinguishes competing mechanisms. The distinct test claim concerns exact inheritance versus lossy sanitization; production correctness today does not establish the claimed regression sensitivity. Use an independent expected literal/byte representation or a focused semantic round trip over the original value, or narrow the comment/assertion message to say this test verifies transport of the serializer's output.\n\nAttribution/persistence: git log of the assigned file over the complete exclusive 6e423e30068b62c6cfa276c6d720ee35bb70387a through inclusive 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db range shows only its introduction in 56659839785691f76da3af5d8f51b511cff4ba8b; no later patch changes this oracle or claim. Suggested bucket: other, for false test assurance and misleading claimed coverage. Confidence: confirmed by source and counterfactual assertion analysis; no execution, mutation, reproduction or runtime observation. proposed_drop: false. possible_cover: none established; caller-supplied g065/l1 is a distinct production empty-value persistence defect, not this shared-oracle consequence. Could-be-highest: false; no shipped security, credential exposure or loss-of-work route is claimed. Material caveats: the current serializer may be correct, and the test does catch loss introduced outside that shared helper as well as proxy values entering argv. This finding is restricted to the explicit stronger exact-inheritance claim and missing independent oracle for transformations inside the helper. Original lead's consequence is retained; all readily checkable premises are resolved and no uncertainty remains for this narrow finding."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g066/findings.jsonl",
+        "id": "l1",
+        "line": 7,
+        "disposition": "verified",
+        "group": "podman-proxy-exact-inheritance-test-shared-serializer-oracle",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-042 after inspecting it. The test expressly promises sensitivity to lossy proxy transformations but obtains its expected prefix from production's serializer. A newline-to-space transformation inside that shared helper changes both sides and preserves the remaining assertions. Record other with source-confirmed confidence. Use independent expected bytes/semantic observation, or narrow the exact-inheritance claim to transport of the serializer's output. Checked source/results: [\"56659839785691f76da3af5d8f51b511cff4ba8b:environment/podman/failure_tests.rs:12-14 promises exact inheritance against lossy sanitization. At 987-991 it creates original values but computes exports with build::proxy_exports; 1027-1029 compares input to those computed exports.\",\"Production podman.rs:355-356 calls the same proxy_exports, defined at podman/build.rs:420-429. Replacing newlines with spaces there would affect both expected and delivered prefix; marker count at 1032-1038, no-marker argv checks at 999-1019 and import-name checks at 1040-1058 still permit the changed value.\",\"failure_tests.rs:545-597 parses script text into phases and returns canned output rather than evaluating exports. provisioning/e2e.rs:382-408 ignores installed _content, so it supplies no independent original-value observation.\",\"Range log and diff show failure_tests.rs and build.rs introduced at 56659839785691f76da3af5d8f51b511cff4ba8b and unchanged through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. Source/counterfactual analysis only; no mutation or execution.\"] Current coverage/results: {\"SPEC.md\":\"Container sessions at 4876-4882 promises deterministic creation-time proxy inheritance. This does not accept overstated regression sensitivity in the test.\",\"SPEC_impl.md\":\"Current 6082-6085 requires selected proxy values in environment.d. Read surrounding Podman creation and prepared-artifact sections; no shared-oracle exception.\",\"test-authoring contract\":\"Read .agents/test-authoring.md in full; it requires an observable distinguishing competing mechanisms.\",\"TODO.md Planned and plans\":\"Empty/no unlanded entries.\",\"BUGS.md\":\"Read; no matching test oracle acceptance.\",\"queue and active triage\":\"Searched proxy_exports, exact inheritance, lossy sanitization, test name and module, then broader proxy/test assurance terms across queue/index and active ledger. No exact cover/alias found. Existing fixture proxy-privacy guards concern different source strings and assertions.\",\"FILTER.md\":\"No full match. The consequence is persistent false test assurance, not an imprecise runtime diagnostic or self-correcting rare failure.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"False assurance that shell metacharacters/newlines survive unchanged. This is a test-oracle/comment defect, not an observed product proxy failure or credential exposure. Current serialization may be correct; the test still meaningfully checks private-input transport, absence from argv and transformations introduced outside the shared helper. Supplied g065/l1 production empty-value persistence is a distinct consequence, not a duplicate or cover.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g066/l1",
+        "line": 7,
+        "disposition": "verified",
+        "group": "podman-proxy-exact-inheritance-test-shared-serializer-oracle",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-042 after inspecting it. The test expressly promises sensitivity to lossy proxy transformations but obtains its expected prefix from production's serializer. A newline-to-space transformation inside that shared helper changes both sides and preserves the remaining assertions. Record other with source-confirmed confidence. Use independent expected bytes/semantic observation, or narrow the exact-inheritance claim to transport of the serializer's output. Checked source/results: [\"56659839785691f76da3af5d8f51b511cff4ba8b:environment/podman/failure_tests.rs:12-14 promises exact inheritance against lossy sanitization. At 987-991 it creates original values but computes exports with build::proxy_exports; 1027-1029 compares input to those computed exports.\",\"Production podman.rs:355-356 calls the same proxy_exports, defined at podman/build.rs:420-429. Replacing newlines with spaces there would affect both expected and delivered prefix; marker count at 1032-1038, no-marker argv checks at 999-1019 and import-name checks at 1040-1058 still permit the changed value.\",\"failure_tests.rs:545-597 parses script text into phases and returns canned output rather than evaluating exports. provisioning/e2e.rs:382-408 ignores installed _content, so it supplies no independent original-value observation.\",\"Range log and diff show failure_tests.rs and build.rs introduced at 56659839785691f76da3af5d8f51b511cff4ba8b and unchanged through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. Source/counterfactual analysis only; no mutation or execution.\"] Current coverage/results: {\"SPEC.md\":\"Container sessions at 4876-4882 promises deterministic creation-time proxy inheritance. This does not accept overstated regression sensitivity in the test.\",\"SPEC_impl.md\":\"Current 6082-6085 requires selected proxy values in environment.d. Read surrounding Podman creation and prepared-artifact sections; no shared-oracle exception.\",\"test-authoring contract\":\"Read .agents/test-authoring.md in full; it requires an observable distinguishing competing mechanisms.\",\"TODO.md Planned and plans\":\"Empty/no unlanded entries.\",\"BUGS.md\":\"Read; no matching test oracle acceptance.\",\"queue and active triage\":\"Searched proxy_exports, exact inheritance, lossy sanitization, test name and module, then broader proxy/test assurance terms across queue/index and active ledger. No exact cover/alias found. Existing fixture proxy-privacy guards concern different source strings and assertions.\",\"FILTER.md\":\"No full match. The consequence is persistent false test assurance, not an imprecise runtime diagnostic or self-correcting rare failure.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"False assurance that shell metacharacters/newlines survive unchanged. This is a test-oracle/comment defect, not an observed product proxy failure or credential exposure. Current serialization may be correct; the test still meaningfully checks private-input transport, absence from argv and transformations introduced outside the shared helper. Supplied g065/l1 production empty-value persistence is a distinct consequence, not a duplicate or cover.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-042",
+          "key": "g066/l1",
+          "latest_line": 7,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "podman-proxy-exact-inheritance-test-shared-serializer-oracle",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The test expressly promises sensitivity to lossy proxy transformations but obtains its expected prefix from production's serializer. A newline-to-space transformation inside that shared helper changes both sides and preserves the remaining assertions.",
+          "checks": [
+            "56659839785691f76da3af5d8f51b511cff4ba8b:environment/podman/failure_tests.rs:12-14 promises exact inheritance against lossy sanitization. At 987-991 it creates original values but computes exports with build::proxy_exports; 1027-1029 compares input to those computed exports.",
+            "Production podman.rs:355-356 calls the same proxy_exports, defined at podman/build.rs:420-429. Replacing newlines with spaces there would affect both expected and delivered prefix; marker count at 1032-1038, no-marker argv checks at 999-1019 and import-name checks at 1040-1058 still permit the changed value.",
+            "failure_tests.rs:545-597 parses script text into phases and returns canned output rather than evaluating exports. provisioning/e2e.rs:382-408 ignores installed _content, so it supplies no independent original-value observation.",
+            "Range log and diff show failure_tests.rs and build.rs introduced at 56659839785691f76da3af5d8f51b511cff4ba8b and unchanged through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. Source/counterfactual analysis only; no mutation or execution."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "Container sessions at 4876-4882 promises deterministic creation-time proxy inheritance. This does not accept overstated regression sensitivity in the test.",
+            "SPEC_impl.md": "Current 6082-6085 requires selected proxy values in environment.d. Read surrounding Podman creation and prepared-artifact sections; no shared-oracle exception.",
+            "test-authoring contract": "Read .agents/test-authoring.md in full; it requires an observable distinguishing competing mechanisms.",
+            "TODO.md Planned and plans": "Empty/no unlanded entries.",
+            "BUGS.md": "Read; no matching test oracle acceptance.",
+            "queue and active triage": "Searched proxy_exports, exact inheritance, lossy sanitization, test name and module, then broader proxy/test assurance terms across queue/index and active ledger. No exact cover/alias found. Existing fixture proxy-privacy guards concern different source strings and assertions.",
+            "FILTER.md": "No full match. The consequence is persistent false test assurance, not an imprecise runtime diagnostic or self-correcting rare failure."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "False assurance that shell metacharacters/newlines survive unchanged. This is a test-oracle/comment defect, not an observed product proxy failure or credential exposure. Current serialization may be correct; the test still meaningfully checks private-input transport, absence from argv and transformations introduced outside the shared helper. Supplied g065/l1 production empty-value persistence is a distinct consequence, not a duplicate or cover.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Record other with source-confirmed confidence. Use independent expected bytes/semantic observation, or narrow the exact-inheritance claim to transport of the serializer's output."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "podman-proxy-exact-inheritance-test-shared-serializer-oracle",
+        "destination": "trailing-podman-proxy-exact-inheritance-test-shared-serializer-oracle.md"
+      }
+    },
+    {
+      "key": "g066/c4",
+      "owner": "g066",
+      "id": "c4",
+      "domain": "podman-environments",
+      "purpose": "podman-environments: crates/farhelm-helm/src/environment/podman/failure_tests.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Synthesized ownership labels limit the fake without contradicting its asserted failure contracts",
+            "location": "crates/farhelm-helm/src/environment/podman/failure_tests.rs:388",
+            "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: this command fake is not independent evidence that real containers receive or retain ownership labels, but its current failure-cleanup assertions do not claim to test label tampering. Details: During the separate discovery pass, considered whether container/image inspect fabricates ownership evidence and thereby invalidates this file's cleanup tests. Source confirms that container inspect emits this Commands instance's helm and dev recipe labels (:388-391); run parses role but does not retain helm/recipe argv labels (:422-432, :520-534); image inspect similarly synthesizes labels for modeled owned images (:396-405). Thus a missing actual helm label in run argv would not itself be detected here. The file introduces a model of provider command/backend boundaries (:1-3), and its particular ownership assertion explicitly covers model-owned images retaining durable provider records (:259-292). Its failure matrices verify phase reach, durable helper/image records and canonical cleanup, not rejection of a relabeled or foreign resource; no such foreign/relabeled fixture is introduced in the assigned tests. The canonical-identity comment at :78-79 concerns distinct model IDs, rather than promising exhaustive independent label verification. There is therefore no separate demonstrated false oracle for those stated assertions, and requiring this model to test every ownership boundary would be a new coverage request. This differs from l1, whose exact-inheritance sensitivity is expressly promised and source-refuted. Suggested bucket: other if a specific test-oracle defect were established. Confidence: confirmed source limitation, no execution. proposed_drop: no established contradiction with the assigned tests' actual assertions or an explicit label-verification claim; retain as a bounded model limitation rather than a finding. possible_cover: none; no coverage sources searched. Could-be-highest: false for this test-model limitation; no shipped security or destructive behavior is established or dropped. Caveat: the fake cannot be cited as real-container label/lifecycle evidence, and an explicitly label-focused test using this unmodified oracle would require independent label state or assertions."
+          }
+        }
+      ],
+      "latest": {
+        "line": 8,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c4",
+          "state": "open",
+          "summary": "Synthesized ownership labels limit the fake without contradicting its asserted failure contracts",
+          "location": "crates/farhelm-helm/src/environment/podman/failure_tests.rs:388",
+          "detail": "Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: this command fake is not independent evidence that real containers receive or retain ownership labels, but its current failure-cleanup assertions do not claim to test label tampering. Details: During the separate discovery pass, considered whether container/image inspect fabricates ownership evidence and thereby invalidates this file's cleanup tests. Source confirms that container inspect emits this Commands instance's helm and dev recipe labels (:388-391); run parses role but does not retain helm/recipe argv labels (:422-432, :520-534); image inspect similarly synthesizes labels for modeled owned images (:396-405). Thus a missing actual helm label in run argv would not itself be detected here. The file introduces a model of provider command/backend boundaries (:1-3), and its particular ownership assertion explicitly covers model-owned images retaining durable provider records (:259-292). Its failure matrices verify phase reach, durable helper/image records and canonical cleanup, not rejection of a relabeled or foreign resource; no such foreign/relabeled fixture is introduced in the assigned tests. The canonical-identity comment at :78-79 concerns distinct model IDs, rather than promising exhaustive independent label verification. There is therefore no separate demonstrated false oracle for those stated assertions, and requiring this model to test every ownership boundary would be a new coverage request. This differs from l1, whose exact-inheritance sensitivity is expressly promised and source-refuted. Suggested bucket: other if a specific test-oracle defect were established. Confidence: confirmed source limitation, no execution. proposed_drop: no established contradiction with the assigned tests' actual assertions or an explicit label-verification claim; retain as a bounded model limitation rather than a finding. possible_cover: none; no coverage sources searched. Could-be-highest: false for this test-model limitation; no shipped security or destructive behavior is established or dropped. Caveat: the fake cannot be cited as real-container label/lifecycle evidence, and an explicitly label-focused test using this unmodified oracle would require independent label state or assertions."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g066/findings.jsonl",
+        "id": "c4",
+        "line": 8,
+        "disposition": "excluded",
+        "group": "podman-failure-fake-synthesized-label-oracle-scope",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-042 after inspecting it. The fake synthesizes labels and cannot independently prove real label transport. Its named failure tests assert orchestration and durable ownership accounting of model-owned resources, without an explicit claim to test label tampering. No contradiction with that bounded contract is established. Do not record a new coverage request as an established defect. Preserve the model limitation; any parent claim that these tests independently prove label transport would exceed this disposition. Checked source/results: [\"56659839785691f76da3af5d8f51b511cff4ba8b:failure_tests.rs:388-405 synthesizes helm/recipe labels for modeled containers/images. Run at 422-432 reads role; stored Container at 520-534 does not retain supplied helm/recipe argv labels.\",\"The file contract at 1-3 describes command/backend models. assert_ownership_accounted at 259-294 checks model-owned images against real durable provider state, not independent engine labels. Failure tests at 821-887 check reached boundaries and resource/accounting effects, without foreign/relabeled input.\",\"Canonical distinct model IDs at 74-75 are a narrower cleanup identity premise, not a promise of exhaustive independent label verification. No runtime or product ownership defect is established.\"] Current coverage/results: {\"specifications\":\"Read SPEC.md container cleanup and SPEC_impl.md:6046-6050,6087-6091 label/retained-base requirements. These govern real cleanup; they do not require each workflow fake to validate every label boundary.\",\"TODO.md Planned and plans\":\"Empty/no unlanded entries.\",\"BUGS.md\":\"Read; no matching fake-label acceptance.\",\"queue and active triage\":\"Searched synthesized label, ownership fake, failure_tests and phase-oracle terms. No exact existing item/outcome found.\",\"FILTER.md\":\"No filter invoked; disposition is absence of a demonstrated test-contract contradiction.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Fabricated inspect labels might invalidate failure-cleanup evidence. The bounded conclusion preserves that the fake cannot detect missing real run labels by itself; it does not establish a shipped security/destructive route. A future explicitly label-focused test needs independent label state/assertions. This is distinct from l1's express exact-inheritance promise.\"; \"A specific asserted label-tampering/real-label guarantee defeated by this oracle has not been identified.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g066/c4",
+        "line": 8,
+        "disposition": "excluded",
+        "group": "podman-failure-fake-synthesized-label-oracle-scope",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-042 after inspecting it. The fake synthesizes labels and cannot independently prove real label transport. Its named failure tests assert orchestration and durable ownership accounting of model-owned resources, without an explicit claim to test label tampering. No contradiction with that bounded contract is established. Do not record a new coverage request as an established defect. Preserve the model limitation; any parent claim that these tests independently prove label transport would exceed this disposition. Checked source/results: [\"56659839785691f76da3af5d8f51b511cff4ba8b:failure_tests.rs:388-405 synthesizes helm/recipe labels for modeled containers/images. Run at 422-432 reads role; stored Container at 520-534 does not retain supplied helm/recipe argv labels.\",\"The file contract at 1-3 describes command/backend models. assert_ownership_accounted at 259-294 checks model-owned images against real durable provider state, not independent engine labels. Failure tests at 821-887 check reached boundaries and resource/accounting effects, without foreign/relabeled input.\",\"Canonical distinct model IDs at 74-75 are a narrower cleanup identity premise, not a promise of exhaustive independent label verification. No runtime or product ownership defect is established.\"] Current coverage/results: {\"specifications\":\"Read SPEC.md container cleanup and SPEC_impl.md:6046-6050,6087-6091 label/retained-base requirements. These govern real cleanup; they do not require each workflow fake to validate every label boundary.\",\"TODO.md Planned and plans\":\"Empty/no unlanded entries.\",\"BUGS.md\":\"Read; no matching fake-label acceptance.\",\"queue and active triage\":\"Searched synthesized label, ownership fake, failure_tests and phase-oracle terms. No exact existing item/outcome found.\",\"FILTER.md\":\"No filter invoked; disposition is absence of a demonstrated test-contract contradiction.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Fabricated inspect labels might invalidate failure-cleanup evidence. The bounded conclusion preserves that the fake cannot detect missing real run labels by itself; it does not establish a shipped security/destructive route. A future explicitly label-focused test needs independent label state/assertions. This is distinct from l1's express exact-inheritance promise.\"; \"A specific asserted label-tampering/real-label guarantee defeated by this oracle has not been identified.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-042",
+          "key": "g066/c4",
+          "latest_line": 8,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "podman-failure-fake-synthesized-label-oracle-scope",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The fake synthesizes labels and cannot independently prove real label transport. Its named failure tests assert orchestration and durable ownership accounting of model-owned resources, without an explicit claim to test label tampering. No contradiction with that bounded contract is established.",
+          "checks": [
+            "56659839785691f76da3af5d8f51b511cff4ba8b:failure_tests.rs:388-405 synthesizes helm/recipe labels for modeled containers/images. Run at 422-432 reads role; stored Container at 520-534 does not retain supplied helm/recipe argv labels.",
+            "The file contract at 1-3 describes command/backend models. assert_ownership_accounted at 259-294 checks model-owned images against real durable provider state, not independent engine labels. Failure tests at 821-887 check reached boundaries and resource/accounting effects, without foreign/relabeled input.",
+            "Canonical distinct model IDs at 74-75 are a narrower cleanup identity premise, not a promise of exhaustive independent label verification. No runtime or product ownership defect is established."
+          ],
+          "coverage_checked": {
+            "specifications": "Read SPEC.md container cleanup and SPEC_impl.md:6046-6050,6087-6091 label/retained-base requirements. These govern real cleanup; they do not require each workflow fake to validate every label boundary.",
+            "TODO.md Planned and plans": "Empty/no unlanded entries.",
+            "BUGS.md": "Read; no matching fake-label acceptance.",
+            "queue and active triage": "Searched synthesized label, ownership fake, failure_tests and phase-oracle terms. No exact existing item/outcome found.",
+            "FILTER.md": "No filter invoked; disposition is absence of a demonstrated test-contract contradiction."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "A specific asserted label-tampering/real-label guarantee defeated by this oracle has not been identified.",
+          "original_stronger_consequence": "Fabricated inspect labels might invalidate failure-cleanup evidence. The bounded conclusion preserves that the fake cannot detect missing real run labels by itself; it does not establish a shipped security/destructive route. A future explicitly label-focused test needs independent label state/assertions. This is distinct from l1's express exact-inheritance promise.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Do not record a new coverage request as an established defect. Preserve the model limitation; any parent claim that these tests independently prove label transport would exceed this disposition."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "podman-failure-fake-synthesized-label-oracle-scope",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete: all 1,519 assigned patch lines reviewed against the pinned contracts and callers.\n\nNo substantive findings or open leads. Candidate `c1` records a source-refuted concern about fixed test names. Findings log and progress are updated. No tests or reproductions run."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised `c1`; appended source-refuted candidates `c2` (fixture lifetime) and `c3` (phase/setup assertions).\n\nConfirmed that preparation timeouts cancel only the waiter; background jobs remain bounded by the test’s runtime. Cleanup/retry assertions validate orchestration over modeled I/O, not real Podman lifecycle.\n\nNo new findings. Unresolved leads: none. Progress updated; no execution performed."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 complete.\n\n- Checked proxy assertions, command-model outcomes, cleanup ordering, recovery exclusions, and full-range history.\n- New verified finding: `l1` — shared serializer cannot prove the test’s exact-inheritance claim.\n- New unverified findings: none. Open leads: none.\n- Added candidate `c4`; updated progress. No execution performed.\n\nNew issue found: yes."
+    },
+    {
+      "turn": 4,
+      "reply": "Discovery pass 2 complete. Checked fault consumption, pending-create retry assertions, backend failure targeting, cleanup/commit ownership, and partial-admission guards.\n\nNew verified IDs: none. New unverified IDs: none. Open leads: none. Nothing new found.\n\nProgress updated; findings unchanged. No execution performed."
+    }
+  ],
+  "progress": "# g066 progress\nGroup: podman-environments; failure_tests.rs introduced at 56659839785691f76da3af5d8f51b511cff4ba8b.\nTurn type/count: initial review / 1. Discovery-pass count: 0. Initial pass complete; awaiting caller synthesis turn.\nRead coverage: complete inventory commits field; full brief; all assigned patch lines 1-1519 delivered by eight evidence read packets (1-190, 191-380, 381-570, 571-760, 761-950, 951-1140, 1141-1330, 1331-1519).\nContracts read at pinned revision: SPEC.md recipes/preparation paragraphs 441-589, Sandbox sessions 1431-1524, Container sessions 4737-4815, Ownership during cleanup and provisioning 5082-5152, Security 4395-4527; SPEC_impl.md Disposable environments 6408-6592, Answers bind to what was drawn 1068-1096, Testing 8491-8560.\nSource checks: provider map; fixture assembly and backend target-fault matching; real software/preparation stages; run classification and helper/session settlement; commit ownership; retirement and recipe cleanup; private script lowering and proxy install/restart/admission branches; backend event recording and install-byte/restart fault labels.\nInterface assumptions: backend events establish workflow and target identity, not executed remote filesystem semantics; command fake owns isolated in-memory resources. Real provider orchestration and store mutations are exercised by the tests, while remote command results and installer I/O are modeled. No real Podman, shell, live install or process mutation was performed.\nResults: no verified or unverified findings. Appended candidate c1 (fixed fake container names are isolated; dropped by source refutation, not specification acceptance). New verified/unverified finding IDs in this pass: none. Open leads: none.\nUnread assigned scope: none. Runtime tests/builds/reproductions: not run; source-only assignment.\nNext action: caller-defined later synthesis; independently reconsider fixture assertions if requested. Durable log is complete.\n\n## Synthesis turn 2\n\nTurn type/count: later-turn synthesis / 2. Discovery-pass count: 0.\nRevisited failure matrices, success premises, definite versus ambiguous creation, cleanup/refusal gates, canonical removal, commit/tag ownership, proxy admission, and caller rollback. Verified that command failures are tied to their selected phase, backend failures to exact canonical target/event, and uncertain absent sends remain pending on immediate retry. No new substantive finding.\nFixture-lifetime checks followed the asynchronous preparation owner into RecipeBuilds, the scripted transport, ConnectionManager Drop, and farhelm_testtrace::run_async/runtime teardown. A preparation timeout cancels only its waiter; the owned job can continue until per-test runtime teardown. The fixture does not synchronously drain every background task before its temporary directories drop, but these injected boundaries create no real containers/supervisors to orphan. Source analysis only; no execution observed.\nAlso verified that PodmanPlaces dispatches exclusively through injected commands and lowered_command_for_test constructs a ProcessCommand without starting it. Evidence is of real orchestration/store behavior over modeled I/O, not real Podman lifecycle or remote filesystem/proxy-byte effects.\nLog delta: revised c1 with narrower scope, exact locations and explicit parent-decision status; appended c2 (fixture unwind/timeout resource-lifetime refutation) and c3 (phase/setup false-pass refutation). All are proposed candidate dispositions, not parent-accepted drops. No verified/unverified finding IDs added. Unresolved lead IDs: none.\nRead scope: all assigned mandatory material remains covered; no unread assigned scope. New contextual checks completed; no runtime tests/builds/reproductions requested or run. Next action: caller-defined continuation or final synthesis.\n\n## Discovery turn 3 — separate pass 1\n\nTurn type/count: discovery / 3. Discovery-pass count: 1. Completed the separate assigned-group search beyond c1-c3.\nRead discovery-neighbours.json completely in bounded packets: 1-59, 60-100, 101-153, 154-201, 202-260. The initial larger read clipped; these subsequent packets fully reread and covered it. No named pending questions were supplied. Used neighbour records only for interface context and novelty, without adopting their findings or broadening source scope.\nNew checks: independent versus shared expectations in the proxy privacy test; private-script phase classification; command return/result models for created/absent/lost/signalled outcomes; stop/commit/tag ordering; canonical container and image removal; alias lookup and ownership accounting; proxy mismatch fixture, known-ID recovery and admitted-coordinate mutation exclusions. Rechecked assigned path history over the full pinned range and directly diffed introduction to endpoint; only the introduction commit changes this file and endpoint diff is empty.\nNew finding: l1 opened as a lead and revised to a source-confirmed finding in this pass. Exact-inheritance claim at failure_tests.rs:12-14 and :1027-1029 exceeds the shared production-serializer oracle at :991. Counterfactual newline-to-space sanitization inside proxy_exports changes both actual and expected private bytes while preserving the marker, import-name and argv assertions. This is source-only assertion analysis; no code mutation or reproduction was performed. The private-input-versus-argv checks remain meaningful. Distinct from supplied g065/l1 production empty-value persistence.\nAdditional durable candidate: c4 records the considered synthesized-label limitation and its proposed nonfinding disposition, based on absence of an explicit independent label-verification assertion/claim in these failure cases; no parent drop accepted.\nNew verified IDs this pass: l1. New unverified-after-investigation IDs: none. Remaining lead IDs: none. New discovery: yes, one test-oracle/documentation finding. No other substantive finding after completing the pass.\nUnread assigned scope: none. No runtime tests, builds, reproductions or live-install actions. Next action: later caller synthesis/discovery as requested, because this pass made a substantive new discovery.\n\n## Discovery turn 4 — separate pass 2\n\nTurn type/count: discovery / 4. Discovery-pass count: 2. Completed a separate search beyond all existing local findings/candidates; no new issue found.\nRead the updated discovery-neighbours.json (timestamp 2026-11-13T17:28:06.798Z) completely in bounded packets 1-53, 54-101, 102-149, 150-197, 198-221, 222-281, 282-314, 315-347 and 348-362. No named pending questions. Inputs remain context/novelty only; no neighbouring issue was imported as a local discovery.\nSource checks revisited all absent-session/helper outcome loops, pending-marker premises, consumed absent fault versus restored absence observer, per-helper backend target selection, common-installer inspect failure representation, command/backend failure matrix assertions, failed-cleanup retry, and lost/invalid commit ownership assertions. Also inspected partial-install fixture admission and its before/after input/backend counters, plus the normal accepted-launch caller's checks for session readiness before proxy access/attachment. These checks add no independently actionable defect beyond durable history. The phase and resource observations remain specific to the owned command/backend model; no real container lifecycle or remote filesystem evidence is inferred.\nFindings-log delta this turn: none. Existing IDs and consequences are unchanged, and no parent drop/lowering is assumed. New verified IDs: none. New unverified-after-investigation IDs: none. Remaining lead IDs: none. Explicit discovery result: empty; nothing new found.\nUnread assigned scope: none. No tests, builds, reproductions, code mutations or live-install actions. Next action: caller-defined continuation or final synthesis.\n"
+}

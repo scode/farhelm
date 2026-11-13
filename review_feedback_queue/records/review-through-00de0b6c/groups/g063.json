@@ -1,0 +1,298 @@
+{
+  "group": {
+    "id": "g063",
+    "domain": "release-build-payloads",
+    "purpose": "release-build-payloads: scripts/build-private-tmux.sh; phases complete small per-commit changes",
+    "interfaces": [
+      "g007",
+      "g062",
+      "g071",
+      "g072",
+      "g073",
+      "g188",
+      "g189",
+      "g190",
+      "g191",
+      "g192",
+      "g193",
+      "g194",
+      "g195",
+      "g196",
+      "g197"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/01414-000.patch",
+        "ranges": [
+          [
+            1,
+            173
+          ]
+        ],
+        "original_path": "scripts/build-private-tmux.sh",
+        "commit": "d751ff1633bb479c7bf53920f2e4ea4ba932a1c2",
+        "notes": "patch header; patch character offsets [0,9103)",
+        "lines": 173,
+        "bytes": 9107,
+        "start": 0,
+        "end": 9103,
+        "original": "[private-run]/prep/originals/01414.patch"
+      }
+    ],
+    "lines": 173,
+    "bytes": 9107
+  },
+  "records": [
+    {
+      "key": "g063/c1",
+      "owner": "g063",
+      "id": "c1",
+      "domain": "release-build-payloads",
+      "purpose": "release-build-payloads: scripts/build-private-tmux.sh; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "No surviving callers of the removed private tmux builder",
+            "location": "scripts/build-private-tmux.sh:1 (deleted)",
+            "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2\n\n## TLDR\nConsidered whether deleting this builder leaves a release or test command pointing at a missing script. No such caller was found at the reviewed revision.\n\n## Details\nThe entire scripts/build-private-tmux.sh (parent lines 1–167) is deleted. A pinned-revision git grep for build-private-tmux, build-pinned-tmux and TMUX_VERSION across the active tree (excluding forbidden coverage files, plans and historical lore) returned no matches. Commit stat also shows scripts/build-pinned-tmux-ci.sh and .github/release/source-pins.env deleted in the same commit. This rules out direct surviving references, though indirect payload/runtime dependencies remain to be checked during the rest of the assigned pass. SPEC_impl.md:2786–2790 says: \"Nothing in an installation requires, looks for or installs a tmux: not the installer, the desktop app, `farhelm helm setup`, or provisioning of a Linux host or a Mac. The running supervisor runs no tmux at all\".\n\nSuggested bucket: other (hypothetical maintainer build break only; no established break). Confidence: confirmed absence of searched direct references, source analysis only. proposed_drop: no direct surviving caller; source refutation above. possible_cover: none; coverage sources not consulted. Could-be-highest: no established security or loss-of-work route for this candidate. No execution or reproduction performed. Continue checking indirect dependencies before concluding the scope."
+          }
+        },
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Private tmux builder deletion has no surviving build or payload consumer",
+            "location": "scripts/build-private-tmux.sh:1 (deleted)",
+            "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2\n\n## TLDR\nConsidered whether removing the private tmux builder breaks testing, installation or release payload production. Source analysis found no surviving dependency on the deleted builder; no defect is proposed.\n\n## Details\nAssigned patch 01414-000.patch lines 1–173 deletes scripts/build-private-tmux.sh in full (parent lines 1–167). At the parent revision its only executable direct caller is scripts/build-pinned-tmux-ci.sh:75, which is deleted in the same commit. At the reviewed revision, git grep across active sources for build-private-tmux, build-pinned-tmux and TMUX_VERSION returns no matches; another search for .ci-tmux, FARHELM_TEST_TMUX and the deleted tmux/libevent/ncurses checksum variable names finds only .gitignore's obsolete cache exclusion and historical flake evidence, no operational dependency. The replacement test lookup in crates/farhelm-teststate/src/tmux.rs:218–239 resolves the machine's tmux through PATH and prints an explicit SKIPPED message if unavailable. The x86_64 Linux release runtime gate installs the distribution package in .github/dist-build-setup.yml:157–166, with the matching generated step at .github/workflows/release.yml:170–172. This inspection covers the dependency interface only, not an independent review of all replacement test machinery.\n\nThe production contract does not require this binary: SPEC.md:5274–5275 states \"No supported environment needs tmux: Farhelm neither requires nor looks for one on any machine. A tmux the user runs in a session is one of their own programs, like any other they run there.\" SPEC_impl.md:2786–2790 states \"Nothing in an installation requires, looks for or installs a tmux: not the installer, the desktop app, `farhelm helm setup`, or provisioning of a Linux host or a Mac. The running supervisor runs no tmux at all\". Source corroborates the payload side: crates/farhelm-helm/src/provisioning/assets.rs:39–64 lists only the three Farhelm archives and the Mac desktop archive; scripts/install.sh's payload table and dist-workspace.toml have no tmux build/payload reference. SPEC_impl.md:8072–8080 describes the same four payloads and explicitly distinguishes older releases' tmux payloads. The deleted builder's checksum, library and terminfo behavior therefore has no replacement production contract to preserve. SPEC_impl.md:2705–2708 also explicitly removes live tmux as the emulator's test oracle.\n\nSuggested bucket: other (the original hypothetical consequence was a maintainer test/build failure; no established failure). Confidence: confirmed source refutation for the deletion's dependency routes, not observed execution. proposed_drop: no surviving caller or payload consumer, with source and exact contract text above. possible_cover: none; excluded coverage metadata and queue coverage sources were not consulted. Could-be-highest: no established security or loss-of-work route from this deletion; no potentially highest finding is being dropped solely on specification acceptance. Caveats: no builds, runtime tests or reproductions were run, and sibling groups own the independent correctness review of changed gate/test implementations. No unresolved premise remains for this candidate."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Commit-boundary synthesis still refutes a surviving builder dependency",
+            "location": "scripts/build-private-tmux.sh:1 (deleted)",
+            "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2\n\n## TLDR\nRevisited whether deleting the private tmux builder breaks a release, test or install command. The parent-to-commit changes remove its consumers together and provide machine tmux for compatibility tests. No defect is proposed; this remains a proposed drop for the caller's decision, not an accepted drop.\n\n## Details\nThis group has one assigned revision, d751ff1633bb479c7bf53920f2e4ea4ba932a1c2; analysis compares that revision with its immediate parent rather than relying on the review range's endpoint. Original hypothetical consequence remains a maintainer build/test failure caused by a missing builder or binary. Earlier c1 events establish the only direct executable caller at the parent, scripts/build-pinned-tmux-ci.sh:75, deleted in the same commit, and no surviving source-pin/builder reference. This turn checked the indirect consumers too. In the same commit .github/dist-build-setup.yml replaces building the pinned tmux with apt-get installing tmux for Linux X64 (current lines 157–166), removes .ci-tmux PATH prefixes and --tmux required from runtime commands, and the generated release workflow has the matching install at lines 170–172. scripts/record-test-run.py removes both the source-pins reader and the .ci-tmux binary/hash comparison together with their invocation and --tmux option; scripts/plan-test-hunts.py removes the obsolete source-pin input. The sandbox packers stop archiving .ci-tmux in scripts/tensorlake/rust-tests.ts and sandbox-tests.ts; bootstrap.sh installs tmux and queries the machine binary, and run-rust-shard.sh/run-shard.sh remove the pinned PATH prefixes and obsolete recorder flag. Desktop smoke removes its tmux preflight, old tmux liveness branch and tmux teardown calls; its retained terminal-host checks do not consume the builder output. The CentOS helper removes the retired recorder flag, with no new private-builder consumer.\n\nProduction and compatibility-test dependencies are distinct: crates/farhelm-teststate/src/tmux.rs:218–239 intentionally resolves the machine tmux, old_terminals.rs adds explicit skips before its manually constructed old-layout fixtures, and harness/tmux_guard.rs adds the same missing-substrate check. This does not establish production needs tmux. The production asset inventory, directory/download payload consumers, install.sh and sign-sums.yml have no diff across this commit (git diff --exit-code on those exact paths exited successfully with no output); parent-revision searches of those payload/build paths found no tmux payload or checksum consumer. The removed TMUX_SHA256/LIBEVENT_SHA256/NCURSES_SHA256 values only fed the retired test builder, not a signed release asset still expected by installation. Source contract remains SPEC.md:5274–5275: \"No supported environment needs tmux: Farhelm neither requires nor looks for one on any machine. A tmux the user runs in a session is one of their own programs, like any other they run there.\" SPEC_impl.md:2786–2790 says \"Nothing in an installation requires, looks for or installs a tmux: not the installer, the desktop app, `farhelm helm setup`, or provisioning of a Linux host or a Mac. The running supervisor runs no tmux at all\". The remaining historical-installer warning was separately investigated and source-refuted under l1; it supplies no counterexample.\n\nSuggested bucket: other for the original hypothetical maintainer test/build break; no break established. Confidence: confirmed source-level dependency refutation at the assigned commit boundary, not execution. proposed_drop: no surviving direct or indirect caller/payload/checksum consumer established, with the specific coordinated removals and replacements above. possible_cover: none; no queue/flake/TODO/plan/triage coverage metadata read in this turn. Could-be-highest: no established security or loss-of-work route; no potentially highest issue is dropped solely on specification acceptance. Caveats: this does not independently certify all sibling groups' replacement machinery, and no runtime tests, builds or reproductions were run. No unresolved premise remains for c1."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Separate discovery pass finds no additional builder-removal dependency",
+            "location": "scripts/build-private-tmux.sh:1 (deleted)",
+            "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2\n\n## TLDR\nA separate discovery pass found no additional test-oracle, documentation or build dependency on the deleted private tmux builder. The original hypothetical consequence remains a test/release/install command failing because its builder or payload disappeared; no such route is established.\n\n## Details\nReused all five previous local events and read the complete supplied interface packet before searching. Its runtime-retirement, installer-assurance and grid-compatibility records provide no builder dependency premise and do not refute separate test obligations. New source checks: git log across the complete pinned range, 6e423e30068b62c6cfa276c6d720ee35bb70387a exclusive through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db inclusive, finds this path changed in cb762a313abbe6da03ae0bf041f07486c4ed4df9 and then deleted in the assigned d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. The cb762 same-path patch only changes comments describing its remaining test use; no executable build behavior changes. At cb762 the active executable direct caller is scripts/build-pinned-tmux-ci.sh:75, and a diff from cb762 to d751's parent for builder, wrapper and pins is empty. This rules out an intervening change in this path's remaining contract, without treating unrelated earlier changes as outside the whole review range. Current searches for pinned/private tmux build references, build-tmux, LIBEVENT_VERSION and NCURSES_VERSION found no remaining build invocation or pin consumer. Build/lint configuration searches found no hard-coded reference to the removed file. The screen-capture interface was separately checked as a possible oracle dependency: docs/agent-screen-fixtures.md:13–27 uses the built Farhelm terminal host and its own emulator, while :33–41 preserves captured and hand-made historical screens; scripts/capture-agent-screens.py describes the same host path and only mentions tmux historically. Thus builder deletion does not make re-capture invoke a missing script or erase the retained historical-screen oracle. No independent bug in retired builder code was sought.\n\nThe earlier c1 source bases remain: its sole wrapper, release gate build invocation, recorder source-pin/hash checks and sandbox archive/PATH consumers are removed together; machine tmux is deliberately retained for old-layout compatibility fixtures and installed by the x86_64 Linux release gate; production inventories have no tmux payload consumer. This is source-level evidence about each interface, not an inference that production correctness alone proves test correctness. Exact product text remains SPEC.md:5274–5275, \"No supported environment needs tmux: Farhelm neither requires nor looks for one on any machine. A tmux the user runs in a session is one of their own programs, like any other they run there.\" The prior event preserves the full immediate-parent gate, recorder and sandbox references; l1 separately preserves and refutes the historical-installer gate hypothesis.\n\nSuggested bucket: other for the original hypothetical maintainer tooling failure; no established failure. Confidence: confirmed source checks, no execution. proposed_drop: dependency and oracle source refutation as described, unchanged from earlier events; this remains proposed and no parent drop is claimed accepted. possible_cover: supplied neighbour context above only, no prohibited coverage sources consulted. Could-be-highest: no established security or loss-of-work route; not a potentially highest concern dropped solely because production no longer needs tmux. Caveats: sibling implementations are not independently certified by this pass. No tests, builds, reproductions or live-install actions. No new finding, new unresolved premise or open lead from discovery pass 1."
+          }
+        }
+      ],
+      "latest": {
+        "line": 6,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Separate discovery pass finds no additional builder-removal dependency",
+          "location": "scripts/build-private-tmux.sh:1 (deleted)",
+          "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2\n\n## TLDR\nA separate discovery pass found no additional test-oracle, documentation or build dependency on the deleted private tmux builder. The original hypothetical consequence remains a test/release/install command failing because its builder or payload disappeared; no such route is established.\n\n## Details\nReused all five previous local events and read the complete supplied interface packet before searching. Its runtime-retirement, installer-assurance and grid-compatibility records provide no builder dependency premise and do not refute separate test obligations. New source checks: git log across the complete pinned range, 6e423e30068b62c6cfa276c6d720ee35bb70387a exclusive through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db inclusive, finds this path changed in cb762a313abbe6da03ae0bf041f07486c4ed4df9 and then deleted in the assigned d751ff1633bb479c7bf53920f2e4ea4ba932a1c2. The cb762 same-path patch only changes comments describing its remaining test use; no executable build behavior changes. At cb762 the active executable direct caller is scripts/build-pinned-tmux-ci.sh:75, and a diff from cb762 to d751's parent for builder, wrapper and pins is empty. This rules out an intervening change in this path's remaining contract, without treating unrelated earlier changes as outside the whole review range. Current searches for pinned/private tmux build references, build-tmux, LIBEVENT_VERSION and NCURSES_VERSION found no remaining build invocation or pin consumer. Build/lint configuration searches found no hard-coded reference to the removed file. The screen-capture interface was separately checked as a possible oracle dependency: docs/agent-screen-fixtures.md:13–27 uses the built Farhelm terminal host and its own emulator, while :33–41 preserves captured and hand-made historical screens; scripts/capture-agent-screens.py describes the same host path and only mentions tmux historically. Thus builder deletion does not make re-capture invoke a missing script or erase the retained historical-screen oracle. No independent bug in retired builder code was sought.\n\nThe earlier c1 source bases remain: its sole wrapper, release gate build invocation, recorder source-pin/hash checks and sandbox archive/PATH consumers are removed together; machine tmux is deliberately retained for old-layout compatibility fixtures and installed by the x86_64 Linux release gate; production inventories have no tmux payload consumer. This is source-level evidence about each interface, not an inference that production correctness alone proves test correctness. Exact product text remains SPEC.md:5274–5275, \"No supported environment needs tmux: Farhelm neither requires nor looks for one on any machine. A tmux the user runs in a session is one of their own programs, like any other they run there.\" The prior event preserves the full immediate-parent gate, recorder and sandbox references; l1 separately preserves and refutes the historical-installer gate hypothesis.\n\nSuggested bucket: other for the original hypothetical maintainer tooling failure; no established failure. Confidence: confirmed source checks, no execution. proposed_drop: dependency and oracle source refutation as described, unchanged from earlier events; this remains proposed and no parent drop is claimed accepted. possible_cover: supplied neighbour context above only, no prohibited coverage sources consulted. Could-be-highest: no established security or loss-of-work route; not a potentially highest concern dropped solely because production no longer needs tmux. Caveats: sibling implementations are not independently certified by this pass. No tests, builds, reproductions or live-install actions. No new finding, new unresolved premise or open lead from discovery pass 1."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g063/findings.jsonl",
+        "id": "c1",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "removed-private-tmux-builder-surviving-consumer",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-040 after inspecting it. The builder's remaining direct caller and test consumers are removed or changed together. The release/install payload inventory no longer includes tmux. No surviving executable dependency on the deleted builder is established. Related skip-premise and historical-installer hypotheses are separately checked under c4 and l1, not treated as exact aliases. Source refutation of a surviving builder/payload/checksum dependency, using coordinated removal and replacement at the assigned commit boundary. Checked source/results: [\"At d751ff1633bb479c7bf53920f2e4ea4ba932a1c2^, scripts/build-pinned-tmux-ci.sh:40-82 reads the pin and invokes build-private-tmux.sh at :75. Commit d751ff16 deletes both scripts and .github/release/source-pins.env.\",\"Revision-specific git grep at d751ff16 across scripts, .github, dist-workspace.toml, helm build.rs and provisioning assets for builder names, .ci-tmux and removed checksum variables returned no matches. The commit changes recorder and Tensorlake bootstrap/archive/runner consumers together.\",\"At d751ff16, .github/dist-build-setup.yml:157-166 installs machine tmux; farhelm-teststate/src/tmux.rs:218-239 explicitly resolves it and permits a visible missing-substrate skip. This establishes the replacement dependency interface, not actual feature coverage.\",\"At d751ff16, provisioning/assets.rs:39-64 contains exactly the three Farhelm archives and Mac desktop archive. SPEC.md:5274-5275 and SPEC_impl.md:2786-2791 remove a production tmux dependency. This production fact is kept separate from test-consumer analysis.\",\"Range log for scripts/build-private-tmux.sh identifies cb762a313abbe6da03ae0bf041f07486c4ed4df9 followed by deletion in d751ff16. The cb762 patch changes comments only; it adds no executable dependency. No build, install or runtime reproduction was performed.\"] Current coverage/results: [\"Current SPEC.md:5257-5258 and SPEC_impl.md, Ending the old private tmux server, accept no production tmux requirement. SPEC_impl.md's release verification chain at :8060-8080 lists four archives and identifies older tmux payloads historically; this is production context, not a substitute for test checks.\",\"TODO.md Planned is empty. plans/queue/tmux-drop-from-tooling.md:37-60,95-97 explicitly orders builder/pin/recorder removal and machine-tmux replacement, but plans/REPORTS.md:31 says it landed. No unlanded matching consumer-repair plan found. BUGS.md is unrelated.\",\"Full INDEX.md, targeted queue searches and active TRIAGE_OUTCOMES.md searches found no exact missing-builder consumer item or decision. Historical tmux mentions describe different retained issues. Archive not read.\",\"FILTER.md fully read; no filter is used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Deleting the private tmux builder might leave a test, release or installation command calling a missing script or expecting a missing binary/payload. Early records left indirect consumers open; later records proposed source refutation, without claiming observed build success or independent correctness of all replacement machinery.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g063/c1",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "removed-private-tmux-builder-surviving-consumer",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-040 after inspecting it. The builder's remaining direct caller and test consumers are removed or changed together. The release/install payload inventory no longer includes tmux. No surviving executable dependency on the deleted builder is established. Related skip-premise and historical-installer hypotheses are separately checked under c4 and l1, not treated as exact aliases. Source refutation of a surviving builder/payload/checksum dependency, using coordinated removal and replacement at the assigned commit boundary. Checked source/results: [\"At d751ff1633bb479c7bf53920f2e4ea4ba932a1c2^, scripts/build-pinned-tmux-ci.sh:40-82 reads the pin and invokes build-private-tmux.sh at :75. Commit d751ff16 deletes both scripts and .github/release/source-pins.env.\",\"Revision-specific git grep at d751ff16 across scripts, .github, dist-workspace.toml, helm build.rs and provisioning assets for builder names, .ci-tmux and removed checksum variables returned no matches. The commit changes recorder and Tensorlake bootstrap/archive/runner consumers together.\",\"At d751ff16, .github/dist-build-setup.yml:157-166 installs machine tmux; farhelm-teststate/src/tmux.rs:218-239 explicitly resolves it and permits a visible missing-substrate skip. This establishes the replacement dependency interface, not actual feature coverage.\",\"At d751ff16, provisioning/assets.rs:39-64 contains exactly the three Farhelm archives and Mac desktop archive. SPEC.md:5274-5275 and SPEC_impl.md:2786-2791 remove a production tmux dependency. This production fact is kept separate from test-consumer analysis.\",\"Range log for scripts/build-private-tmux.sh identifies cb762a313abbe6da03ae0bf041f07486c4ed4df9 followed by deletion in d751ff16. The cb762 patch changes comments only; it adds no executable dependency. No build, install or runtime reproduction was performed.\"] Current coverage/results: [\"Current SPEC.md:5257-5258 and SPEC_impl.md, Ending the old private tmux server, accept no production tmux requirement. SPEC_impl.md's release verification chain at :8060-8080 lists four archives and identifies older tmux payloads historically; this is production context, not a substitute for test checks.\",\"TODO.md Planned is empty. plans/queue/tmux-drop-from-tooling.md:37-60,95-97 explicitly orders builder/pin/recorder removal and machine-tmux replacement, but plans/REPORTS.md:31 says it landed. No unlanded matching consumer-repair plan found. BUGS.md is unrelated.\",\"Full INDEX.md, targeted queue searches and active TRIAGE_OUTCOMES.md searches found no exact missing-builder consumer item or decision. Historical tmux mentions describe different retained issues. Archive not read.\",\"FILTER.md fully read; no filter is used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Deleting the private tmux builder might leave a test, release or installation command calling a missing script or expecting a missing binary/payload. Early records left indirect consumers open; later records proposed source refutation, without claiming observed build success or independent correctness of all replacement machinery.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-040",
+          "key": "g063/c1",
+          "latest_line": 6,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "removed-private-tmux-builder-surviving-consumer",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The builder's remaining direct caller and test consumers are removed or changed together. The release/install payload inventory no longer includes tmux. No surviving executable dependency on the deleted builder is established. Related skip-premise and historical-installer hypotheses are separately checked under c4 and l1, not treated as exact aliases.",
+          "checks": [
+            "At d751ff1633bb479c7bf53920f2e4ea4ba932a1c2^, scripts/build-pinned-tmux-ci.sh:40-82 reads the pin and invokes build-private-tmux.sh at :75. Commit d751ff16 deletes both scripts and .github/release/source-pins.env.",
+            "Revision-specific git grep at d751ff16 across scripts, .github, dist-workspace.toml, helm build.rs and provisioning assets for builder names, .ci-tmux and removed checksum variables returned no matches. The commit changes recorder and Tensorlake bootstrap/archive/runner consumers together.",
+            "At d751ff16, .github/dist-build-setup.yml:157-166 installs machine tmux; farhelm-teststate/src/tmux.rs:218-239 explicitly resolves it and permits a visible missing-substrate skip. This establishes the replacement dependency interface, not actual feature coverage.",
+            "At d751ff16, provisioning/assets.rs:39-64 contains exactly the three Farhelm archives and Mac desktop archive. SPEC.md:5274-5275 and SPEC_impl.md:2786-2791 remove a production tmux dependency. This production fact is kept separate from test-consumer analysis.",
+            "Range log for scripts/build-private-tmux.sh identifies cb762a313abbe6da03ae0bf041f07486c4ed4df9 followed by deletion in d751ff16. The cb762 patch changes comments only; it adds no executable dependency. No build, install or runtime reproduction was performed."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:5257-5258 and SPEC_impl.md, Ending the old private tmux server, accept no production tmux requirement. SPEC_impl.md's release verification chain at :8060-8080 lists four archives and identifies older tmux payloads historically; this is production context, not a substitute for test checks.",
+            "TODO.md Planned is empty. plans/queue/tmux-drop-from-tooling.md:37-60,95-97 explicitly orders builder/pin/recorder removal and machine-tmux replacement, but plans/REPORTS.md:31 says it landed. No unlanded matching consumer-repair plan found. BUGS.md is unrelated.",
+            "Full INDEX.md, targeted queue searches and active TRIAGE_OUTCOMES.md searches found no exact missing-builder consumer item or decision. Historical tmux mentions describe different retained issues. Archive not read.",
+            "FILTER.md fully read; no filter is used."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Deleting the private tmux builder might leave a test, release or installation command calling a missing script or expecting a missing binary/payload. Early records left indirect consumers open; later records proposed source refutation, without claiming observed build success or independent correctness of all replacement machinery.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation of a surviving builder/payload/checksum dependency, using coordinated removal and replacement at the assigned commit boundary."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "removed-private-tmux-builder-surviving-consumer",
+        "destination": null
+      }
+    },
+    {
+      "key": "g063/l1",
+      "owner": "g063",
+      "id": "l1",
+      "domain": "release-build-payloads",
+      "purpose": "release-build-payloads: scripts/build-private-tmux.sh; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Check historical installer fixture's remaining tmux version requirement",
+            "location": "scripts/fixtures/install-v0.27.0.sh:1456",
+            "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2\n\n## TLDR\nA historical installer fixture still requires tmux 3.7c. Check whether a test executes that requirement and implicitly relied on the deleted pinned builder, which could break the release test gate when it now installs the distribution's tmux.\n\n## Details\nPinned-revision search found scripts/fixtures/install-v0.27.0.sh:1401–1456 parsing the machine's tmux version and printing a 3.7c floor refusal. The deleted test builder previously selected tmux 3.7c. Source checks already made: both release gate variants now install/use machine tmux; real old-terminal compatibility fixtures now explicitly select machine tmux; no current source-pins or .ci-tmux operational references survived the deletion. Exact missing premise: whether an active historical-installer test invokes this fixture's real tmux startup path rather than extracting its text or exercising another branch. Next available check: inspect fixture callers and their command/environment inputs at the reviewed commit. Confidence: unverified, investigation in progress, not a substantiated defect. Suggested bucket: other for the suspected maintainer gate failure; no established security or user loss-of-work route. Could-be-highest: no. proposed_drop: false while caller check remains. possible_cover: none. No execution or reproduction performed."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Historical installer fixture does not require the removed tmux build to succeed",
+            "location": "scripts/fixtures/install-v0.27.0.sh:1401–1468",
+            "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2\n\n## TLDR\nThe suspected historical-installer test failure is refuted. The fixture's old tmux floor only controls printed launch advice after installation; it does not refuse installation or need the deleted builder.\n\n## Details\nOriginal suspected consequence: the release test gate could fail because the machine's tmux is older than 3.7c after the pinned builder is deleted. Checked the only active fixture caller, scripts/test-install-sh.sh:2689–2842, and the historical fixture's complete final report block at scripts/fixtures/install-v0.27.0.sh:1396–1468. The caller copies the historical installer into fake releases and tests installation handoff using Mac stand-in tools. It checks successful exit and installation/version/record state, not a successful real Farhelm launch. In the fixture, parsing the real tmux version changes meets_floor and the printed recommendation; lines 1455–1468 contain only printf and shell branches and no failure exit. The installation already happened before this report block, and the function ends after printing. Thus the warning text found by grep was not a startup refusal in the exercised path. No missing runtime prerequisite remains for this lead.\n\nSuggested bucket: other for the original hypothetical maintainer gate failure; no failure established. Confidence: confirmed by caller and source control-flow analysis, not observed execution. proposed_drop: source refutation; a too-old or absent tmux produces advice rather than failing the tested installation handoff. possible_cover: none; queue and coverage metadata not consulted. Could-be-highest: no established security or user loss-of-work route. This revision closes lead l1 as a candidate; it preserves the original suspected consequence rather than silently narrowing it. No build, runtime test or reproduction was run."
+          }
+        }
+      ],
+      "latest": {
+        "line": 4,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l1",
+          "state": "open",
+          "summary": "Historical installer fixture does not require the removed tmux build to succeed",
+          "location": "scripts/fixtures/install-v0.27.0.sh:1401–1468",
+          "detail": "Reviewed commit: d751ff1633bb479c7bf53920f2e4ea4ba932a1c2\n\n## TLDR\nThe suspected historical-installer test failure is refuted. The fixture's old tmux floor only controls printed launch advice after installation; it does not refuse installation or need the deleted builder.\n\n## Details\nOriginal suspected consequence: the release test gate could fail because the machine's tmux is older than 3.7c after the pinned builder is deleted. Checked the only active fixture caller, scripts/test-install-sh.sh:2689–2842, and the historical fixture's complete final report block at scripts/fixtures/install-v0.27.0.sh:1396–1468. The caller copies the historical installer into fake releases and tests installation handoff using Mac stand-in tools. It checks successful exit and installation/version/record state, not a successful real Farhelm launch. In the fixture, parsing the real tmux version changes meets_floor and the printed recommendation; lines 1455–1468 contain only printf and shell branches and no failure exit. The installation already happened before this report block, and the function ends after printing. Thus the warning text found by grep was not a startup refusal in the exercised path. No missing runtime prerequisite remains for this lead.\n\nSuggested bucket: other for the original hypothetical maintainer gate failure; no failure established. Confidence: confirmed by caller and source control-flow analysis, not observed execution. proposed_drop: source refutation; a too-old or absent tmux produces advice rather than failing the tested installation handoff. possible_cover: none; queue and coverage metadata not consulted. Could-be-highest: no established security or user loss-of-work route. This revision closes lead l1 as a candidate; it preserves the original suspected consequence rather than silently narrowing it. No build, runtime test or reproduction was run."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g063/findings.jsonl",
+        "id": "l1",
+        "line": 4,
+        "disposition": "excluded",
+        "group": "historical-installer-tmux-floor-report-only",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-040 after inspecting it. The historical installer's tmux floor changes final advice; it does not refuse the exercised installation. Its caller tests installation handoff, records and a stand-in app layout. No active launch requirement on the removed pinned builder was found. Source refutation: the version floor controls advice after successful installation, not a failure exit or an exercised real startup path. Checked source/results: [\"At d751ff1633bb479c7bf53920f2e4ea4ba932a1c2, scripts/fixtures/install-v0.27.0.sh:1396-1468 is the final report after installation and lock release. tmux -V failure is guarded with || true; meets_floor selects printf advice. The below-floor branch contains no exit failure, and the main function ends at :1469.\",\"Same revision scripts/test-install-sh.sh:2689-2725 packages this frozen installer into fake older releases with a stand-in farhelm executable. :2770-2810 checks record/version/layout and successful handoff, not a real Farhelm launch through the old tmux startup requirement.\",\"No historical-installer test, build or release gate was executed. The finding's initial description of a startup refusal was corrected in its later record; that withdrawal is preserved here.\"] Current coverage/results: [\"Both current specifications searched for historical installer, tmux prerequisite and release payload behavior. Current no-tmux production rules do not retroactively prove a frozen older installer's control flow; the source above supplies that proof.\",\"TODO.md Planned is empty. plans/queue/tmux-drop-from-install.md:63-66 explicitly preserves scripts/fixtures/install-v0.27.0.sh as historical; plans/REPORTS.md:30 says the plan landed. No unlanded matching test-gate repair plan was found. BUGS.md is unrelated.\",\"Full INDEX.md and targeted queue searches found older-installer damage/handoff findings, but their triggers are damaged executable layouts or stale installed versions, not a tmux floor causing this handoff test to fail. Active TRIAGE_OUTCOMES.md has no exact decision for this claim. Archive not read.\",\"FILTER.md fully read; no filter is used. A historical fixture is not automatically filtered merely because it represents an old release.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"After deleting the pinned tmux builder, the release test gate might fail because the frozen v0.27.0 installer requires tmux 3.7c and the distribution version is older. The initial lead called its printed warning a startup refusal; source investigation withdrew that interpretation.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g063/l1",
+        "line": 4,
+        "disposition": "excluded",
+        "group": "historical-installer-tmux-floor-report-only",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-040 after inspecting it. The historical installer's tmux floor changes final advice; it does not refuse the exercised installation. Its caller tests installation handoff, records and a stand-in app layout. No active launch requirement on the removed pinned builder was found. Source refutation: the version floor controls advice after successful installation, not a failure exit or an exercised real startup path. Checked source/results: [\"At d751ff1633bb479c7bf53920f2e4ea4ba932a1c2, scripts/fixtures/install-v0.27.0.sh:1396-1468 is the final report after installation and lock release. tmux -V failure is guarded with || true; meets_floor selects printf advice. The below-floor branch contains no exit failure, and the main function ends at :1469.\",\"Same revision scripts/test-install-sh.sh:2689-2725 packages this frozen installer into fake older releases with a stand-in farhelm executable. :2770-2810 checks record/version/layout and successful handoff, not a real Farhelm launch through the old tmux startup requirement.\",\"No historical-installer test, build or release gate was executed. The finding's initial description of a startup refusal was corrected in its later record; that withdrawal is preserved here.\"] Current coverage/results: [\"Both current specifications searched for historical installer, tmux prerequisite and release payload behavior. Current no-tmux production rules do not retroactively prove a frozen older installer's control flow; the source above supplies that proof.\",\"TODO.md Planned is empty. plans/queue/tmux-drop-from-install.md:63-66 explicitly preserves scripts/fixtures/install-v0.27.0.sh as historical; plans/REPORTS.md:30 says the plan landed. No unlanded matching test-gate repair plan was found. BUGS.md is unrelated.\",\"Full INDEX.md and targeted queue searches found older-installer damage/handoff findings, but their triggers are damaged executable layouts or stale installed versions, not a tmux floor causing this handoff test to fail. Active TRIAGE_OUTCOMES.md has no exact decision for this claim. Archive not read.\",\"FILTER.md fully read; no filter is used. A historical fixture is not automatically filtered merely because it represents an old release.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"After deleting the pinned tmux builder, the release test gate might fail because the frozen v0.27.0 installer requires tmux 3.7c and the distribution version is older. The initial lead called its printed warning a startup refusal; source investigation withdrew that interpretation.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-040",
+          "key": "g063/l1",
+          "latest_line": 4,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "historical-installer-tmux-floor-report-only",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The historical installer's tmux floor changes final advice; it does not refuse the exercised installation. Its caller tests installation handoff, records and a stand-in app layout. No active launch requirement on the removed pinned builder was found.",
+          "checks": [
+            "At d751ff1633bb479c7bf53920f2e4ea4ba932a1c2, scripts/fixtures/install-v0.27.0.sh:1396-1468 is the final report after installation and lock release. tmux -V failure is guarded with || true; meets_floor selects printf advice. The below-floor branch contains no exit failure, and the main function ends at :1469.",
+            "Same revision scripts/test-install-sh.sh:2689-2725 packages this frozen installer into fake older releases with a stand-in farhelm executable. :2770-2810 checks record/version/layout and successful handoff, not a real Farhelm launch through the old tmux startup requirement.",
+            "No historical-installer test, build or release gate was executed. The finding's initial description of a startup refusal was corrected in its later record; that withdrawal is preserved here."
+          ],
+          "coverage_checked": [
+            "Both current specifications searched for historical installer, tmux prerequisite and release payload behavior. Current no-tmux production rules do not retroactively prove a frozen older installer's control flow; the source above supplies that proof.",
+            "TODO.md Planned is empty. plans/queue/tmux-drop-from-install.md:63-66 explicitly preserves scripts/fixtures/install-v0.27.0.sh as historical; plans/REPORTS.md:30 says the plan landed. No unlanded matching test-gate repair plan was found. BUGS.md is unrelated.",
+            "Full INDEX.md and targeted queue searches found older-installer damage/handoff findings, but their triggers are damaged executable layouts or stale installed versions, not a tmux floor causing this handoff test to fail. Active TRIAGE_OUTCOMES.md has no exact decision for this claim. Archive not read.",
+            "FILTER.md fully read; no filter is used. A historical fixture is not automatically filtered merely because it represents an old release."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "After deleting the pinned tmux builder, the release test gate might fail because the frozen v0.27.0 installer requires tmux 3.7c and the distribution version is older. The initial lead called its printed warning a startup refusal; source investigation withdrew that interpretation.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation: the version floor controls advice after successful installation, not a failure exit or an exercised real startup path."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "historical-installer-tmux-floor-report-only",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete: all 173 assigned patch lines reviewed at the recorded revision.\n\nNo reportable findings. Candidate `c1` records why deleting the builder leaves no surviving caller or payload dependency. No open leads or unread assigned material. Findings log and progress updated; no tests or reproductions run."
+    },
+    {
+      "turn": 2,
+      "reply": "- Revised `c1`: commit-boundary checks refute surviving indirect build, release, payload, or checksum dependencies.\n- Recorded and resolved `l1`: the historical installer’s tmux minimum only changes printed advice; it does not fail installation.\n\nNo new findings. Unresolved lead IDs: none. Source analysis only; no builds or reproductions run."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 found nothing new.\n\nChecked whole-range builder history, remaining build/pin references, build/lint configuration, and screen-capture oracle dependencies. Recorded results under existing `c1`.\n\nNew verified IDs: none. New unverified IDs: none. Open leads: none. Source analysis only; no execution."
+    }
+  ],
+  "progress": "g063: initialized, awaiting initial source review.\nGroup: g063 (release-build-payloads).\nState: initial review, turn 1. Complete inventory commits field and brief read. Findings log verified present; append only.\nScope: scripts/build-private-tmux.sh at d751ff1633bb479c7bf53920f2e4ea4ba932a1c2, mandatory patch lines 1–173.\nInterface assumptions: examine removal against runtime migration and release payload references at the recorded revision; do not assume the endpoint tree proves intermediate correctness.\nInitial review complete, turn 1. Mandatory patch lines 1–173 delivered through evidence read. Reviewed deletion against its parent caller, pinned current source consumers, complete private-tmux contract section, supported-environments subsection, release payload contract and test replacement lookup/gate.\nInterface assumptions checked: builder only served the deleted pinned-test wrapper; machine tmux supplies remaining real-tmux fixtures; release/installer payload inventories contain no tmux. Sibling groups own replacement test and gate implementation review.\nResult: no reportable findings. Candidate c1 appended and revised with direct and indirect dependency refutation and exact contract text. No open leads. No runtime execution or reproductions.\nSynthesis complete, turn 2. Revisited the assigned commit against its immediate parent: release gate and generated workflow, recorder pin/hash checks, sandbox pack/bootstrap/shard paths, desktop smoke, CentOS helper, and unchanged production payload consumers. Machine tmux remains intentional compatibility-test substrate, separate from production's terminal hosts.\nRecords this turn: c1 revised with commit-boundary indirect dependency checks. Lead l1 appended for the historical installer floor, then closed as a candidate under the same ID: the only caller exercises install handoff, and the floor only changes printed advice after installation. No accepted drop claimed; both candidates remain proposed drops for the caller. No reportable finding, open lead or unread assigned scope.\nDiscovery turn 3 in progress. Read the complete supplied neighbour packet (119 lines, 21,003 bytes) and all five prior log events. No named pending interface questions. Neighbour records concern runtime retirement, installer assurances and grid compatibility; none supplies a caller or oracle dependency on this group's builder deletion. They do not settle this group's separate test/build obligations.\nDiscovery pass 1 complete. Checked same-path history across the whole pinned range, prior comment-only change and continuity to the deletion's parent, remaining build/pin source references, build/lint configuration, and the screen-capture/oracle interface. No new concern found. c1 revised with these useful negative checks and unchanged original consequence/proposed-drop basis. l1 unchanged and resolved as a candidate. No accepted drop claimed.\nNext action: return discovery delta to caller. No unread assigned material or remaining leads.\nTurn type/count: discovery/3. Discovery-pass count: 1 (complete, empty). New verified IDs: none. New unverified-after-investigation IDs: none. Revised existing ID: c1. No runtime tests, builds, reproductions or live-install actions.\n"
+}

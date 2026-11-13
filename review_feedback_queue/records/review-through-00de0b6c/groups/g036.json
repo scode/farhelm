@@ -1,0 +1,924 @@
+{
+  "group": {
+    "id": "g036",
+    "domain": "gui-session-lifecycle",
+    "purpose": "gui-session-lifecycle: crates/farhelm-ui/src/session_ops.rs, crates/farhelm-ui/src/list/view.rs, crates/farhelm-ui/src/replace.rs, crates/farhelm-ui/src/list/lifecycle.rs, crates/farhelm-ui/src/list/marking.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g001",
+      "g009",
+      "g010",
+      "g011",
+      "g022",
+      "g023",
+      "g024",
+      "g025",
+      "g026",
+      "g027",
+      "g028",
+      "g029",
+      "g035",
+      "g037",
+      "g038"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00519-000.patch",
+        "ranges": [
+          [
+            1,
+            139
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/session_ops.rs",
+        "commit": "1d24c6af0b6fdbbec854623ff53f90281b8271ab",
+        "notes": "patch header; patch character offsets [0,6096)",
+        "lines": 139,
+        "bytes": 6096,
+        "start": 0,
+        "end": 6096,
+        "original": "[private-run]/prep/originals/00519.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00572-000.patch",
+        "ranges": [
+          [
+            1,
+            86
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/list/view.rs",
+        "commit": "b3d6b3eff6b7508e0b1fb6ec5b5cde31d27ebabe",
+        "notes": "patch header; patch character offsets [0,4326)",
+        "lines": 86,
+        "bytes": 4326,
+        "start": 0,
+        "end": 4326,
+        "original": "[private-run]/prep/originals/00572.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00574-000.patch",
+        "ranges": [
+          [
+            1,
+            331
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/session_ops.rs",
+        "commit": "b3d6b3eff6b7508e0b1fb6ec5b5cde31d27ebabe",
+        "notes": "patch header; patch character offsets [0,14445)",
+        "lines": 331,
+        "bytes": 14445,
+        "start": 0,
+        "end": 14445,
+        "original": "[private-run]/prep/originals/00574.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00579-000.patch",
+        "ranges": [
+          [
+            1,
+            121
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/replace.rs",
+        "commit": "db72347066bc4de3fa1a5f05d64bca91e571bc11",
+        "notes": "patch header; patch character offsets [0,5500)",
+        "lines": 121,
+        "bytes": 5504,
+        "start": 0,
+        "end": 5500,
+        "original": "[private-run]/prep/originals/00579.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00714-000.patch",
+        "ranges": [
+          [
+            1,
+            516
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/list/lifecycle.rs",
+        "commit": "2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa",
+        "notes": "patch header; patch character offsets [0,24477)",
+        "lines": 516,
+        "bytes": 24477,
+        "start": 0,
+        "end": 24477,
+        "original": "[private-run]/prep/originals/00714.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00715-000.patch",
+        "ranges": [
+          [
+            1,
+            136
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/list/marking.rs",
+        "commit": "2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa",
+        "notes": "patch header; patch character offsets [0,6700)",
+        "lines": 136,
+        "bytes": 6700,
+        "start": 0,
+        "end": 6700,
+        "original": "[private-run]/prep/originals/00715.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00720-000.patch",
+        "ranges": [
+          [
+            1,
+            44
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/session_ops.rs",
+        "commit": "2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa",
+        "notes": "patch header; patch character offsets [0,1926)",
+        "lines": 44,
+        "bytes": 1926,
+        "start": 0,
+        "end": 1926,
+        "original": "[private-run]/prep/originals/00720.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01117-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/replace.rs",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,450)",
+        "lines": 13,
+        "bytes": 450,
+        "start": 0,
+        "end": 450,
+        "original": "[private-run]/prep/originals/01117.patch"
+      }
+    ],
+    "lines": 1386,
+    "bytes": 63924
+  },
+  "records": [
+    {
+      "key": "g036/l1",
+      "owner": "g036",
+      "id": "l1",
+      "domain": "gui-session-lifecycle",
+      "purpose": "gui-session-lifecycle: crates/farhelm-ui/src/session_ops.rs, crates/farhelm-ui/src/list/view.rs, crates/farhelm-ui/src/replace.rs, crates/farhelm-ui/src/list/lifecycle.rs, crates/farhelm-ui/src/list/marking.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Check restart retirement before a mounted view consumes the outcome",
+            "location": "crates/farhelm-ui/src/session_ops.rs:228",
+            "detail": "Reviewed commit: b3d6b3eff6b7508e0b1fb6ec5b5cde31d27ebabe. TLDR: a mounted session view might briefly retain an interrupted card if the sidebar clears a successful restart result before the view observes it. Source basis: retire_confirmed_restarts clears Lifecycle.restart while preserving restart_revision; session_view.rs:535-565 observes that revision and sets relaunched/terminal_kind only while the outcome remains present. Contract: SPEC.md Lifecycle operations requires views opened during Restart to observe completion, and SPEC_impl.md GUI: Dioxus requires successful reply terminal kind until current detail catches up. Checks made: read assigned patches, observer and detail commit; no execution. Missing premise: whether scheduling and current-session propagation permit retirement before observation while the view's own detail is stale. Next checks: listing commit propagation, effect scheduling and restart/detail ordering. Suggested bucket: other pending validation; could-be-highest: no established security or loss-of-work route. Confidence: unverified, investigation open. proposed_drop: false. possible_cover: none. Caveat: a current detail read may immediately correct the display."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Sidebar retirement can consume a restart result before the open view observes it",
+            "location": "crates/farhelm-ui/src/session_ops.rs:228",
+            "detail": "Reviewed commit: b3d6b3eff6b7508e0b1fb6ec5b5cde31d27ebabe. TLDR: a successful Restart can leave the open session showing its interrupted card or trying its old terminal until another detail read succeeds, even though the sidebar already knows the new run exists. Details: the new retire_confirmed_restarts clears Lifecycle.restart as soon as an eligible listing commits, without checking that a mounted view consumed the result. session_view.rs:535-565 uses restart_revision to notice completion, but sets relaunched and the reply terminal-kind override only if restart is still Some. Its retained revision guarantees a remount but cannot recover the removed payload. A sidebar commit does not propagate its session into current: session_view.rs:1251-1271 only follows the selected title and requests detail. Checks: read the observer, detail commit, selection bridge, listing commit and finish_restart caller at this revision; read pinned Cargo.lock (Dioxus core/hooks/desktop 0.7.10) and that installed version's use_effect.rs:15-47, virtual_dom.rs:507-537, scheduler.rs:61-78 and desktop webview.rs:537-590. Effects read the latest shared state and run after ready tasks. Desktop additionally waits for mutation delivery before polling further, allowing the post-Restart listing request to finish while the completion observer is deferred; its task can clear the result before the observer executes. There is no per-consumer acknowledgement or observer-local payload. A successful detail read corrects the view, but the lifecycle contract requires the reply to supply the terminal kind until that read catches up, rather than depending on that read to recover a consumed reply. Contract: SPEC.md Lifecycle operations says a view opened during Restart observes its completion; SPEC_impl.md GUI: Dioxus says 'A successful reply supplies the terminal kind until a current detail read catches up.' Suggested fix: keep the completion payload durable for mounted observers (or synchronously publish it to them), while separately retiring the seed for views mounted later. Suggested bucket: other; transient loss of terminal presentation and completion knowledge, with no established security or loss-of-work consequence. Could-be-highest: no established route. Confidence: confirmed by source ordering; no execution or reproduction. proposed_drop: false. possible_cover: none. Caveats: ordinary scheduling may deliver the observer first; a successful current detail read repairs it. The later grid-only protocol removes the terminal-kind aspect, but the reviewed intermediate revision still has it; whether its interrupted-card aspect remains at tip is not asserted here."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l1",
+            "state": "open",
+            "summary": "Sidebar retirement can consume a restart result before the open view observes it",
+            "location": "crates/farhelm-ui/src/session_ops.rs:232",
+            "detail": "Reviewed commit: b3d6b3eff6b7508e0b1fb6ec5b5cde31d27ebabe. TLDR: a successful Restart can leave its already-open session showing the interrupted card, or trying the replaced terminal kind, until the next successful detail read. The sidebar can consume the success before the view uses it. Synthesis revision: preserve the original consequence but distinguish a generation increment from mounting an actual terminal. g088/l1 correctly establishes that restart_revision survives retirement: session_view.rs:549-564 increments mount_generation even when restart is None. Its isolated observer test at :3956-4013 checks this scalar and does not mount SessionView or assert relaunched. That does not settle surface admission: :1722-1730 emits an empty terminal set while keep_terminal_surface is false; :3711-3732 returns false for nonstale Interrupted with relaunched=false regardless of mount_generation. The success payload is the only completion path setting relaunched=true (:559-561), and at this revision also carries the new terminal kind. Thus the consequence is missing terminal admission/override, not a lost increment.\n\nSource-established sequence at the reviewed earlier revision: the mounted current signal still describes the interrupted or replaced run; a successful POST publishes restart and restart_revision; a listing started AFTER that publication (generation above restart_listing_floor) commits a positive new-run status before the deferred mounted observer, clearing restart at session_ops.rs:219-233. The view still has its own earlier current while its independent detail is pending. Sidebar listing commits do not copy their status into that current; the selected-session bridge at session_view.rs:1252-1269 updates title only and requests detail. The observer then increments generation but cannot set relaunched or the kind override. An admitted, post-boundary connected detail repairs the view when it returns. This finding does not require a newly fetched connected detail to return cached Interrupted; it is the already-mounted old current before that detail returns. The original old-kind attachment consequence remains specific to this earlier terminal-kind protocol.\n\nPinned ordering checked: Cargo.lock uses Dioxus core/hooks/desktop 0.7.10; installed primary dependency use_effect.rs:15-47 queues a callback that reads the latest state when it executes; core virtual_dom.rs:507-537 drains ready tasks before effects, :599-624 renders/tasks before finish_render, and scheduler.rs:61-78 ranks effects last. Desktop webview.rs:537-590 waits for browser mutation delivery before continuing virtual-DOM work. A post-completion listing task can therefore become ready during that delivery interval and retire success before the observer; there is no observer-first guarantee or captured completion payload. All evidence is source/contract analysis, not observed execution.\n\nCross-group boundary: g037/f3 and g038/l1 concern an OLD STALE listing accepted after f560058da19e02716e6f943883a9508b447aff4e removes the generation floor. Their age-of-evidence defect can be fixed by restoring that floor; this earlier finding already has the floor and uses a newer eligible listing, so that fix does not settle it. They share the wider lifetime contract (new-view seed retirement must not erase unconsumed mounted completion), and a durable per-consumer completion design could fix both. Retain the two triggers separately rather than claiming the neighbours as a new discovery. After terminal-kind removal, the lost kind aspect disappears, but f560058d still conditions relaunched on restart_succeeded (:549-563), and still excludes Interrupted with relaunched=false from terminal_specs (:1702-1710 and :3701-3722), so the mounted-observer/surface aspect remains for a newer eligible listing too.\n\nContract: SPEC_impl.md GUI: Dioxus says 'A successful reply supplies the terminal kind until a current detail read catches up' and requires a mounted view to observe completion/reattachment. SPEC.md Lifecycle operations preserves outcomes across navigation. Suggested fix: preserve completion knowledge until mounted consumers observe it, separately from retiring the seed used by future views; merely retaining restart_revision is insufficient for surface admission. Suggested bucket: other, unchanged. Could-be-highest: no established security or loss-of-work route. Confidence: confirmed source-level interleaving; incidence unmeasured. proposed_drop: false. possible_cover: related interface records g037/f3, g038/l1 and g088/l1 as distinguished above; no coverage sources searched. Caveats: a later successful live detail normally heals the gap; no permanent outage, lost generation increment, stale-cache connected detail, or destructive second-Restart consequence is asserted. No execution or reproduction. No remaining uninvestigated source premise for this route."
+          }
+        }
+      ],
+      "latest": {
+        "line": 7,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l1",
+          "state": "open",
+          "summary": "Sidebar retirement can consume a restart result before the open view observes it",
+          "location": "crates/farhelm-ui/src/session_ops.rs:232",
+          "detail": "Reviewed commit: b3d6b3eff6b7508e0b1fb6ec5b5cde31d27ebabe. TLDR: a successful Restart can leave its already-open session showing the interrupted card, or trying the replaced terminal kind, until the next successful detail read. The sidebar can consume the success before the view uses it. Synthesis revision: preserve the original consequence but distinguish a generation increment from mounting an actual terminal. g088/l1 correctly establishes that restart_revision survives retirement: session_view.rs:549-564 increments mount_generation even when restart is None. Its isolated observer test at :3956-4013 checks this scalar and does not mount SessionView or assert relaunched. That does not settle surface admission: :1722-1730 emits an empty terminal set while keep_terminal_surface is false; :3711-3732 returns false for nonstale Interrupted with relaunched=false regardless of mount_generation. The success payload is the only completion path setting relaunched=true (:559-561), and at this revision also carries the new terminal kind. Thus the consequence is missing terminal admission/override, not a lost increment.\n\nSource-established sequence at the reviewed earlier revision: the mounted current signal still describes the interrupted or replaced run; a successful POST publishes restart and restart_revision; a listing started AFTER that publication (generation above restart_listing_floor) commits a positive new-run status before the deferred mounted observer, clearing restart at session_ops.rs:219-233. The view still has its own earlier current while its independent detail is pending. Sidebar listing commits do not copy their status into that current; the selected-session bridge at session_view.rs:1252-1269 updates title only and requests detail. The observer then increments generation but cannot set relaunched or the kind override. An admitted, post-boundary connected detail repairs the view when it returns. This finding does not require a newly fetched connected detail to return cached Interrupted; it is the already-mounted old current before that detail returns. The original old-kind attachment consequence remains specific to this earlier terminal-kind protocol.\n\nPinned ordering checked: Cargo.lock uses Dioxus core/hooks/desktop 0.7.10; installed primary dependency use_effect.rs:15-47 queues a callback that reads the latest state when it executes; core virtual_dom.rs:507-537 drains ready tasks before effects, :599-624 renders/tasks before finish_render, and scheduler.rs:61-78 ranks effects last. Desktop webview.rs:537-590 waits for browser mutation delivery before continuing virtual-DOM work. A post-completion listing task can therefore become ready during that delivery interval and retire success before the observer; there is no observer-first guarantee or captured completion payload. All evidence is source/contract analysis, not observed execution.\n\nCross-group boundary: g037/f3 and g038/l1 concern an OLD STALE listing accepted after f560058da19e02716e6f943883a9508b447aff4e removes the generation floor. Their age-of-evidence defect can be fixed by restoring that floor; this earlier finding already has the floor and uses a newer eligible listing, so that fix does not settle it. They share the wider lifetime contract (new-view seed retirement must not erase unconsumed mounted completion), and a durable per-consumer completion design could fix both. Retain the two triggers separately rather than claiming the neighbours as a new discovery. After terminal-kind removal, the lost kind aspect disappears, but f560058d still conditions relaunched on restart_succeeded (:549-563), and still excludes Interrupted with relaunched=false from terminal_specs (:1702-1710 and :3701-3722), so the mounted-observer/surface aspect remains for a newer eligible listing too.\n\nContract: SPEC_impl.md GUI: Dioxus says 'A successful reply supplies the terminal kind until a current detail read catches up' and requires a mounted view to observe completion/reattachment. SPEC.md Lifecycle operations preserves outcomes across navigation. Suggested fix: preserve completion knowledge until mounted consumers observe it, separately from retiring the seed used by future views; merely retaining restart_revision is insufficient for surface admission. Suggested bucket: other, unchanged. Could-be-highest: no established security or loss-of-work route. Confidence: confirmed source-level interleaving; incidence unmeasured. proposed_drop: false. possible_cover: related interface records g037/f3, g038/l1 and g088/l1 as distinguished above; no coverage sources searched. Caveats: a later successful live detail normally heals the gap; no permanent outage, lost generation increment, stale-cache connected detail, or destructive second-Restart consequence is asserted. No execution or reproduction. No remaining uninvestigated source premise for this route."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g036/findings.jsonl",
+        "id": "l1",
+        "line": 7,
+        "disposition": "rejected",
+        "group": "sidebar-retires-restart-success-before-mounted-observer",
+        "reason": "Parent explicitly accepted named filtered proposal from claims-021 after inspecting it. The source supports the transient missing-completion presentation under the named scheduling order. Its entire established consequence is a display/attachment gap repaired by the next successful detail refresh, with no lost process, conversation, terminal history or security route. That exact boundary matches the rare self-correcting glitch filter. Proposed filter only for the complete established transient presentation consequence; not a source refutation or drop of separately owned stale-listing/age-of-evidence concerns. Checked source/results: [\"b3d6b3eff6b7508e0b1fb6ec5b5cde31d27ebabe:crates/farhelm-ui/src/session_ops.rs:92-109,219-233 lets an eligible newer positive listing remove restart before a mounted observer acknowledges it. session_view.rs:549-564 always retains the revision-driven generation increment but sets relaunched/terminal kind only while the payload remains.\",\"Same revision:session_view.rs:1252-1269 only copies selected title and requests independent detail; :1722-1730,3711-3732 excludes the interrupted terminal surface while relaunched=false. Thus generation preservation alone does not refute admission loss.\",\"Pinned Dioxus 0.7.10 source: use_effect.rs:15-47 queues live-reading callbacks; core virtual_dom.rs:493-537 drains tasks/dirty work before effects; desktop webview.rs:537-590 waits for edits delivery. A newer eligible listing can retire the success during deferred observation. This is conditional source ordering, not an observed run.\",\"Tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:session_view.rs:551-565 still sets relaunched only while restart_succeeded is present. Old-terminal-kind override loss is historical to the earlier revision; the surface-admission aspect persists.\"] Current coverage/results: [\"SPEC.md:1901-1905 requires completion observation; historical SPEC_impl.md at b3d6b3ef:1133-1138 promises terminal kind until current detail catches up. Current SPEC_impl.md:1133-1140 retains mounted completion/reattachment. No explicit acceptance of the observer race.\",\"Planned and unlanded-plan index are empty. session-action-leftovers.md:20-70 concerns retiring new-view optimism after a listing, and its accepted second-reboot residual is a different trigger. retained-restart-hides-reboot-card.md was read; it concerns success retained too long after a later reboot, not removal before mounted observation. No exact queue/active-ledger/BUGS cover found.\",\"FILTER.md, Rare, self-correcting glitches and imprecise diagnostics, applies to the narrow task/effect order and whole transient display/attachment consequence. The stated repair is an ordinary successful detail refresh; none of that filter's wrong-target, persistent-record, false-success, security or work-loss exceptions is established.\"] Exact cited cover: [\"FILTER.md: The trigger is rare: a narrow timing window, a crash or interruption at a specific point, or an input the shipped clients never send.\",\"FILTER.md: The whole consequence is one of: a display that is briefly wrong and corrects itself on the next refresh, retry or reconnect, or when the user leaves the view; an operation that fails safely and succeeds when retried; or an error message, log line or other diagnostic that is imprecise, misleading, missing detail, or lost.\"] Original stronger consequence and missing premise remain preserved: \"An already-open view can show its interrupted card or try an old terminal kind until a successful detail read. The retained generation increment does not itself admit a terminal. Old-kind impact belongs to the earlier protocol; no permanent outage or destructive second-Restart route was asserted.\"; \"Incidence is unmeasured. Any stronger persistent outage, destructive second-Restart consequence or loss of user work would need its own established route and would invalidate this filter basis.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g036/l1",
+        "line": 7,
+        "disposition": "rejected",
+        "group": "sidebar-retires-restart-success-before-mounted-observer",
+        "bucket": "other",
+        "recording": "filtered",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named filtered proposal from claims-021 after inspecting it. The source supports the transient missing-completion presentation under the named scheduling order. Its entire established consequence is a display/attachment gap repaired by the next successful detail refresh, with no lost process, conversation, terminal history or security route. That exact boundary matches the rare self-correcting glitch filter. Proposed filter only for the complete established transient presentation consequence; not a source refutation or drop of separately owned stale-listing/age-of-evidence concerns. Checked source/results: [\"b3d6b3eff6b7508e0b1fb6ec5b5cde31d27ebabe:crates/farhelm-ui/src/session_ops.rs:92-109,219-233 lets an eligible newer positive listing remove restart before a mounted observer acknowledges it. session_view.rs:549-564 always retains the revision-driven generation increment but sets relaunched/terminal kind only while the payload remains.\",\"Same revision:session_view.rs:1252-1269 only copies selected title and requests independent detail; :1722-1730,3711-3732 excludes the interrupted terminal surface while relaunched=false. Thus generation preservation alone does not refute admission loss.\",\"Pinned Dioxus 0.7.10 source: use_effect.rs:15-47 queues live-reading callbacks; core virtual_dom.rs:493-537 drains tasks/dirty work before effects; desktop webview.rs:537-590 waits for edits delivery. A newer eligible listing can retire the success during deferred observation. This is conditional source ordering, not an observed run.\",\"Tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:session_view.rs:551-565 still sets relaunched only while restart_succeeded is present. Old-terminal-kind override loss is historical to the earlier revision; the surface-admission aspect persists.\"] Current coverage/results: [\"SPEC.md:1901-1905 requires completion observation; historical SPEC_impl.md at b3d6b3ef:1133-1138 promises terminal kind until current detail catches up. Current SPEC_impl.md:1133-1140 retains mounted completion/reattachment. No explicit acceptance of the observer race.\",\"Planned and unlanded-plan index are empty. session-action-leftovers.md:20-70 concerns retiring new-view optimism after a listing, and its accepted second-reboot residual is a different trigger. retained-restart-hides-reboot-card.md was read; it concerns success retained too long after a later reboot, not removal before mounted observation. No exact queue/active-ledger/BUGS cover found.\",\"FILTER.md, Rare, self-correcting glitches and imprecise diagnostics, applies to the narrow task/effect order and whole transient display/attachment consequence. The stated repair is an ordinary successful detail refresh; none of that filter's wrong-target, persistent-record, false-success, security or work-loss exceptions is established.\"] Exact cited cover: [\"FILTER.md: The trigger is rare: a narrow timing window, a crash or interruption at a specific point, or an input the shipped clients never send.\",\"FILTER.md: The whole consequence is one of: a display that is briefly wrong and corrects itself on the next refresh, retry or reconnect, or when the user leaves the view; an operation that fails safely and succeeds when retried; or an error message, log line or other diagnostic that is imprecise, misleading, missing detail, or lost.\"] Original stronger consequence and missing premise remain preserved: \"An already-open view can show its interrupted card or try an old terminal kind until a successful detail read. The retained generation increment does not itself admit a terminal. Old-kind impact belongs to the earlier protocol; no permanent outage or destructive second-Restart route was asserted.\"; \"Incidence is unmeasured. Any stronger persistent outage, destructive second-Restart consequence or loss of user work would need its own established route and would invalidate this filter basis.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-021",
+          "key": "g036/l1",
+          "latest_line": 7,
+          "recommendation": "filtered",
+          "bucket": "other",
+          "underlying_key": "sidebar-retires-restart-success-before-mounted-observer",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The source supports the transient missing-completion presentation under the named scheduling order. Its entire established consequence is a display/attachment gap repaired by the next successful detail refresh, with no lost process, conversation, terminal history or security route. That exact boundary matches the rare self-correcting glitch filter.",
+          "checks": [
+            "b3d6b3eff6b7508e0b1fb6ec5b5cde31d27ebabe:crates/farhelm-ui/src/session_ops.rs:92-109,219-233 lets an eligible newer positive listing remove restart before a mounted observer acknowledges it. session_view.rs:549-564 always retains the revision-driven generation increment but sets relaunched/terminal kind only while the payload remains.",
+            "Same revision:session_view.rs:1252-1269 only copies selected title and requests independent detail; :1722-1730,3711-3732 excludes the interrupted terminal surface while relaunched=false. Thus generation preservation alone does not refute admission loss.",
+            "Pinned Dioxus 0.7.10 source: use_effect.rs:15-47 queues live-reading callbacks; core virtual_dom.rs:493-537 drains tasks/dirty work before effects; desktop webview.rs:537-590 waits for edits delivery. A newer eligible listing can retire the success during deferred observation. This is conditional source ordering, not an observed run.",
+            "Tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:session_view.rs:551-565 still sets relaunched only while restart_succeeded is present. Old-terminal-kind override loss is historical to the earlier revision; the surface-admission aspect persists."
+          ],
+          "coverage_checked": [
+            "SPEC.md:1901-1905 requires completion observation; historical SPEC_impl.md at b3d6b3ef:1133-1138 promises terminal kind until current detail catches up. Current SPEC_impl.md:1133-1140 retains mounted completion/reattachment. No explicit acceptance of the observer race.",
+            "Planned and unlanded-plan index are empty. session-action-leftovers.md:20-70 concerns retiring new-view optimism after a listing, and its accepted second-reboot residual is a different trigger. retained-restart-hides-reboot-card.md was read; it concerns success retained too long after a later reboot, not removal before mounted observation. No exact queue/active-ledger/BUGS cover found.",
+            "FILTER.md, Rare, self-correcting glitches and imprecise diagnostics, applies to the narrow task/effect order and whole transient display/attachment consequence. The stated repair is an ordinary successful detail refresh; none of that filter's wrong-target, persistent-record, false-success, security or work-loss exceptions is established."
+          ],
+          "exact_cover_quotes": [
+            "FILTER.md: The trigger is rare: a narrow timing window, a crash or interruption at a specific point, or an input the shipped clients never send.",
+            "FILTER.md: The whole consequence is one of: a display that is briefly wrong and corrects itself on the next refresh, retry or reconnect, or when the user leaves the view; an operation that fails safely and succeeds when retried; or an error message, log line or other diagnostic that is imprecise, misleading, missing detail, or lost."
+          ],
+          "missing_premise": "Incidence is unmeasured. Any stronger persistent outage, destructive second-Restart consequence or loss of user work would need its own established route and would invalidate this filter basis.",
+          "original_stronger_consequence": "An already-open view can show its interrupted card or try an old terminal kind until a successful detail read. The retained generation increment does not itself admit a terminal. Old-kind impact belongs to the earlier protocol; no permanent outage or destructive second-Restart route was asserted.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Proposed filter only for the complete established transient presentation consequence; not a source refutation or drop of separately owned stale-listing/age-of-evidence concerns."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "sidebar-retires-restart-success-before-mounted-observer",
+        "destination": "trailing-sidebar-retires-restart-success-before-mounted-observer.md"
+      }
+    },
+    {
+      "key": "g036/l2",
+      "owner": "g036",
+      "id": "l2",
+      "domain": "gui-session-lifecycle",
+      "purpose": "gui-session-lifecycle: crates/farhelm-ui/src/session_ops.rs, crates/farhelm-ui/src/list/view.rs, crates/farhelm-ui/src/replace.rs, crates/farhelm-ui/src/list/lifecycle.rs, crates/farhelm-ui/src/list/marking.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l2",
+            "state": "open",
+            "summary": "Check ownership of concurrent warned environment Delete returns",
+            "location": "crates/farhelm-ui/src/session_ops.rs:140",
+            "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa. TLDR: simultaneous header Deletes on different sessions may overwrite the single remembered offer to confirm whole-environment deletion. Source basis: new SessionOps.warned_delete is Signal<Option<String>>, while actions survive navigation and separate sessions may run concurrently. Missing premise: how list completion and header consumption preserve or report an offer for an unselected source, and whether a second completion can replace it. Next checks: producer/consumer and row errors. Contract: SPEC.md Lifecycle operations requires actions and outcomes to survive switching sessions; Sandbox sessions requires an unasked Delete to offer whole-resource confirmation without deciding automatically. Suggested bucket: other pending source investigation; could-be-highest: no destructive action is established, only a potentially lost question. Confidence: unverified, investigation open. proposed_drop: false. possible_cover: none. No execution."
+          }
+        },
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l2",
+            "state": "open",
+            "summary": "A deferred whole-environment Delete offer can lose its failure explanation",
+            "location": "crates/farhelm-ui/src/session_ops.rs:140",
+            "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa. TLDR: a failed session Delete can leave no explanation when the user switches sessions before its follow-up confirmation renders, or another action takes the session first. Nothing was deleted, but the user loses the reason and the offered next step. Details: list/view.rs:3020-3055 ends the row operation, computes UnaskedFollowUp from selected.peek(), then removes the source error and publishes the newly added SessionOps.warned_delete single-slot handoff. session_view.rs:784-795 consumes and clears this handoff before checking the offered session and before claim_guard succeeds. A newly mounted different session explicitly discards the offer; a busy source discards it too. Neither branch restores the error removed by the producer. This is a source-established lossy handoff: selection and claim availability are checked at two different scheduling boundaries without an acknowledged owner or fallback. The original concurrent-overwrite suspicion is narrowed: unselected source replies normally take UnaskedFollowUp::Error (list/view.rs:927-939), so different-source completion alone is insufficient. Contract: SPEC.md Lifecycle operations says 'Actions and their results survive switching sessions. A failure, unknown outcome or partial result appears on the source session’s row and at the top when it is opened again.' Sandbox sessions says an unanswered request decides nothing and offers the warned whole-sandbox Delete. Keep the reason until the matching view actually admits its question, or fall back to the source error if admission is refused. Suggested bucket: other (lost failure disclosure and retry guidance; no source-established loss of user work). Could-be-highest: no, no destructive action occurs in the lost-offer route. Confidence: confirmed by source; not executed. proposed_drop: false. possible_cover: none. Caveat: if the matching view consumes the offer while idle before navigation, the question works normally; ordinary unselected completions already retain the reason."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l2",
+            "state": "open",
+            "summary": "A deferred whole-environment Delete offer can lose its failure explanation",
+            "location": "crates/farhelm-ui/src/session_ops.rs:140",
+            "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa. TLDR: a failed session Delete can leave no explanation if the user switches sessions after its reply is handled but before the follow-up confirmation is admitted. Nothing was deleted, but the failure reason and offered next step disappear. This synthesis supplies a supported navigation sequence rather than relying only on the two unchecked branches.\n\nSource sequence: (1) Open environment session A and confirm its Session-scope header Delete. It is list-owned, so navigation remains supported during the request. (2) The request receives Unasked while A is still selected. list/view.rs:3022-3034 releases the pending/held claim, and the HeaderQuestion branch at :3052-3054 removes A's error and publishes warned_delete=A. All this is one synchronous completion; no input is assumed to interrupt those statements. (3) The completion changes rendered pending/deleting state. On desktop, its render is sent to the browser while the A effect that consumes warned_delete is deferred. A plain row click selecting B can be delivered before that effect runs. This shipped opening path is list/view.rs:4011-4020, which explicitly ignores pending session writes and synchronously calls on_open; lib.rs:2174-2176 writes the parent selection. No modal bars the click: the Delete request is pending/completed, and the returned warned confirmation has not been opened. (4) The keyed SessionView at lib.rs:2272-2282 replaces A with B. A's queued consumer is discarded with its scope. B's initial effect at session_view.rs:784-793 takes and clears warned_delete=A, then rejects the mismatched operation_id without restoring A's error. A is still listed, and reopening it has neither that source error nor the consumed offer.\n\nPinned scheduling evidence, not an executed reproduction: Cargo.lock pins Dioxus core/hooks/desktop 0.7.10. Desktop webview.rs:537-590 sends DOM edits and returns while poll_edits_flushed is pending; event delivery at :43-84 and :190-194 directly calls runtime.handle_event and does not first drain queued effects. use_effect.rs:15-47 queues the handoff callback; virtual_dom.rs:493-537 and :599-624 processes dirty scopes/tasks before effects, while runtime.rs:179-205 drops queued effects when A's scope is removed. Therefore a normal B row event delivered in that render-delivery interval updates the parent before A consumes the offer. This is an admitted single-GUI event sequence, not an invented API control or input between synchronous completion statements. It requires timing but neither a second fault nor a failed detail read.\n\nThe original secondary consequence, a competing source action claiming A before handoff, is preserved as an additional possible branch: the completion releases held at view.rs:3024, while the consumer later calls SessionGate.claim_guard, which checks the shared held/questions state (session_ops.rs:163-179, :287-291). An intervening source question could make that claim fail and discard the offer. This synthesis does not rely on that branch, because a newer explicit action may independently supersede source error presentation. The ordinary path where the user already selected B BEFORE reply handling is safe: unasked_follow_up picks Error and retains Delete's reason. Different-source completions overwriting the single slot also remain insufficient on their own; only the selected source gets the HeaderQuestion branch.\n\nContract: SPEC.md Lifecycle operations says 'Actions and their results survive switching sessions. A failure, unknown outcome or partial result appears on the source session’s row and at the top when it is opened again.' Sandbox sessions requires an unanswered request to decide nothing and offer a separately warned whole-environment Delete. Keep the source error until the matching view actually admits the question, or restore a source error when delivery is abandoned. Suggested bucket: other, unchanged (lost disclosure/retry guidance, no destroyed work). Could-be-highest: no established route; the lost handoff sends no destructive request. Confidence: confirmed source/contract event sequence, not observed execution. proposed_drop: false. possible_cover: none; no coverage sources searched. Caveats: the matching idle view normally admits the question; unselected completions retain their error; the confirmed route is navigation during deferred delivery, not arbitrary concurrent overwrite. No missing source premise for that route; actual incidence unmeasured. No tests or reproductions run."
+          }
+        }
+      ],
+      "latest": {
+        "line": 8,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l2",
+          "state": "open",
+          "summary": "A deferred whole-environment Delete offer can lose its failure explanation",
+          "location": "crates/farhelm-ui/src/session_ops.rs:140",
+          "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa. TLDR: a failed session Delete can leave no explanation if the user switches sessions after its reply is handled but before the follow-up confirmation is admitted. Nothing was deleted, but the failure reason and offered next step disappear. This synthesis supplies a supported navigation sequence rather than relying only on the two unchecked branches.\n\nSource sequence: (1) Open environment session A and confirm its Session-scope header Delete. It is list-owned, so navigation remains supported during the request. (2) The request receives Unasked while A is still selected. list/view.rs:3022-3034 releases the pending/held claim, and the HeaderQuestion branch at :3052-3054 removes A's error and publishes warned_delete=A. All this is one synchronous completion; no input is assumed to interrupt those statements. (3) The completion changes rendered pending/deleting state. On desktop, its render is sent to the browser while the A effect that consumes warned_delete is deferred. A plain row click selecting B can be delivered before that effect runs. This shipped opening path is list/view.rs:4011-4020, which explicitly ignores pending session writes and synchronously calls on_open; lib.rs:2174-2176 writes the parent selection. No modal bars the click: the Delete request is pending/completed, and the returned warned confirmation has not been opened. (4) The keyed SessionView at lib.rs:2272-2282 replaces A with B. A's queued consumer is discarded with its scope. B's initial effect at session_view.rs:784-793 takes and clears warned_delete=A, then rejects the mismatched operation_id without restoring A's error. A is still listed, and reopening it has neither that source error nor the consumed offer.\n\nPinned scheduling evidence, not an executed reproduction: Cargo.lock pins Dioxus core/hooks/desktop 0.7.10. Desktop webview.rs:537-590 sends DOM edits and returns while poll_edits_flushed is pending; event delivery at :43-84 and :190-194 directly calls runtime.handle_event and does not first drain queued effects. use_effect.rs:15-47 queues the handoff callback; virtual_dom.rs:493-537 and :599-624 processes dirty scopes/tasks before effects, while runtime.rs:179-205 drops queued effects when A's scope is removed. Therefore a normal B row event delivered in that render-delivery interval updates the parent before A consumes the offer. This is an admitted single-GUI event sequence, not an invented API control or input between synchronous completion statements. It requires timing but neither a second fault nor a failed detail read.\n\nThe original secondary consequence, a competing source action claiming A before handoff, is preserved as an additional possible branch: the completion releases held at view.rs:3024, while the consumer later calls SessionGate.claim_guard, which checks the shared held/questions state (session_ops.rs:163-179, :287-291). An intervening source question could make that claim fail and discard the offer. This synthesis does not rely on that branch, because a newer explicit action may independently supersede source error presentation. The ordinary path where the user already selected B BEFORE reply handling is safe: unasked_follow_up picks Error and retains Delete's reason. Different-source completions overwriting the single slot also remain insufficient on their own; only the selected source gets the HeaderQuestion branch.\n\nContract: SPEC.md Lifecycle operations says 'Actions and their results survive switching sessions. A failure, unknown outcome or partial result appears on the source session’s row and at the top when it is opened again.' Sandbox sessions requires an unanswered request to decide nothing and offer a separately warned whole-environment Delete. Keep the source error until the matching view actually admits the question, or restore a source error when delivery is abandoned. Suggested bucket: other, unchanged (lost disclosure/retry guidance, no destroyed work). Could-be-highest: no established route; the lost handoff sends no destructive request. Confidence: confirmed source/contract event sequence, not observed execution. proposed_drop: false. possible_cover: none; no coverage sources searched. Caveats: the matching idle view normally admits the question; unselected completions retain their error; the confirmed route is navigation during deferred delivery, not arbitrary concurrent overwrite. No missing source premise for that route; actual incidence unmeasured. No tests or reproductions run."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g036/findings.jsonl",
+        "id": "l2",
+        "line": 8,
+        "disposition": "rejected",
+        "group": "warned-delete-handoff-clears-error-before-view-admission",
+        "reason": "Parent explicitly accepted named filtered proposal from claims-021 after inspecting it. The supported deferred-navigation handoff can lose a failed Delete's explanation and follow-up offer. Nothing destructive is sent by that loss. The complete established consequence is a lost diagnostic/retry explanation under a narrow scheduling window, which the rare diagnostic filter explicitly covers. Proposed filter of the named lost-diagnostic consequence only. This is not permission to waive destructive confirmation or any other Delete guard. Checked source/results: [\"2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa:crates/farhelm-ui/src/list/view.rs:3022-3057 releases the source claim, selects HeaderQuestion only while that source is selected, then removes its error and publishes warned_delete. session_view.rs:784-793 clears the offer before checking identity/claim and supplies no failure fallback.\",\"Same revision:list/view.rs:4011-4020 allows ordinary row navigation; lib.rs:2174-2176 changes selection and :2272-2282 keys SessionView by source. Replacing A with B can therefore discard A's queued effect; B can consume and reject A's offer. Dioxus 0.7.10 desktop webview.rs:43-84,190-194 dispatches events directly, :537-590 waits for edit delivery; core runtime.rs:179-205 removes queued effects with the old scope. Source supports the conditional admitted navigation sequence; no execution occurred.\",\"Unselected completion already takes Error (list/view.rs:927-942). Different-source completions alone do not establish overwrite. The alternative claim-before-consumption branch is not needed and remains qualified because a newer explicit action may supersede error presentation.\"] Current coverage/results: [\"SPEC.md:1901-1905 requires durable source result presentation; :1532-1547 and SPEC_impl.md:6140-6145 require separately warned whole-environment fallback. These do not accept losing the explanation.\",\"Planned and unlanded-plan index are empty; BUGS has no matching exception. INDEX.md and active ledger searches found no warned_delete handoff item. sandbox-row-menu-owns-transient-lifecycle-state.md was read; its transient row Controls owner is different from this page-owned header handoff.\",\"FILTER.md Rare, self-correcting glitches and imprecise diagnostics matches the narrow delivery/navigation interval and lost error/next-step explanation. Retrying ordinary Delete can offer the guarded fallback again. No silent deletion, wrong target, false success, durable wrong record, security breach or user-work loss is established.\"] Exact cited cover: [\"FILTER.md: The trigger is rare: a narrow timing window, a crash or interruption at a specific point, or an input the shipped clients never send.\",\"FILTER.md: The whole consequence is one of ... an error message, log line or other diagnostic that is imprecise, misleading, missing detail, or lost.\"] Original stronger consequence and missing premise remain preserved: \"Failed Delete loses its explanation/whole-environment offer after navigation or a competing claim. Initial simultaneous-different-source overwrite alone was narrowed as insufficient. No deletion or user-work loss was asserted.\"; \"Actual timing/incidence was not observed. A stronger consequence involving a sent whole-environment request or lost work is not supported by this route and is not included in the proposed filter.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g036/l2",
+        "line": 8,
+        "disposition": "rejected",
+        "group": "warned-delete-handoff-clears-error-before-view-admission",
+        "bucket": "other",
+        "recording": "filtered",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named filtered proposal from claims-021 after inspecting it. The supported deferred-navigation handoff can lose a failed Delete's explanation and follow-up offer. Nothing destructive is sent by that loss. The complete established consequence is a lost diagnostic/retry explanation under a narrow scheduling window, which the rare diagnostic filter explicitly covers. Proposed filter of the named lost-diagnostic consequence only. This is not permission to waive destructive confirmation or any other Delete guard. Checked source/results: [\"2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa:crates/farhelm-ui/src/list/view.rs:3022-3057 releases the source claim, selects HeaderQuestion only while that source is selected, then removes its error and publishes warned_delete. session_view.rs:784-793 clears the offer before checking identity/claim and supplies no failure fallback.\",\"Same revision:list/view.rs:4011-4020 allows ordinary row navigation; lib.rs:2174-2176 changes selection and :2272-2282 keys SessionView by source. Replacing A with B can therefore discard A's queued effect; B can consume and reject A's offer. Dioxus 0.7.10 desktop webview.rs:43-84,190-194 dispatches events directly, :537-590 waits for edit delivery; core runtime.rs:179-205 removes queued effects with the old scope. Source supports the conditional admitted navigation sequence; no execution occurred.\",\"Unselected completion already takes Error (list/view.rs:927-942). Different-source completions alone do not establish overwrite. The alternative claim-before-consumption branch is not needed and remains qualified because a newer explicit action may supersede error presentation.\"] Current coverage/results: [\"SPEC.md:1901-1905 requires durable source result presentation; :1532-1547 and SPEC_impl.md:6140-6145 require separately warned whole-environment fallback. These do not accept losing the explanation.\",\"Planned and unlanded-plan index are empty; BUGS has no matching exception. INDEX.md and active ledger searches found no warned_delete handoff item. sandbox-row-menu-owns-transient-lifecycle-state.md was read; its transient row Controls owner is different from this page-owned header handoff.\",\"FILTER.md Rare, self-correcting glitches and imprecise diagnostics matches the narrow delivery/navigation interval and lost error/next-step explanation. Retrying ordinary Delete can offer the guarded fallback again. No silent deletion, wrong target, false success, durable wrong record, security breach or user-work loss is established.\"] Exact cited cover: [\"FILTER.md: The trigger is rare: a narrow timing window, a crash or interruption at a specific point, or an input the shipped clients never send.\",\"FILTER.md: The whole consequence is one of ... an error message, log line or other diagnostic that is imprecise, misleading, missing detail, or lost.\"] Original stronger consequence and missing premise remain preserved: \"Failed Delete loses its explanation/whole-environment offer after navigation or a competing claim. Initial simultaneous-different-source overwrite alone was narrowed as insufficient. No deletion or user-work loss was asserted.\"; \"Actual timing/incidence was not observed. A stronger consequence involving a sent whole-environment request or lost work is not supported by this route and is not included in the proposed filter.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-021",
+          "key": "g036/l2",
+          "latest_line": 8,
+          "recommendation": "filtered",
+          "bucket": "other",
+          "underlying_key": "warned-delete-handoff-clears-error-before-view-admission",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The supported deferred-navigation handoff can lose a failed Delete's explanation and follow-up offer. Nothing destructive is sent by that loss. The complete established consequence is a lost diagnostic/retry explanation under a narrow scheduling window, which the rare diagnostic filter explicitly covers.",
+          "checks": [
+            "2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa:crates/farhelm-ui/src/list/view.rs:3022-3057 releases the source claim, selects HeaderQuestion only while that source is selected, then removes its error and publishes warned_delete. session_view.rs:784-793 clears the offer before checking identity/claim and supplies no failure fallback.",
+            "Same revision:list/view.rs:4011-4020 allows ordinary row navigation; lib.rs:2174-2176 changes selection and :2272-2282 keys SessionView by source. Replacing A with B can therefore discard A's queued effect; B can consume and reject A's offer. Dioxus 0.7.10 desktop webview.rs:43-84,190-194 dispatches events directly, :537-590 waits for edit delivery; core runtime.rs:179-205 removes queued effects with the old scope. Source supports the conditional admitted navigation sequence; no execution occurred.",
+            "Unselected completion already takes Error (list/view.rs:927-942). Different-source completions alone do not establish overwrite. The alternative claim-before-consumption branch is not needed and remains qualified because a newer explicit action may supersede error presentation."
+          ],
+          "coverage_checked": [
+            "SPEC.md:1901-1905 requires durable source result presentation; :1532-1547 and SPEC_impl.md:6140-6145 require separately warned whole-environment fallback. These do not accept losing the explanation.",
+            "Planned and unlanded-plan index are empty; BUGS has no matching exception. INDEX.md and active ledger searches found no warned_delete handoff item. sandbox-row-menu-owns-transient-lifecycle-state.md was read; its transient row Controls owner is different from this page-owned header handoff.",
+            "FILTER.md Rare, self-correcting glitches and imprecise diagnostics matches the narrow delivery/navigation interval and lost error/next-step explanation. Retrying ordinary Delete can offer the guarded fallback again. No silent deletion, wrong target, false success, durable wrong record, security breach or user-work loss is established."
+          ],
+          "exact_cover_quotes": [
+            "FILTER.md: The trigger is rare: a narrow timing window, a crash or interruption at a specific point, or an input the shipped clients never send.",
+            "FILTER.md: The whole consequence is one of ... an error message, log line or other diagnostic that is imprecise, misleading, missing detail, or lost."
+          ],
+          "missing_premise": "Actual timing/incidence was not observed. A stronger consequence involving a sent whole-environment request or lost work is not supported by this route and is not included in the proposed filter.",
+          "original_stronger_consequence": "Failed Delete loses its explanation/whole-environment offer after navigation or a competing claim. Initial simultaneous-different-source overwrite alone was narrowed as insufficient. No deletion or user-work loss was asserted.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Proposed filter of the named lost-diagnostic consequence only. This is not permission to waive destructive confirmation or any other Delete guard."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "warned-delete-handoff-clears-error-before-view-admission",
+        "destination": "trailing-warned-delete-handoff-clears-error-before-view-admission.md"
+      }
+    },
+    {
+      "key": "g036/c1",
+      "owner": "g036",
+      "id": "c1",
+      "domain": "gui-session-lifecycle",
+      "purpose": "gui-session-lifecycle: crates/farhelm-ui/src/session_ops.rs, crates/farhelm-ui/src/list/view.rs, crates/farhelm-ui/src/replace.rs, crates/farhelm-ui/src/list/lifecycle.rs, crates/farhelm-ui/src/list/marking.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c1",
+            "state": "open",
+            "summary": "Whole-environment bulk Delete intentionally destroys unmarked peers",
+            "location": "crates/farhelm-ui/src/list/lifecycle.rs:266",
+            "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa. TLDR: a whole-environment bulk Delete removes unmarked and unlisted sessions and their files; this is explicitly warned and accepted. Considered whether deduplicating marked peers, including after answer-time admission removes the representative shown in the dialog, could destroy work beyond the listed session identities. Source checks: lifecycle.rs sends_delete/delete_requests/question_targets coalesce only sandbox && whole by host; row_consequence and DialogCopy draw the whole-resource warning and answer. view.rs:4509-4584 retains each captured EnvironmentDelete scope through shrink-only admission and dispatch. The remaining peer still names the same warned whole resource, not a different host. Exact acceptance: SPEC.md, Sandbox sessions at this commit: 'Marked sessions of a sandbox the helm could not ask when the modal opened get the whole-sandbox Delete, once per sandbox, and the modal says which rows are which.' The immediately preceding paragraph explicitly warns 'every session, process, file, checkout, unpushed change and snapshot in the sandbox will be removed, including sessions Farhelm does not list because they were started while it was not connected'. Suggested bucket: highest if this exceeded consent, because processes/files are destroyed; could-be-highest: yes. Confidence: confirmed source behavior and explicit specification acceptance, not executed. proposed_drop: explicit specification acceptance quoted above; requires caller's independent drop check. possible_cover: SPEC.md Sandbox sessions only; no coverage sources searched. Caveats: this acceptance does not cover a reachable-environment Session-scoped request silently escalating; inspected dispatch preserves the scope and leaves Unasked as an error for Bulk, so that escalation is absent."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c1",
+            "state": "open",
+            "summary": "Whole-environment bulk Delete intentionally destroys unmarked peers",
+            "location": "crates/farhelm-ui/src/list/lifecycle.rs:263",
+            "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa. TLDR: a whole-environment bulk Delete removes unmarked and unlisted sessions, processes and files. This destruction remains in the proposed-drop register; no independent approval to drop or lower it has been assumed. Original concern preserved: deduplicating marked peers, including after answer-time shrink removes the displayed representative, can destroy sessions not individually shown as targets. Source reconciliation: lifecycle.rs:263-286 deduplicates only sandbox && whole by the same captured host; :302-315 gives the dialog an explicit whole-environment title and answer; :339-343 renders ProviderUi.whole_delete_warning. view.rs:4559-4581 sends the captured EnvironmentDelete.scope, and api/sandbox_sessions.rs:188-197 maps Session and Whole to distinct opt-in query parameters. Its :214-246 never changes the scope or automatically retries Session as Whole. Therefore a remaining marked peer is only a routing representative for the same fully warned resource, not authority to destroy a different resource.\n\nDrawn warning checked directly at environment_ui.rs:164-172: Tensorlake text says 'this deletes the whole sandbox: every session, running process, file, checkout, unpushed change and snapshot in it, including sessions Farhelm does not list because they were started while it was not connected. This cannot be undone.' Podman names the whole container and the same categories except snapshots. Both offer resuming/updating first as the way to delete only the session. Exact proposed acceptance remains SPEC.md Sandbox sessions: 'Marked sessions of a sandbox the helm could not ask when the modal opened get the whole-sandbox Delete, once per sandbox, and the modal says which rows are which.' The preceding paragraph warns 'every session, process, file, checkout, unpushed change and snapshot in the sandbox will be removed, including sessions Farhelm does not list because they were started while it was not connected'. This basis covers only destruction WITHIN that quoted whole-resource consent. It accepts neither a Session-to-Whole escalation nor destruction on an uncaptured host; the checked UI/API route does neither.\n\nSuggested bucket: highest if outside consent, unchanged; could-be-highest: yes because processes and files are destroyed. Confidence: confirmed source behavior and exact specification acceptance, not executed. proposed_drop: explicit specification acceptance quoted above, still requiring the caller's independent check; not dropped by this synthesis. possible_cover: SPEC.md Sandbox sessions only; no excluded coverage sources searched. Caveats: Session-scoped reachable-environment Deletes retain one request per marked session and keep an Unasked failure on its row in Bulk; no broader loss is accepted. No runtime tests or reproductions run."
+          }
+        }
+      ],
+      "latest": {
+        "line": 9,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "c1",
+          "state": "open",
+          "summary": "Whole-environment bulk Delete intentionally destroys unmarked peers",
+          "location": "crates/farhelm-ui/src/list/lifecycle.rs:263",
+          "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa. TLDR: a whole-environment bulk Delete removes unmarked and unlisted sessions, processes and files. This destruction remains in the proposed-drop register; no independent approval to drop or lower it has been assumed. Original concern preserved: deduplicating marked peers, including after answer-time shrink removes the displayed representative, can destroy sessions not individually shown as targets. Source reconciliation: lifecycle.rs:263-286 deduplicates only sandbox && whole by the same captured host; :302-315 gives the dialog an explicit whole-environment title and answer; :339-343 renders ProviderUi.whole_delete_warning. view.rs:4559-4581 sends the captured EnvironmentDelete.scope, and api/sandbox_sessions.rs:188-197 maps Session and Whole to distinct opt-in query parameters. Its :214-246 never changes the scope or automatically retries Session as Whole. Therefore a remaining marked peer is only a routing representative for the same fully warned resource, not authority to destroy a different resource.\n\nDrawn warning checked directly at environment_ui.rs:164-172: Tensorlake text says 'this deletes the whole sandbox: every session, running process, file, checkout, unpushed change and snapshot in it, including sessions Farhelm does not list because they were started while it was not connected. This cannot be undone.' Podman names the whole container and the same categories except snapshots. Both offer resuming/updating first as the way to delete only the session. Exact proposed acceptance remains SPEC.md Sandbox sessions: 'Marked sessions of a sandbox the helm could not ask when the modal opened get the whole-sandbox Delete, once per sandbox, and the modal says which rows are which.' The preceding paragraph warns 'every session, process, file, checkout, unpushed change and snapshot in the sandbox will be removed, including sessions Farhelm does not list because they were started while it was not connected'. This basis covers only destruction WITHIN that quoted whole-resource consent. It accepts neither a Session-to-Whole escalation nor destruction on an uncaptured host; the checked UI/API route does neither.\n\nSuggested bucket: highest if outside consent, unchanged; could-be-highest: yes because processes and files are destroyed. Confidence: confirmed source behavior and exact specification acceptance, not executed. proposed_drop: explicit specification acceptance quoted above, still requiring the caller's independent check; not dropped by this synthesis. possible_cover: SPEC.md Sandbox sessions only; no excluded coverage sources searched. Caveats: Session-scoped reachable-environment Deletes retain one request per marked session and keep an Unasked failure on its row in Bulk; no broader loss is accepted. No runtime tests or reproductions run."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g036/findings.jsonl",
+        "id": "c1",
+        "line": 9,
+        "disposition": "under-investigation",
+        "group": "g036-c1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-021",
+          "key": "g036/c1",
+          "latest_line": 9,
+          "recommendation": "covered",
+          "bucket": "highest",
+          "underlying_key": "warned-whole-environment-delete-includes-unmarked-peers",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The destruction of unmarked/unlisted peers is established, but exactly matches the warned whole-resource consent the specifications accept. Keep the proposed drop in the independent register; no drop is authorized by this consultation.",
+          "checks": [
+            "2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa:crates/farhelm-ui/src/list/lifecycle.rs:263-286 deduplicates only whole-environment rows by captured host; :302-315 explicitly names whole environments in title/answer; :339-343 draws whole_delete_warning.",
+            "Same revision:environment_ui.rs:164-172 explicitly warns about every session, running process, file, checkout and unpushed change, including unlisted sessions; Tensorlake also names snapshots. It explains resuming/updating for a narrower deletion.",
+            "Same revision:list/view.rs:4555-4581 retains each target's captured environment scope and passes Bulk follow-up policy. api/sandbox_sessions.rs:188-197,214-246 uses distinct Session/Whole query opt-ins with no automatic escalation. list/view.rs:927-942 leaves Bulk Unasked as Error. Source only."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:1532-1548 expressly warns of unlisted work and permits one whole-sandbox Delete for marked members when its supervisor could not be asked. Session list:2221-2234 authorizes the drawn whole-resource consequences; Container sessions:4832-4849 inherits the same rule.",
+            "SPEC_impl.md:6608-6623 explicitly allows coalescing by host without a complete member set and accepts destruction of listed/unlisted leftovers. No specification accepts scope escalation or an uncaptured host.",
+            "Planned and unlanded-plan index are empty; BUGS/active ledger searches found no additional relevant cover. Existing bulk-sandbox-delete-drops-eligible-peer.md was read and concerns deleting nothing after refusal of the coalesced representative, not destruction beyond the warned resource. No filter needed."
+          ],
+          "exact_cover_quotes": [
+            "SPEC.md:1534-1537: whose confirmation warns that every session, process, file, checkout, unpushed change and snapshot in the sandbox will be removed, including sessions Farhelm does not list because they were started while it was not connected",
+            "SPEC.md:1544-1545: Marked sessions of a sandbox the helm could not ask when the modal opened get the whole-sandbox Delete, once per sandbox, and the modal says which rows are which.",
+            "SPEC_impl.md:6613-6616: Bulk Delete sends one supervisor request per marked session of a connected sandbox and coalesces only the rows of sandboxes it could not ask by host ID, without requiring a complete member set or a designated last session.",
+            "SPEC_impl.md:6620-6622: The warned whole-sandbox Delete may subsequently destroy any leftover session, listed or unlisted. This is accepted product behavior"
+          ],
+          "missing_premise": "Independent fresh-context agreement is still required before dropping this highest-capable claim. Coverage applies only within captured whole-resource consent, not to Session-to-Whole escalation or a different host.",
+          "original_stronger_consequence": "Bulk whole-environment Delete destroys unmarked/unlisted sessions, processes, files and unpushed work, even if shrink-only admission changes the representative. Highest if outside consent; that original consequence is preserved.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Exact explicit specification acceptance plus drawn warning and scope-preservation source checks. Do not use this proposal as an independent drop verdict."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-021.json",
+          "key": "g036/c1",
+          "proposal": "claim-checks/claims-021/result.json",
+          "parent_proposal": "exact-spec-accepted-warned-whole-resource-unmarked-peer-destruction",
+          "final_independent_gate": "required-before-highest-drop",
+          "reason": "Full021 andparentactualSPEC1485-1555: bulkwhole-resourcescopecapturedhost/dedup andwarningexplicitlyalllisted/unlistedprocessesfilescheckoutsunpushedwork, narrowerresume/updateremedy; APIseparateoptins/noBulkUnaskedescalation. SPECexplicitpermitswholeforofflineatmodalopeningonceperhost; no complete membershiprequired. Proposedexactpriorwarnedscopeacceptanceonly, notSession→Wholeorhostretarget. Original unmarked/unlistedworklossremains highestoutsideconsent; freshgatecheckwordingandcapturedscope, distinctbulkeligiblepeerrefusalnotcover."
+        }
+      ],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "warned-whole-environment-delete-includes-unmarked-peers",
+        "destination": "trailing-warned-whole-environment-delete-includes-unmarked-peers.md"
+      }
+    },
+    {
+      "key": "g036/c2",
+      "owner": "g036",
+      "id": "c2",
+      "domain": "gui-session-lifecycle",
+      "purpose": "gui-session-lifecycle: crates/farhelm-ui/src/session_ops.rs, crates/farhelm-ui/src/list/view.rs, crates/farhelm-ui/src/replace.rs, crates/farhelm-ui/src/list/lifecycle.rs, crates/farhelm-ui/src/list/marking.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Removing the sandbox page guard does not remove same-host launch exclusion",
+            "location": "crates/farhelm-ui/src/session_ops.rs:127",
+            "detail": "Reviewed commit: 1d24c6af0b6fdbbec854623ff53f90281b8271ab. TLDR: considered whether dropping the sandbox action's page-operation guard lets its Suspend interfere with an already accepted launch on the same host. Source refutation: ops.rs:53-57 records the resolved launch target, and sandbox_sessions.rs:262-272 rechecks launch_targets_now at execution/answer after its activity read; its click path at 290-300 checks it too. The session guard still survives dispatch in list/view.rs:3133-3163. SPEC_impl.md GUI: Dioxus explicitly states 'Suspend and Resume, from Hosts or a sandbox session (Stop and suspend included), are not registry mutations and never claim it' and 'those controls are refused while it names their host, at the click and again at the answer.' Other-host concurrency is intended. Suggested bucket: other; could-be-highest: no established security or loss-of-work route from these non-destructive host state changes. Confidence: confirmed by source, not executed. proposed_drop: source refutation plus explicit contract quoted above. possible_cover: none beyond the specification. Caveat: helm lifecycle locks and launch wake retries are interfaces owned by other groups; this conclusion concerns the removed UI guard and its replacement admission only."
+          }
+        }
+      ],
+      "latest": {
+        "line": 6,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Removing the sandbox page guard does not remove same-host launch exclusion",
+          "location": "crates/farhelm-ui/src/session_ops.rs:127",
+          "detail": "Reviewed commit: 1d24c6af0b6fdbbec854623ff53f90281b8271ab. TLDR: considered whether dropping the sandbox action's page-operation guard lets its Suspend interfere with an already accepted launch on the same host. Source refutation: ops.rs:53-57 records the resolved launch target, and sandbox_sessions.rs:262-272 rechecks launch_targets_now at execution/answer after its activity read; its click path at 290-300 checks it too. The session guard still survives dispatch in list/view.rs:3133-3163. SPEC_impl.md GUI: Dioxus explicitly states 'Suspend and Resume, from Hosts or a sandbox session (Stop and suspend included), are not registry mutations and never claim it' and 'those controls are refused while it names their host, at the click and again at the answer.' Other-host concurrency is intended. Suggested bucket: other; could-be-highest: no established security or loss-of-work route from these non-destructive host state changes. Confidence: confirmed by source, not executed. proposed_drop: source refutation plus explicit contract quoted above. possible_cover: none beyond the specification. Caveat: helm lifecycle locks and launch wake retries are interfaces owned by other groups; this conclusion concerns the removed UI guard and its replacement admission only."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g036/findings.jsonl",
+        "id": "c2",
+        "line": 6,
+        "disposition": "under-investigation",
+        "group": "g036-c2",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-021",
+          "key": "g036/c2",
+          "latest_line": 6,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "sandbox-page-token-removal-preserves-launch-target-admission",
+          "aliases": [
+            "g035/c3"
+          ],
+          "target_queue_file": null,
+          "why": "The removed page guard is replaced by the specified same-host launch-target admission checks at click and execution/answer. Shared token ownership is not the stated contract.",
+          "checks": [
+            "1d24c6af0b6fdbbec854623ff53f90281b8271ab:crates/farhelm-ui/src/ops.rs:49-58 records the resolved launch host. sandbox_sessions.rs:267-272 refuses execution while that host is targeted, and :292-300 checks at click; the activity read cannot bypass the execute check.",
+            "Same revision:list/row.rs:2391-2403 independently rechecks Stop-and-suspend's answer before handing it to list-owned admission. This agrees with g035/c3's source basis. Backend lifecycle locks and later launch wake retries remain outside this narrow refutation. Source only."
+          ],
+          "coverage_checked": [
+            "SPEC_impl.md:1143-1151 explicitly says these controls never claim the registry token and are refused for its named host at click/answer. SPEC.md:1894-1905 permits independent actions; no broader UI exclusion found.",
+            "TODO Planned and plans/queue/INDEX.md have no entries; BUGS.md contains no matching exception. INDEX.md and active ledger searches found no exact page-token-removal claim. Related landed overlap/stop-guard plans are historical context, not unlanded coverage."
+          ],
+          "exact_cover_quotes": [
+            "SPEC_impl.md:1144-1148: Suspend and Resume, from Hosts or a sandbox session (Stop and suspend included), are not registry mutations and never claim it ... those controls are refused while it names their host, at the click and again at the answer."
+          ],
+          "missing_premise": null,
+          "original_stronger_consequence": "Dropping the page guard could let Suspend interfere with an already accepted launch on the same host. No established loss-of-work/security consequence; the source refutation is limited to this UI admission contract.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Same narrow refutation as g035/c3. Flagged conservatively because the contract/candidate family includes Stop and suspend; retain both named histories when the parent reconciles this one underlying concern."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-021.json",
+          "key": "g036/c2",
+          "proposal": "claim-checks/claims-021/result.json",
+          "parent_proposal": "source-refuted-same-host-launch-admission-after-global-token-removal",
+          "final_independent_gate": "required-by-conservative-stop-work-flag",
+          "reason": "Full021 same035c3UIhosttargetadmissionroot: start/execute/rowanswercheckexistinglaunchhostdespiteremovedglobalclaim. ExplicitcontractnotbroaderUIexclusion. Preservebothlocalhistoriesandnoestablishedworkloss, freshgateonlynamedalreadyadmittedlaunchcollision; backendlocks/wakeretries/laterlaunchoutsideconclusion."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "sandbox-page-token-removal-preserves-launch-target-admission",
+        "destination": null
+      }
+    },
+    {
+      "key": "g036/l3",
+      "owner": "g036",
+      "id": "l3",
+      "domain": "gui-session-lifecycle",
+      "purpose": "gui-session-lifecycle: crates/farhelm-ui/src/session_ops.rs, crates/farhelm-ui/src/list/view.rs, crates/farhelm-ui/src/replace.rs, crates/farhelm-ui/src/list/lifecycle.rs, crates/farhelm-ui/src/list/marking.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l3",
+            "state": "open",
+            "summary": "Check mark cleanup for a confirmed target excluded after its environment starts deleting",
+            "location": "crates/farhelm-ui/src/list/lifecycle.rs:74",
+            "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa. TLDR: a row included in the answered bulk question may remain marked after the batch settles if its environment enters Deleting before admission. Source basis: new exclude_unavailable removes such snapshots; its caller computes marking_targets only after exclusions, so cleanup may omit a refused captured target. Contract to check: SPEC.md Session list clears an accepted batch's own targets even when rows failed/refused unless a newer marking choice occurred; Deleting actions must also be unavailable. Need distinguish excluded-before-question targets from already-drawn answered targets and check actual cleanup/pruning/host-state event ordering. Suggested bucket: other (marking cleanup), could-be-highest: no destructive consequence suspected. Confidence: unresolved lead, not execution evidence. proposed_drop: false. possible_cover: none; supplied neighbour findings do not describe this cleanup route. Next: pinned bulk_run, confirmation admission, marking revision/prune rules and full relevant contract. No reproduction or runtime tests."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l3",
+            "state": "open",
+            "summary": "A confirmed bulk target excluded as Deleting keeps its old mark",
+            "location": "crates/farhelm-ui/src/list/lifecycle.rs:74",
+            "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa. TLDR: after confirming a bulk Stop or Delete, sessions refused because their environment has started deleting remain marked while the successful sibling targets clear. If every confirmed target is refused this way, the entire old marking remains. This makes the accepted batch cleanup depend on the refusal reason, despite no newer marking choice.\n\nDetails: this commit adds exclude_unavailable at lifecycle.rs:74-87 and invokes it again after confirmation in list/view.rs:4523-4535. The answered snapshots have already passed shrink-only displayed/marked admission (:4512-4521). Each excluded row gets its failure reason, but is removed BEFORE marking_targets is captured at :4550-4554. The completion at :4590-4623 removes only marking_targets, so excluded captured targets survive. If all are excluded, :4537-4538 returns before any cleanup task exists. In contrast ordinary row-admission refusals happen after marking_targets is captured (:4571-4586), so those marks do clear. The parent revision has no exclude_unavailable call between captured admission and marking_targets (parent view.rs:4197-4227), establishing introduction here rather than a pre-range cleanup omission. Later changes through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db do not change this exclusion/capture/cleanup ordering.\n\nReachable boundary: a bulk question is drawn while environment target A is not Deleting, then its host becomes Deleting while the question is open; A remains displayed and marked when the user confirms. That is the explicit supported boundary named by the new helper and its caller comments ('a question drawn before a host entered Deleting must not dispatch to it now'). Pending lifecycle actions allow marking and acting on other sessions, so an earlier accepted whole-environment Delete can progress into Deleting beside a later bulk question about a cached peer and an ordinary sibling B. While whole-resource cleanup is slow, or if it fails and retains the resource/cache, A can remain listed; no new marking interaction is required. Host phase alone is not a DeleteSnapshot field. Listing reconciliation at view.rs:2025-2068 calls lifecycle::reconcile, which updates only snapshot-visible session facts and preserves scope; it does not retire a question merely because host state entered Deleting. The same host transition can therefore leave the answered token current. An actual authoritative absence can prune A (:2205-2249), but a still-listed row is retained, and independent host-state updates are not absence proof. The finding is conditional on A remaining displayed at confirmation/settlement, not a claim that every destroyed session stays listed forever.\n\nContract: SPEC.md Session list says 'An accepted batch clears its own targets when every completion has finished, including when some rows failed or were refused, only if the user has made no newer marking choice or opened a marked-actions menu or bulk question.' SPEC_impl.md GUI: Dioxus says measurement/remount/reconciliation do not advance that user revision and otherwise cleanup removes the captured targets. These were already drawn, confirmed targets, unlike rows excluded before a question first opens. Refusing their destructive work is correct and must remain; the defect is omitting them from the batch's marking cleanup. Capture cleanup identities before the new availability refusal (and run cleanup for an all-refused accepted question), while preserving the existing newer-interaction revision guard.\n\nSuggested bucket: other (incorrect selection cleanup and lingering toolbar; no destructive effect). Could-be-highest: no established security or loss-of-work route. Confidence: confirmed source/contract mechanism under the stated retained-row transition; no execution or reproduction. proposed_drop: false. possible_cover: none; supplied neighbour records concern other mechanisms and prohibited coverage sources were not searched. Caveats: a later authoritative disappearance, Clear, ordinary row opening or new marking gesture removes the residual mark; no request is incorrectly sent to the Deleting environment. Pre-question unavailable rows are not the basis of this finding. l3's lead is closed as a finding; no missing source premise remains for this conditional cleanup route."
+          }
+        }
+      ],
+      "latest": {
+        "line": 11,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l3",
+          "state": "open",
+          "summary": "A confirmed bulk target excluded as Deleting keeps its old mark",
+          "location": "crates/farhelm-ui/src/list/lifecycle.rs:74",
+          "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa. TLDR: after confirming a bulk Stop or Delete, sessions refused because their environment has started deleting remain marked while the successful sibling targets clear. If every confirmed target is refused this way, the entire old marking remains. This makes the accepted batch cleanup depend on the refusal reason, despite no newer marking choice.\n\nDetails: this commit adds exclude_unavailable at lifecycle.rs:74-87 and invokes it again after confirmation in list/view.rs:4523-4535. The answered snapshots have already passed shrink-only displayed/marked admission (:4512-4521). Each excluded row gets its failure reason, but is removed BEFORE marking_targets is captured at :4550-4554. The completion at :4590-4623 removes only marking_targets, so excluded captured targets survive. If all are excluded, :4537-4538 returns before any cleanup task exists. In contrast ordinary row-admission refusals happen after marking_targets is captured (:4571-4586), so those marks do clear. The parent revision has no exclude_unavailable call between captured admission and marking_targets (parent view.rs:4197-4227), establishing introduction here rather than a pre-range cleanup omission. Later changes through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db do not change this exclusion/capture/cleanup ordering.\n\nReachable boundary: a bulk question is drawn while environment target A is not Deleting, then its host becomes Deleting while the question is open; A remains displayed and marked when the user confirms. That is the explicit supported boundary named by the new helper and its caller comments ('a question drawn before a host entered Deleting must not dispatch to it now'). Pending lifecycle actions allow marking and acting on other sessions, so an earlier accepted whole-environment Delete can progress into Deleting beside a later bulk question about a cached peer and an ordinary sibling B. While whole-resource cleanup is slow, or if it fails and retains the resource/cache, A can remain listed; no new marking interaction is required. Host phase alone is not a DeleteSnapshot field. Listing reconciliation at view.rs:2025-2068 calls lifecycle::reconcile, which updates only snapshot-visible session facts and preserves scope; it does not retire a question merely because host state entered Deleting. The same host transition can therefore leave the answered token current. An actual authoritative absence can prune A (:2205-2249), but a still-listed row is retained, and independent host-state updates are not absence proof. The finding is conditional on A remaining displayed at confirmation/settlement, not a claim that every destroyed session stays listed forever.\n\nContract: SPEC.md Session list says 'An accepted batch clears its own targets when every completion has finished, including when some rows failed or were refused, only if the user has made no newer marking choice or opened a marked-actions menu or bulk question.' SPEC_impl.md GUI: Dioxus says measurement/remount/reconciliation do not advance that user revision and otherwise cleanup removes the captured targets. These were already drawn, confirmed targets, unlike rows excluded before a question first opens. Refusing their destructive work is correct and must remain; the defect is omitting them from the batch's marking cleanup. Capture cleanup identities before the new availability refusal (and run cleanup for an all-refused accepted question), while preserving the existing newer-interaction revision guard.\n\nSuggested bucket: other (incorrect selection cleanup and lingering toolbar; no destructive effect). Could-be-highest: no established security or loss-of-work route. Confidence: confirmed source/contract mechanism under the stated retained-row transition; no execution or reproduction. proposed_drop: false. possible_cover: none; supplied neighbour records concern other mechanisms and prohibited coverage sources were not searched. Caveats: a later authoritative disappearance, Clear, ordinary row opening or new marking gesture removes the residual mark; no request is incorrectly sent to the Deleting environment. Pre-question unavailable rows are not the basis of this finding. l3's lead is closed as a finding; no missing source premise remains for this conditional cleanup route."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g036/findings.jsonl",
+        "id": "l3",
+        "line": 11,
+        "disposition": "verified",
+        "group": "bulk-cleanup-captures-targets-after-deleting-exclusion",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-022 after inspecting it. Confirmed targets refused because their environment entered Deleting are omitted from marking cleanup. The retained-row condition is explicit; no destructive request is sent. Record the conditional retained-row cleanup defect as other. No FILTER boundary covers marks that remain through ordinary refreshes while the row stays listed; destruction can remain failed rather than creating a sub-second window. Checked source/results: [\"At 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa, list/view.rs:4512-4538 shrink-admits drawn targets, excludes Deleting targets and returns if all are excluded, before capturing marking_targets at :4550-4554.\",\"Same source :4590-4623 clears only marking_targets, protected by the unchanged user-interaction revision. :2248-2249 prunes questions/marks by authoritative listed identity, so a retained displayed row is not pruned merely for Deleting.\",\"list/lifecycle.rs:74-87 explicitly applies the exclusion both at drawing and admission. Its availability refusal is correct; it does not supply missing cleanup identities.\",\"The relevant change hash is inside the supplied exclusive-base/inclusive-tip range (git log with explicit range). No runtime test or reproduction.\"] Current coverage/results: [\"Recording-time main 24bc058066fd57848e788b465719b0e6da2f98f7: TODO.md:25-26 Planned is empty.\",\"BUGS.md searched for actual Restart, Deleting, marking, Replace-progress and notification claims; its sole SSH-helper install/update hang is unrelated.\",\"plans/queue searched for retirement/stale/floor/success, Deleting/Rename/question, marking/cleanup, ReplaceProgressGuard and OldTerminalEnded. Matching session-action-leftovers, environment-agent-operations, tmux and nonblocking plans have landed per plans/REPORTS.md; none is an unlanded repair covering these claims.\",\"review_feedback_queue/INDEX.md read in bounded chunks. Matching retained-restart-hides-reboot-card, suspended-sandbox-keeps-row-confirmations-enabled, frozen-sandbox-retains-header-lifecycle-answers and bulk-sandbox-delete-drops-eligible-peer files read; their trigger/consequence boundaries differ as noted per record.\",\"TRIAGE_OUTCOMES.md searched for the actual retirement/stale-success, Deleting/Rename/question, marking cleanup, progress-guard and notification claims; no matching active disposition. Archive not read.\",\"SPEC.md Session list:2189-2235 requires an accepted batch to clear its targets including refused rows unless a newer marking interaction occurred; it does not accept this omission. SPEC_impl.md:1125-1133 preserves ordinary completion ownership. Existing bulk-sandbox-delete-drops-eligible-peer clears both marks and concerns representative selection, not this omission.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: null; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g036/l3",
+        "line": 11,
+        "disposition": "verified",
+        "group": "bulk-cleanup-captures-targets-after-deleting-exclusion",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-022 after inspecting it. Confirmed targets refused because their environment entered Deleting are omitted from marking cleanup. The retained-row condition is explicit; no destructive request is sent. Record the conditional retained-row cleanup defect as other. No FILTER boundary covers marks that remain through ordinary refreshes while the row stays listed; destruction can remain failed rather than creating a sub-second window. Checked source/results: [\"At 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa, list/view.rs:4512-4538 shrink-admits drawn targets, excludes Deleting targets and returns if all are excluded, before capturing marking_targets at :4550-4554.\",\"Same source :4590-4623 clears only marking_targets, protected by the unchanged user-interaction revision. :2248-2249 prunes questions/marks by authoritative listed identity, so a retained displayed row is not pruned merely for Deleting.\",\"list/lifecycle.rs:74-87 explicitly applies the exclusion both at drawing and admission. Its availability refusal is correct; it does not supply missing cleanup identities.\",\"The relevant change hash is inside the supplied exclusive-base/inclusive-tip range (git log with explicit range). No runtime test or reproduction.\"] Current coverage/results: [\"Recording-time main 24bc058066fd57848e788b465719b0e6da2f98f7: TODO.md:25-26 Planned is empty.\",\"BUGS.md searched for actual Restart, Deleting, marking, Replace-progress and notification claims; its sole SSH-helper install/update hang is unrelated.\",\"plans/queue searched for retirement/stale/floor/success, Deleting/Rename/question, marking/cleanup, ReplaceProgressGuard and OldTerminalEnded. Matching session-action-leftovers, environment-agent-operations, tmux and nonblocking plans have landed per plans/REPORTS.md; none is an unlanded repair covering these claims.\",\"review_feedback_queue/INDEX.md read in bounded chunks. Matching retained-restart-hides-reboot-card, suspended-sandbox-keeps-row-confirmations-enabled, frozen-sandbox-retains-header-lifecycle-answers and bulk-sandbox-delete-drops-eligible-peer files read; their trigger/consequence boundaries differ as noted per record.\",\"TRIAGE_OUTCOMES.md searched for the actual retirement/stale-success, Deleting/Rename/question, marking cleanup, progress-guard and notification claims; no matching active disposition. Archive not read.\",\"SPEC.md Session list:2189-2235 requires an accepted batch to clear its targets including refused rows unless a newer marking interaction occurred; it does not accept this omission. SPEC_impl.md:1125-1133 preserves ordinary completion ownership. Existing bulk-sandbox-delete-drops-eligible-peer clears both marks and concerns representative selection, not this omission.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: null; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-022",
+          "bucket": "other",
+          "aliases": [],
+          "target_queue_file": null,
+          "coverage_checked": [
+            "Recording-time main 24bc058066fd57848e788b465719b0e6da2f98f7: TODO.md:25-26 Planned is empty.",
+            "BUGS.md searched for actual Restart, Deleting, marking, Replace-progress and notification claims; its sole SSH-helper install/update hang is unrelated.",
+            "plans/queue searched for retirement/stale/floor/success, Deleting/Rename/question, marking/cleanup, ReplaceProgressGuard and OldTerminalEnded. Matching session-action-leftovers, environment-agent-operations, tmux and nonblocking plans have landed per plans/REPORTS.md; none is an unlanded repair covering these claims.",
+            "review_feedback_queue/INDEX.md read in bounded chunks. Matching retained-restart-hides-reboot-card, suspended-sandbox-keeps-row-confirmations-enabled, frozen-sandbox-retains-header-lifecycle-answers and bulk-sandbox-delete-drops-eligible-peer files read; their trigger/consequence boundaries differ as noted per record.",
+            "TRIAGE_OUTCOMES.md searched for the actual retirement/stale-success, Deleting/Rename/question, marking cleanup, progress-guard and notification claims; no matching active disposition. Archive not read.",
+            "SPEC.md Session list:2189-2235 requires an accepted batch to clear its targets including refused rows unless a newer marking interaction occurred; it does not accept this omission. SPEC_impl.md:1125-1133 preserves ordinary completion ownership. Existing bulk-sandbox-delete-drops-eligible-peer clears both marks and concerns representative selection, not this omission."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": null,
+          "needs_independent_drop_check": false,
+          "key": "g036/l3",
+          "latest_line": 11,
+          "recommendation": "retain-verified",
+          "underlying_key": "bulk-cleanup-captures-targets-after-deleting-exclusion",
+          "why": "Confirmed targets refused because their environment entered Deleting are omitted from marking cleanup. The retained-row condition is explicit; no destructive request is sent.",
+          "checks": [
+            "At 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa, list/view.rs:4512-4538 shrink-admits drawn targets, excludes Deleting targets and returns if all are excluded, before capturing marking_targets at :4550-4554.",
+            "Same source :4590-4623 clears only marking_targets, protected by the unchanged user-interaction revision. :2248-2249 prunes questions/marks by authoritative listed identity, so a retained displayed row is not pruned merely for Deleting.",
+            "list/lifecycle.rs:74-87 explicitly applies the exclusion both at drawing and admission. Its availability refusal is correct; it does not supply missing cleanup identities.",
+            "The relevant change hash is inside the supplied exclusive-base/inclusive-tip range (git log with explicit range). No runtime test or reproduction."
+          ],
+          "proposed_basis": "Record the conditional retained-row cleanup defect as other. No FILTER boundary covers marks that remain through ordinary refreshes while the row stays listed; destruction can remain failed rather than creating a sub-second window."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "bulk-cleanup-captures-targets-after-deleting-exclusion",
+        "destination": "trailing-bulk-cleanup-captures-targets-after-deleting-exclusion.md"
+      }
+    },
+    {
+      "key": "g036/c3",
+      "owner": "g036",
+      "id": "c3",
+      "domain": "gui-session-lifecycle",
+      "purpose": "gui-session-lifecycle: crates/farhelm-ui/src/session_ops.rs, crates/farhelm-ui/src/list/view.rs, crates/farhelm-ui/src/replace.rs, crates/farhelm-ui/src/list/lifecycle.rs, crates/farhelm-ui/src/list/marking.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Provisioning stage updates do not invalidate the Replace progress guard's cleanup identity",
+            "location": "crates/farhelm-ui/src/replace.rs:144",
+            "detail": "Reviewed commit: db72347066bc4de3fa1a5f05d64bca91e571bc11. TLDR: considered whether asynchronous progress updates change the stored Replace entry so the new equality-checked cancellation guard fails to clear it, leaving Replacing visible indefinitely. Source refutation: ReplaceProgressGuard.start at replace.rs:130-140 inserts a clone and retains the matching immutable PendingLaunch; Drop at :144-151 compares that captured value. The only observe_stage caller found in the relevant launcher/progress/controller paths is create_form.rs:3411-3433, and it mutates the separate component-local pending_launch signal, not shared_replace_progress. The shared map has insertion/guard cleanup and settle_prepared_source's removal (:1075-1091), with no in-place stage updates in these callers. The new guard is live across the Replace-with network await (:6991-6997), dropped before source release/settlement (:7113-7138), and plain Replace uses the same before-return cleanup (:534-539). Contract: SPEC.md Creation/Lifecycle requires progress to settle on outcome and shared source progress to survive navigation; the suspected mutable-value cancellation failure is not present in the inspected route. Suggested bucket: other if present (stuck progress presentation); could-be-highest: no established security or loss-of-work consequence. Confidence: confirmed source refutation; no execution. proposed_drop: source refutation, progress mutation belongs to a different signal. possible_cover: none; prohibited coverage sources not searched. Caveat: this does not claim arbitrary external writes to the shared map would be safe; no shipped caller here mutates the retained entry in place. Changed guard test asserts cleanup and newer unequal-entry preservation directly; that is distinct from claiming a unique physical clock tick and no such clock premise is needed for these assertions."
+          }
+        }
+      ],
+      "latest": {
+        "line": 12,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Provisioning stage updates do not invalidate the Replace progress guard's cleanup identity",
+          "location": "crates/farhelm-ui/src/replace.rs:144",
+          "detail": "Reviewed commit: db72347066bc4de3fa1a5f05d64bca91e571bc11. TLDR: considered whether asynchronous progress updates change the stored Replace entry so the new equality-checked cancellation guard fails to clear it, leaving Replacing visible indefinitely. Source refutation: ReplaceProgressGuard.start at replace.rs:130-140 inserts a clone and retains the matching immutable PendingLaunch; Drop at :144-151 compares that captured value. The only observe_stage caller found in the relevant launcher/progress/controller paths is create_form.rs:3411-3433, and it mutates the separate component-local pending_launch signal, not shared_replace_progress. The shared map has insertion/guard cleanup and settle_prepared_source's removal (:1075-1091), with no in-place stage updates in these callers. The new guard is live across the Replace-with network await (:6991-6997), dropped before source release/settlement (:7113-7138), and plain Replace uses the same before-return cleanup (:534-539). Contract: SPEC.md Creation/Lifecycle requires progress to settle on outcome and shared source progress to survive navigation; the suspected mutable-value cancellation failure is not present in the inspected route. Suggested bucket: other if present (stuck progress presentation); could-be-highest: no established security or loss-of-work consequence. Confidence: confirmed source refutation; no execution. proposed_drop: source refutation, progress mutation belongs to a different signal. possible_cover: none; prohibited coverage sources not searched. Caveat: this does not claim arbitrary external writes to the shared map would be safe; no shipped caller here mutates the retained entry in place. Changed guard test asserts cleanup and newer unequal-entry preservation directly; that is distinct from claiming a unique physical clock tick and no such clock premise is needed for these assertions."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g036/findings.jsonl",
+        "id": "c3",
+        "line": 12,
+        "disposition": "excluded",
+        "group": "replace-progress-guard-compares-immutable-shared-entry",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-022 after inspecting it. The suspected progress mutation occurs in the form-local pending signal, not in the shared entry captured by the guard. Drop only this hypothesized shared-entry mutation mechanism as source-refuted. Arbitrary future shared-map writers and clock uniqueness are not established by this check. Checked source/results: [\"At db72347066bc4de3fa1a5f05d64bca91e571bc11, replace.rs:106-151 clones PendingLaunch into the shared map and guard, then Drop removes only an equal entry.\",\"list/create_form.rs:3405-3437 updates pending_launch via observe_stage; shared_replace_progress is a separate context handle. Its searched references are pass-through/start/settlement uses, not in-place stage mutation.\",\"list/create_form.rs:6991-6997 holds the guard across the request; :7113-7138 drops it before releasing the claim and on_settled, with no await in that handoff.\",\"The reviewed guard change is in range. Source checks only.\"] Current coverage/results: [\"Recording-time main 24bc058066fd57848e788b465719b0e6da2f98f7: TODO.md:25-26 Planned is empty.\",\"BUGS.md searched for actual Restart, Deleting, marking, Replace-progress and notification claims; its sole SSH-helper install/update hang is unrelated.\",\"plans/queue searched for retirement/stale/floor/success, Deleting/Rename/question, marking/cleanup, ReplaceProgressGuard and OldTerminalEnded. Matching session-action-leftovers, environment-agent-operations, tmux and nonblocking plans have landed per plans/REPORTS.md; none is an unlanded repair covering these claims.\",\"review_feedback_queue/INDEX.md read in bounded chunks. Matching retained-restart-hides-reboot-card, suspended-sandbox-keeps-row-confirmations-enabled, frozen-sandbox-retains-header-lifecycle-answers and bulk-sandbox-delete-drops-eligible-peer files read; their trigger/consequence boundaries differ as noted per record.\",\"TRIAGE_OUTCOMES.md searched for the actual retirement/stale-success, Deleting/Rename/question, marking cleanup, progress-guard and notification claims; no matching active disposition. Archive not read.\",\"SPEC.md Lifecycle operations and SPEC_impl.md:1134-1145 require shared progress/outcome lifetime; no accepted behavior or coverage item is needed to refute this specific mutable-entry premise. Landed session-action-leftovers.md:39-56,97-102 describes the guard, not an unlanded fix.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Replacing could remain visible indefinitely because provisioning stage mutation defeated the equality-checked cancellation guard.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g036/c3",
+        "line": 12,
+        "disposition": "excluded",
+        "group": "replace-progress-guard-compares-immutable-shared-entry",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-022 after inspecting it. The suspected progress mutation occurs in the form-local pending signal, not in the shared entry captured by the guard. Drop only this hypothesized shared-entry mutation mechanism as source-refuted. Arbitrary future shared-map writers and clock uniqueness are not established by this check. Checked source/results: [\"At db72347066bc4de3fa1a5f05d64bca91e571bc11, replace.rs:106-151 clones PendingLaunch into the shared map and guard, then Drop removes only an equal entry.\",\"list/create_form.rs:3405-3437 updates pending_launch via observe_stage; shared_replace_progress is a separate context handle. Its searched references are pass-through/start/settlement uses, not in-place stage mutation.\",\"list/create_form.rs:6991-6997 holds the guard across the request; :7113-7138 drops it before releasing the claim and on_settled, with no await in that handoff.\",\"The reviewed guard change is in range. Source checks only.\"] Current coverage/results: [\"Recording-time main 24bc058066fd57848e788b465719b0e6da2f98f7: TODO.md:25-26 Planned is empty.\",\"BUGS.md searched for actual Restart, Deleting, marking, Replace-progress and notification claims; its sole SSH-helper install/update hang is unrelated.\",\"plans/queue searched for retirement/stale/floor/success, Deleting/Rename/question, marking/cleanup, ReplaceProgressGuard and OldTerminalEnded. Matching session-action-leftovers, environment-agent-operations, tmux and nonblocking plans have landed per plans/REPORTS.md; none is an unlanded repair covering these claims.\",\"review_feedback_queue/INDEX.md read in bounded chunks. Matching retained-restart-hides-reboot-card, suspended-sandbox-keeps-row-confirmations-enabled, frozen-sandbox-retains-header-lifecycle-answers and bulk-sandbox-delete-drops-eligible-peer files read; their trigger/consequence boundaries differ as noted per record.\",\"TRIAGE_OUTCOMES.md searched for the actual retirement/stale-success, Deleting/Rename/question, marking cleanup, progress-guard and notification claims; no matching active disposition. Archive not read.\",\"SPEC.md Lifecycle operations and SPEC_impl.md:1134-1145 require shared progress/outcome lifetime; no accepted behavior or coverage item is needed to refute this specific mutable-entry premise. Landed session-action-leftovers.md:39-56,97-102 describes the guard, not an unlanded fix.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Replacing could remain visible indefinitely because provisioning stage mutation defeated the equality-checked cancellation guard.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-022",
+          "bucket": "other",
+          "aliases": [],
+          "target_queue_file": null,
+          "coverage_checked": [
+            "Recording-time main 24bc058066fd57848e788b465719b0e6da2f98f7: TODO.md:25-26 Planned is empty.",
+            "BUGS.md searched for actual Restart, Deleting, marking, Replace-progress and notification claims; its sole SSH-helper install/update hang is unrelated.",
+            "plans/queue searched for retirement/stale/floor/success, Deleting/Rename/question, marking/cleanup, ReplaceProgressGuard and OldTerminalEnded. Matching session-action-leftovers, environment-agent-operations, tmux and nonblocking plans have landed per plans/REPORTS.md; none is an unlanded repair covering these claims.",
+            "review_feedback_queue/INDEX.md read in bounded chunks. Matching retained-restart-hides-reboot-card, suspended-sandbox-keeps-row-confirmations-enabled, frozen-sandbox-retains-header-lifecycle-answers and bulk-sandbox-delete-drops-eligible-peer files read; their trigger/consequence boundaries differ as noted per record.",
+            "TRIAGE_OUTCOMES.md searched for the actual retirement/stale-success, Deleting/Rename/question, marking cleanup, progress-guard and notification claims; no matching active disposition. Archive not read.",
+            "SPEC.md Lifecycle operations and SPEC_impl.md:1134-1145 require shared progress/outcome lifetime; no accepted behavior or coverage item is needed to refute this specific mutable-entry premise. Landed session-action-leftovers.md:39-56,97-102 describes the guard, not an unlanded fix."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Replacing could remain visible indefinitely because provisioning stage mutation defeated the equality-checked cancellation guard.",
+          "needs_independent_drop_check": false,
+          "key": "g036/c3",
+          "latest_line": 12,
+          "recommendation": "refuted",
+          "underlying_key": "replace-progress-guard-compares-immutable-shared-entry",
+          "why": "The suspected progress mutation occurs in the form-local pending signal, not in the shared entry captured by the guard.",
+          "checks": [
+            "At db72347066bc4de3fa1a5f05d64bca91e571bc11, replace.rs:106-151 clones PendingLaunch into the shared map and guard, then Drop removes only an equal entry.",
+            "list/create_form.rs:3405-3437 updates pending_launch via observe_stage; shared_replace_progress is a separate context handle. Its searched references are pass-through/start/settlement uses, not in-place stage mutation.",
+            "list/create_form.rs:6991-6997 holds the guard across the request; :7113-7138 drops it before releasing the claim and on_settled, with no await in that handoff.",
+            "The reviewed guard change is in range. Source checks only."
+          ],
+          "proposed_basis": "Drop only this hypothesized shared-entry mutation mechanism as source-refuted. Arbitrary future shared-map writers and clock uniqueness are not established by this check."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "replace-progress-guard-compares-immutable-shared-entry",
+        "destination": null
+      }
+    },
+    {
+      "key": "g036/c4",
+      "owner": "g036",
+      "id": "c4",
+      "domain": "gui-session-lifecycle",
+      "purpose": "gui-session-lifecycle: crates/farhelm-ui/src/session_ops.rs, crates/farhelm-ui/src/list/view.rs, crates/farhelm-ui/src/replace.rs, crates/farhelm-ui/src/list/lifecycle.rs, crates/farhelm-ui/src/list/marking.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "The Deleting-availability unit test does not claim a complete retired-session matrix",
+            "location": "crates/farhelm-ui/src/list/marking.rs:677",
+            "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa. TLDR: considered a separate test-oracle/documentation issue because the new availability test mentions retired containers remaining Delete-only but supplies only ordinary rows. Checks: marking.rs:677-711 asserts all-Deleting, mixed and ordinary availability through LifecycleOffer; it never constructs a retired fixture and therefore cannot establish stop_shown=false for retired-only targets. The retired filtering at :181-185 is the unchanged eligibility rule moved from the prior MarkedBar conditional into the helper; the new behavior under test is environment-Deleting admission. The name and main docstring describe that availability boundary, and the final 'Retired containers stay Delete-only, as before' sentence identifies the retained contract rather than promising an exhaustive variant fixture. Thus no particular new assertion's oracle is unsound and no explicit all-variants guarantee is contradicted; demanding this additional branch would be a general coverage expansion rather than a substantiated defect. The existing rendering test at :743-875 explicitly establishes a nonretired fixture and checks disabled controls, so it also must not be credited as retired-only coverage. Suggested bucket: other for the considered maintenance concern; could-be-highest: no security/work-loss route alleged. Confidence: confirmed scope/fixture analysis, not execution. proposed_drop: no distinct test-oracle or documentation defect established by these exact claims; do not infer a universal coverage promise. possible_cover: none; coverage sources not searched. Caveats: a future retired-filter regression could benefit from dedicated coverage, and correct production code alone would not refute an actually incorrect test guarantee. No such broader guarantee is asserted here, and no new test or runtime execution was performed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 13,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c4",
+          "state": "open",
+          "summary": "The Deleting-availability unit test does not claim a complete retired-session matrix",
+          "location": "crates/farhelm-ui/src/list/marking.rs:677",
+          "detail": "Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa. TLDR: considered a separate test-oracle/documentation issue because the new availability test mentions retired containers remaining Delete-only but supplies only ordinary rows. Checks: marking.rs:677-711 asserts all-Deleting, mixed and ordinary availability through LifecycleOffer; it never constructs a retired fixture and therefore cannot establish stop_shown=false for retired-only targets. The retired filtering at :181-185 is the unchanged eligibility rule moved from the prior MarkedBar conditional into the helper; the new behavior under test is environment-Deleting admission. The name and main docstring describe that availability boundary, and the final 'Retired containers stay Delete-only, as before' sentence identifies the retained contract rather than promising an exhaustive variant fixture. Thus no particular new assertion's oracle is unsound and no explicit all-variants guarantee is contradicted; demanding this additional branch would be a general coverage expansion rather than a substantiated defect. The existing rendering test at :743-875 explicitly establishes a nonretired fixture and checks disabled controls, so it also must not be credited as retired-only coverage. Suggested bucket: other for the considered maintenance concern; could-be-highest: no security/work-loss route alleged. Confidence: confirmed scope/fixture analysis, not execution. proposed_drop: no distinct test-oracle or documentation defect established by these exact claims; do not infer a universal coverage promise. possible_cover: none; coverage sources not searched. Caveats: a future retired-filter regression could benefit from dedicated coverage, and correct production code alone would not refute an actually incorrect test guarantee. No such broader guarantee is asserted here, and no new test or runtime execution was performed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g036/findings.jsonl",
+        "id": "c4",
+        "line": 13,
+        "disposition": "excluded",
+        "group": "deleting-availability-test-does-not-promise-retired-matrix",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-022 after inspecting it. The test does not exercise retired-only rows, but its stated subject is Deleting availability and its assertions do not falsely claim that fixture. Do not record this exact asserted documentation/oracle defect. Preserve the limited coverage fact; production correctness alone is not the refutation. Checked source/results: [\"At 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa, list/marking.rs:677-711 documents all-Deleting and mixed eligibility, constructs ordinary specimens, and checks those three expected LifecycleOffer values.\",\"The final retired-contract sentence does not name a retired fixture or an exhaustive branch matrix. Missing additional coverage alone is not a demonstrated bad oracle.\",\"The reviewed test change is in range; no tests executed.\"] Current coverage/results: [\"Recording-time main 24bc058066fd57848e788b465719b0e6da2f98f7: TODO.md:25-26 Planned is empty.\",\"BUGS.md searched for actual Restart, Deleting, marking, Replace-progress and notification claims; its sole SSH-helper install/update hang is unrelated.\",\"plans/queue searched for retirement/stale/floor/success, Deleting/Rename/question, marking/cleanup, ReplaceProgressGuard and OldTerminalEnded. Matching session-action-leftovers, environment-agent-operations, tmux and nonblocking plans have landed per plans/REPORTS.md; none is an unlanded repair covering these claims.\",\"review_feedback_queue/INDEX.md read in bounded chunks. Matching retained-restart-hides-reboot-card, suspended-sandbox-keeps-row-confirmations-enabled, frozen-sandbox-retains-header-lifecycle-answers and bulk-sandbox-delete-drops-eligible-peer files read; their trigger/consequence boundaries differ as noted per record.\",\"TRIAGE_OUTCOMES.md searched for the actual retirement/stale-success, Deleting/Rename/question, marking cleanup, progress-guard and notification claims; no matching active disposition. Archive not read.\",\"SPEC.md Lifecycle operations says retired containerized sessions support only Delete. That contract does not itself make every availability test an exhaustive retired-session regression. No exact existing queue item or active decision found.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A misleading test-oracle/docstring might imply retired-only Stop suppression was tested although only ordinary rows were supplied.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g036/c4",
+        "line": 13,
+        "disposition": "excluded",
+        "group": "deleting-availability-test-does-not-promise-retired-matrix",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-022 after inspecting it. The test does not exercise retired-only rows, but its stated subject is Deleting availability and its assertions do not falsely claim that fixture. Do not record this exact asserted documentation/oracle defect. Preserve the limited coverage fact; production correctness alone is not the refutation. Checked source/results: [\"At 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa, list/marking.rs:677-711 documents all-Deleting and mixed eligibility, constructs ordinary specimens, and checks those three expected LifecycleOffer values.\",\"The final retired-contract sentence does not name a retired fixture or an exhaustive branch matrix. Missing additional coverage alone is not a demonstrated bad oracle.\",\"The reviewed test change is in range; no tests executed.\"] Current coverage/results: [\"Recording-time main 24bc058066fd57848e788b465719b0e6da2f98f7: TODO.md:25-26 Planned is empty.\",\"BUGS.md searched for actual Restart, Deleting, marking, Replace-progress and notification claims; its sole SSH-helper install/update hang is unrelated.\",\"plans/queue searched for retirement/stale/floor/success, Deleting/Rename/question, marking/cleanup, ReplaceProgressGuard and OldTerminalEnded. Matching session-action-leftovers, environment-agent-operations, tmux and nonblocking plans have landed per plans/REPORTS.md; none is an unlanded repair covering these claims.\",\"review_feedback_queue/INDEX.md read in bounded chunks. Matching retained-restart-hides-reboot-card, suspended-sandbox-keeps-row-confirmations-enabled, frozen-sandbox-retains-header-lifecycle-answers and bulk-sandbox-delete-drops-eligible-peer files read; their trigger/consequence boundaries differ as noted per record.\",\"TRIAGE_OUTCOMES.md searched for the actual retirement/stale-success, Deleting/Rename/question, marking cleanup, progress-guard and notification claims; no matching active disposition. Archive not read.\",\"SPEC.md Lifecycle operations says retired containerized sessions support only Delete. That contract does not itself make every availability test an exhaustive retired-session regression. No exact existing queue item or active decision found.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A misleading test-oracle/docstring might imply retired-only Stop suppression was tested although only ordinary rows were supplied.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-022",
+          "bucket": "other",
+          "aliases": [],
+          "target_queue_file": null,
+          "coverage_checked": [
+            "Recording-time main 24bc058066fd57848e788b465719b0e6da2f98f7: TODO.md:25-26 Planned is empty.",
+            "BUGS.md searched for actual Restart, Deleting, marking, Replace-progress and notification claims; its sole SSH-helper install/update hang is unrelated.",
+            "plans/queue searched for retirement/stale/floor/success, Deleting/Rename/question, marking/cleanup, ReplaceProgressGuard and OldTerminalEnded. Matching session-action-leftovers, environment-agent-operations, tmux and nonblocking plans have landed per plans/REPORTS.md; none is an unlanded repair covering these claims.",
+            "review_feedback_queue/INDEX.md read in bounded chunks. Matching retained-restart-hides-reboot-card, suspended-sandbox-keeps-row-confirmations-enabled, frozen-sandbox-retains-header-lifecycle-answers and bulk-sandbox-delete-drops-eligible-peer files read; their trigger/consequence boundaries differ as noted per record.",
+            "TRIAGE_OUTCOMES.md searched for the actual retirement/stale-success, Deleting/Rename/question, marking cleanup, progress-guard and notification claims; no matching active disposition. Archive not read.",
+            "SPEC.md Lifecycle operations says retired containerized sessions support only Delete. That contract does not itself make every availability test an exhaustive retired-session regression. No exact existing queue item or active decision found."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "A misleading test-oracle/docstring might imply retired-only Stop suppression was tested although only ordinary rows were supplied.",
+          "needs_independent_drop_check": false,
+          "key": "g036/c4",
+          "latest_line": 13,
+          "recommendation": "refuted",
+          "underlying_key": "deleting-availability-test-does-not-promise-retired-matrix",
+          "why": "The test does not exercise retired-only rows, but its stated subject is Deleting availability and its assertions do not falsely claim that fixture.",
+          "checks": [
+            "At 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa, list/marking.rs:677-711 documents all-Deleting and mixed eligibility, constructs ordinary specimens, and checks those three expected LifecycleOffer values.",
+            "The final retired-contract sentence does not name a retired fixture or an exhaustive branch matrix. Missing additional coverage alone is not a demonstrated bad oracle.",
+            "The reviewed test change is in range; no tests executed."
+          ],
+          "proposed_basis": "Do not record this exact asserted documentation/oracle defect. Preserve the limited coverage fact; production correctness alone is not the refutation."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "deleting-availability-test-does-not-promise-retired-matrix",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial pass complete: all eight patches and 1,386 assigned lines reviewed.\n\nRecorded in `findings.jsonl`:\n\n- `l1`: restart result can be retired before the open view consumes it.\n- `l2`: deferred Delete confirmation can lose its failure explanation.\n- `c1`: spec-accepted destruction case requiring independent drop review.\n- `c2`: source-refuted candidate.\n\nNo open leads or unread assigned scope. Progress updated; no tests or reproductions run."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised existing records at lines 7–9:\n\n- `l1`: distinguished terminal-surface admission from the preserved generation increment; retained its newer-listing trigger separately from the neighbours’ old-stale-list trigger.\n- `l2`: established a supported desktop navigation sequence that loses the Delete explanation.\n- `c1`: verified the drawn warnings and captured scope; still awaits independent drop review.\n\n`c2` unchanged. No new IDs, drops, lowerings, runtime tests, or unresolved leads."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 found something new:\n\n- Verified `l3`: confirmed bulk targets refused as Deleting retain their marks. Recorded at line 11.\n- Refuted candidate `c3`: progress-stage updates affect a separate signal, so guard cleanup remains valid.\n\nChecked admission, scope preservation, cleanup ordering, cancellation ownership, changed tests, and later in-range changes. Source analysis only; no execution.\n\nNew unverified findings: none. Open leads: none. Progress updated."
+    },
+    {
+      "turn": 4,
+      "reply": "Discovery pass 2 found no new reportable issue.\n\nChecked scope projections, availability, source-claim and cancellation lifetimes, dialog handlers, and changed test assertions. Recorded considered candidate `c4` at line 13.\n\nNew verified IDs: none. New unverified IDs: none. Open leads: none. Progress updated; no execution performed."
+    }
+  ],
+  "progress": "# g036 review progress\n\nGroup: gui-session-lifecycle. Turn 1: initial review complete. Discovery passes: 0.\n\nRead the brief fully and the complete inventory commits field only. Read all eight assigned patches, all 1,386 assigned lines, in bounded evidence packets. Initial packets were wrapped in shell-result JSON; every mandatory packet was delivered again as direct stdout before this boundary. No assigned material remains unread.\n\nRecords: l1 and l2 are source-confirmed findings, suggested bucket other. c1 is a spec-accepted highest-capable whole-environment destruction concern retained as a finding with proposed_drop for the caller's independent check. c2 is a source-refuted candidate about removal of the page guard. No open leads. No unverified findings. Both original leads were revised under their original IDs. No runtime execution or reproductions.\n\nContracts read at pinned revisions: 1d24c6af SPEC.md 1330-1382, 1435-1528, 1843-2093, 2143-2208; SPEC_impl.md GUI paragraphs 1060-1215. Compared specification changes through b3d6b3ef and db723470. Read 2ef10815 SPEC.md Sandbox sessions 1450-1568 and SPEC_impl.md Environment ownership and refusal / Environment Delete and the seal 6575-6665. Root End sentinel and review priority/template instructions read. Changed-test checklist applied to all assigned test changes.\n\nAdditional source context: 1d24c6af ops.rs 1-210, sandbox_sessions.rs 184-325, list/view.rs 2450-2585 and 3130-3180; b3d6b3ef session_ops.rs 120-260, session_view.rs 530-570, 615-650, 850-1070, 1160-1295, 1460-1510 and 1845-1880, list/view.rs 1740-1810 and 3100-3160, helm session_cache.rs 115-195; db723470 replace.rs 1-245 and create_form.rs 6965-7035, 7090-7140; 2ef10815 lifecycle.rs 1-255, 355-425, view.rs 895-965, 2910-3100, 4490-4735, session_view.rs 735-820; f560058d UI Session mirror 375-445 and removed-field search. Pinned Dioxus 0.7.10 confirmed in Cargo.lock; read installed core scheduler 1-220, virtual_dom 435-552 and 599-627, hooks use_effect 1-180 and desktop webview 530-620 to establish task/effect ordering.\n\nInterface assumptions: caller owns coverage and cross-group deduplication, including overlap with session-view/launch groups. l1 concerns the intermediate b3d6b3ef terminal-kind contract; the later grid-only change removes its kind aspect and does not invalidate review of that intermediate revision. l2 spans the new SessionOps handoff and its list producer/header consumer at 2ef10815. Other provider and helm routes were context only, not independently reviewed as this group's assignment.\n\nNext: return for a later synthesis/discovery prompt; do not start another pass inside this initial turn. New verified IDs this pass: l1, l2; c1 records verified accepted behavior. New unverified IDs: none.\n\nTool note: one candidate record attempt used invalid state closed and was rejected without appending. It was corrected to open and appended successfully. Read tooling.md after the diagnostic. No checkout files were changed.\n\n## Turn 2: later-turn synthesis complete\n\nDiscovery passes: 0 (this was synthesis, not a discovery pass). Revisited batch/caller ownership, related records g037/f3, g038/l1 and g088/l1, pinned Dioxus 0.7.10 task/effect/event handling, and l2's actual navigation path. No new IDs. Revised l1, l2 and c1 under their existing IDs; c2 unchanged. No drop or lowering accepted. No open leads, unread assigned scope, or investigated uncertainty requiring another source premise. All conclusions remain source analysis; no runtime observation, reproduction or test run.\n\nl1: distinguished durable generation increment from terminal-surface admission. The observer test proves the increment but does not render SessionView or assert relaunched. keep_terminal_surface still excludes nonstale Interrupted without success even after that increment. A newer eligible listing can retire the payload before its mounted consumer, independently of the old-stale-list regression introduced when f560058d removed the age floor. Restoring that floor fixes the neighbours' age route but not l1's eligible-newer-read route. A durable completion/consumer invariant could fix both; preserve separate triggers. Terminal-kind removal eliminates the old-kind aspect but keeps the interrupted-surface aspect. Connected detail reads drain live supervisor state (b3d6b3ef sessions.rs 2854-2896, 2962-3015); l1 requires only the view's already-retained old current while that new read is pending, not cached Interrupted from a fresh connected detail. Current detail commit updates current before retirement, so that retirement alone has the required replacement data and is not the l1 path.\n\nl2: established the selected-at-reply A -> deferred render/effect -> ordinary row select B -> keyed view replacement -> B clears mismatched offer route. Source read: 2ef10815 list/view.rs 868-883, 1218-1232, 3022-3065, 4011-4063 and nav_locked=false; lib.rs 2174-2176 and 2272-2282; session_ops.rs 163-179 and 287-307. Native Dioxus protocol.rs 45-65 routes __events directly to webview handle_event; webview.rs 43-84, 190-194 and 537-590 does not drain effects before event delivery while waiting for rendered mutations. Runtime::remove_scope drops A's effects (runtime.rs 179-205), and finish_render only queues their eventual execution (337-343). Core scopes/tasks precede effects, so B replacement can precede handoff. This is one supported UI event sequence; it does not assume input reentrancy inside completion. The secondary competing-claim branch is not needed, and different-source slot overwrite alone remains refuted by the selected-at-reply check.\n\nc1: rechecked actual provider warning, dialog title, captured scope and API query. Supplemented its record with exact warnings and the distinction between Session and Whole opt-ins. It stays highest-capable/proposed_drop for the caller's independent check; nothing authorizes unwarned scope growth. c2 still source-refuted; no new facts require a revision.\n\nAdditional source read this turn: b3d6b3ef session_view.rs 530-568, 615-648, 990-1058, 1238-1274, 1468-1502, 1720-1765, 1859-1877, 3695-3745 and 3950-4020; session_ops.rs 30-120 and 173-242; list/view.rs 1780-1805, 2114-2165, 2278-2288 and 3125-3154; reader.rs 616-700. f560058d session_ops.rs 35-115 and 172-232; session_view.rs 530-566, 1460-1496, 1700-1734, 3690-3728. 2ef10815 view.rs 858-890, 1215-1248, 3010-3078, 3985-4068, 4235-4288, 4535-4590 and 6310-6367; session_view.rs 580-610, 773-805, 2245-2273, 2735-2772; lifecycle.rs 256-340 and 395-414; environment_ui.rs 164-191; api/sandbox_sessions.rs 180-263. Targeted specification clauses rechecked. Neighbour logs initially combined into a clipped output; relevant g037 line 5 and g038 line 4 were then reread in individual bounded outputs. g038's later synthesis record was fully delivered in the original combined read; g088 candidate was fully delivered too.\n\nNext: await the caller's next discovery/synthesis instruction. Evidence record for l1 initially rejected a multiline JSON string; normalized event JSON and appended successfully before any further source read. No log event was lost or overwritten, and no checkout file changed.\n\n## Turn 3: discovery pass 1 started\n\nRead discovery-neighbours.json fully in bounded ranges 1-40, 41-81, 82-112, 113-142, 143-180, 181-198 after a clipped initial large read. Reconciled named g038/l1:11 input before discovery: it agrees with l1's previous synthesis boundary (f560058d old-stale evidence versus b3d6b3ef newer eligible payload retirement), and with the live connected-detail correction. No new source claim, ID, consequence or record revision follows from that input; do not rediscover these known routes.\n\nDiscovery focus: assigned small changes' cancellation cleanup, bulk environment scope/projection/reconciliation and action eligibility, and changed unit-test premises beyond already recorded findings. No runtime work or broader group search.\n\n## Turn 3: discovery pass 1 complete\n\nResult: something new was found. New verified finding ID l3 (confirmed bulk targets excluded after an environment enters Deleting are omitted from batch mark cleanup). New unverified-after-investigation finding IDs: none. Open leads: none; l3 was recorded immediately as a lead and revised to a finding after source/contract checks. New source-refuted candidate c3 covers mutable progress-stage identity; recorded immediately after refutation. Existing l1/l2/c1/c2 consequences, buckets and proposed-drop bases unchanged. No parent drop/lowering accepted.\n\nChecks beyond the known issues: revisited all assigned change responsibilities at their recorded revisions: the removed sandbox host guard and surviving source claims; restart retirement helper/test contracts without re-reporting the known mounted-observer or stale-list mechanisms; ReplaceProgressGuard publication, identity, cancellation, and its launcher/controller callers; bulk snapshot scope, deduplicated request/display projections, admission/refusal ordering and marking cleanup; unavailable-control eligibility including retired-only mixtures; changed fixture fields after terminal-kind removal. Changed tests were inspected with the already supplied authoring checklist. Production scope preservation does not stand in for test-oracle review: the new guard tests directly assert immutable-entry cleanup/newer-entry preservation; bulk tests exercise scope request projection and eligibility, and no separate test-oracle finding was established. No runtime tests, reproduction scripts, builds, live-install actions or checkout modifications.\n\nl3 validation: 2ef10815 lifecycle.rs 74-87, 155-253, 365-408 and view.rs 4505-4740 establish drawn admission -> availability exclusion -> marking identity capture -> ordinary refusal -> cleanup. A Deleting host transition while the question remains open is an explicit supported caller boundary; the helper's correctly refused target was already in the answered question. The ordinary-refusal branch clears captured marks, while new exclusion does not and all-excluded exits before cleanup. SPEC.md Session list 2200-2259 and SPEC_impl.md GUI marking lifecycle 1203-1218 require cleanup including refused targets absent a newer user marking interaction. Reconciliation/prune checks at view.rs 2016-2073 and 2200-2254 show only visible snapshot changes or authoritative absence alter the question/marks; still-displayed Deleting rows are not automatically dropped. sandbox_sessions.rs 92-113 names retained ongoing/failed Deleting state. Parent bulk_run 4197-4292 has no new availability filter; git history/diff through endpoint shows no later repair to this ordering.\n\nc3 checks: db723470 replace.rs 100-168, 300-440, 470-553 and 1010-1098; create_form.rs 1060-1093, 3405-3441, 6977-7010 and 7108-7145; launch_progress.rs 1-100. Targeted exact-revision searches find stage mutation only in local pending_launch, while the shared guarded map entry is not edited in place. The initial broad combined source result was clipped; the missing marking/lifecycle ranges were reread independently (marking.rs 125-220, 330-423, 670-728; lifecycle.rs 155-253, 365-395; b3d6b3ef session_ops.rs 425-563). Additional inspected 1d24c6af session_ops.rs 1-294 and f560058d replace fixture 585-637. No required assigned source remains unread.\n\nNext: return discovery delta. A new substantive discovery was made, so do not claim final multi-pass completion; another caller-directed pass may be needed. Log now ends at line 12.\n\n## Turn 4: discovery pass 2 started\n\nRead the refreshed discovery-neighbours.json fully in bounded ranges 1-40, 41-80, 81-120, 121-160, 161-200, 201-240, 241-276, 277-312 and 313-355. No clipping in those packets. No named pending synthesis questions. New neighbour findings are novelty context only; do not adopt known cross-group mechanisms as discoveries. Existing local history through event 12 remains authoritative; no drop/lowering accepted.\n\nSearch focus: changed helper projections and malformed/absent metadata assumptions, request-guard cleanup under owner lifetime, tests' stated premises, and UI availability consistency within the assigned patches. No runtime work.\n\n## Turn 4: discovery pass 2 complete\n\nResult: no new reportable issue found. New verified finding IDs: none. New unverified-after-investigation finding IDs: none. Remaining lead IDs: none. One new candidate c4 was recorded as soon as the considered test-matrix concern was rejected; it does not alter any retained finding or proposed-drop basis. All earlier l1/l2/l3/c1/c2/c3 records stand unchanged. Discovery pass count is now 2. This pass was separate from the earlier synthesis and discovery pass 1.\n\nUseful checks/results: inspected LifecycleAction confirmation/error wording, availability partition, per-host work queues, whole-resource deduplicated display/request projections, dialog snapshot handlers, provider scope/identity preconditions and MarkedBar unavailable prop derivation. The drawn/request projections use the same sends_delete predicate; changing live host connection does not rewrite the captured Whole/Session scope. owned_host resolves a known provider and matching host ID before setting the sandbox snapshot, preventing a normal producer of a sandbox=true/provider=None fallback. Looked at Replace-with source exclusion from synchronous submit to the request-owned future and explicit drop/settlement, alongside the new progress guard/test. Source claim is taken before hidden preparation, transferred with SubmitGuards and remains in the task through the guarded network await; no additional cancellation ownership gap established. No new test-oracle defect follows from the new progress test's deterministic unequal entries. Reviewed availability test claims separately from production behavior: c4 records that the test has no retired fixture, but does not promise a complete retired-state matrix; the retained retired rule was moved unchanged from its parent conditional. Existing locked-toolbar rendering test explicitly premises an ordinary row, so it is not credited as retired-only coverage. No code correctness argument was substituted for a false test guarantee.\n\nAdditional pinned source ranges: 2ef10815 lifecycle.rs 32-153, 255-365, 425-511; marking.rs 246-330, 677-711, 730-886; view.rs 5695-5748; sandbox_sessions.rs 10-42; shared.rs 20-64; parent marking.rs 332-353. db723470 replace.rs 560-602 and 1032-1075; create_form.rs 5790-5827 and 6697-6741. A broader source-claim search/context command was clipped; its omitted search context was not used as proof, and the needed admission/transfer/cleanup ranges were delivered independently. All mandatory patch delivery remains covered by the earlier successful caller audit; no assigned mandatory material is unread.\n\nNo runtime tests, builds, reproductions, live-install actions, prohibited coverage searches or checkout edits. No new uncertainty remains to be investigated. Next: return the empty discovery result and await further caller instructions.\n"
+}

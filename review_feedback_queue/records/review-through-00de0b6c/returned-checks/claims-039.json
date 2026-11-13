@@ -1,0 +1,296 @@
+[
+  {
+    "key": "g061/l1",
+    "latest_line": 17,
+    "recommendation": "retain-verified",
+    "bucket": "high",
+    "underlying_key": "podman-rebuild-retires-current-images-before-success",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "An admitted Rebuild discards both reusable checkpoints before attempting replacement. Failure leaves subsequent launches rebuilding, contrary to the successful-replacement boundary. This is source-established availability loss, with no runtime reproduction.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/environment/podman/build.rs:250-264 takes current image/prepared records before prepare_images_owned; 267-278 attempts retirement on failure; 690-757 verifies explicit ownership and container use before nonforcing removal.",
+      "Same revision: environment/podman.rs:913-942 admits current-definition Rebuild with rebuild=true; 993-1035 cannot reuse records removed by the failed job.",
+      "Same revision: build.rs:128-132 and 306-307 are separate reuse shortcuts; 216-224 already publishes the successful software replacement and retires its predecessor together. A fix must carry force intent past both shortcuts and preserve active-job joining required by SPEC_impl.md:6508-6509. Successful software replacement may legitimately stale prior preparation even if later preparation fails.",
+      "Diff from 5665983 to reviewed tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db has no changes to environment/podman/build.rs or tensorlake/build.rs.",
+      "The record names g058/l2 as an alias, but that named record was not supplied to this batch. Parent can reconcile the underlying key without treating the uninspected cross-batch record as checked coverage. Nonforcing removal protects existing containers; it does not settle the separate implicit-base-pruning defect in g061/l8."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:4885-4889 and SPEC_impl.md:6025-6050,6087-6091 require successful replacement before superseded retirement; they do not accept this failure route.",
+      "TODO.md:25-27 Planned is empty. BUGS.md records only the unrelated stalled provisioning-output helper. Active TRIAGE_OUTCOMES.md searches for rebuild, retired images, image cleanup/pruning, proxy, bootstrap and Podman found no matching decision.",
+      "plans/queue searched for the actual image-retirement/build-failure scope. podman-environments.md:251-253 repeats the required success boundary and is already landed per plans/REPORTS.md:21. environment-agent-operations.md:8-80 concerns agent authority/lifetime, not failed image replacement. No unlanded repair found.",
+      "INDEX.md read in full and searched. packages-build-result-retired-under-changed-image-source.md is a Tensorlake frozen-definition/result handoff defect; rebuild-order-test-misses-persistence-boundary.md concerns a Tensorlake test oracle. Neither covers this Podman implementation failure. No exact queued alias found.",
+      "FILTER.md read in full: failure can discard durable reusable image records and physical images. The rare self-correcting/display, hung-manager, session-history and upgrade filters do not cover that scope."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No missing premise for the availability defect. Work loss inside an existing container is not established. The distinct user-base pruning route is retained separately under g061/l8.",
+    "original_stronger_consequence": "A failed recipe rebuild deletes the previously usable software and installation checkpoints; later launches must rebuild and may fail for the same network, installer or edited-base cause. Existing-container files/processes were never claimed lost. The supplied history reports g058/l2 as the same route without changing this consequence.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain a high-priority source-confirmed availability finding; preserve force/reuse/joining fix constraints and the distinction from user-owned-base pruning. No accepted coverage or filter match."
+  },
+  {
+    "key": "g061/l2",
+    "latest_line": 18,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "podman-bootstrap-missing-explicit-proxy-exports",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The exact missing-export suspicion is refuted: bootstrap scripts receive explicit proxy exports before apt runs. This does not refute stale cached proxy observations during later container creation.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/environment/podman/build.rs:41-46 calls self.script for BOOTSTRAP; environment/podman.rs:347-369 obtains ready.proxy and prepends proxy_exports before private stdin delivery.",
+      "Same revision: build.rs:420-429 unsets known proxy variables and exports shell-quoted observed values. This mechanism precedes and does not depend on the later environment.d/user-manager setup at software:160-161.",
+      "No runtime bootstrap or network behavior was executed. The supplied g003/f1 cache-freshness concern is a different input-value premise; it is not an alias or a basis to drop that separate record."
+    ],
+    "coverage_checked": [
+      "SPEC.md:4877-4879 and SPEC_impl.md:6082-6085 specify host-manager proxy inheritance and explicit environment setup. They do not accept missing bootstrap exports; source supplies them.",
+      "TODO Planned is empty; BUGS.md and active TRIAGE_OUTCOMES.md contain no matching bootstrap/export decision. plans/queue proxy hits are in the landed podman-environments plan or agent-operations context, not an unlanded fix for this exact claim.",
+      "Full INDEX.md and targeted searches found no bootstrap missing-export queue item. Existing container/account inspection issues have different triggers and causes. No filter is used for this refutation."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "The suspected absence of exports is contradicted by self.script. Correct freshness/content of ready.proxy remains a separate question owned by the supplied g003/f1 record.",
+    "original_stronger_consequence": "First-time managed Ubuntu builds might fail on a proxy-required host because apt precedes environment.d and implicit Podman inheritance is disabled; suggested high if real. Later history explicitly preserved a separate creation-time stale-proxy defect instead of withdrawing it with this mechanism.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Propose dismissing only the missing-explicit-export claim, on direct historical source. No claim that all proxy-required builds succeed, or that cached creation-time proxy values are fresh."
+  },
+  {
+    "key": "g061/c3",
+    "latest_line": 5,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "release-focused-tmux-shutdown-gate-removal-coverage",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "At the named intermediate revision, deleting the focused invocation does not remove the three surviving driver regressions from the workspace release selection. This conclusion does not claim those tests survive the later driver removal.",
+    "checks": [
+      "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513^:scripts/test-tmux-pinned-shutdown.sh names the three driver tests and integration tests using retired creation scenarios.",
+      "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:crates/farhelm-supervisor/src/tmux/stream.rs:2632,2724,2845 still defines all three driver tests. .github/workflows/release.yml:228-239 still selects workspace Rust targets except desktop with pinned tmux on PATH.",
+      "Same revision: SPEC_impl.md:2305-2307 says driver tests create their own tmux servers; 2965-2978 explains adoption of old terminals and no creation of new old terminals. The paired template/workflow patch removes only the redundant focused step in this concern.",
+      "No tests were run. Source selection is evidence of retained selection, not proof that the substrate executed."
+    ],
+    "coverage_checked": [
+      "Both current specifications searched for tmux shutdown/driver/test coverage; current contracts describe the subsequent retirement, not a requirement to retain the removed driver indefinitely. Historical governing sections checked above.",
+      "TODO Planned is empty; no matching BUGS.md or active TRIAGE_OUTCOMES.md decision. tmux-end-old-terminals, tmux-drop-from-install and tmux-drop-from-tooling queue files describe the coordinated retirement and are landed, not unlanded remediation coverage.",
+      "Full INDEX.md and targeted tmux/shutdown/pinned-builder searches found no exact queue item. No filter used; this is a narrow source refutation rather than acceptance of missing tests."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No missing premise for the three-test selection conclusion at 647f022. Successful actual execution is unobserved. Later removal of the driver is outside this narrow retained-test claim.",
+    "original_stronger_consequence": "Removing the focused shutdown gate might drop regression coverage for legacy terminals still served during transition. The historical source refutation retains driver tests while new-tmux integration creation scenarios are retired.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Dismiss only the alleged loss of these driver regressions from the release selection at 647f022. Do not generalize this into certification of all legacy-terminal coverage or of later workflow revisions."
+  },
+  {
+    "key": "g061/l4",
+    "latest_line": 14,
+    "recommendation": "retain-verified",
+    "bucket": "high",
+    "underlying_key": "podman-pending-commit-tag-no-dispatch-crash-never-settles",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "A crash after persisting the fresh lookup tag but before dispatch leaves an image that can never appear and a record no ordinary cleanup path can clear. Recipe deletion and container-host removal/retargeting remain blocked.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b:environment/podman.rs:505-525 awaits the persistent retired_images tag write before constructing/polling command dispatch. A process crash in between loses the future's later settlement.",
+      "Same revision: podman.rs:526-550 clears a definitely refused absent tag or replaces a successful tag with canonical ID. build.rs:690-719 converts a tag only after positive image observation; 748-757 refuses absent non-ID tags. clean_images:779-788 removes place state only after successful retirement.",
+      "At reviewed tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, git grep enumerates production retired_images mutations only in podman.rs, podman/build.rs and the state definition. No alternate absent-tag settlement appears in that complete named-field writer set.",
+      "5665983:tensorlake/recipes.rs:610-614 returns provider cleanup failure before recipe deletion; 414-420 refuses residual cleanup state. store/podman.rs:213-249 refuses removing or retargeting a place with needs_cleanup recipe state. Relevant build implementation remains unchanged to tip.",
+      "This is a source crash-window argument, not an executed crash or transport-loss reproduction. Absence alone cannot safely settle a genuinely dispatched remote commit."
+    ],
+    "coverage_checked": [
+      "SPEC.md:4870-4874 keeps place routes until cleanup; SPEC_impl.md:6039-6044 requires retained failure records, and 6087-6091 promises retryable explicit cleanup. Neither accepts permanent blockage after a never-dispatched capture.",
+      "TODO Planned empty; BUGS.md concerns provisioning pipes only; active TRIAGE_OUTCOMES.md has no commit-tag/image-cleanup decision. podman-environments.md is already landed; its definite-create-refusal follow-up does not settle never-dispatched image commits. No unlanded plan fixes the tag state machine.",
+      "Full INDEX.md and image/capture/cleanup searches found no exact queue item. The older interrupted-image-inspection-leaves-unnamed-allocation item concerns another inspector's container allocation, not durable commit lookup tags.",
+      "FILTER.md does not cover durable administration blockage: no ordinary retry can clear it. The hung-manager and session-history boundaries do not match."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "None for the no-dispatch crash window. Other transport-failure routes need actual remote outcome knowledge and are not necessary to this proof.",
+    "original_stronger_consequence": "An interrupted capture can permanently block recipe deletion and its place host's removal/retargeting. Conservative immediate retention is necessary; the defect is absence of eventual certified settlement. Do not fix with immediate absence acceptance or an arbitrary age timeout.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain high for permanent blocked cleanup and host administration. Preserve the remote-ambiguity safety constraint and source-only confidence."
+  },
+  {
+    "key": "g061/l5",
+    "latest_line": 16,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "podman-job-removal-after-last-fleet-invalidation",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The last fleet event precedes registry removal. A successful concurrent status read can spend that event on building=true and leave Preparing/Rebuild disabled until another read trigger. The schedule is narrow, unmeasured and source-supported.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b:tensorlake/build.rs:605-615 computes building from podman_jobs membership; 718-724 publishes result before PodmanJobAdmission::drop:446-448 removes the entry, with no following fleet event.",
+      "Same revision: environment/podman/build.rs:288 bumps before returning; success enters Ready at 404 while admission remains held. No await separates normal final return and admission drop, so concurrent handling/preemption is required.",
+      "350a4b33b6d4476f4a78e43cea124bc2b828f462:farhelm-ui/src/tensorlake/recipes.rs:367-385 restarts the status resource on fleet notices/changed successful place observations; containers_settings.rs:213-215 only displays status-read error, 234-260 derives Preparing/disabled Rebuild, and 270-279 refreshes after admission reply rather than after job completion.",
+      "Reviewed tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:farhelm-ui/src/environment_ui.rs:948-992 polls only during probing/feed fallback. The record's old 684-724 citation shifted; the actual tip function is at 952. This supports lack of a guaranteed quiet-state reread.",
+      "The supplied g060/l1 failed-read recovery defect is distinct: this route requires a successful stale GET. The initial silent-prerequisite-failure suspicion remains unclaimed because place observation can expose it. No runtime observation."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md recipe build-status contract at 450-483 and SPEC_impl.md:6025-6056 describe per-place readiness/registry projection; neither accepts missing completion invalidation.",
+      "TODO Planned empty; BUGS and active TRIAGE_OUTCOMES searches found no matching completion-feed decision. No unlanded plan states removal-before-final-invalidation work; landed podman-environments scope is not future coverage.",
+      "Full INDEX.md and preparing/build-completion/feed searches found no exact queue item. orphan-cleanup-start-does-not-invalidate-feed.md concerns another operation's start event, not this completion registry ordering.",
+      "FILTER.md rare self-correcting display rule might be argued to cover remount recovery, but its 'briefly wrong' boundary is unclear when the state can persist indefinitely and disables Rebuild. The sub-second-person-action filter does not match an automatic GET. Recommend retention on that ambiguity, not filtering solely because the window is narrow."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No runtime frequency or duration measurement. No claim every completion leaves stale state. The exact filter interpretation of an indefinitely retained display plus disabled command remains for parent/triage.",
+    "original_stronger_consequence": "Preparing and a disabled Rebuild button can remain after image work completes until unrelated invalidation, changed place observation or remount. Original early-prerequisite silent failure was investigated but not claimed separately. No security or user-work-loss consequence was proposed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain other with the narrow concurrent-read schedule, source-only confidence, distinct failed-read route and explicit filter ambiguity."
+  },
+  {
+    "key": "g061/l6",
+    "latest_line": 21,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "podman-account-observation-exec-guesses-root-home",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "A supported custom base without /root fails privileged passwd lookup before the selected account can be resolved. The documented base contract does not require /root.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b:environment/podman/build.rs:142-151 selects the custom reference/user, starts helper and calls login without managed bootstrap; 65-73 uses root_user; 411-417 hardcodes its home to /root. The selected account's actual readiness check follows at 152-159.",
+      "Same revision: access.rs:193-230 lowers user.home to podman exec --workdir and HOME. pull_base:808-837 only pulls/inspects; it does not establish /root.",
+      "Primary upstream checks: https://github.com/containers/podman/blob/v4.9.3/libpod/container_exec.go#L1012-L1025 maps WorkDir to Cwd; https://github.com/containers/podman/blob/v4.9.3/libpod/oci_conmon_exec_common.go#L648-L650 places it in the OCI process; https://github.com/containers/crun/blob/1.14/src/libcrun/container.c#L3132-L3133 fails an unsuccessful chdir before exec. No reproduction was run.",
+      "build.rs is unchanged from its introduction to reviewed tip. Managed Ubuntu and custom bases retaining /root are unaffected; a cached artifact may postpone lookup. No existing environment file loss is claimed."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:450-483 and SPEC_impl.md:6073-6079 require systemd, passwordless sudo, Debian/Ubuntu apt and build tools, with a selected login user; neither requires root's /root directory. Historical SPEC_impl.md:6552-6559 has the same boundary.",
+      "TODO Planned empty; no matching BUGS or active TRIAGE_OUTCOMES decision. No unlanded plan adds a neutral privileged lookup directory or otherwise removes this prerequisite. Landed podman-environments plan is not future coverage.",
+      "Full INDEX.md and matching image-inspection-inherits-keep-id-account.md and inspector-workdir-hides-missing-home.md read. They concern retired supervisor-side account synthesis/implicit WORKDIR creation, not helm-side privileged exec guessing /root. No exact queue alias or useful extension to those different roots.",
+      "No FILTER.md match: a valid custom-base build repeatedly fails until the base or implementation changes; rarity alone is insufficient."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "None for the conditional missing-/root source route on the checked supported exec implementation. Prevalence and observed user impact are unmeasured.",
+    "original_stronger_consequence": "A custom base satisfying the documented requirements cannot build if /root is absent, even with a usable selected login home elsewhere. Suggested other from the initial lead onward; no universal custom-base failure or work loss was asserted.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain other for conditional custom-base compatibility failure; use a neutral guaranteed directory for privileged account observation rather than expanding the product prerequisites."
+  },
+  {
+    "key": "g061/l7",
+    "latest_line": 24,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "podman-parent-first-image-record-removal-refusal",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The suspected child-only refusal is absent in the checked Podman 4.9.3 implementation. Image records can be removed while shared layers stay needed by children. This says nothing about implicit ancestor pruning.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b:environment/podman/build.rs:690-757 iterates stored order and propagates removal failure; 781-785 appends software before prepared. That order is real; the required child-only failure premise is not.",
+      "https://github.com/containers/podman/blob/v4.9.3/vendor/github.com/containers/common/libimage/image.go#L460-L494 observes children for reporting, then deletes the image record. https://github.com/containers/podman/blob/v4.9.3/vendor/github.com/containers/storage/store.go#L2393-L2457 refuses direct container users but preserves still-needed layers after image deletion.",
+      "https://github.com/containers/podman/blob/v4.9.3/pkg/domain/infra/abi/images.go#L512-L579 derives command failure from errors; report.Removed=false alone is not an error. Farhelm subsequently checks record absence at build.rs:744-747.",
+      "The rmi manual's child-image exit-status sentence is broader than these implementation conditions. No runtime removal executed."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:4885-4889 and SPEC_impl.md:6087-6091 require nonforcing owned-image cleanup, but do not explicitly accept permanently blocked parent-first cleanup. Refutation comes from implementation semantics, not spec coverage.",
+      "TODO Planned empty; no matching BUGS or active ledger decision. No unlanded plan covers child-only removal refusal. Full INDEX.md and parent/child/image-retirement searches find no matching item. No filter used."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "The required refusal merely because committed child layers exist is contradicted by the checked supported-floor implementation. Other removal errors are outside this narrowly considered claim.",
+    "original_stronger_consequence": "Creation-order retirement might permanently block recipe/host cleanup when nonforcing removal encounters parent images before committed children; suggested high if real. The latest record proposes refutation of that prerequisite only and explicitly keeps l8's distinct pruning concern.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Dismiss the exact child-only refusal suspicion at the supported floor. Preserve the separate highest-priority ancestor-pruning finding; successful parent record removal does not imply ownership-safe pruning."
+  },
+  {
+    "key": "g061/l8",
+    "latest_line": 26,
+    "recommendation": "retain-verified",
+    "bucket": "highest",
+    "underlying_key": "podman-owned-image-rm-default-prunes-user-base",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Owned-image retirement omits --no-prune. A valid untagged user-authored local base selected by ID can be removed implicitly outside the ownership-checked target list. Once no retained image/container protects its contents, this can destroy the user's sole local copy.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b:environment/podman/build.rs:690-743 checks labels only for the explicit target, then runs image rm without --no-prune. clean_images:781-785 retires software and prepared images. Source unchanged through reviewed tip.",
+      "Same revision: farhelm-proto/src/recipes.rs:788-797 accepts any nonempty NUL-free custom reference, including a local ID. pull_base:808-837 accepts an existing image without pulling or tagging it; software:142-151,203-224 commits an owned child. A saved reference does not add a Podman name.",
+      "https://docs.podman.io/en/v4.9.3/markdown/podman-rmi.1.html documents dangling-parent removal and --no-prune. Checked https://github.com/containers/podman/blob/v4.9.3/vendor/github.com/containers/common/libimage/image.go#L496-L518: absent NoPrune, removal recurses into a dangling parent without Farhelm's ownership predicate. ABI images.go:558-568 passes that option.",
+      "Ancestry premise checked in primary v4.9.3 source: libpod/container_commit.go:57-70,160 imports/commits through Buildah; vendor/github.com/containers/buildah/image.go:250-286,566-647 preserves base history/diff IDs and appends commit history; common/libimage/oci.go:60-94 and layer_tree.go:263-340 recognize the immediate committed parent.",
+      "Tagged/digest-named parents remain protected by names; direct container use can refuse deletion; other images may keep a parent non-dangling. The route is conditional on absence of those protections. No forced in-use deletion, measured prevalence or runtime data loss is asserted. Parent-first removal can preserve layers temporarily; it does not preserve the original base record or prevent eventual loss when remaining owned descendants are removed."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:4885-4889 and SPEC_impl.md:6048-6050,6087-6091 expressly preserve user base images. They prohibit rather than accept this route.",
+      "TODO Planned empty. BUGS.md and active TRIAGE_OUTCOMES searches for pruning, untagged bases, image retirement, Podman and cleanup contain no matching accepted bug/decision. Archive not read.",
+      "plans/queue searched for no-prune, untagged, image retirement/cleanup and Podman. podman-environments.md:251-253 also preserves user bases and is landed per REPORTS.md:21. Agent-operations scope does not fix image pruning; no unlanded plan supplies coverage.",
+      "Full INDEX.md read and image/pruning matches checked. snapshot-cleanup-spec-omits-unrecorded-builder-exception.md covers a Tensorlake-owned package snapshot accepted as another source, with an explicit implementation exception; it does not cover a user-authored local Podman base or default ancestor pruning. No exact queued alias or extension found.",
+      "FILTER.md excludes user-work loss and trust-boundary consequences from the relevant rare-condition filters. No upgrade premise or other exact accepted filter route is needed here."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No missing source premise for the conditional unsupported deletion boundary. Actual presence of sole-copy user-authored contents is a valid input condition, not an observed installation fact. Runtime occurrence remains untested.",
+    "original_stronger_consequence": "Initial high unwanted-base-removal concern included possible highest if an unbacked local image held user work. Latest history establishes the image-ID input, commit ancestry and implicit prune route and recommends highest. Keep both unwanted deletion and conditional sole-copy work loss, with all name/container/dependent-image caveats.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain highest on the supported sole-copy local-base route. Ownership checks and nonforcing removal do not constrain implicit ancestor deletion. Add --no-prune while continuing explicit verified-ID retirement; no dismissal or consequence lowering is proposed."
+  },
+  {
+    "key": "g062/c1",
+    "latest_line": 13,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "deleted-pinned-tmux-builders-dangling-consumers",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Historical executable-source searches find no remaining retired-builder/pin consumer after coordinated deletion. Remaining compatibility fixtures use machine tmux and do not depend on the deleted private build.",
+    "checks": [
+      "At d751ff1633bb479c7bf53920f2e4ea4ba932a1c2, git grep over .github, scripts, crates, e2e, packaging and website/scripts for build-private-tmux, build-pinned-tmux, source-pins.env, ziglang-requirements, build-tmux-assets and tmux-preflight finds no caller. python3-venv remains only in ci.yml:221 for its independent checker setup.",
+      "Same revision: .github/dist-build-setup.yml:157-166 installs distro tmux; 214-232 prepares rootless Podman/user bus. record-test-run.py:1166-1174 retains non-FARHELM environment values. New release recorder commands at release.yml:225-243 have no --tmux or .ci-tmux dependency.",
+      "farhelm-teststate/src/tmux.rs:218-239 resolves machine tmux or prints SKIPPED; farhelm/tests/e2e/old_terminals.rs:244-250 visibly skips if tmux or scope manager is missing. These are the full paths behind the abbreviated latest-record citations.",
+      "The supplied g063/c1 is corroboration, not an inspected named alias in this batch. The earlier c3/647f022 driver-selection argument cannot establish that retired drivers survive d751. No tests/builds executed and no claim that every compatibility substrate actually ran."
+    ],
+    "coverage_checked": [
+      "Both current specs searched for tmux and release payload requirements; current provisioning contract names only farhelm payloads. No accepted rule requires the deleted test builder.",
+      "TODO Planned empty; no matching BUGS or active ledger decision. tmux-drop-from-tooling plan's removal scope is landed per plans/REPORTS.md:31, not an unlanded prospective fix. No other unlanded plan repairs a dangling consumer.",
+      "Full INDEX.md and pinned-builder/dependency searches found no exact queue item. No filter used; refutation is source dependency analysis."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No remaining executable dependency is established. This does not certify external distribution-package features, actual user-manager availability or fixture execution.",
+    "original_stronger_consequence": "Deleting source pins, zig requirements and pinned/private tmux builders might break release or CI commands. Latest record refutes only dangling direct/indirect consumers and preserves compatibility skip limits.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Dismiss the named broken-dependency suspicion on explicit reviewed-revision searches and coordinated caller removal. Do not convert that into a test-coverage/runtime pass claim."
+  },
+  {
+    "key": "g062/c2",
+    "latest_line": 11,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "release-setup-template-generated-workflow-operational-drift",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The inspected operational setup changes are present in the generated workflow at their reviewed revisions. The suspected template-only stale command/dependency route is refuted.",
+    "checks": [
+      "04d85f0c98a9b635709d00b056719a0baa7fd3fc:.github/workflows/release.yml:204-213 installs musl-tools and pulls/runs the pinned Ubuntu digest matching the template concern.",
+      "Paired historical patches checked for d9b5501ba55c3008cebbe2cf8e4fe3eeaff630b2 (bus preparation/export), 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513 (focused step removal), 17a3fe858c5511a24b7403af15dd41c93bf69fd7 (retired artifact names) and 500548b9253b07a26fd03119679184b69544e31d (comment correction). Each changes both template and generated counterpart consistently for this claim.",
+      "d751ff1633bb479c7bf53920f2e4ea4ba932a1c2:release.yml:170-172,201-243,349-358 agrees with dist-build-setup.yml:157-166,207-273 on distro tmux, prerequisites, bus export, pinned image and recorder selection/artifact collection. No generator or runtime execution was performed."
+    ],
+    "coverage_checked": [
+      "Both specs searched for release setup, Podman prerequisites and tmux payload/test requirements; no rule accepts operational generated-workflow drift. The claim is refuted by parity, not spec acceptance.",
+      "TODO Planned empty; BUGS and active TRIAGE_OUTCOMES searches found no corresponding workflow-parity decision. Relevant Podman/tmux plans are landed, and no unlanded plan supplies a matching drift fix.",
+      "Full INDEX.md and release/workflow/pinned-image searches found no exact item. No filter used."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "Parity does not prove external packages remain available or test prerequisites actually execute. Those are outside the exact template-only omission suspicion.",
+    "original_stronger_consequence": "Release gates might miss dependencies, run an unpinned image or use stale commands because only the source template changed. Initial and latest records propose source refutation; no runtime success was observed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Dismiss only operational template/generated-workflow divergence for the named changes. Preserve external-substrate and unrun-generator caveats."
+  },
+  {
+    "key": "g062/c3",
+    "latest_line": 15,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "removed-tmux-release-assets-required-consumer-or-static-check-gap",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The retired tmux artifacts are absent from both production inventory and the validator's declared set, while each remaining archive still produces a binary for architecture/static checks. The exact omitted-current-payload or bypass suspicion is source-refuted.",
+    "checks": [
+      "cb762a313abbe6da03ae0bf041f07486c4ed4df9:provisioning/assets.rs:43-64 declares the same four archives as sign-sums.yml:60-64. assets.rs:88-108 derives checksum names and documents name-based consumer lookup; Cargo.toml has no tmux extra-artifact entry.",
+      "Same revision: sign-sums.yml:139-164 requires every declared archive and metadata member and rejects extras; 173-179 downloads every exact name; 187-234 checks structure/architecture and extracts its binary; 248-258 still dispatches both Linux triples to check-static-elf.sh.",
+      "check-static-elf.sh:51-97 fails missing files, failed inspections, wrong architecture, dynamic dependencies or an interpreter. Removing the bare tmux copy does not empty the set of Linux farhelm binaries extracted by the preceding archive loop.",
+      "Current SPEC_impl.md:8038-8066 describes farhelm as the only host program and four archives plus install.sh in signed sums. The reviewed record cites the corresponding cb762a specification at 8050-8052,8074-8077. External signing/publication tooling was not inspected, and actual artifact bytes were not validated by execution."
+    ],
+    "coverage_checked": [
+      "Both current specifications searched for payloads, checksum lists, tmux and release inventory; SPEC_impl.md's provisioning contract explicitly names the four-archive set. This supports current requirements, not blanket acceptance of missing validation.",
+      "TODO Planned empty; no matching BUGS or active TRIAGE_OUTCOMES decision. tmux-drop-from-install.md release-payload scope is already landed per plans/REPORTS.md:30, and its external-publication caveat is not evidence of a remaining checkout consumer. No unlanded repair covers a separate gap.",
+      "Full INDEX.md and checksum/static-validator/payload-removal searches found no exact queued finding. No filter is used."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No required current payload or omitted remaining static/architecture check is established. External publication behavior and the contents of unrun release artifacts remain unverified.",
+    "original_stronger_consequence": "Removing tmux artifacts and their validation could leave provisioning without a needed executable or publish an unchecked payload. Latest record narrows and refutes the specific inventory/extraction-loop bypass concern while retaining external tooling and actual-byte caveats.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Propose dismissing the exact inventory/static-validation omission on source parity and complete remaining extraction/check paths. Because the original unchecked-payload consequence can involve release integrity, submit this proposed refutation to the independent drop check; this consultation is not that check."
+  }
+]

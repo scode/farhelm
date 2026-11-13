@@ -1,0 +1,787 @@
+{
+  "group": {
+    "id": "g042",
+    "domain": "browser-environment-regressions",
+    "purpose": "browser-environment-regressions: e2e/tests/provisioning.spec.ts, e2e/tests/retired-container-sessions.spec.ts; phases complete small per-commit changes",
+    "interfaces": [
+      "g001",
+      "g006",
+      "g012",
+      "g091",
+      "g092"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00064-000.patch",
+        "ranges": [
+          [
+            1,
+            40
+          ]
+        ],
+        "original_path": "e2e/tests/provisioning.spec.ts",
+        "commit": "9ff03ce91f191ea59f3ce16cefbd0b76d7fe599d",
+        "notes": "patch header; patch character offsets [0,2779)",
+        "lines": 40,
+        "bytes": 2779,
+        "start": 0,
+        "end": 2779,
+        "original": "[private-run]/prep/originals/00064.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00263-000.patch",
+        "ranges": [
+          [
+            1,
+            21
+          ]
+        ],
+        "original_path": "e2e/tests/provisioning.spec.ts",
+        "commit": "350a4b33b6d4476f4a78e43cea124bc2b828f462",
+        "notes": "patch header; patch character offsets [0,1290)",
+        "lines": 21,
+        "bytes": 1290,
+        "start": 0,
+        "end": 1290,
+        "original": "[private-run]/prep/originals/00263.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00328-000.patch",
+        "ranges": [
+          [
+            1,
+            126
+          ]
+        ],
+        "original_path": "e2e/tests/retired-container-sessions.spec.ts",
+        "commit": "04d85f0c98a9b635709d00b056719a0baa7fd3fc",
+        "notes": "patch header; patch character offsets [0,8109)",
+        "lines": 126,
+        "bytes": 8109,
+        "start": 0,
+        "end": 8109,
+        "original": "[private-run]/prep/originals/00328.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01287-000.patch",
+        "ranges": [
+          [
+            1,
+            12
+          ]
+        ],
+        "original_path": "e2e/tests/provisioning.spec.ts",
+        "commit": "500548b9253b07a26fd03119679184b69544e31d",
+        "notes": "patch header; patch character offsets [0,412)",
+        "lines": 12,
+        "bytes": 412,
+        "start": 0,
+        "end": 412,
+        "original": "[private-run]/prep/originals/01287.patch"
+      }
+    ],
+    "lines": 199,
+    "bytes": 12590
+  },
+  "records": [
+    {
+      "key": "g042/c1",
+      "owner": "g042",
+      "id": "c1",
+      "domain": "browser-environment-regressions",
+      "purpose": "browser-environment-regressions: e2e/tests/provisioning.spec.ts, e2e/tests/retired-container-sessions.spec.ts; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Explicitly opening the agent host-add card preserves the intended approval test",
+            "location": "e2e/tests/provisioning.spec.ts:1490",
+            "detail": "Reviewed commit: 9ff03ce91f191ea59f3ce16cefbd0b76d7fe599d. TLDR: Considered whether adding the explicit Open add dialog click removes coverage of an expected automatic opening or weakens protection against agent-triggered setup. It does not: automatic opening is forbidden, and the test still verifies no setup request occurs before Set up despite the saved skip preference, then verifies that origin survives the refused setup and reprobe. Source: provisioning.spec.ts:1442-1521; SPEC.md:4179-4195 (Agent-spawned sessions); SPEC_impl.md:9204-9217. Exact contract: 'The request never opens the dialog by itself, because the user did not start it'; 'An agent add always shows the setup confirmation when installation is needed, whatever the setup preference says, including after a refused setup submission is reopened.' SPEC.md, Keyboard focus / Opening and closing: 'A confirmation the user just opened starts on the action they asked for: focus starts on its enabled confirming button'. Suggested bucket: other (considered test regression, refuted). Confidence: confirmed by source and contract, no runtime observation. proposed_drop: explicit opening and focused Set up assertions follow the quoted contract; original suspected consequence was missing automatic-opening coverage. possible_cover: none known; coverage sources not searched. Could-be-highest: no, this candidate concerns the browser test only and its relevant permission assertions remain present. Caveat: this does not establish every production approval/focus path is correct."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c1",
+            "state": "open",
+            "summary": "Host-add setup test may not distinguish automatic opening from explicit opening",
+            "location": "e2e/tests/provisioning.spec.ts:1490",
+            "detail": "Reviewed commit: 9ff03ce91f191ea59f3ce16cefbd0b76d7fe599d. TLDR: Synthesis corrects the initial candidate's overly broad refutation: requiring an explicit card click follows the contract, but by itself it does not prove that the dialog stayed closed before that click. A regression that opens the form automatically and leaves the card's open button usable could still satisfy this test. Original consequence retained: possible missing coverage of automatic dialog opening, while agent-origin setup and saved-preference protection remain asserted. Source: provisioning.spec.ts:1489-1493 immediately clicks the card after notifying the feed; there is no intervening closed-form assertion in this test. Exact contract from SPEC.md Agent-spawned sessions: 'The request never opens the dialog by itself, because the user did not start it'. Suggested bucket: other (test sensitivity only). Confidence: source establishes this test's missing negative observation; whether another intentional test supplies the contract boundary remains under investigation. proposed_drop: not currently proposed pending source check of the same revision's related host-add test and card handler. possible_cover: none known; no queue/coverage metadata consulted. Could-be-highest: no; no shipped permission bypass or work-loss route established. Missing premise: whether the scenario is already explicitly observed elsewhere and whether the open action remains clickable after automatic opening. Next available checks: same-revision test callers and approval-card admission handler. No execution or reproduction."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Automatic host-add opening is separately observed at the armed-card boundary",
+            "location": "e2e/tests/provisioning.spec.ts:1490",
+            "detail": "Reviewed commit: 9ff03ce91f191ea59f3ce16cefbd0b76d7fe599d. TLDR: Synthesis resolves the temporary lead. This setup-preference test alone is insensitive to an automatic form opening that leaves its card usable; its explicit click does not itself prove that the dialog stayed closed beforehand. The same revision has dedicated arrival tests observing that exact negative boundary, so adding a duplicate assertion here is not required to preserve the intended contract. Original suspected consequence retained: possible missing automatic-opening regression coverage. Source checks: provisioning.spec.ts:1489-1493 clicks immediately after notification without a negative form observation. approvals.rs:549-555 leaves the host-add open button disabled only by busy, so the local sensitivity caveat is real. But approval-layout.spec.ts:198-219 stages a newly arriving request in an established focused terminal, waits for Open add dialog to be enabled (past the arm pause), asserts no add form and retained terminal focus, sends Enter, then asserts no form and no answer; :221-235 separately asserts no form before explicit opening and verifies opening sends no approval. Exact governing contract, SPEC.md Agent-spawned sessions: 'The request never opens the dialog by itself, because the user did not start it'; 'Opening is not approval.' The assigned provisioning test independently retains no-setup-before-confirmation and origin-through-refusal assertions (:1497-1515). Suggested bucket: other (considered test sensitivity regression, refuted across the explicit caller/test boundary). Confidence: confirmed by source; no execution. proposed_drop: the suspected negative boundary is explicitly asserted by the dedicated same-revision arrival tests, while this test preserves its distinct setup-preference contract. possible_cover: same-revision approval-layout.spec.ts:198-235 supplies these assertions; queue and excluded inventory coverage metadata were not consulted. Could-be-highest: no; test sensitivity only and no shipped permission/work-loss route established. Caveat: the assigned test alone would not catch every automatic-opening regression; this revision corrects the initial record's overly broad implication. Lead resolved; candidate remains available for the parent's drop-register check, not accepted or deleted."
+          }
+        }
+      ],
+      "latest": {
+        "line": 8,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Automatic host-add opening is separately observed at the armed-card boundary",
+          "location": "e2e/tests/provisioning.spec.ts:1490",
+          "detail": "Reviewed commit: 9ff03ce91f191ea59f3ce16cefbd0b76d7fe599d. TLDR: Synthesis resolves the temporary lead. This setup-preference test alone is insensitive to an automatic form opening that leaves its card usable; its explicit click does not itself prove that the dialog stayed closed beforehand. The same revision has dedicated arrival tests observing that exact negative boundary, so adding a duplicate assertion here is not required to preserve the intended contract. Original suspected consequence retained: possible missing automatic-opening regression coverage. Source checks: provisioning.spec.ts:1489-1493 clicks immediately after notification without a negative form observation. approvals.rs:549-555 leaves the host-add open button disabled only by busy, so the local sensitivity caveat is real. But approval-layout.spec.ts:198-219 stages a newly arriving request in an established focused terminal, waits for Open add dialog to be enabled (past the arm pause), asserts no add form and retained terminal focus, sends Enter, then asserts no form and no answer; :221-235 separately asserts no form before explicit opening and verifies opening sends no approval. Exact governing contract, SPEC.md Agent-spawned sessions: 'The request never opens the dialog by itself, because the user did not start it'; 'Opening is not approval.' The assigned provisioning test independently retains no-setup-before-confirmation and origin-through-refusal assertions (:1497-1515). Suggested bucket: other (considered test sensitivity regression, refuted across the explicit caller/test boundary). Confidence: confirmed by source; no execution. proposed_drop: the suspected negative boundary is explicitly asserted by the dedicated same-revision arrival tests, while this test preserves its distinct setup-preference contract. possible_cover: same-revision approval-layout.spec.ts:198-235 supplies these assertions; queue and excluded inventory coverage metadata were not consulted. Could-be-highest: no; test sensitivity only and no shipped permission/work-loss route established. Caveat: the assigned test alone would not catch every automatic-opening regression; this revision corrects the initial record's overly broad implication. Lead resolved; candidate remains available for the parent's drop-register check, not accepted or deleted."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g042/findings.jsonl",
+        "id": "c1",
+        "line": 8,
+        "disposition": "under-investigation",
+        "group": "g042-c1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-026",
+          "key": "g042/c1",
+          "latest_line": 8,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "browser-host-add-arrival-negative-observation",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The provisioning test alone lacks a closed-dialog observation, as the intermediate lead correctly states. The same reviewed revision explicitly tests that negative arrival boundary after arming, while the provisioning test retains its separate agent-origin/setup-preference assertions. No missing contract boundary is established across those tests.",
+          "checks": [
+            "At 9ff03ce91f191ea59f3ce16cefbd0b76d7fe599d, e2e/tests/provisioning.spec.ts:1489-1493 immediately clicks the card and cannot itself prove the form stayed closed. Lines 1497-1515 still require no provision before Set up and retained agent origin after refusal/reprobe.",
+            "At that revision, e2e/tests/approval-layout.spec.ts:198-219 stages arrival with an attached focused terminal, waits for the enabled card action, requires zero forms and retained focus, sends Enter, and again requires zero forms and no answers. Lines 221-236 separately require zero forms before explicit opening and no approval from opening.",
+            "At that revision, crates/farhelm-ui/src/approvals.rs:549-555 disables the open button only for busy state. Thus the local provisioning-test sensitivity caveat is real; it is the separate arrival assertions, not the explicit click alone, that refute the wider missing-coverage claim.",
+            "Historical SPEC.md:4179-4194 and SPEC_impl.md:9204-9218 establish explicit opening and mandatory agent setup confirmation. No runtime behavior, execution result or reliability measurement was observed."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:4193-4209 and SPEC_impl.md:8978-9002 preserve card-only arrival, opening-is-not-approval and agent-origin confirmation. They do not accept automatic opening.",
+            "TODO.md Planned is empty (:25-27). BUGS.md's sole SSH-output-holder hang does not cover this test concern.",
+            "Searched plans/queue for host-add, arrival and automatic opening. agent-host-add-card.md acceptance criteria 1-3 and test proposals explicitly place arrival regression coverage in approval-layout and add the click to provisioning. plans/REPORTS.md:20 records it landed; it is not unlanded-plan coverage.",
+            "Read INDEX.md in full and searched matching queue text. ordinary-setup-discards-deferred-agent-add.md and queued-agent-dialog-inherits-elapsed-arm-timer.md concern deferred openings and fresh arming, not absence of the initial negative arrival observation.",
+            "Searched active TRIAGE_OUTCOMES.md; ordinary-setup entry :183-205 addresses lost deferred presentation, not this test boundary. No exact queue/ledger alias or accepted exclusion found. FILTER.md has no complete match and is not the proposed basis."
+          ],
+          "exact_cover_quotes": [
+            "Historical SPEC.md:4181-4182: 'The request never opens the dialog by itself, because the user did not start it'.",
+            "Historical SPEC.md:4182: 'Opening is not approval.'",
+            "Historical approval-layout.spec.ts:213: 'await expect(page.locator(\".add-host-form\")).toHaveCount(0);'; :218 requires staged.answers to equal []."
+          ],
+          "missing_premise": "No shipped approval bypass is established. A narrower combination-specific defect would need evidence that automatic arrival depends on the saved setup preference or another state absent from the dedicated arrival cases; none is shown by these named records.",
+          "original_stronger_consequence": "Initial concern was loss of automatic-opening regression coverage; the first record over-refuted that concern, the intermediate lead restored the provisioning-test-only sensitivity gap, and the final synthesis refuted the suite-level gap using dedicated arrival tests. The provisioning test alone still cannot detect every automatic-opening regression. No production permission bypass was established.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Propose refutation only of the claimed missing suite boundary, with the local sensitivity caveat retained. Because arrival can redirect Enter into an approval surface, send this proposed dismissal through the parent's independent drop check. This consultation does not authorize a drop."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-026.json",
+          "key": "g042/c1",
+          "proposal": "claim-checks/claims-026/result.json",
+          "parent_proposal": "source-refuted-suite-negative-arrival-coverage-gap-with-local-caveat",
+          "final_independent_gate": "required-by-conservative-approval-arrival-flag",
+          "reason": "Parent read full026. Provisioningimmediatecardclickalonecannotproveformstayedclosed; originaloverrefutationwithdrawal preserved. Same9ffrevisiondedicatedapproval-layoutstagesfocusedterminal/armedcard,zeroforms+Enter/focus/noanswersbeforeexplicitopen, thenopeningnotapproval. ProductioncorrectnessNOTtestcoveragebasis; actualindependenttestoraclecoverssuiteboundary. Proposednarrowrefutationwithoutclaimlocaltestorallsetup-preferencecombinationcoverage. OriginalpotentialEnterapprovalredirectionpreservedfreshgate, no demonstratedproductionbypass."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "browser-host-add-arrival-negative-observation",
+        "destination": null
+      }
+    },
+    {
+      "key": "g042/c2",
+      "owner": "g042",
+      "id": "c2",
+      "domain": "browser-environment-regressions",
+      "purpose": "browser-environment-regressions: e2e/tests/provisioning.spec.ts, e2e/tests/retired-container-sessions.spec.ts; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Removing needs_tmux does not remove an exercised provisioning scenario",
+            "location": "e2e/tests/provisioning.spec.ts:53",
+            "detail": "Reviewed commit: 500548b9253b07a26fd03119679184b69544e31d. TLDR: Considered whether removal of the browser fixture's needs_tmux option silently removes setup coverage. The deleted field occurs only in the Behavior type at the parent revision; no browser case sets it. Removing that unused optional declaration changes neither runtime fixture configuration nor assertions. Source checks: git show 500548b9253b07a26fd03119679184b69544e31d^:e2e/tests/provisioning.spec.ts with needs_tmux search returns only line 53; git grep needs_tmux at the reviewed revision over e2e and crates/farhelm-helm returns no matches; assigned patch removes that declaration alone. Suggested bucket: other (suspected loss of test coverage, refuted). Confidence: confirmed by source, no runtime observation. proposed_drop: no scenario or runtime behavior depended on the removed field. possible_cover: none known; coverage sources not searched. Could-be-highest: no; the assigned deletion is a TypeScript-only unused fixture field. Caveat: provisioning implementation changes in that commit belong to other groups and are not reviewed here."
+          }
+        }
+      ],
+      "latest": {
+        "line": 2,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Removing needs_tmux does not remove an exercised provisioning scenario",
+          "location": "e2e/tests/provisioning.spec.ts:53",
+          "detail": "Reviewed commit: 500548b9253b07a26fd03119679184b69544e31d. TLDR: Considered whether removal of the browser fixture's needs_tmux option silently removes setup coverage. The deleted field occurs only in the Behavior type at the parent revision; no browser case sets it. Removing that unused optional declaration changes neither runtime fixture configuration nor assertions. Source checks: git show 500548b9253b07a26fd03119679184b69544e31d^:e2e/tests/provisioning.spec.ts with needs_tmux search returns only line 53; git grep needs_tmux at the reviewed revision over e2e and crates/farhelm-helm returns no matches; assigned patch removes that declaration alone. Suggested bucket: other (suspected loss of test coverage, refuted). Confidence: confirmed by source, no runtime observation. proposed_drop: no scenario or runtime behavior depended on the removed field. possible_cover: none known; coverage sources not searched. Could-be-highest: no; the assigned deletion is a TypeScript-only unused fixture field. Caveat: provisioning implementation changes in that commit belong to other groups and are not reviewed here."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g042/findings.jsonl",
+        "id": "c2",
+        "line": 2,
+        "disposition": "excluded",
+        "group": "browser-unused-needs-tmux-fixture-type-removal",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-026 after inspecting it. The assigned browser-file change removes only an unused optional type property. No provisioning test configuration or assertion used it. Propose source refutation of the unused browser type-field concern only. Its established scope is maintainer-test declarations, without a security or user-work-loss route. Checked source/results: [\"git diff 500548b9253b07a26fd03119679184b69544e31d^..500548b9253b07a26fd03119679184b69544e31d -- e2e/tests/provisioning.spec.ts removes only needs_tmux?: boolean at parent line 53.\",\"Historical parent git grep over e2e finds that declaration plus distinct readme-hero scenario declarations/validation/configuration. Within provisioning.spec.ts it occurs only at line 53. Thus the claim must remain scoped to this browser test, not all parent e2e code.\",\"git grep at 500548b9253b07a26fd03119679184b69544e31d over e2e and crates/farhelm-helm finds no needs_tmux. No runtime test, build or reproduction ran. Provisioning implementation changes are outside this named claim.\"] Current coverage/results: [\"Searched both current specifications for tmux/provisioning and needs_tmux. SPEC.md's installation/uninstall text and SPEC_impl.md:7996-8011 describe no tmux requirement or provisioning payload; this does not itself prove test sensitivity, which the historical diff establishes.\",\"TODO.md Planned is empty. BUGS.md's SSH transfer hang is unrelated. Searched active TRIAGE_OUTCOMES.md and INDEX.md/queue for needs_tmux and the specific browser fixture; no exact finding or decision found.\",\"plans/queue/tmux-drop-from-install.md acceptance criterion 2 explicitly removes the browser needs_tmux field and users, with media authorization at :113-115. plans/REPORTS.md:30 says the plan landed; it is not pending repair coverage.\",\"The user-tmux-jobs plan's needs_tmux_sweep concerns process cleanup, not this optional TypeScript field. FILTER.md does not match this source-refuted coverage concern.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing needs_tmux might silently remove browser setup coverage. That proposed consequence was refuted from its first record, with the caveat that implementation changes in the same commit were assigned elsewhere.\"; \"A lost exercised scenario would require a browser case that configured or depended on this property. The historical file contains none. No conclusion is made about other provisioning implementation changes.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g042/c2",
+        "line": 2,
+        "disposition": "excluded",
+        "group": "browser-unused-needs-tmux-fixture-type-removal",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-026 after inspecting it. The assigned browser-file change removes only an unused optional type property. No provisioning test configuration or assertion used it. Propose source refutation of the unused browser type-field concern only. Its established scope is maintainer-test declarations, without a security or user-work-loss route. Checked source/results: [\"git diff 500548b9253b07a26fd03119679184b69544e31d^..500548b9253b07a26fd03119679184b69544e31d -- e2e/tests/provisioning.spec.ts removes only needs_tmux?: boolean at parent line 53.\",\"Historical parent git grep over e2e finds that declaration plus distinct readme-hero scenario declarations/validation/configuration. Within provisioning.spec.ts it occurs only at line 53. Thus the claim must remain scoped to this browser test, not all parent e2e code.\",\"git grep at 500548b9253b07a26fd03119679184b69544e31d over e2e and crates/farhelm-helm finds no needs_tmux. No runtime test, build or reproduction ran. Provisioning implementation changes are outside this named claim.\"] Current coverage/results: [\"Searched both current specifications for tmux/provisioning and needs_tmux. SPEC.md's installation/uninstall text and SPEC_impl.md:7996-8011 describe no tmux requirement or provisioning payload; this does not itself prove test sensitivity, which the historical diff establishes.\",\"TODO.md Planned is empty. BUGS.md's SSH transfer hang is unrelated. Searched active TRIAGE_OUTCOMES.md and INDEX.md/queue for needs_tmux and the specific browser fixture; no exact finding or decision found.\",\"plans/queue/tmux-drop-from-install.md acceptance criterion 2 explicitly removes the browser needs_tmux field and users, with media authorization at :113-115. plans/REPORTS.md:30 says the plan landed; it is not pending repair coverage.\",\"The user-tmux-jobs plan's needs_tmux_sweep concerns process cleanup, not this optional TypeScript field. FILTER.md does not match this source-refuted coverage concern.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing needs_tmux might silently remove browser setup coverage. That proposed consequence was refuted from its first record, with the caveat that implementation changes in the same commit were assigned elsewhere.\"; \"A lost exercised scenario would require a browser case that configured or depended on this property. The historical file contains none. No conclusion is made about other provisioning implementation changes.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-026",
+          "key": "g042/c2",
+          "latest_line": 2,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "browser-unused-needs-tmux-fixture-type-removal",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The assigned browser-file change removes only an unused optional type property. No provisioning test configuration or assertion used it.",
+          "checks": [
+            "git diff 500548b9253b07a26fd03119679184b69544e31d^..500548b9253b07a26fd03119679184b69544e31d -- e2e/tests/provisioning.spec.ts removes only needs_tmux?: boolean at parent line 53.",
+            "Historical parent git grep over e2e finds that declaration plus distinct readme-hero scenario declarations/validation/configuration. Within provisioning.spec.ts it occurs only at line 53. Thus the claim must remain scoped to this browser test, not all parent e2e code.",
+            "git grep at 500548b9253b07a26fd03119679184b69544e31d over e2e and crates/farhelm-helm finds no needs_tmux. No runtime test, build or reproduction ran. Provisioning implementation changes are outside this named claim."
+          ],
+          "coverage_checked": [
+            "Searched both current specifications for tmux/provisioning and needs_tmux. SPEC.md's installation/uninstall text and SPEC_impl.md:7996-8011 describe no tmux requirement or provisioning payload; this does not itself prove test sensitivity, which the historical diff establishes.",
+            "TODO.md Planned is empty. BUGS.md's SSH transfer hang is unrelated. Searched active TRIAGE_OUTCOMES.md and INDEX.md/queue for needs_tmux and the specific browser fixture; no exact finding or decision found.",
+            "plans/queue/tmux-drop-from-install.md acceptance criterion 2 explicitly removes the browser needs_tmux field and users, with media authorization at :113-115. plans/REPORTS.md:30 says the plan landed; it is not pending repair coverage.",
+            "The user-tmux-jobs plan's needs_tmux_sweep concerns process cleanup, not this optional TypeScript field. FILTER.md does not match this source-refuted coverage concern."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "A lost exercised scenario would require a browser case that configured or depended on this property. The historical file contains none. No conclusion is made about other provisioning implementation changes.",
+          "original_stronger_consequence": "Removing needs_tmux might silently remove browser setup coverage. That proposed consequence was refuted from its first record, with the caveat that implementation changes in the same commit were assigned elsewhere.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Propose source refutation of the unused browser type-field concern only. Its established scope is maintainer-test declarations, without a security or user-work-loss route."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "browser-unused-needs-tmux-fixture-type-removal",
+        "destination": null
+      }
+    },
+    {
+      "key": "g042/c3",
+      "owner": "g042",
+      "id": "c3",
+      "domain": "browser-environment-regressions",
+      "purpose": "browser-environment-regressions: e2e/tests/provisioning.spec.ts, e2e/tests/retired-container-sessions.spec.ts; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Short menu waits retain the per-host busy-state assertions",
+            "location": "e2e/tests/provisioning.spec.ts:3781",
+            "detail": "Reviewed commit: 350a4b33b6d4476f4a78e43cea124bc2b828f462. TLDR: Considered whether the shorter menu timeout lets the regression test pass without showing each host's correct setup state. It does not: the retry encloses both opening the menu and asserting the required enabled/disabled Settings state, and no error is swallowed outside that retry. Source: provisioning.spec.ts:3741-3798 verifies both page rows running, both Settings disabled, then first completed/enabled and second still running/disabled; helpers/fleet.ts:1344-1401 passes options to menu toggle operations, panel visibility and measured-placement polling; :1443-1452 forwards the option from openHostMenu. Provisioning e2e backend action at crates/farhelm-helm/src/provisioning/e2e.rs:206-235 keeps an action held until released or its 30-second failure, supporting the documented reason for releasing retry attempts promptly. Suggested bucket: other (considered false-positive test regression, refuted). Confidence: confirmed by source, no runtime observation. proposed_drop: shortening a readiness wait changes when an attempt retries, not what must pass; an incorrect Settings state still cannot satisfy that attempt. possible_cover: none known; coverage sources not searched. Could-be-highest: no; this is browser-test observation behavior only. Caveats: timeout is per operation, not a one-second deadline for the entire helper; showHostsPanel keeps its ordinary readiness waits, but the caller has already opened that panel before the changing-menu observations. No claim of measured runtime reliability."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Short menu waits preserve busy assertions and held steps are released by teardown",
+            "location": "e2e/tests/provisioning.spec.ts:3781",
+            "detail": "Reviewed commit: 350a4b33b6d4476f4a78e43cea124bc2b828f462. TLDR: The suspected false-positive busy-state regression remains refuted. Synthesis additionally verifies failure cleanup: the test deliberately leaves row two held for its final disabled-Settings observation; afterEach releases every held backend action by publishing the default configuration before removing hosts. Source: provisioning.spec.ts:3741-3798 retains running-row premises and open-plus-enabled/disabled assertions inside toPass; :1118-1130 aborts held setup POST gates, calls configureBackend(), resets confirmation preferences and removes hosts beyond the baseline; :103-108 atomically replaces the backend configuration; :219-231 removes all added host identities, even when the body failed before saving an id. removeHostOnceIdle (:151-209) retries only the explicit busy refusal until removal is admitted, since progress completion precedes lock release. Backend e2e.rs:206-235 rereads behavior during each hold and exits the hold on default hold_actions=false (or errors after 30 seconds). Thus both ordinary assertion failure and the successful final-held observation reach a release path; the test is not relying on the 30-second failure as normal release. Suggested bucket: other (considered test observation/cleanup defect, refuted). Confidence: confirmed by source, not runtime. proposed_drop: the retry preserves the required state and afterEach explicitly releases held management steps. possible_cover: none known; coverage sources not searched. Could-be-highest: no; test-only concern. Caveats: per-operation one-second timeout is not a whole-helper deadline; showHostsPanel retains ordinary waits but the test already opened it. An exception in the teardown's preceding held-gate abort or configuration write could prevent later cleanup; no such failure route is introduced by this assigned timeout patch. No execution evidence or reliability measurement."
+          }
+        }
+      ],
+      "latest": {
+        "line": 6,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Short menu waits preserve busy assertions and held steps are released by teardown",
+          "location": "e2e/tests/provisioning.spec.ts:3781",
+          "detail": "Reviewed commit: 350a4b33b6d4476f4a78e43cea124bc2b828f462. TLDR: The suspected false-positive busy-state regression remains refuted. Synthesis additionally verifies failure cleanup: the test deliberately leaves row two held for its final disabled-Settings observation; afterEach releases every held backend action by publishing the default configuration before removing hosts. Source: provisioning.spec.ts:3741-3798 retains running-row premises and open-plus-enabled/disabled assertions inside toPass; :1118-1130 aborts held setup POST gates, calls configureBackend(), resets confirmation preferences and removes hosts beyond the baseline; :103-108 atomically replaces the backend configuration; :219-231 removes all added host identities, even when the body failed before saving an id. removeHostOnceIdle (:151-209) retries only the explicit busy refusal until removal is admitted, since progress completion precedes lock release. Backend e2e.rs:206-235 rereads behavior during each hold and exits the hold on default hold_actions=false (or errors after 30 seconds). Thus both ordinary assertion failure and the successful final-held observation reach a release path; the test is not relying on the 30-second failure as normal release. Suggested bucket: other (considered test observation/cleanup defect, refuted). Confidence: confirmed by source, not runtime. proposed_drop: the retry preserves the required state and afterEach explicitly releases held management steps. possible_cover: none known; coverage sources not searched. Could-be-highest: no; test-only concern. Caveats: per-operation one-second timeout is not a whole-helper deadline; showHostsPanel retains ordinary waits but the test already opened it. An exception in the teardown's preceding held-gate abort or configuration write could prevent later cleanup; no such failure route is introduced by this assigned timeout patch. No execution evidence or reliability measurement."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g042/findings.jsonl",
+        "id": "c3",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "browser-provisioning-busy-menu-retry-observation",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-026 after inspecting it. Shorter menu waits change when an attempt retries while leaving both menu readiness and enabled/disabled assertions inside the same required retry. Normal assertion failure still reaches the backend release hook. Propose refutation of the named observation and normal-release concern, not a claim that every exceptional teardown path succeeds. The consequences are confined to owned maintainer-test state and do not establish security or user-work loss. Checked source/results: [\"At 350a4b33b6d4476f4a78e43cea124bc2b828f462, provisioning.spec.ts:3741-3798 holds both hosts, observes both running, checks both Settings disabled, releases the first host, then requires first enabled while second remains running and disabled. settingsReads :3779-3785 encloses opening and the state assertion in toPass; no outer swallowed assertion was found.\",\"At that revision, helpers/fleet.ts:1344-1401 passes timeout options to toggle attributes/hover/click, panel visibility, evaluation and measured-placement polling. openHostMenu :1443-1452 forwards them. These are per-operation limits, not a whole-helper one-second deadline; showHostsPanel keeps its ordinary waits and the test already opened Hosts.\",\"provisioning.spec.ts:1118-1130 aborts held setup POST gates, publishes default backend behavior, resets preferences and removes hosts beyond baseline. configureBackend :103-108 atomically replaces config; removeHostsBeyondBaseline :219-231 enumerates actual added IDs, and removeHostOnceIdle :172-208 retries the explicit busy refusal rather than assuming final progress releases the lock.\",\"crates/farhelm-helm/src/provisioning/e2e.rs:206-235 at that revision rereads hold_actions each iteration; default false releases the held action, with a 30-second error fallback. The normal release does not depend on that fallback. A failed earlier teardown abort/config write can still prevent later cleanup; this timeout patch does not introduce that route. No runtime reliability observation was made.\"] Current coverage/results: [\"Current SPEC.md:4689-4721 accepts same-host queueing but exempts other hosts and requires prompt removal refusal. SPEC_impl.md:1149-1152 retains per-host busy serialization. Neither accepts false-positive tests.\",\"TODO.md Planned is empty. BUGS.md's SSH-output-holder hang is distinct from held injected actions and browser menu observation. Searched active TRIAGE_OUTCOMES.md and plans/queue for the test, busy rows, hold_actions and menu waits; no unlanded repair or acceptance of this concern found.\",\"host-progress-hover.md's configuration example and test references concern hover contents and current-step following (:49-94), not busy-state Settings assertions. It is not exact coverage.\",\"INDEX.md and matching queue searches reveal separate hidden-progress-test-observes-unaffected-host and host-removal-preference concerns, not this test's shorter-wait oracle. No exact alias found. FILTER.md is not used; rarity alone would not refute this oracle concern.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Short menu waits might allow incorrect per-host busy state to pass, or leave the final held action poisoning later tests. Both ordinary paths are source-refuted. Earlier and latest caveats about per-operation deadlines, ordinary panel waits, preceding teardown failure and absent runtime measurements remain.\"; \"No demonstrated false-pass state satisfies the required wrong Settings assertion. Actual reliability or a global one-second helper deadline is not established. Cleanup depends on preceding teardown steps succeeding, and the record must not promise otherwise.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g042/c3",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "browser-provisioning-busy-menu-retry-observation",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-026 after inspecting it. Shorter menu waits change when an attempt retries while leaving both menu readiness and enabled/disabled assertions inside the same required retry. Normal assertion failure still reaches the backend release hook. Propose refutation of the named observation and normal-release concern, not a claim that every exceptional teardown path succeeds. The consequences are confined to owned maintainer-test state and do not establish security or user-work loss. Checked source/results: [\"At 350a4b33b6d4476f4a78e43cea124bc2b828f462, provisioning.spec.ts:3741-3798 holds both hosts, observes both running, checks both Settings disabled, releases the first host, then requires first enabled while second remains running and disabled. settingsReads :3779-3785 encloses opening and the state assertion in toPass; no outer swallowed assertion was found.\",\"At that revision, helpers/fleet.ts:1344-1401 passes timeout options to toggle attributes/hover/click, panel visibility, evaluation and measured-placement polling. openHostMenu :1443-1452 forwards them. These are per-operation limits, not a whole-helper one-second deadline; showHostsPanel keeps its ordinary waits and the test already opened Hosts.\",\"provisioning.spec.ts:1118-1130 aborts held setup POST gates, publishes default backend behavior, resets preferences and removes hosts beyond baseline. configureBackend :103-108 atomically replaces config; removeHostsBeyondBaseline :219-231 enumerates actual added IDs, and removeHostOnceIdle :172-208 retries the explicit busy refusal rather than assuming final progress releases the lock.\",\"crates/farhelm-helm/src/provisioning/e2e.rs:206-235 at that revision rereads hold_actions each iteration; default false releases the held action, with a 30-second error fallback. The normal release does not depend on that fallback. A failed earlier teardown abort/config write can still prevent later cleanup; this timeout patch does not introduce that route. No runtime reliability observation was made.\"] Current coverage/results: [\"Current SPEC.md:4689-4721 accepts same-host queueing but exempts other hosts and requires prompt removal refusal. SPEC_impl.md:1149-1152 retains per-host busy serialization. Neither accepts false-positive tests.\",\"TODO.md Planned is empty. BUGS.md's SSH-output-holder hang is distinct from held injected actions and browser menu observation. Searched active TRIAGE_OUTCOMES.md and plans/queue for the test, busy rows, hold_actions and menu waits; no unlanded repair or acceptance of this concern found.\",\"host-progress-hover.md's configuration example and test references concern hover contents and current-step following (:49-94), not busy-state Settings assertions. It is not exact coverage.\",\"INDEX.md and matching queue searches reveal separate hidden-progress-test-observes-unaffected-host and host-removal-preference concerns, not this test's shorter-wait oracle. No exact alias found. FILTER.md is not used; rarity alone would not refute this oracle concern.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Short menu waits might allow incorrect per-host busy state to pass, or leave the final held action poisoning later tests. Both ordinary paths are source-refuted. Earlier and latest caveats about per-operation deadlines, ordinary panel waits, preceding teardown failure and absent runtime measurements remain.\"; \"No demonstrated false-pass state satisfies the required wrong Settings assertion. Actual reliability or a global one-second helper deadline is not established. Cleanup depends on preceding teardown steps succeeding, and the record must not promise otherwise.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-026",
+          "key": "g042/c3",
+          "latest_line": 6,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "browser-provisioning-busy-menu-retry-observation",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Shorter menu waits change when an attempt retries while leaving both menu readiness and enabled/disabled assertions inside the same required retry. Normal assertion failure still reaches the backend release hook.",
+          "checks": [
+            "At 350a4b33b6d4476f4a78e43cea124bc2b828f462, provisioning.spec.ts:3741-3798 holds both hosts, observes both running, checks both Settings disabled, releases the first host, then requires first enabled while second remains running and disabled. settingsReads :3779-3785 encloses opening and the state assertion in toPass; no outer swallowed assertion was found.",
+            "At that revision, helpers/fleet.ts:1344-1401 passes timeout options to toggle attributes/hover/click, panel visibility, evaluation and measured-placement polling. openHostMenu :1443-1452 forwards them. These are per-operation limits, not a whole-helper one-second deadline; showHostsPanel keeps its ordinary waits and the test already opened Hosts.",
+            "provisioning.spec.ts:1118-1130 aborts held setup POST gates, publishes default backend behavior, resets preferences and removes hosts beyond baseline. configureBackend :103-108 atomically replaces config; removeHostsBeyondBaseline :219-231 enumerates actual added IDs, and removeHostOnceIdle :172-208 retries the explicit busy refusal rather than assuming final progress releases the lock.",
+            "crates/farhelm-helm/src/provisioning/e2e.rs:206-235 at that revision rereads hold_actions each iteration; default false releases the held action, with a 30-second error fallback. The normal release does not depend on that fallback. A failed earlier teardown abort/config write can still prevent later cleanup; this timeout patch does not introduce that route. No runtime reliability observation was made."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:4689-4721 accepts same-host queueing but exempts other hosts and requires prompt removal refusal. SPEC_impl.md:1149-1152 retains per-host busy serialization. Neither accepts false-positive tests.",
+            "TODO.md Planned is empty. BUGS.md's SSH-output-holder hang is distinct from held injected actions and browser menu observation. Searched active TRIAGE_OUTCOMES.md and plans/queue for the test, busy rows, hold_actions and menu waits; no unlanded repair or acceptance of this concern found.",
+            "host-progress-hover.md's configuration example and test references concern hover contents and current-step following (:49-94), not busy-state Settings assertions. It is not exact coverage.",
+            "INDEX.md and matching queue searches reveal separate hidden-progress-test-observes-unaffected-host and host-removal-preference concerns, not this test's shorter-wait oracle. No exact alias found. FILTER.md is not used; rarity alone would not refute this oracle concern."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No demonstrated false-pass state satisfies the required wrong Settings assertion. Actual reliability or a global one-second helper deadline is not established. Cleanup depends on preceding teardown steps succeeding, and the record must not promise otherwise.",
+          "original_stronger_consequence": "Short menu waits might allow incorrect per-host busy state to pass, or leave the final held action poisoning later tests. Both ordinary paths are source-refuted. Earlier and latest caveats about per-operation deadlines, ordinary panel waits, preceding teardown failure and absent runtime measurements remain.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Propose refutation of the named observation and normal-release concern, not a claim that every exceptional teardown path succeeds. The consequences are confined to owned maintainer-test state and do not establish security or user-work loss."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "browser-provisioning-busy-menu-retry-observation",
+        "destination": null
+      }
+    },
+    {
+      "key": "g042/c4",
+      "owner": "g042",
+      "id": "c4",
+      "domain": "browser-environment-regressions",
+      "purpose": "browser-environment-regressions: e2e/tests/provisioning.spec.ts, e2e/tests/retired-container-sessions.spec.ts; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Retirement browser fixture deliberately tests presentation rather than container execution",
+            "location": "e2e/tests/retired-container-sessions.spec.ts:16",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: Considered whether ordinary backing sessions and a refused Delete make this test falsely claim real container lifecycle coverage. The test explicitly limits itself to browser presentation and dispatch. It rewrites both list and detail launch metadata for the retired row, rewrites the other session's host as a provider-backed container, and leaves that second session's actual terminal transport intact. The real command launch is asserted at :36-38, the retired marker is supplied at :39-42 and :61-74, and assertions at :81-113 check Delete-only UI, no terminal surface/socket, one confirmed DELETE request with visible refusal, and a real ordinary terminal on the provider-labelled host. Its header states exactly: 'HTTP rewrites change only presentation: no old container or new Podman environment is created'; its test doc states: 'A refused Delete proves the surviving action dispatches without removing the real backing fixture; supervisor cleanup semantics have separate coverage.' Contract: SPEC.md:4816-4823 says 'Existing sessions support Delete only' and refuses terminal/lifecycle access; SPEC_impl.md:8642-8656 says new environments use ordinary supervisor paths while old stored ContainerConfig identifies retirement. UI lib.rs:691-695 classifies retirement from stored selection.container; session_view.rs:2356-2649 excludes lifecycle controls, :3723-3730 excludes terminal surfaces. The Delete answer captures the shown id and shown confirmation token at session_view.rs:2713-2720. Fixture helpers createSession and cleanupSession use the independent API request context; drainedRoute cleanup removes page-only rewrites before backing fixture deletion. Suggested bucket: other (considered misleading test premise/coverage, refuted). Confidence: confirmed by source and contract, no runtime observation. proposed_drop: the mocked boundary is explicit and its assertions distinguish stored legacy launch from provider host kind; real Podman creation/removal is outside this browser test's declared contract. possible_cover: none known; the test's assertion of separate supervisor coverage was not independently used as evidence or checked against coverage sources. Could-be-highest: no, no shipped security or work-loss route established by this test-only concern. Caveat: neither successful legacy container removal nor real provider lifecycle execution is demonstrated by this test."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Retirement fixture cleans real backing sessions after its limited presentation assertions",
+            "location": "e2e/tests/retired-container-sessions.spec.ts:115",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: Synthesis confirms that a failed browser assertion, route setup, or second-session creation still enters finally and attempts cleanup of every successfully recorded backing session. The refused browser Delete does not remove its backing session; ordinary real Stop/Delete in teardown does. Original considered consequence retained: fixture might overclaim real container lifecycle coverage; that remains refuted by its explicit limited presentation contract. Source: retired-container-sessions.spec.ts:29-33 records each returned id immediately after creation within try; :115-120 finally passes route-stop steps followed by reversed owned ids to cleanupOwnedSteps. helpers/cleanup.ts attempts later steps after an earlier rejection, retains the original assertion failure and reports cleanup errors; helpers/fleet.ts:576-588 uses the separate APIRequestContext to Stop with both refusal guards disabled and then Delete, tolerating 404. Page routes intercept only browser requests and do not fabricate these cleanup results. Helpers/drained-route.ts stops admitting rewrite work, waits for in-flight callbacks, then removes its handler. Assertions :81-113 occur before teardown and distinguish old stored launch from provider kind, show the confirmation before clicking its submit, require no earlier mutation then exactly one DELETE with visible refusal, and require readiness/FAKE-AGENT READY from the current session's own attachment. Contract: SPEC.md Retired containerized sessions says 'Existing sessions support Delete only'; SPEC_impl.md Rootless Podman sessions says new containers use ordinary supervisor paths. Exact fixture scope: 'HTTP rewrites change only presentation: no old container or new Podman environment is created'; 'A refused Delete proves the surviving action dispatches without removing the real backing fixture'. Suggested bucket: other (considered test premise/cleanup defect, refuted for the claimed boundary). Confidence: confirmed by source, no runtime observation. proposed_drop: the mocked boundary is explicit, real backing-session cleanup is attempted independently, and failure of an earlier cleanup step does not skip later ids. possible_cover: none known; separate supervisor-coverage claim not used as evidence, coverage sources not searched. Could-be-highest: no; test fixture only, no shipped work-loss route. Caveats: a server create accepted without a usable response cannot supply an id to owned; this shared createSession API limitation is not solved here. A hung cleanup step is not a rejection and can exhaust teardown time. Neither hypothetical transport failure establishes an assigned-change defect. Real Podman creation/removal is not tested; actual Stop/Delete teardown acts on ordinary owned-stack sessions, not legacy containers. This revision supersedes any implication that the backing session survives the whole test."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Retirement fixture observes its declared UI boundary and cleans ordinary backing sessions",
+            "location": "e2e/tests/retired-container-sessions.spec.ts:115",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: Final synthesis keeps the presentation-only interpretation and verifies the attachment boundary. No real container creation/removal is established. Original suspected consequence retained: a mocked fixture could overclaim lifecycle coverage or leave its real backing sessions behind after a failed assertion. Source: retired-container-sessions.spec.ts:29-33 records returned ids immediately inside try, :81-113 asserts retired controls/socket absence then confirmed DELETE dispatch with a fabricated refusal and a live ordinary current-session attachment; :115-120 finally attempts route stops and cleanup for every recorded id. helpers/cleanup.ts continues after rejected cleanup steps; helpers/fleet.ts:576-588 independently sends real Stop/Delete through APIRequestContext with both process/tab refusal guards disabled, tolerating 404. These teardown requests bypass page presentation routes. Thus the browser refusal leaves old backing state for inspection, but teardown removes that ordinary session. Setup failure after the first id is recorded still cleans it; failures before try allocate no owned sessions. helpers/drained-route.ts stops rewrite admission and drains callbacks before unroute. helpers/term.ts:406-423 selects the requested row then calls waitForSessionReady(page,id); helpers/terminal-readiness.ts:364-379 requires a mounted island, matching open socket, revealed replay and focus without forcing focus. waitForTermText polls the agent buffer (:376-392), after that identity/reveal boundary. tabs.rs:255-264 places both agent and tab sockets below /api/sessions/{encoded-id}/, matching the fixture's decoded-prefix observation. Delete submit captures shown id and confirmation token (session_view.rs:2713-2720). Contract: SPEC.md Retired containerized sessions, 'Existing sessions support Delete only'; SPEC_impl.md Rootless Podman sessions says current containers use ordinary supervisor paths. Exact fixture scope: 'HTTP rewrites change only presentation: no old container or new Podman environment is created'; 'A refused Delete proves the surviving action dispatches without removing the real backing fixture'. Suggested bucket: other (considered test-boundary/cleanup defect, refuted within the stated contract). Confidence: confirmed by source only. proposed_drop: explicit mock boundary, identity/replay readiness before buffer observation, and independent real backing-session teardown support the stated presentation/dispatch contract. possible_cover: none known; no queue/coverage metadata used or separate supervisor coverage verified. Could-be-highest: no; no shipped security or work-loss route established. Caveats: create accepted without usable response cannot supply an owned id; a hung cleanup step can exhaust teardown time, unlike a rejected step. Neither hypothetical shared-helper transport failure establishes an assigned-change defect. Test checks control visibility, not successful execution of each current-container lifecycle action. Backing cleanup is ordinary-session Stop/Delete, not proof of legacy Podman cleanup. Candidate remains for parent's drop-register check."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Retirement fixture has limited presentation coverage; primary-error preservation is not established",
+            "location": "e2e/tests/retired-container-sessions.spec.ts:115",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: Preserve the original presentation/dispatch and owned-ID cleanup refutations, while correcting the earlier assertion that the original body error necessarily stays primary. The distinct new in-body cleanup-status defect is linked finding f1, to be reconciled by the parent with its existing cleanup-status-masks-body-assertion mechanism. Original suspected consequences retained: the mocked fixture might overclaim real container lifecycle coverage or leave backing sessions after an assertion failure. The former remains refuted by the explicit mock boundary; for the latter, finally attempts cleanup of recorded ids, but neither successful removal nor universal primary-error preservation follows. Source: test :29-33 records returned ids within try; :81-113 checks retired controls/socket absence, confirmed DELETE dispatch/refusal and current-session readiness. :114-118 passes info.status !== info.expectedStatus from the body's own finally. helpers/cleanup.ts:6-19 continues after rejected steps, then logs only if bodyFailed, otherwise throws AggregateError. The caller-supplied Playwright 1.64.0 runner timing evidence (corresponding to package-lock.json :13-20,42-49,58-60 checked this turn) means a first hard assertion may not have updated info.status there. Therefore the earlier c4 statement 'retains the original assertion failure' is withdrawn; step/trace evidence can retain it while the propagating callback error is replaced by cleanup AggregateError. Owned fixture cleanup remains independent of page routes: helpers/fleet.ts:576-588 sends real Stop/Delete using APIRequestContext, with process/tab refusal guards disabled and 404 tolerated; the helper attempts remaining steps after rejection, not after an unbounded hang. Other retained source bases: helpers/term.ts:406-423 and terminal-readiness.ts:364-379 bind readiness to requested session's mounted island, matching open socket, revealed replay and focus before buffer observation; tabs.rs:255-264 supports the decoded socket path filter; session_view.rs:2713-2720 captures shown Delete id and confirmation token. Contract: SPEC.md Retired containerized sessions, 'Existing sessions support Delete only'; SPEC_impl.md Rootless Podman sessions gives current containers ordinary supervisor paths. Exact test boundary: 'HTTP rewrites change only presentation: no old container or new Podman environment is created'; 'A refused Delete proves the surviving action dispatches without removing the real backing fixture'. Suggested bucket: other (original test-boundary candidate). Confidence: source-supported with the supplied locked-runner premise; no runtime observation. proposed_drop: preserve the original limited grounds only: explicit presentation mocks, stored-launch/provider distinction, identity/replay readiness and independent attempts to clean recorded backing ids refute overclaiming real provider execution or selecting arbitrary sessions. This proposed drop does not cover f1's primary-error diagnostic defect; no parent drop accepted. possible_cover: f1 links the newly supplied existing mechanism; no forbidden queue/coverage sources read. Could-be-highest: no. Caveats retained: an accepted create without usable reply cannot provide an owned id; hung cleanup can exhaust teardown time; visible lifecycle controls do not prove successful provider operations; real ordinary-session teardown does not prove legacy Podman cleanup. Local e2e/node_modules/playwright is absent, so dependency internals were not independently reread or installed here; exact version/caller/helper correspondence was checked, and the runner premise is attributed to the supplied source evidence."
+          }
+        }
+      ],
+      "latest": {
+        "line": 12,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c4",
+          "state": "open",
+          "summary": "Retirement fixture has limited presentation coverage; primary-error preservation is not established",
+          "location": "e2e/tests/retired-container-sessions.spec.ts:115",
+          "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: Preserve the original presentation/dispatch and owned-ID cleanup refutations, while correcting the earlier assertion that the original body error necessarily stays primary. The distinct new in-body cleanup-status defect is linked finding f1, to be reconciled by the parent with its existing cleanup-status-masks-body-assertion mechanism. Original suspected consequences retained: the mocked fixture might overclaim real container lifecycle coverage or leave backing sessions after an assertion failure. The former remains refuted by the explicit mock boundary; for the latter, finally attempts cleanup of recorded ids, but neither successful removal nor universal primary-error preservation follows. Source: test :29-33 records returned ids within try; :81-113 checks retired controls/socket absence, confirmed DELETE dispatch/refusal and current-session readiness. :114-118 passes info.status !== info.expectedStatus from the body's own finally. helpers/cleanup.ts:6-19 continues after rejected steps, then logs only if bodyFailed, otherwise throws AggregateError. The caller-supplied Playwright 1.64.0 runner timing evidence (corresponding to package-lock.json :13-20,42-49,58-60 checked this turn) means a first hard assertion may not have updated info.status there. Therefore the earlier c4 statement 'retains the original assertion failure' is withdrawn; step/trace evidence can retain it while the propagating callback error is replaced by cleanup AggregateError. Owned fixture cleanup remains independent of page routes: helpers/fleet.ts:576-588 sends real Stop/Delete using APIRequestContext, with process/tab refusal guards disabled and 404 tolerated; the helper attempts remaining steps after rejection, not after an unbounded hang. Other retained source bases: helpers/term.ts:406-423 and terminal-readiness.ts:364-379 bind readiness to requested session's mounted island, matching open socket, revealed replay and focus before buffer observation; tabs.rs:255-264 supports the decoded socket path filter; session_view.rs:2713-2720 captures shown Delete id and confirmation token. Contract: SPEC.md Retired containerized sessions, 'Existing sessions support Delete only'; SPEC_impl.md Rootless Podman sessions gives current containers ordinary supervisor paths. Exact test boundary: 'HTTP rewrites change only presentation: no old container or new Podman environment is created'; 'A refused Delete proves the surviving action dispatches without removing the real backing fixture'. Suggested bucket: other (original test-boundary candidate). Confidence: source-supported with the supplied locked-runner premise; no runtime observation. proposed_drop: preserve the original limited grounds only: explicit presentation mocks, stored-launch/provider distinction, identity/replay readiness and independent attempts to clean recorded backing ids refute overclaiming real provider execution or selecting arbitrary sessions. This proposed drop does not cover f1's primary-error diagnostic defect; no parent drop accepted. possible_cover: f1 links the newly supplied existing mechanism; no forbidden queue/coverage sources read. Could-be-highest: no. Caveats retained: an accepted create without usable reply cannot provide an owned id; hung cleanup can exhaust teardown time; visible lifecycle controls do not prove successful provider operations; real ordinary-session teardown does not prove legacy Podman cleanup. Local e2e/node_modules/playwright is absent, so dependency internals were not independently reread or installed here; exact version/caller/helper correspondence was checked, and the runner premise is attributed to the supplied source evidence."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g042/findings.jsonl",
+        "id": "c4",
+        "line": 12,
+        "disposition": "excluded",
+        "group": "browser-retirement-fixture-declared-presentation-boundary",
+        "reason": "Parent accepts the corrected narrow source refutation after full claims-026 and original revision12. The test expressly promises only HTTP-rewritten presentation/dispatch over real ordinary backing sessions; positive retired/current readiness and exact-id observers distinguish its stated boundary. IDs are recorded inside try and separate cleanup steps attempt actual API Stop/Delete independently of page mocks. This does not prove real Podman creation/removal, every cleanup success, recovery before an ID exists, or primary-error preservation. That last earlier overstatement is explicitly withdrawn and retained separately as f1's existing-item extension. Hung steps and Stop transport failure remain limitations, not universal source-refutation claims."
+      },
+      "accepted_parent_decision": {
+        "key": "g042/c4",
+        "line": 12,
+        "disposition": "excluded",
+        "group": "browser-retirement-fixture-declared-presentation-boundary",
+        "bucket": "other",
+        "recording": "refuted-narrow-declared-boundary",
+        "needs_independent_drop_check": false,
+        "reason": "Parent accepts the corrected narrow source refutation after full claims-026 and original revision12. The test expressly promises only HTTP-rewritten presentation/dispatch over real ordinary backing sessions; positive retired/current readiness and exact-id observers distinguish its stated boundary. IDs are recorded inside try and separate cleanup steps attempt actual API Stop/Delete independently of page mocks. This does not prove real Podman creation/removal, every cleanup success, recovery before an ID exists, or primary-error preservation. That last earlier overstatement is explicitly withdrawn and retained separately as f1's existing-item extension. Hung steps and Stop transport failure remain limitations, not universal source-refutation claims."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-026",
+          "key": "g042/c4",
+          "latest_line": 9,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "browser-retirement-fixture-declared-presentation-boundary",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The test explicitly declares presentation and dispatch coverage, records returned fixture IDs before later assertions, and attempts each route/session cleanup independently. It neither claims nor demonstrates real Podman creation or legacy removal. The refutation must not carry forward the earlier unconditional primary-error-preservation statement.",
+          "checks": [
+            "At 04d85f0c98a9b635709d00b056719a0baa7fd3fc, retired-container-sessions.spec.ts:1-15 declares real ordinary backing sessions and HTTP presentation rewrites, no old/new container creation, and a refused Delete as dispatch evidence. Lines 29-33 record each returned ID within try before later setup/assertions.",
+            "Lines 43-74 bind mutation/socket observation and list/detail launch rewrites to the retired ID; :81-103 observes selected retired UI, absent terminal/tab/header lifecycle surfaces, an explicit confirmation, no earlier mutation, and exactly one refused DELETE. Lines 104-113 attach the current ID, require FAKE-AGENT READY and normal control visibility, and require no retired-ID socket.",
+            "helpers/term.ts:406-423 selects the requested ID then calls waitForSessionReady. helpers/terminal-readiness.ts:364-379 requires matching open socket, mounted island, revealed replay and focus before term buffer polling (:376-392). tabs.rs:255-264 uses the session-ID path prefix that the fixture observes. session_view.rs:2713-2720 captures the shown ID and shown confirmation token.",
+            "retired-container-sessions.spec.ts:114-118 passes each route stop and reversed owned ID as a separate cleanupOwnedSteps step. helpers/cleanup.ts:6-19 catches each rejection and continues subsequent steps. helpers/drained-route.ts:39-42 stops rewrite admission, waits for tracked callbacks and unroutes. helpers/fleet.ts:576-588 sends real Stop/Delete via independent APIRequestContext; page routes do not fabricate those responses.",
+            "Cleanup is an attempt, not an absolute guarantee: accepted create without a usable response supplies no owned ID; hung steps can exhaust teardown time; a Stop transport rejection skips that ID's Delete inside cleanupSession. The last is already recorded in cleanup-stop-transport-error-skips-delete.md. Neither successful legacy cleanup nor actual current-container lifecycle execution is demonstrated. No runtime check ran."
+          ],
+          "coverage_checked": [
+            "Historical SPEC.md:4816-4823 and SPEC_impl.md:8642-8656, plus current SPEC.md:4892-4899 and SPEC_impl.md:8312-8326, distinguish legacy Delete-only stored launches from ordinary supervisor paths in new provider environments. They do not waive successful production container cleanup.",
+            "TODO.md Planned is empty; BUGS.md is unrelated. Searched active TRIAGE_OUTCOMES.md and plans/queue for retired-container/presentation/fixture/cleanup. podman-environments.md retirement acceptance (:453-455) governs the product but plans/REPORTS.md:21 records it landed, so it is not pending repair coverage.",
+            "Read INDEX.md and matching queue items cleanup-stop-transport-error-skips-delete.md, route-retirement-failure-skips-owned-session-cleanup.md and cleanup-status-masks-body-assertion.md. Independent supplied steps avoid the route-failure-skips-later-ID root here. Existing Stop transport and own-finally primary-error roots remain relevant caveats, not refutations of presentation coverage.",
+            "No exact queued alias for the named overclaimed-container-lifecycle concern found. No FILTER.md boundary fully matches and none is used."
+          ],
+          "exact_cover_quotes": [
+            "Historical test :2-3: 'HTTP rewrites change only presentation: no old container or new Podman environment is created'.",
+            "Historical test :14-15: 'A refused Delete proves the surviving action dispatches without removing the real backing fixture'."
+          ],
+          "missing_premise": "Separate supervisor cleanup coverage asserted in the header was not independently verified and is not used as evidence. Successful real Podman creation/removal and successful execution of each current-container action remain outside this test's scope. The earlier history's claim that cleanup always preserves the original assertion is too strong.",
+          "original_stronger_consequence": "A presentation-mocked fixture might overclaim real lifecycle coverage or leave ordinary backing sessions behind after an assertion/setup failure. Source refutes an ordinary missing-finally/skip-later-ID path and the lifecycle overclaim. The intermediate statement that the refused backing session survives the whole test was superseded: teardown attempts real ordinary-session Stop/Delete. Pre-ID create loss, a hung cleanup step and shared helper transport failure remain caveats.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Propose refutation only of the declared-boundary and ordinary owned-ID cleanup concern. Do not describe this as proof of actual container cleanup, universal resource reclamation or primary-assertion preservation. All established consequences here concern owned maintainer fixtures, without catastrophic tooling or user-work loss.",
+          "new_interface_evidence": "Useful extension to existing review_feedback_queue/cleanup-status-masks-body-assertion.md: at 04d85f0c98a9b635709d00b056719a0baa7fd3fc, retired-container-sessions.spec.ts:115 passes info.status !== info.expectedStatus from the callback's own finally to unchanged helpers/cleanup.ts:6-19. e2e/package-lock.json pins the same Playwright/core 1.64.0 as the existing item's dependency assessment. This is another concrete caller of that recorded root, so the earlier c4 history's unconditional primary-error-preservation wording should not survive. Dependency worker timing was not independently re-investigated here; no reproduction ran. The existing cleanupSession transport root also applies at the new call, but is already documented and is not a new lifecycle finding."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "browser-retirement-fixture-declared-presentation-boundary",
+        "destination": null
+      }
+    },
+    {
+      "key": "g042/c5",
+      "owner": "g042",
+      "id": "c5",
+      "domain": "browser-environment-regressions",
+      "purpose": "browser-environment-regressions: e2e/tests/provisioning.spec.ts, e2e/tests/retired-container-sessions.spec.ts; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c5",
+            "state": "open",
+            "summary": "Fixed fixture titles do not select another project's session",
+            "location": "e2e/tests/retired-container-sessions.spec.ts:30",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: Discovery considered whether fixed retired-container-row/new-container-row titles allow another browser project or prior fixture to satisfy the retirement assertions or be deleted by cleanup. Source refutes this route: test lines 30-33 retain server-returned ids, lines 43-50 and 65-74 bind response rewrites and socket/mutation observations to the old id, line 83 selects the row by id, line 104 attaches the current id and lines 115-118 clean only owned ids. The title-based menu locator is used only after opening the id-selected old row; the existing one-menu-at-a-time helper does not search for a session by title. e2e/playwright.config.ts:120-136 explicitly runs one worker per owned stack slot, keeps tests serial within each project, and :170-173 gives each engine/spec pair its own project. Suggested bucket: other (considered fixture identity/isolation defect, refuted). Confidence: confirmed by source only. proposed_drop: fixed display titles are not fixture ownership or session-selection identifiers; server ids and per-worker stacks isolate the operations. possible_cover: none known; no prohibited coverage sources consulted. Could-be-highest: no, no route to user-owned state or another agent's session is established. Caveat: this does not claim title uniqueness globally; it establishes that the test does not rely on such uniqueness for mutations or attachment. No runtime execution or reproduction."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c5",
+          "state": "open",
+          "summary": "Fixed fixture titles do not select another project's session",
+          "location": "e2e/tests/retired-container-sessions.spec.ts:30",
+          "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: Discovery considered whether fixed retired-container-row/new-container-row titles allow another browser project or prior fixture to satisfy the retirement assertions or be deleted by cleanup. Source refutes this route: test lines 30-33 retain server-returned ids, lines 43-50 and 65-74 bind response rewrites and socket/mutation observations to the old id, line 83 selects the row by id, line 104 attaches the current id and lines 115-118 clean only owned ids. The title-based menu locator is used only after opening the id-selected old row; the existing one-menu-at-a-time helper does not search for a session by title. e2e/playwright.config.ts:120-136 explicitly runs one worker per owned stack slot, keeps tests serial within each project, and :170-173 gives each engine/spec pair its own project. Suggested bucket: other (considered fixture identity/isolation defect, refuted). Confidence: confirmed by source only. proposed_drop: fixed display titles are not fixture ownership or session-selection identifiers; server ids and per-worker stacks isolate the operations. possible_cover: none known; no prohibited coverage sources consulted. Could-be-highest: no, no route to user-owned state or another agent's session is established. Caveat: this does not claim title uniqueness globally; it establishes that the test does not rely on such uniqueness for mutations or attachment. No runtime execution or reproduction."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g042/findings.jsonl",
+        "id": "c5",
+        "line": 10,
+        "disposition": "under-investigation",
+        "group": "g042-c5",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-026",
+          "key": "g042/c5",
+          "latest_line": 10,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "browser-retirement-fixed-title-session-ownership",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The fixed display titles do not choose the selected session, intercepted identity, attachment or destructive cleanup target. Those operations use the exact returned IDs, and each worker owns its stack slot.",
+          "checks": [
+            "At 04d85f0c98a9b635709d00b056719a0baa7fd3fc, retired-container-sessions.spec.ts:30-33 records server-returned IDs; :43-50 binds observations to old.id; :65-74 rewrites only its list/detail row; :81-89 selects and opens the old-ID row; :104 attaches current.id; :115-118 cleans only the recorded IDs.",
+            "The title locator at :90 follows openRowMenu(oldRow). It locates the currently open menu's accessible name; it does not find a session or derive a mutation target from title. Helpers/term.ts:406-423 independently selects by data-session-id and waits for that ID's readiness.",
+            "e2e/playwright.config.ts:119-136 requires one worker per independent stack slot and serial tests within a project. Lines 170-177 create separate engine/spec projects; :179-180 documents independent port/state/credential per slot. Titles need not be globally unique for this design.",
+            "session_view.rs:2713-2720 captures the shown session ID and confirmation token for Delete. No runtime cross-project interference, accidental deletion or reproduction was observed."
+          ],
+          "coverage_checked": [
+            "Searched SPEC.md and SPEC_impl.md for fixed/duplicate titles, retirement and identity; SPEC.md:1996-1997 expressly allows duplicate titles. The retirement contracts at SPEC.md:4892-4899 and SPEC_impl.md:8312-8326 define behavior, not fixture-title ownership. The refutation rests on ID-bound source operations.",
+            "TODO.md Planned is empty. BUGS.md's SSH-output-holder hang is unrelated. Searched active TRIAGE_OUTCOMES.md, plans/queue, INDEX.md and queue for fixed/duplicate/same titles and this retirement fixture; no exact acceptance, known bug, queued root or unlanded repair found.",
+            "podman-environments.md is landed per plans/REPORTS.md:21; its retirement criteria do not cover wrong-fixture deletion. Existing cleanup items concern missed cleanup or reporting rather than selecting another session by title. No exact same-root alias among c4 or the existing queue found. FILTER.md is not used."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "The suspected wrong-session route needs a title-based choice that can supply another session's ID to attachment or cleanup. The reviewed test uses the returned IDs throughout. Global title uniqueness is neither shown nor required.",
+          "original_stronger_consequence": "Fixed fixture titles might let another project or prior fixture satisfy retirement assertions or have its session deleted. The stronger wrong-target cleanup possibility is preserved for independent checking even though source refutes the proposed title-to-target route.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Propose source refutation of title-based target confusion, retaining the absence of a global uniqueness claim. Because the original concern included deleting another agent's session or user-owned work, the parent must independently check this proposed dismissal. This consultation does not authorize dropping it."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-026.json",
+          "key": "g042/c5",
+          "proposal": "claim-checks/claims-026/result.json",
+          "parent_proposal": "source-refuted-fixed-title-wrong-fixture-attachment-delete",
+          "final_independent_gate": "required-before-original-work-target-drop",
+          "reason": "Full026 returnedsessionIDsownobservations,rowrewrites,rowmenuopen,attachmentandcleanup; titlelocatoriscurrentmenuaccessiblelabelafterIDboundopen, no title→mutationidentityroute. Perstackslotworkerisolationandserialprojecttestsprovidecontext, notglobaltitleuniquenessclaim. Preserveoriginalotheragent/userworkdeletepossibilityforfreshcheck, boundedtitlerouteonly notallcleanupmisses/concurrency. Independentfixturecleanupissue042c4separate."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "browser-retirement-fixed-title-session-ownership",
+        "destination": null
+      }
+    },
+    {
+      "key": "g042/f1",
+      "owner": "g042",
+      "id": "f1",
+      "domain": "browser-environment-regressions",
+      "purpose": "browser-environment-regressions: e2e/tests/provisioning.spec.ts, e2e/tests/retired-container-sessions.spec.ts; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f1",
+            "state": "open",
+            "summary": "Retirement test can replace its body assertion with a cleanup error",
+            "location": "e2e/tests/retired-container-sessions.spec.ts:115",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: When this browser regression test first fails a hard assertion and its cleanup also fails, the reported callback error can become an AggregateError about cleanup instead of the assertion that exposed the regression. This complicates diagnosis; assertion step/trace evidence remains, so the original assertion is not universally lost. Source checked: new retired-container-sessions.spec.ts:114-118 reads info.status !== info.expectedStatus inside the body's own finally and passes that value to cleanupOwnedSteps. Unchanged helpers/cleanup.ts:6-19 attempts each step, but only logs cleanup errors when bodyFailed is true; with false it throws AggregateError. e2e/package-lock.json:13-20,42-49,58-60 pins @playwright/test, playwright and playwright-core to 1.64.0. Caller-supplied already-recorded dependency source evidence establishes the timing premise for that locked runner: a hard expect records its failing step and rethrows before test status is changed; the runner awaits the complete callback, including finally, before its outer catch records body failure. Therefore a first hard assertion can leave info.status equal to expectedStatus in this finally; throwing cleanup AggregateError replaces the propagating assertion under JavaScript finally semantics. This timing differs from reading status in afterEach. Contract: the helper's own lines 3-4 promise 'An assertion failure remains the primary failure; cleanup errors accompany it in stderr.' The new caller does not reliably provide the argument needed for that contract. Capture body failure explicitly with catch/rethrow plus a local flag before finally, as appropriate for an in-body cleanup caller. Suggested bucket: other (test failure diagnostics, no product security/work-loss route). Confidence: confirmed source analysis using locally checked caller/helper/locked-version correspondence plus the expressly supplied runner-source premise; no runtime observation or reproduction. proposed_drop: false. possible_cover: caller explicitly identifies existing mechanism cleanup-status-masks-body-assertion at other call sites and will extend it with this new in-range caller; no queue metadata read or searched. This is a linked caller finding, not a request for a second mechanism entry. Could-be-highest: no. Caveats: requires both a body hard assertion failure and cleanup rejection; helper still attempts later cleanup steps, and page-route separation/owned-id cleanup remain valid. This does not refute c4's narrow presentation/dispatch coverage or establish successful real Podman removal. Attribution: this test and its in-body status argument are introduced by the assigned commit, even though the helper already existed. No universal cleanup success or primary-error preservation is claimed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 11,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "f1",
+          "state": "open",
+          "summary": "Retirement test can replace its body assertion with a cleanup error",
+          "location": "e2e/tests/retired-container-sessions.spec.ts:115",
+          "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: When this browser regression test first fails a hard assertion and its cleanup also fails, the reported callback error can become an AggregateError about cleanup instead of the assertion that exposed the regression. This complicates diagnosis; assertion step/trace evidence remains, so the original assertion is not universally lost. Source checked: new retired-container-sessions.spec.ts:114-118 reads info.status !== info.expectedStatus inside the body's own finally and passes that value to cleanupOwnedSteps. Unchanged helpers/cleanup.ts:6-19 attempts each step, but only logs cleanup errors when bodyFailed is true; with false it throws AggregateError. e2e/package-lock.json:13-20,42-49,58-60 pins @playwright/test, playwright and playwright-core to 1.64.0. Caller-supplied already-recorded dependency source evidence establishes the timing premise for that locked runner: a hard expect records its failing step and rethrows before test status is changed; the runner awaits the complete callback, including finally, before its outer catch records body failure. Therefore a first hard assertion can leave info.status equal to expectedStatus in this finally; throwing cleanup AggregateError replaces the propagating assertion under JavaScript finally semantics. This timing differs from reading status in afterEach. Contract: the helper's own lines 3-4 promise 'An assertion failure remains the primary failure; cleanup errors accompany it in stderr.' The new caller does not reliably provide the argument needed for that contract. Capture body failure explicitly with catch/rethrow plus a local flag before finally, as appropriate for an in-body cleanup caller. Suggested bucket: other (test failure diagnostics, no product security/work-loss route). Confidence: confirmed source analysis using locally checked caller/helper/locked-version correspondence plus the expressly supplied runner-source premise; no runtime observation or reproduction. proposed_drop: false. possible_cover: caller explicitly identifies existing mechanism cleanup-status-masks-body-assertion at other call sites and will extend it with this new in-range caller; no queue metadata read or searched. This is a linked caller finding, not a request for a second mechanism entry. Could-be-highest: no. Caveats: requires both a body hard assertion failure and cleanup rejection; helper still attempts later cleanup steps, and page-route separation/owned-id cleanup remain valid. This does not refute c4's narrow presentation/dispatch coverage or establish successful real Podman removal. Attribution: this test and its in-body status argument are introduced by the assigned commit, even though the helper already existed. No universal cleanup success or primary-error preservation is claimed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g042/findings.jsonl",
+        "id": "f1",
+        "line": 11,
+        "disposition": "verified",
+        "group": "cleanup-status-masks-body-assertion",
+        "reason": "Parent read complete originalf1 and c4 revision, focused claims-026 and the entire existing cleanup-status-masks-body-assertion file. New04d85f0c retired-container-sessions.spec.ts:114-118 passes info.status!==info.expectedStatus from its own finally to unchanged helpers/cleanup.ts:6-19. Locally checked lock1.64.0 matches the existing item's retained runner-source proof: first hard expect rethrows before status update, and outer callback catch records failure after finally. Cleanup AggregateError can replace that propagating assertion, whose step/trace still survives. This is a useful in-range caller extension of the exact existing mechanism, not a second root or a claim of runtime failure injection. Ordinary presentation/readiness/independent cleanup attempts remain sound; cofailure incidence unmeasured. No exact specification/Planned/unlanded-plan/BUGS/active-outcome acceptance or complete rare filter covers the extension beyond existing root."
+      },
+      "accepted_parent_decision": {
+        "key": "g042/f1",
+        "line": 11,
+        "disposition": "verified",
+        "group": "cleanup-status-masks-body-assertion",
+        "bucket": "other",
+        "recording": "extend-existing",
+        "queue_target_candidate": "review_feedback_queue/cleanup-status-masks-body-assertion.md",
+        "needs_independent_drop_check": false,
+        "reason": "Parent read complete originalf1 and c4 revision, focused claims-026 and the entire existing cleanup-status-masks-body-assertion file. New04d85f0c retired-container-sessions.spec.ts:114-118 passes info.status!==info.expectedStatus from its own finally to unchanged helpers/cleanup.ts:6-19. Locally checked lock1.64.0 matches the existing item's retained runner-source proof: first hard expect rethrows before status update, and outer callback catch records failure after finally. Cleanup AggregateError can replace that propagating assertion, whose step/trace still survives. This is a useful in-range caller extension of the exact existing mechanism, not a second root or a claim of runtime failure injection. Ordinary presentation/readiness/independent cleanup attempts remain sound; cofailure incidence unmeasured. No exact specification/Planned/unlanded-plan/BUGS/active-outcome acceptance or complete rare filter covers the extension beyond existing root."
+      },
+      "returned_claim_checks": [],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "cleanup-status-masks-body-assertion",
+        "destination": "trailing-cleanup-status-masks-body-assertion.md"
+      }
+    },
+    {
+      "key": "g042/c6",
+      "owner": "g042",
+      "id": "c6",
+      "domain": "browser-environment-regressions",
+      "purpose": "browser-environment-regressions: e2e/tests/provisioning.spec.ts, e2e/tests/retired-container-sessions.spec.ts; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c6",
+            "state": "open",
+            "summary": "Legacy retirement fixture matches the pinned launch decoder",
+            "location": "e2e/tests/retired-container-sessions.spec.ts:40",
+            "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: Discovery checked whether the fabricated old launch uses a removed image_file key or omits required selection fields, making the browser test exercise a decoding failure instead of the intended retired-session presentation. The same-revision decoder explicitly supports this wire shape. Source: retired-container-sessions.spec.ts:40-42 supplies kind agent, codex harness, model/effort/permissions null, podman container, image_file, valid nonzero u16 api_proxy_port, start argv and null resume. farhelm-proto/src/launch.rs:580-615 defines selection fields with defaults for the omitted optional additions; :624-627 decodes podman; :643-658 explicitly accepts legacy image_file via IgnoredAny, defaults absent image and optional github_token_file; :660-667 keeps a ContainerConfig object even when only the historical image_file was present. Presence of that object is the retirement marker, as selection docs :600-604 declare. The fixture asserts the positive retired label/card before its absent-control observations (:84-88), so an unreadable launch cannot silently count as retired presentation. Suggested bucket: other (considered malformed-fixture/false-oracle defect, refuted). Confidence: confirmed by source only, not runtime. proposed_drop: the pinned decoding contract explicitly preserves the historical key and omitted optional fields; a missing image does not remove the stored container choice. possible_cover: none known; no prohibited queue or coverage metadata consulted. Could-be-highest: no; browser fixture decode concern only. Caveat: this demonstrates acceptance of the presentation fixture's historical shape, not successful execution or removal of a real legacy container, and does not alter f1's independent diagnostic finding. No runtime tests or reproductions."
+          }
+        }
+      ],
+      "latest": {
+        "line": 13,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c6",
+          "state": "open",
+          "summary": "Legacy retirement fixture matches the pinned launch decoder",
+          "location": "e2e/tests/retired-container-sessions.spec.ts:40",
+          "detail": "Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc. TLDR: Discovery checked whether the fabricated old launch uses a removed image_file key or omits required selection fields, making the browser test exercise a decoding failure instead of the intended retired-session presentation. The same-revision decoder explicitly supports this wire shape. Source: retired-container-sessions.spec.ts:40-42 supplies kind agent, codex harness, model/effort/permissions null, podman container, image_file, valid nonzero u16 api_proxy_port, start argv and null resume. farhelm-proto/src/launch.rs:580-615 defines selection fields with defaults for the omitted optional additions; :624-627 decodes podman; :643-658 explicitly accepts legacy image_file via IgnoredAny, defaults absent image and optional github_token_file; :660-667 keeps a ContainerConfig object even when only the historical image_file was present. Presence of that object is the retirement marker, as selection docs :600-604 declare. The fixture asserts the positive retired label/card before its absent-control observations (:84-88), so an unreadable launch cannot silently count as retired presentation. Suggested bucket: other (considered malformed-fixture/false-oracle defect, refuted). Confidence: confirmed by source only, not runtime. proposed_drop: the pinned decoding contract explicitly preserves the historical key and omitted optional fields; a missing image does not remove the stored container choice. possible_cover: none known; no prohibited queue or coverage metadata consulted. Could-be-highest: no; browser fixture decode concern only. Caveat: this demonstrates acceptance of the presentation fixture's historical shape, not successful execution or removal of a real legacy container, and does not alter f1's independent diagnostic finding. No runtime tests or reproductions."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g042/findings.jsonl",
+        "id": "c6",
+        "line": 13,
+        "disposition": "excluded",
+        "group": "legacy-retirement-fixture-pinned-launch-decoder",
+        "reason": "Parent read complete discovery event13: reviewed04d85f0c launch.rs:580-615 defaults omitted optional selection fields;:624-627 decodes Podman;:643-658 explicitly accepts image_file and defaults image/token;:660-667 retains ContainerConfig as the retired marker. Fixture:40-42 supplies the remaining required fields, and:84-88 requires a positive retired label/card before absence observations. The suspected unreadable-launch false pass is source-refuted, without claiming any real container execution/removal or runtime test pass. No security/work-loss route was alleged, and no coverage/filter exception is needed."
+      },
+      "accepted_parent_decision": {
+        "key": "g042/c6",
+        "line": 13,
+        "disposition": "excluded",
+        "group": "legacy-retirement-fixture-pinned-launch-decoder",
+        "bucket": "other",
+        "recording": "refuted-fixture-decoding-premise",
+        "needs_independent_drop_check": false,
+        "reason": "Parent read complete discovery event13: reviewed04d85f0c launch.rs:580-615 defaults omitted optional selection fields;:624-627 decodes Podman;:643-658 explicitly accepts image_file and defaults image/token;:660-667 retains ContainerConfig as the retired marker. Fixture:40-42 supplies the remaining required fields, and:84-88 requires a positive retired label/card before absence observations. The suspected unreadable-launch false pass is source-refuted, without claiming any real container execution/removal or runtime test pass. No security/work-loss route was alleged, and no coverage/filter exception is needed."
+      },
+      "returned_claim_checks": [],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "legacy-retirement-fixture-pinned-launch-decoder",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial pass complete: all four assigned patches reviewed at their recorded revisions.\n\nNo reportable findings or unresolved leads. Four refuted candidates are recorded in [findings.jsonl]([private-run]/g042/findings.jsonl); [progress.md]([private-run]/g042/progress.md) records coverage and limits. No tests or reproductions run."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised c1, c3 and c4 with source checks for automatic-opening sensitivity, held-action release, failure cleanup and attachment readiness. c1’s temporary lead is resolved; c2 is unchanged.\n\nNo new findings. c1–c4 remain preserved for the parent’s drop check. Unresolved lead IDs: none."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass complete. Checked full-range path history, fixture identity and isolation, request/socket matching, provider lookup and backend schema compatibility.\n\nRecorded c5 as a refuted isolation candidate. New verified findings: none. New unverified findings: none. Open leads: none.\n\nNo new reportable issue found. Progress updated; source analysis only."
+    },
+    {
+      "turn": 4,
+      "reply": "Added f1: the new caller can replace a body assertion with a cleanup AggregateError. Linked it to the parent-supplied existing mechanism.\n\nRevised c4 to withdraw primary-error preservation while retaining its narrow coverage and cleanup-attempt conclusions.\n\nUnresolved lead IDs: none."
+    },
+    {
+      "turn": 5,
+      "reply": "Checked legacy fixture decoding, retirement assertions, menu structure/readiness, provider-state predicates and full-range path history.\n\nRecorded c6 as a refuted fixture-decoding candidate. New verified findings: none. New unverified findings: none. Open leads: none.\n\nNo new reportable issue found. Discovery count updated to 2."
+    }
+  ],
+  "progress": "Group g042: browser-environment-regressions.\nTurn type/count: initial review, turn 1 complete. Later discovery-pass count: 0. No synthesis pass performed.\nCoverage: all four assigned patch packets read in full through the evidence reader (199 lines, 12,590 bytes), including each intermediate recorded revision. Complete inventory commits field read; excluded coverage metadata not read. No unread assigned material.\nContracts checked: pinned SPEC.md agent host-add approval and Keyboard focus sections; pinned SPEC_impl.md Answers bind to what was drawn and host-add continuation contract; pinned SPEC.md Container sessions and Retired containerized sessions; pinned SPEC_impl.md Rootless Podman sessions; per-host waiting contract. Source context checked at each relevant revision, including provisioning test premises/retries, fixture backend hold, menu helpers, retirement predicate, terminal surface gating, Delete answer binding, route cleanup and backing session helpers.\nRecords appended this pass: candidates c1-c4, all confirmed source refutations with proposed_drop bases. New verified findings: none. New unverified findings: none. Open leads: none.\nInterface assumptions: retirement depends on stored launch selection.container, not provider host kind. The retirement browser test rewrites presentation only and does not claim real Podman lifecycle execution. Its backing sessions use the owned stack and API-request cleanup independent of page routes. Provisioning menu retry changes observation timing while retaining required Settings state and page-state premises. Host-add card explicitly opens its ordinary form; saved confirmation preference does not authorize agent setup.\nEvidence limits: source-only conclusions. No tests, builds, bug reproductions, live installation operations, checkout edits, or helper agents. No queue/coverage sources consulted. An oversized preliminary specification search was clipped; the relevant governing sections were subsequently read in bounded context calls. Mandatory patch packets were also delivered again directly as stdout to remove outer tool-result encoding ambiguity.\nNext action: return to caller for the separately requested synthesis or discovery turn. Findings log is the complete durable record; no separate report file created.\n\nTurn type/count: later-turn synthesis, turn 2 complete. Later discovery-pass count: 0.\nDelta: revised c1 (temporary lead then resolved candidate), c3 and c4 under original IDs. c2 unchanged. All c1-c4 remain preserved and open as candidates for the parent's drop-register check; no drop accepted here. No new verified/unverified findings. Open leads: none.\nCross-batch checks: unused needs_tmux declaration removal does not change the retained backend hold configuration, afterEach cleanup or menu observation. Held actions reread the default configuration published by afterEach; host deletion retries only explicit busy refusal through release. Retirement finally runs after assertion/partial setup failure for recorded ids; cleanup rejects do not skip later steps. Page mocks do not affect real API-context Stop/Delete teardown. Identity-matching socket/replay/focus readiness precedes current-session buffer observation; decoded attachment path filter covers agent and tabs. UI controls are asserted for presence, not exercised as real provider lifecycle operations.\nSensitivity correction: the changed provisioning host-add test alone would allow an automatic open while the open-card button remains usable; dedicated same-revision approval-layout arrival and explicit-opening tests assert no form before opening, after the arm pause, and retained terminal focus/Enter behavior. c1 now states that boundary rather than overclaiming this one test's sensitivity.\nNo unread assigned material. No runtime tests/builds/reproductions or checkout changes. Source-derived conclusions only. Next: return delta; await separately requested later discovery/synthesis turn.\n\nTurn type/count: separate discovery, turn 3 complete. Discovery-pass count: 1.\nFirst read discovery-neighbours.json completely (69 lines, 14,309 bytes). No named pending questions. Interface context was used for novelty only; no neighbour issue was re-reported or treated as source proof.\nDiscovery checks beyond known candidates: checked the full exclusive-base/inclusive-tip path history and endpoint provisioning diff, confirming that the four assigned commits exhaust changes to these two files within the range; re-examined retirement request/socket matching, id-specific rewrites and ownership; checked browser project/worker isolation and one-menu ownership against fixed fixture titles; checked that provider-host lookup uses session.host plus is_session_owned and an environment provider, matching the rewritten host; checked the post-tmux-removal backend schema still accepts the remaining Behavior fields and keeps holds default-false. These are source checks, not runtime observations.\nAppended c5 immediately on deciding the fixed-title/isolation concern was refuted. New verified finding IDs: none. New unverified-after-investigation finding IDs: none. New candidate IDs: c5. Remaining lead IDs: none. Existing c1-c4 unchanged this turn and preserved for independent drop checking. No parent drops/lowerings accepted here.\nResult: no new reportable issue found. One additional refuted candidate is durably recorded. No unread assigned scope, no execution/reproductions/live-install actions, no checkout modifications and no prohibited coverage-source searches.\nNext: return discovery delta and await caller.\n\nTurn type/count: reopened later-turn synthesis, turn 4 complete. Discovery-pass count remains 1; no new discovery performed this turn.\nRead complete findings history before revising. Checked only the named late interface input: pinned retirement caller :114-118, complete cleanup helper and locked @playwright/test/playwright/playwright-core 1.64.0 dependency correspondence. The test is a new file in the assigned commit, making this a new in-range caller of the pre-existing mechanism. Local e2e/node_modules/playwright is absent; no installation/download performed. Runner timing is specifically attributed to the parent-supplied already-recorded source evidence, not runtime or an independent local dependency read.\nAppended linked finding f1 (other, confirmed source analysis with supplied runner premise): a first hard assertion may leave status equal to expectedStatus inside its own finally, so a subsequent cleanup AggregateError replaces the propagating assertion. Assertion step/trace evidence remains. Parent will extend the existing cleanup-status-masks-body-assertion mechanism, not create a duplicate. No queue metadata consulted.\nRevised c4 under original ID to withdraw universal primary-error preservation, retaining all original consequences and limited presentation/dispatch/owned-ID cleanup proposed-drop bases. c4 does not dismiss f1. c1-c3 and c5 unchanged. No parent drop/lowering accepted.\nNew verified finding IDs: f1. New unverified-after-investigation IDs: none. Open lead IDs: none. No readily checkable caller/helper/lockfile premise remains unresolved. No tests/builds/reproductions/live actions/checkout edits or unrelated searches. Next: return synthesis delta; await separate post-audit discovery.\n\nTurn type/count: separate post-reopen discovery, turn 5 complete. Discovery-pass count: 2.\nRead refreshed discovery-neighbours.json completely (78 lines, 24,528 bytes) before source search. No named pending questions. Interface findings served only as novelty context; no neighbouring issue was repeated or treated as source validation.\nChecks beyond recorded mechanisms: rechecked same-revision legacy fixture selection/container wire fields against LaunchSelection and ContainerConfigWire (including decode-only image_file, defaults, engine and port), positive retirement label/card before absence assertions, menu accessibility structure and retired keyboard order, provider controls' admitted-host/frozen-state predicates, and each menu-open operation's explicit timeout/readiness conditions. Rechecked complete-range assigned-path history (four commits only) and retained Behavior declaration at the later tmux-removal revision. No issue was attributed merely from an immediate-parent comparison.\nAppended new candidate c6 immediately when its malformed-legacy-fixture concern was refuted by the pinned decoder contract. No existing finding/candidate changed this turn; original consequences/proposed-drop bases remain preserved. f1 remains open as the previously reported linked diagnostic mechanism; it is not new in this pass. No parent drops or lowerings accepted.\nNew verified finding IDs: none. New unverified-after-investigation finding IDs: none. New candidate IDs: c6. Remaining lead IDs: none. Explicit result: no new reportable issue found.\nAll conclusions source-only. No runtime tests/builds/reproductions/live actions, checkout edits, installs, nested agents or prohibited coverage searches. No unread assigned scope. Next: return discovery delta and await caller.\n"
+}

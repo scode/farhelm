@@ -1,0 +1,765 @@
+{
+  "group": {
+    "id": "g064",
+    "domain": "podman-environments",
+    "purpose": "podman-environments: crates/farhelm-helm/src/environment/podman_probe.rs, crates/farhelm-helm/src/store/podman.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g022",
+      "g023",
+      "g024",
+      "g025",
+      "g026",
+      "g027",
+      "g028",
+      "g029",
+      "g055",
+      "g056",
+      "g057",
+      "g058",
+      "g059",
+      "g060",
+      "g065",
+      "g067",
+      "g068",
+      "g003"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00149-000.patch",
+        "ranges": [
+          [
+            1,
+            676
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/environment/podman_probe.rs",
+        "commit": "04ffdbb35773cef36e73eb798c005ddbeb9a9de6",
+        "notes": "patch header; patch character offsets [0,26192)",
+        "lines": 676,
+        "bytes": 26192,
+        "start": 0,
+        "end": 26192,
+        "original": "[private-run]/prep/originals/00149.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00157-000.patch",
+        "ranges": [
+          [
+            1,
+            660
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/store/podman.rs",
+        "commit": "04ffdbb35773cef36e73eb798c005ddbeb9a9de6",
+        "notes": "patch header; patch character offsets [0,26255)",
+        "lines": 660,
+        "bytes": 26255,
+        "start": 0,
+        "end": 26255,
+        "original": "[private-run]/prep/originals/00157.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01524-000.patch",
+        "ranges": [
+          [
+            1,
+            28
+          ]
+        ],
+        "original_path": "crates/farhelm-helm/src/environment/podman_probe.rs",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,1484)",
+        "lines": 28,
+        "bytes": 1484,
+        "start": 0,
+        "end": 1484,
+        "original": "[private-run]/prep/originals/01524.patch"
+      }
+    ],
+    "lines": 1364,
+    "bytes": 53931
+  },
+  "records": [
+    {
+      "key": "g064/c1",
+      "owner": "g064",
+      "id": "c1",
+      "domain": "podman-environments",
+      "purpose": "podman-environments: crates/farhelm-helm/src/environment/podman_probe.rs, crates/farhelm-helm/src/store/podman.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Initial registration and create-marker APIs are staged without production creation callers",
+            "location": "crates/farhelm-helm/src/store/podman.rs:249",
+            "detail": "Reviewed commit: 04ffdbb35773cef36e73eb798c005ddbeb9a9de6. TLDR: No user-visible creation defect established from the initial storage API alone. Details: Considered whether registration requires login coordinates before lazy preparation, contrary to SPEC_impl.md, Disposable environments, which says pending registration may lack login coordinates. At this revision git grep for register_session_container, set_podman_pending_create and set_podman_container_id finds only their definitions and test callers; environment/mod.rs explicitly describes staged assembly and Providers::with_tensorlake leaves Podman absent. The API's dead_code annotations say the next provider unit owns creation. Therefore no shipped creation route at this recorded revision depends on this shape. Suggested bucket: other; confidence: confirmed source analysis of this revision; proposed_drop: no production creation caller at this revision, rather than specification acceptance; possible_cover: none. Could-be-highest: no established loss-of-work or security consequence; later provider integration belongs to the adjacent assigned groups. No execution performed."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c1",
+            "state": "open",
+            "summary": "Recheck login and place admission through the integrated creation caller",
+            "location": "crates/farhelm-helm/src/store/podman.rs:249",
+            "detail": "Reviewed foundation commit: 04ffdbb35773cef36e73eb798c005ddbeb9a9de6; integrated caller commit: 56659839785691f76da3af5d8f51b511cff4ba8b, with endpoint checks at 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: The foundation-only absence of callers does not settle whether the integrated launch records the correct place and complete login identity before sending create. Details: Endpoint source search finds environment/mod.rs:134 calling register_pending_session_container and :171 calling admit_podman_install, with provider create/identity observations in environment/podman.rs. Required invariant: registration retains recipe/place/reserved-name intent without fabricated login coordinates; observed complete login identity, prepared facts and pending-send marker must be admitted atomically before create. Place retarget refusal protects only an already-referenced row, not an earlier approval. Initial candidate rejection is reopened for caller checks. Suggested bucket: other pending established impact; confidence: unverified, investigation active; proposed_drop: false; possible_cover: g065 integrated provider and g068 storage updates own these interfaces, g020/l1 concerns earlier approval. Could-be-highest: if a mismatched place or identity could send credentials to an unintended target or affect unconfirmed user work; no such route established yet. No execution performed."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Integrated creation admits observed login and selected facts before run",
+            "location": "crates/farhelm-helm/src/store/podman.rs:256",
+            "detail": "Reviewed foundation commit: 04ffdbb35773cef36e73eb798c005ddbeb9a9de6; integrated commit checked: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: The suspected use of guessed login coordinates is refuted by the integrated storage and creation path, rather than by the foundation having no callers. Details: SPEC_impl.md:6430-6434 requires pending registration to allow absent login coordinates, then atomically save complete observed login, selected prepared facts and pending-send marker before creation. store/podman.rs:353-361 registers pending login as None; the complete-coordinate registration seam at :335 is cfg(test). set_podman_prepared_create at :256-278 updates the three login columns, prepared facts and send marker in one conditional SQL statement, comparing entry UUID, name, place, recipe, prior pending marker and prior login and refusing an existing container or admitted paths. environment/podman.rs:1097-1115 checks any already-recorded login matches the selected image and requires that SQL admission to succeed; only then does :1116-1125 send run using that selected image. decode_binding at :145-171 rejects partial login or a canonical-ID/admitted row without login. admit_podman_install at :297-329 requires canonical ID and full login and compares the inspected binding. Required invariant is therefore satisfied for this login/facts concern. Suggested bucket if true: high for broken launch, potentially highest if wrong identity caused credential disclosure or damage; confidence: confirmed source refutation of this concern; proposed_drop: exact integrated conditional write and caller ordering quoted above establish the invariant; possible_cover: g065 and g068 own these interfaces. Could-be-highest: potentially, but no wrong-login security or loss-of-work route established. This conclusion does not cover first approval before registration: the referenced-place retarget refusal only applies after the row exists, and g020/l1 owns that separate earlier-phase concern. No execution performed."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Integrated creation admits observed login and selected facts before run",
+            "location": "crates/farhelm-helm/src/store/podman.rs:256",
+            "detail": "Reviewed foundation commit: 04ffdbb35773cef36e73eb798c005ddbeb9a9de6; integrated commit: 56659839785691f76da3af5d8f51b511cff4ba8b; checked through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: Integrated creation does not require a guessed account before preparation. Details: Required invariant from SPEC_impl.md:6430-6434: pending registration may omit login, then observed complete login, prepared installation facts and send marker are recorded atomically before external creation; exec requires canonical ID and full login. Production environment/mod.rs:134 calls register_pending_session_container; store/podman.rs:353-361 registers login None and :335 marks complete-coordinate registration cfg(test). set_podman_prepared_create at :256-278 atomically records three login columns, prepared facts and send marker, comparing entry UUID, name, place, recipe, prior marker and login and refusing canonical ID or admitted paths. environment/podman.rs:1097-1115 checks any recorded login against the selected image and requires conditional admission success; :1116-1125 then sends run with the selected image. decode_binding at store/podman.rs:148-164 rejects partial login and identity/admission without login. admit_podman_install at :297-329 requires canonical ID/full login and compares inspected coordinates. Caller provisioning/tensorlake_add.rs:391-398 registers before provider I/O; :452 takes the host provisioning lock; environment_session_steps :521-555 prepares then creates, :567-593 reads that resource's saved facts and admits installation before credential delivery at :597-605. Diff through range endpoint leaves this store and creation path unchanged; only the provider lifecycle lock helper and an unrelated Tensorlake re-setup seal check changed. Suggested bucket if true: high for broken launch, potentially highest for credential disclosure or loss of work; confidence: confirmed source refutation of guessed-login concern; proposed_drop: integrated source satisfies login/facts invariant, not foundation timing. possible_cover: g065/g068 own these interfaces; g020/l1 (latest supplied line 9, read this turn) independently establishes pre-registration approval/retarget authority and credential impact. Could-be-highest: potentially, but this guessed-login concern has no established route. This rejection does not cover the approval phase before registration: the referenced-place refusal begins only once resource/image/helper references exist. No execution performed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 9,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Integrated creation admits observed login and selected facts before run",
+          "location": "crates/farhelm-helm/src/store/podman.rs:256",
+          "detail": "Reviewed foundation commit: 04ffdbb35773cef36e73eb798c005ddbeb9a9de6; integrated commit: 56659839785691f76da3af5d8f51b511cff4ba8b; checked through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: Integrated creation does not require a guessed account before preparation. Details: Required invariant from SPEC_impl.md:6430-6434: pending registration may omit login, then observed complete login, prepared installation facts and send marker are recorded atomically before external creation; exec requires canonical ID and full login. Production environment/mod.rs:134 calls register_pending_session_container; store/podman.rs:353-361 registers login None and :335 marks complete-coordinate registration cfg(test). set_podman_prepared_create at :256-278 atomically records three login columns, prepared facts and send marker, comparing entry UUID, name, place, recipe, prior marker and login and refusing canonical ID or admitted paths. environment/podman.rs:1097-1115 checks any recorded login against the selected image and requires conditional admission success; :1116-1125 then sends run with the selected image. decode_binding at store/podman.rs:148-164 rejects partial login and identity/admission without login. admit_podman_install at :297-329 requires canonical ID/full login and compares inspected coordinates. Caller provisioning/tensorlake_add.rs:391-398 registers before provider I/O; :452 takes the host provisioning lock; environment_session_steps :521-555 prepares then creates, :567-593 reads that resource's saved facts and admits installation before credential delivery at :597-605. Diff through range endpoint leaves this store and creation path unchanged; only the provider lifecycle lock helper and an unrelated Tensorlake re-setup seal check changed. Suggested bucket if true: high for broken launch, potentially highest for credential disclosure or loss of work; confidence: confirmed source refutation of guessed-login concern; proposed_drop: integrated source satisfies login/facts invariant, not foundation timing. possible_cover: g065/g068 own these interfaces; g020/l1 (latest supplied line 9, read this turn) independently establishes pre-registration approval/retarget authority and credential impact. Could-be-highest: potentially, but this guessed-login concern has no established route. This rejection does not cover the approval phase before registration: the referenced-place refusal begins only once resource/image/helper references exist. No execution performed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g064/findings.jsonl",
+        "id": "c1",
+        "line": 9,
+        "disposition": "under-investigation",
+        "group": "g064-c1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-041",
+          "key": "g064/c1",
+          "latest_line": 9,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "podman-create-guessed-login-admission",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The integrated production path permits missing login coordinates at registration and atomically admits observed login, prepared facts and the pending-send marker before external creation. The original foundation-only absence-of-callers argument is superseded by this integrated source check. This does not settle authority bound to an approval before registration.",
+          "checks": [
+            "56659839785691f76da3af5d8f51b511cff4ba8b: environment/mod.rs:132-135 calls register_pending_session_container; store/podman.rs:353-361 passes login None. Complete-coordinate registration at 332-350 is cfg(test).",
+            "Same revision, store/podman.rs:256-278 writes all three login columns, prepared facts and pending marker in one conditional UPDATE bound to row UUID, place, recipe, name, prior marker/login, absent container ID and absent admitted paths. decode_binding:148-164 rejects partial login and created/admitted rows without login.",
+            "Same revision, environment/podman.rs:1097-1125 compares any existing login to the selected image, awaits successful conditional admission, then sends run with that image. store/podman.rs:297-329 requires canonical ID/full login for installation admission. provisioning/tensorlake_add.rs:391-398,521-605 registers, prepares, creates and admits before credential delivery.",
+            "git diff 56659839785691f76da3af5d8f51b511cff4ba8b..00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db leaves store/podman.rs unchanged and changes only the provider lifecycle-lock helper in podman.rs. No runtime observation or reproduction."
+          ],
+          "coverage_checked": [
+            "SPEC.md Container sessions:4831-4872 and SPEC_impl.md Disposable environments:5945-5953 require ownership before creation and observed complete login before create; they do not accept guessed login. The historical contract is at 56659839 SPEC_impl.md:6425-6432.",
+            "TODO.md Planned:25-27 is empty. Searched plans/queue for Podman, registration, login, prepared admission and references: podman-environments.md describes the implemented provider mechanism, and environment-agent-operations.md concerns agent authority/session deletion; neither is an exact remaining fix for guessed login.",
+            "BUGS.md has only the SSH-helper transfer hang. INDEX.md and matching Podman queue files concern the retired container model's storage selection, keep-id inspection, token reads and remote routing; none covers this admission claim. Active TRIAGE_OUTCOMES.md has no matching Podman/login admission record. FILTER.md supplies no basis used here."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No missing premise for refuting guessed login in this integrated path. A separate pre-registration approval/retarget claim mentioned as g020/l1 in the history is outside this batch and remains untouched.",
+          "original_stronger_consequence": "A wrong login or place could break launch, disclose credentials or damage user work. No such route was established for this guessed-login concern; the separate earlier approval concern must not be folded into this refutation.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Source refutation narrowly of guessed-login/nonatomic facts admission, using the integrated caller and conditional write, not foundation timing or coverage by another reviewer. Parent must independently check the proposed security/user-work-related dismissal."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-041.json",
+          "key": "g064/c1",
+          "proposal": "claim-checks/claims-041/result.json",
+          "parent_proposal": "source-refuted-integrated-guessed-login-or-nonatomic-create-admission",
+          "final_independent_gate": "required-before-original-security-work-drop",
+          "reason": "Parent read full041. Real registration starts loginNone; complete registration helper is test-only. Conditional create update atomically saves all login columns, prepared facts and pending marker against original row/place/recipe/name/prior state before run; decoder refuses partial/created login, selected image login rechecked, canonical ID/full login required for installation admission. This integrated566 path supersedes foundation absence-of-callers rationale. Refute guessed login/partial admission only, not earlier approval-place authority020l1. Preserve wrong-login/place credential/work hypothesis for fresh check."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "podman-create-guessed-login-admission",
+        "destination": null
+      }
+    },
+    {
+      "key": "g064/c2",
+      "owner": "g064",
+      "id": "c2",
+      "domain": "podman-environments",
+      "purpose": "podman-environments: crates/farhelm-helm/src/environment/podman_probe.rs, crates/farhelm-helm/src/store/podman.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Probe failure paths do not expose manager proxy credentials",
+            "location": "crates/farhelm-helm/src/environment/podman_probe.rs:275",
+            "detail": "Reviewed commit: 04ffdbb35773cef36e73eb798c005ddbeb9a9de6. TLDR: The considered leak of proxy passwords through public probe errors is refuted by the source. Details: Podman probe reads the entire manager environment and uses capture_child, whose bounded-stream failure can contain a raw output prefix (provisioning/backend.rs:1930 onward). SystemPlaceCommands::run at podman_probe.rs:112 discards capture errors using a fixed message, run at :275 discards command errors again using a prerequisite-specific static reason, and the busctl path at :348 converts errors to None before an equally sanitized fallback. ManagerEnvironment parser errors are replaced at :359 with a fixed unreadable-environment message. ProbeView at :54 contains only readiness, reason, timestamp, architecture and version; it contains no proxy map. capture_child itself does not log its raw output. Suggested bucket if true: highest/security; confidence: confirmed source refutation; proposed_drop: source sanitization and browser projection prevent the suspected leak; possible_cover: none. Could-be-highest: yes, proxy credentials would make a real leak security-impacting, but no leak route was found. No runtime behavior observed."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Probe failure paths do not expose manager proxy credentials",
+            "location": "crates/farhelm-helm/src/environment/podman_probe.rs:272",
+            "detail": "Reviewed commit: 04ffdbb35773cef36e73eb798c005ddbeb9a9de6. TLDR: The considered leak of proxy passwords through public probe errors is refuted by the source. Details: Podman probe reads the entire manager environment and uses capture_child, whose bounded-stream failure can contain a raw output prefix (provisioning/backend.rs:1930 onward). SystemPlaceCommands::run at podman_probe.rs:107 discards capture errors using the exact expression .map_err(|_| anyhow::anyhow!(\"the place command failed or timed out\"))?; run at :272 discards command errors again with .map_err(|_| anyhow::anyhow!(reason)) at :287. The busctl path at :344-348 converts command and parse errors to None before an equally sanitized fallback. ManagerEnvironment parser errors are replaced at :359-360 with the fixed string 'the user manager returned an unreadable environment'. ProbeView at :52-60 contains only readiness, reason, timestamp, architecture and version; it contains no proxy map. capture_child itself does not log raw output. Suggested bucket if true: highest/security; confidence: confirmed source refutation; proposed_drop: the cited error replacement expressions and browser projection prevent the suspected leak; possible_cover: none. Could-be-highest: yes, proxy credentials would make a real leak security-impacting, but no leak route was found. No runtime behavior observed. This revision corrects line references in the original record; the suspected consequence and rejection are unchanged."
+          }
+        }
+      ],
+      "latest": {
+        "line": 4,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Probe failure paths do not expose manager proxy credentials",
+          "location": "crates/farhelm-helm/src/environment/podman_probe.rs:272",
+          "detail": "Reviewed commit: 04ffdbb35773cef36e73eb798c005ddbeb9a9de6. TLDR: The considered leak of proxy passwords through public probe errors is refuted by the source. Details: Podman probe reads the entire manager environment and uses capture_child, whose bounded-stream failure can contain a raw output prefix (provisioning/backend.rs:1930 onward). SystemPlaceCommands::run at podman_probe.rs:107 discards capture errors using the exact expression .map_err(|_| anyhow::anyhow!(\"the place command failed or timed out\"))?; run at :272 discards command errors again with .map_err(|_| anyhow::anyhow!(reason)) at :287. The busctl path at :344-348 converts command and parse errors to None before an equally sanitized fallback. ManagerEnvironment parser errors are replaced at :359-360 with the fixed string 'the user manager returned an unreadable environment'. ProbeView at :52-60 contains only readiness, reason, timestamp, architecture and version; it contains no proxy map. capture_child itself does not log raw output. Suggested bucket if true: highest/security; confidence: confirmed source refutation; proposed_drop: the cited error replacement expressions and browser projection prevent the suspected leak; possible_cover: none. Could-be-highest: yes, proxy credentials would make a real leak security-impacting, but no leak route was found. No runtime behavior observed. This revision corrects line references in the original record; the suspected consequence and rejection are unchanged."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g064/findings.jsonl",
+        "id": "c2",
+        "line": 4,
+        "disposition": "under-investigation",
+        "group": "g064-c2",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-041",
+          "key": "g064/c2",
+          "latest_line": 4,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "podman-probe-raw-manager-error-disclosure",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The considered raw-output route is cut by error replacement before probe errors reach the public projection. Proxy values remain private data rather than ProbeView fields.",
+          "checks": [
+            "04ffdbb35773cef36e73eb798c005ddbeb9a9de6: provisioning/backend.rs:1930-1971 can construct a failure containing an output prefix at 1959-1962, but does not log that raw prefix in this path.",
+            "Same revision, environment/podman_probe.rs:98-110 replaces capture failure with a fixed message, run:272-287 replaces command errors with the static prerequisite reason, busctl:344-348 turns command/parser errors into None, and fallback parse:359-360 uses a fixed unreadable-environment message.",
+            "Same revision, ProbeView:52-60 contains timestamp/refreshing/readiness/reason/architecture/version and no proxy map. This is source evidence of the particular suspected public-probe leak being absent, not runtime evidence or a claim about every provider diagnostic."
+          ],
+          "coverage_checked": [
+            "Searched SPEC.md and SPEC_impl.md for Podman/proxy/environment contracts; the relevant current sections are SPEC.md:4806-4890 and SPEC_impl.md:6058-6092. Neither explicitly accepts credential disclosure; refutation rests on source.",
+            "TODO Planned is empty. plans/queue/podman-environments.md:808-810,853 addresses proxy passwords on command lines, a different transport route from raw public probe failures. Other proxy plans concern SSH routing or endpoint credentials, not this error projection.",
+            "BUGS.md, INDEX.md plus matching Podman files, and active TRIAGE_OUTCOMES.md contain no exact probe-error disclosure item. Exact source-name and proxy credential searches found no queue alias. FILTER.md is not applied to a security claim."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "None for this narrow source refutation. It does not assert that all proxy-bearing command diagnostics or argv are safe.",
+          "original_stronger_consequence": "Proxy passwords could be exposed through public probe errors: highest/security if reachable.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Source sanitization and public projection refute the named raw capture-error route. Requires an independent security drop check."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-041.json",
+          "key": "g064/c2",
+          "proposal": "claim-checks/claims-041/result.json",
+          "parent_proposal": "source-refuted-raw-proxy-capture-error-public-probe-leak",
+          "final_independent_gate": "required-before-highest-secret-drop",
+          "reason": "Full041 backend may construct an output-prefix failure but this probe path does not log it and replaces capture/command/parser errors with fixed reasons orNone before public projection. ProbeView has readiness/version/reason fields, no proxy map. Refute only that raw capture-to-public-probe sink, not all proxy argv/provider diagnostics. Preserve proxy-password disclosure hypothesis for independent source verdict; no accepted secret exception or filter."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "podman-probe-raw-manager-error-disclosure",
+        "destination": null
+      }
+    },
+    {
+      "key": "g064/c3",
+      "owner": "g064",
+      "id": "c3",
+      "domain": "podman-environments",
+      "purpose": "podman-environments: crates/farhelm-helm/src/environment/podman_probe.rs, crates/farhelm-helm/src/store/podman.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "No external-create durability consequence is reachable in the initial storage revision",
+            "location": "crates/farhelm-helm/src/store/podman.rs:259",
+            "detail": "Reviewed commit: 04ffdbb35773cef36e73eb798c005ddbeb9a9de6. TLDR: A power-loss gap between saving a container binding and creating external work is not established at this revision. Details: register_session_container and set_podman_pending_create use ordinary connection calls, and store.rs module docs explicitly say ordinary WAL/NORMAL commits can lose their tail after OS crashes or power loss. Considered whether external creation could therefore outlive its registry binding. Source search at this revision finds no production callers for either API; only tests invoke registration and the pending marker. environment/mod.rs says, exactly, 'Places, prepared selection, create and owned-resource listing join this same trait when their shared recipe/storage consumers arrive.' Podman provider is absent from Providers::with_tensorlake. Thus the required external-create route does not exist at this recorded revision. Suggested bucket: other on established evidence; confidence: confirmed no production call route at this revision; proposed_drop: missing shipped external creation premise, not acceptance of losing a binding; possible_cover: none. Could-be-highest: potentially, if a later integrated route lost track of user work after a host power failure; that route and its recovery behavior are outside this patch revision and must be assessed by provider integration reviewers. No execution performed."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c3",
+            "state": "open",
+            "summary": "Recheck external-create durability through integrated callers",
+            "location": "crates/farhelm-helm/src/store/podman.rs:259",
+            "detail": "Reviewed foundation commit: 04ffdbb35773cef36e73eb798c005ddbeb9a9de6; integrated caller commit: 56659839785691f76da3af5d8f51b511cff4ba8b, with endpoint checks at 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: A later production creation caller exists, so the initial foundation-only rejection cannot settle whether a host power failure could leave user work running without its registry binding. Details: Endpoint search finds registration in environment/mod.rs:134, followed by provider creation and canonical-ID observations in environment/podman.rs:1161 and :1314. Required invariant: the owned resource name/place/binding and pending-send state must survive the failure classes required by the database contract before external creation is sent, and ambiguous results must preserve cleanup authority. Need inspect transactional admission, synchronous policy, and actual caller ordering/recovery. Suggested bucket: other on currently established evidence; confidence: unverified, investigation active; proposed_drop: false; possible_cover: g065 integrated provider and g068 store changes. Could-be-highest: preserve original potential loss-of-work consequence if power loss erases the binding while external work survives; that consequence is not yet established. No execution performed."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c3",
+            "state": "open",
+            "summary": "Power loss can lose a binding after external creation under accepted WAL durability",
+            "location": "crates/farhelm-helm/src/store/podman.rs:373",
+            "detail": "Reviewed foundation commit: 04ffdbb35773cef36e73eb798c005ddbeb9a9de6; integrated commit checked: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: A machine power failure or OS crash can leave an existing container without its latest helm registration or pending-create record; this is a consequence of the specified ordinary database durability policy, not refuted by foundation timing. Details: register_container at store/podman.rs:373-394 commits registration using an ordinary connection call. set_podman_prepared_create at :268-278 similarly uses an ordinary single-statement update, atomically recording login, selected facts and pending marker. environment/podman.rs:1103-1125 awaits that commit before external run, then saves canonical ID at :1160-1165. This satisfies the ordering/atomicity and process-crash invariant, but ordinary WAL/NORMAL tail commits may be lost after OS crash or power failure while an external resource survives. destroy at environment/podman.rs:1298-1301 treats a surviving row with neither ID nor marker as never-created, so it can forget that row without claiming an unrelated same-name resource; label-filtered owned discovery at :1338-1380 can still discover unregistered resources at reachable places. Suggested bucket: other for established lost registration/cleanup visibility; preserve original could-be-highest consequence if losing track of user work is shown to cause security harm or actual loss of work. Confidence: confirmed source-supported durability consequence; no runtime observations. proposed_drop: specification acceptance requires independent parent check. Exact governing text, SPEC_impl.md, Helm internals, :5670-5672: 'every ordinary read-write connection selects `synchronous=NORMAL` only after reading an actual WAL mode and otherwise retains FULL. This accepts losing the last commits on an OS crash or power loss without weakening database consistency; process crashes preserve commits.' The specified FULL exceptions immediately following cover revocations, not resource registration. possible_cover: g065 integrated provider and g068 store updates; parent should pass this invariant/consequence to those owners. Could-be-highest: potentially, as originally recorded; actual destruction of user work is not established, and no such claim is made. This revision supersedes the no-production-caller rejection. Do not treat this proposed drop as accepted."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c3",
+            "state": "open",
+            "summary": "Power loss can lose a binding after external creation under accepted WAL durability",
+            "location": "crates/farhelm-helm/src/store/podman.rs:373",
+            "detail": "Reviewed foundation commit: 04ffdbb35773cef36e73eb798c005ddbeb9a9de6; integrated commit: 56659839785691f76da3af5d8f51b511cff4ba8b; checked through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: Power failure or OS crash can lose a recent registration or pending-create record while its container survives. Details: register_container at store/podman.rs:373-394 and set_podman_prepared_create at :268-278 use ordinary connection calls. The latter atomically records observed login, selected installation facts and pending-send marker. environment/podman.rs:1103-1125 awaits admission before external run and :1160-1165 then saves canonical ID. provisioning/tensorlake_add.rs:391-398 registers before provider work, :452 holds the host provisioning lock, and :521-555 prepares before create. Db::call in crates/farhelm-supervisor/src/db.rs:230-246 returns work from a connection-locked blocking task without strengthening synchronous mode; configure_durability :104-120 selects NORMAL in WAL mode. Db::call_full_sync_if :249 onward is the separate trust-revocation barrier and is not used here. Thus process-crash preservation and pre-send ordering hold, but a power failure can erase their commit tail after external creation. destroy at environment/podman.rs:1298-1301 treats a surviving row with neither ID nor marker as never-created instead of claiming a same-name resource, and :1338-1380 discovers unregistered owned resources by helm label at reachable places. No actual destruction of user work established. Endpoint diffs leave storage and creation ordering unchanged. Suggested bucket: other for established lost registration/cleanup visibility. Confidence: confirmed by source/contracts; no execution. proposed_drop: specification acceptance, for independent parent check. Exact SPEC_impl.md, Helm internals, :5670-5672: 'every ordinary read-write connection selects `synchronous=NORMAL` only after reading an actual WAL mode and otherwise retains FULL. This accepts losing the last commits on an OS crash or power loss without weakening database consistency; process crashes preserve commits.' The following FULL exceptions cover acknowledged trust revocations, not resource registration. possible_cover: g065/g068 own integrated provider/store changes; parent should pass this durability invariant and proposed drop to them. Could-be-highest: preserve original potential consequence of losing track of user work if an actual security or loss-of-work route is established; none is established here. The initial missing-caller rejection is superseded. This record is a finding because specification acceptance is the proposed-drop basis; no drop has been accepted."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "c3",
+          "state": "open",
+          "summary": "Power loss can lose a binding after external creation under accepted WAL durability",
+          "location": "crates/farhelm-helm/src/store/podman.rs:373",
+          "detail": "Reviewed foundation commit: 04ffdbb35773cef36e73eb798c005ddbeb9a9de6; integrated commit: 56659839785691f76da3af5d8f51b511cff4ba8b; checked through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: Power failure or OS crash can lose a recent registration or pending-create record while its container survives. Details: register_container at store/podman.rs:373-394 and set_podman_prepared_create at :268-278 use ordinary connection calls. The latter atomically records observed login, selected installation facts and pending-send marker. environment/podman.rs:1103-1125 awaits admission before external run and :1160-1165 then saves canonical ID. provisioning/tensorlake_add.rs:391-398 registers before provider work, :452 holds the host provisioning lock, and :521-555 prepares before create. Db::call in crates/farhelm-supervisor/src/db.rs:230-246 returns work from a connection-locked blocking task without strengthening synchronous mode; configure_durability :104-120 selects NORMAL in WAL mode. Db::call_full_sync_if :249 onward is the separate trust-revocation barrier and is not used here. Thus process-crash preservation and pre-send ordering hold, but a power failure can erase their commit tail after external creation. destroy at environment/podman.rs:1298-1301 treats a surviving row with neither ID nor marker as never-created instead of claiming a same-name resource, and :1338-1380 discovers unregistered owned resources by helm label at reachable places. No actual destruction of user work established. Endpoint diffs leave storage and creation ordering unchanged. Suggested bucket: other for established lost registration/cleanup visibility. Confidence: confirmed by source/contracts; no execution. proposed_drop: specification acceptance, for independent parent check. Exact SPEC_impl.md, Helm internals, :5670-5672: 'every ordinary read-write connection selects `synchronous=NORMAL` only after reading an actual WAL mode and otherwise retains FULL. This accepts losing the last commits on an OS crash or power loss without weakening database consistency; process crashes preserve commits.' The following FULL exceptions cover acknowledged trust revocations, not resource registration. possible_cover: g065/g068 own integrated provider/store changes; parent should pass this durability invariant and proposed drop to them. Could-be-highest: preserve original potential consequence of losing track of user work if an actual security or loss-of-work route is established; none is established here. The initial missing-caller rejection is superseded. This record is a finding because specification acceptance is the proposed-drop basis; no drop has been accepted."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g064/findings.jsonl",
+        "id": "c3",
+        "line": 10,
+        "disposition": "under-investigation",
+        "group": "g064-c3",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-041",
+          "key": "g064/c3",
+          "latest_line": 10,
+          "recommendation": "covered",
+          "bucket": "other",
+          "underlying_key": "podman-ordinary-wal-tail-loss-after-external-create",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The integrated route can lose recent ordinary registration/create commits after an OS crash or power loss while the external resource survives. This is the ordinary WAL/NORMAL durability limitation the implementation specification explicitly accepts. The initial no-caller rejection is withdrawn; coverage, rather than source refutation, is the proposed basis.",
+          "checks": [
+            "56659839785691f76da3af5d8f51b511cff4ba8b: store/podman.rs:268-278 and373-394 use ordinary Db::call for atomic create admission and registration. environment/podman.rs:1103-1125 awaits admission before run;1160-1165 saves canonical ID afterwards.",
+            "Same revision, supervisor/db.rs:110-115 selects NORMAL in WAL mode, call:230-245 does not strengthen sync mode, and call_full_sync_if begins at249 as a separate trust-change barrier.",
+            "Same revision, environment/podman.rs:1298-1301 treats a row with no ID or pending marker as never-created, without claiming a same-name resource. list_owned:1338-1380 uses helm labels and can still discover unregistered resources at reachable places. No actual destruction of user work follows from these source facts alone.",
+            "Endpoint diff leaves the store and create ordering unchanged. No power-loss reproduction or runtime test ran."
+          ],
+          "coverage_checked": [
+            "Current SPEC_impl.md Helm internals:5184-5201 explicitly accepts ordinary read-write WAL/NORMAL tail loss and names FULL exceptions for acknowledged trust revocations, not resource registration. Historical identical rule:56659839 SPEC_impl.md:5665-5683. SPEC.md Container sessions requires retained ownership/order, with no separate power-loss barrier overriding this rule.",
+            "Current SPEC.md:317-322 and SPEC_impl.md:6296-6305,6452-6463 explicitly discuss power-loss-lost ownership records for Tensorlake. Those provider-specific passages corroborate the ordinary policy but are not claimed as exact Podman coverage.",
+            "TODO Planned is empty. Searched unlanded plans for registration, pending create, power loss and durability; no stated fix for this ordinary Podman policy. BUGS.md is unrelated. INDEX.md and active TRIAGE_OUTCOMES.md durability matches concern installer files/update trust, not this root. No exact queue alias. FILTER.md not needed."
+          ],
+          "exact_cover_quotes": [
+            "SPEC_impl.md:5187-5189: every ordinary read-write connection selects `synchronous=NORMAL` only after reading an actual WAL mode and otherwise retains FULL. This accepts losing the last commits on an OS crash or power loss without weakening database consistency; process crashes preserve commits."
+          ],
+          "missing_premise": "An actual security or destruction-of-user-work route beyond lost registration/cleanup visibility is unestablished. This is not a claim that external resources cannot outlive their rows.",
+          "original_stronger_consequence": "Losing track of still-running user work could potentially cause security harm or actual loss of work. The history preserves this possibility but establishes neither harm route.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Exact ordinary-store durability acceptance, limited to OS crash/power failure tail loss, not process crashes, missing pre-send admission, or arbitrary ownership loss. Parent must independently approve coverage and the absence of an established highest consequence."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-041.json",
+          "key": "g064/c3",
+          "proposal": "claim-checks/claims-041/result.json",
+          "parent_proposal": "ordinary-WAL-NORMAL-power-loss-policy-cover-pending",
+          "final_independent_gate": "required-before-original-possible-security-work-drop-or-lowering",
+          "reason": "Full041 real integrated registration/create commits can be lost after OS crash/power failure while external resource survives; initial no-caller rejection withdrawn. Ordinary Db::call uses WAL/NORMAL; pre-send awaited admission/order stays correct, FULL trust-change path separate. Exact global implementation durability rule explicitly accepts ordinary tail loss without database inconsistency, no separate Podman barrier shown. Tensorlake provider-specific orphan paragraphs are corroboration only, not exact Podman permission. Preserve original possible security/work consequence and resource outliving row; gate precise OS/power scope, not process crashes or missing admission. No actual harm route beyond lost ownership visibility established."
+        }
+      ],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "podman-ordinary-wal-tail-loss-after-external-create",
+        "destination": "trailing-podman-ordinary-wal-tail-loss-after-external-create.md"
+      }
+    },
+    {
+      "key": "g064/c4",
+      "owner": "g064",
+      "id": "c4",
+      "domain": "podman-environments",
+      "purpose": "podman-environments: crates/farhelm-helm/src/environment/podman_probe.rs, crates/farhelm-helm/src/store/podman.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c4",
+            "state": "open",
+            "summary": "Check proxy snapshot age separately from capability-cache freshness",
+            "location": "crates/farhelm-helm/src/environment/podman_probe.rs:18",
+            "detail": "Reviewed foundation commit: 04ffdbb35773cef36e73eb798c005ddbeb9a9de6; integrated interface concern supplied as g003/f1 at commit 56659839785691f76da3af5d8f51b511cff4ba8b and endpoint 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: A new container may permanently inherit old host proxy settings if a recent capability observation is reused as its creation snapshot. Details: Supplied discovery-neighbours.json contains g003/f1 with the complete fresh/runtime/create/proxies trace and the creation-time contract. Need directly check assigned cache semantics and the precise integrated consumption/contract boundary; capability freshness alone does not decide proxy freshness. Suggested bucket if established: other/configuration propagation; confidence: investigation active, not yet independently concluded this turn; proposed_drop: false; possible_cover: exact supplied g003/f1, so no separate discovery credit or duplicate finding intended. Could-be-highest: false on the supplied established consequence; no credential disclosure or loss-of-work route claimed. No runtime execution."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Proxy-cache interaction confirms supplied g003/f1 without a distinct finding",
+            "location": "crates/farhelm-helm/src/environment/podman_probe.rs:330",
+            "detail": "Reviewed foundation commit: 04ffdbb35773cef36e73eb798c005ddbeb9a9de6; integrated source checked: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: Newly created containers can permanently inherit the host manager's earlier proxy settings. This is the already-supplied g003/f1, not a new local discovery. Details: Directly checked podman_probe.rs:324-332 ready accepts a matching-route success up to FRESH_FOR=300 seconds, fresh at :383-390 returns it immediately, and runtime at :338-362 returns matching-route success without an age check. Proxy values enter ReadyPlace only during probe at :594-626 and :656-661. Integrated provider place at podman.rs:150-164 resolves this same runtime cache; initial setup at :1197-1207 passes its ready.proxy to proxies; :1225-1228 leaves already-admitted snapshots unchanged. No second manager-environment read at the creation boundary is supplied by these paths. SPEC.md Container sessions at :4802-4804 says exactly 'Containers inherit proxy variables from the container host's systemd user manager environment at creation' and 'Later host changes affect newly created containers.' SPEC_impl.md:6561-6564 requires reading proxy input during a probe and writing selected values at creation; that mechanism does not authorize using an earlier host proxy snapshot for a new environment. Recent capability admission is therefore not a refutation of proxy-snapshot age. Existing prepared image plus manager proxy edit after the completed launcher observation and launch within five minutes suffices; long preparation can age the snapshot further. Suggested bucket: other/configuration propagation, matching supplied owner; confidence: confirmed by source/contracts, no execution. proposed_drop: exact identity with supplied g003/f1 for consolidation only, not a source refutation or accepted drop. possible_cover: g003/f1 latest record embedded in discovery-neighbours.json, owner retains the full finding. Could-be-highest: false on established network-configuration consequence; no disclosure or loss-of-work route established. This closes the local c4 lead without duplicating ownership or discovery credit."
+          }
+        }
+      ],
+      "latest": {
+        "line": 12,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c4",
+          "state": "open",
+          "summary": "Proxy-cache interaction confirms supplied g003/f1 without a distinct finding",
+          "location": "crates/farhelm-helm/src/environment/podman_probe.rs:330",
+          "detail": "Reviewed foundation commit: 04ffdbb35773cef36e73eb798c005ddbeb9a9de6; integrated source checked: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: Newly created containers can permanently inherit the host manager's earlier proxy settings. This is the already-supplied g003/f1, not a new local discovery. Details: Directly checked podman_probe.rs:324-332 ready accepts a matching-route success up to FRESH_FOR=300 seconds, fresh at :383-390 returns it immediately, and runtime at :338-362 returns matching-route success without an age check. Proxy values enter ReadyPlace only during probe at :594-626 and :656-661. Integrated provider place at podman.rs:150-164 resolves this same runtime cache; initial setup at :1197-1207 passes its ready.proxy to proxies; :1225-1228 leaves already-admitted snapshots unchanged. No second manager-environment read at the creation boundary is supplied by these paths. SPEC.md Container sessions at :4802-4804 says exactly 'Containers inherit proxy variables from the container host's systemd user manager environment at creation' and 'Later host changes affect newly created containers.' SPEC_impl.md:6561-6564 requires reading proxy input during a probe and writing selected values at creation; that mechanism does not authorize using an earlier host proxy snapshot for a new environment. Recent capability admission is therefore not a refutation of proxy-snapshot age. Existing prepared image plus manager proxy edit after the completed launcher observation and launch within five minutes suffices; long preparation can age the snapshot further. Suggested bucket: other/configuration propagation, matching supplied owner; confidence: confirmed by source/contracts, no execution. proposed_drop: exact identity with supplied g003/f1 for consolidation only, not a source refutation or accepted drop. possible_cover: g003/f1 latest record embedded in discovery-neighbours.json, owner retains the full finding. Could-be-highest: false on established network-configuration consequence; no disclosure or loss-of-work route established. This closes the local c4 lead without duplicating ownership or discovery credit."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g064/findings.jsonl",
+        "id": "c4",
+        "line": 12,
+        "disposition": "duplicate",
+        "group": "new-container-proxy-snapshot-capability-cache",
+        "reason": "Parent read full claims-041 c4 and the acceptedg003/f1 decision/source checks. Both establish same-route cached ReadyPlace.proxy being selected for a new container rather than sampling its host manager at creation, then deliberately retaining that per-container snapshot. g003/f1 already carries high conditional lasting network failure when the old proxy stops working on a proxy-dependent host. Preserve c4's originalother suggestion and narrower established configuration effect; this alias does not lower the canonical consequence or add unsupported disclosure/work-loss claims. Explicit bootstrap exports and empty-value serialization are separate causes. Source/contract confidence is conditional analysis, no runtime observation."
+      },
+      "accepted_parent_decision": {
+        "key": "g064/c4",
+        "line": 12,
+        "disposition": "duplicate",
+        "group": "new-container-proxy-snapshot-capability-cache",
+        "bucket": "high",
+        "recording": "same-stale-creation-proxy-defect",
+        "needs_independent_drop_check": false,
+        "reason": "Parent read full claims-041 c4 and the acceptedg003/f1 decision/source checks. Both establish same-route cached ReadyPlace.proxy being selected for a new container rather than sampling its host manager at creation, then deliberately retaining that per-container snapshot. g003/f1 already carries high conditional lasting network failure when the old proxy stops working on a proxy-dependent host. Preserve c4's originalother suggestion and narrower established configuration effect; this alias does not lower the canonical consequence or add unsupported disclosure/work-loss claims. Explicit bootstrap exports and empty-value serialization are separate causes. Source/contract confidence is conditional analysis, no runtime observation."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-041",
+          "key": "g064/c4",
+          "latest_line": 12,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "podman-creation-reuses-cached-place-proxy-snapshot",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "A new container can inherit an earlier host-manager proxy snapshot and retain it after admission. This is source-established configuration propagation failure. The history attributes the same defect to g003/f1; that record is not among this batch's named claims, so exact cross-batch consolidation remains the parent's task rather than a dismissal here.",
+          "checks": [
+            "56659839785691f76da3af5d8f51b511cff4ba8b: environment/podman_probe.rs:324-332 accepts ready results up to FRESH_FOR; fresh:383-390 immediately returns that cache hit. runtime:338-362 accepts matching-route success without an age check. Proxy values are sampled only during probe:616-626,656-661.",
+            "Same revision, environment/podman.rs:150-164 resolves the runtime cache,1197-1207 passes ready.proxy into proxies, and1225-1228 deliberately leaves admitted snapshots unchanged. proxies:565-589 rereads the container manager only for XDG_CONFIG_HOME; it does not resample the place manager's proxies.",
+            "A completed place observation, then a host-manager proxy edit, then launch using an already prepared image within the freshness window suffices conditionally. Endpoint diff leaves these paths unchanged. No runtime reproduction or particular network-client outcome is claimed.",
+            "This is distinct from g065/l1: refreshing the input does not repair empty-value serialization, and repairing serialization does not refresh a stale input snapshot."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md:4877-4879 requires creation-time manager variables and says later host changes affect new containers; SPEC_impl.md:6082-6085 specifies reading during probe and writing selected values at creation, without accepting old settings for a new environment. Historical clauses:56659839 SPEC.md:4802-4804, SPEC_impl.md:6561-6564.",
+            "TODO Planned is empty. Searched plans/queue proxy/cache/snapshot terms; podman-environments.md:242-245 describes probe sampling and deterministic environment.d writing, while its later proxy follow-up853 concerns argv disclosure. Neither schedules cache resampling to fix this cause. Environment-agent-operations and endpoint-credential-ownership concern different authority/credential paths.",
+            "BUGS.md, INDEX.md and matching Podman queue files, and active TRIAGE_OUTCOMES.md provide no exact coverage. Exact proxy cache/source-name searches found no existing item. FILTER.md does not cover the enduring wrong environment snapshot."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No premise missing for stale selected proxy values. A concrete connectivity disruption, credential disclosure or user-work-loss route is not established. Parent should compare its named g003/f1 record before deduplicating; its contents were not separately supplied here.",
+          "original_stronger_consequence": "New containers permanently inherit old proxy settings; the supplied history claims no highest consequence and no established credential disclosure or loss of work.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain the source-confirmed configuration defect under the stable underlying key. The local candidate's earlier consolidation proposal must not erase the finding if g003/f1 is not retained elsewhere."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "new-container-proxy-snapshot-capability-cache",
+        "destination": "trailing-new-container-proxy-snapshot-capability-cache.md"
+      }
+    },
+    {
+      "key": "g064/l5",
+      "owner": "g064",
+      "id": "l5",
+      "domain": "podman-environments",
+      "purpose": "podman-environments: crates/farhelm-helm/src/environment/podman_probe.rs, crates/farhelm-helm/src/store/podman.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l5",
+            "state": "open",
+            "summary": "Deduplication test may assert before a duplicate refresh task can run",
+            "location": "crates/farhelm-helm/src/environment/podman_probe.rs:609",
+            "detail": "Reviewed commit: 04ffdbb35773cef36e73eb798c005ddbeb9a9de6. TLDR: The background-refresh regression test may pass a broken implementation that spawns two probes for the same host. Details: refresh at :201 spawns its command chain and immediately returns; test second refresh at :609 is followed immediately by calls==1 at :610 with no task-start acknowledgment. A duplicate spawned by that second request could still be unpolled then. Test only releases one held command at :613; the first finishing refresh clears the shared host refreshing flag at :240-247, so the loop at :614-620 may exit while a second duplicate remains blocked. Need check the test attribute/runtime lifecycle and permitted spawn scheduling to settle whether the duplicate can survive unnoticed until teardown. This is a distinct test-oracle concern, not a claim the correct production deduplication branch fails. Suggested bucket if established: other/test assurance; confidence: lead under investigation; proposed_drop: false; possible_cover: none in supplied neighbour findings; no prohibited coverage search. Could-be-highest: false; no product security/loss-of-work route alleged. No runtime tests/reproductions or observed execution."
+          }
+        },
+        {
+          "line": 14,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l5",
+            "state": "open",
+            "summary": "Probe deduplication test checks its counter before a duplicate task can run",
+            "location": "crates/farhelm-helm/src/environment/podman_probe.rs:609",
+            "detail": "# Probe deduplication test checks before a duplicate task can run\n\nReviewed commit: 04ffdbb35773cef36e73eb798c005ddbeb9a9de6\n\n## TLDR\n\nThe background-probe test can pass an implementation that starts two checks for the same host. Its claimed deduplication coverage therefore does not establish the behavior it is supposed to protect. This is a test-oracle defect, not an observed product failure.\n\n## Details\n\nAssigned test refresh_is_background_deduplicated_and_route_bound calls a second refresh at podman_probe.rs:609 and immediately asserts calls==1 at :610. refresh schedules the command chain with tokio::spawn at :201 and returns at :230 without awaiting that task. The test has the default current-thread runtime: farhelm-testtrace-macros/src/lib.rs:55-64 expands the async test through run_async, :247-259 chooses CurrentThread unless explicitly multi_thread, and farhelm-testtrace/src/lib.rs:1131-1142 builds that runtime. Cargo.lock:6278-6280 pins Tokio 1.53.2; its installed primary source src/task/spawn.rs:22-29 explicitly guarantees spawn does not synchronously poll the task and that outstanding tasks are dropped at runtime shutdown. Consequently, if the refresh admission at podman_probe.rs:197-199 regressed to allowing duplicates while retaining its refreshing marker insertion, the second spawned probe would still be unpolled at the immediate counter assertion on this runtime. The first probe is already held at its release.notified await (:567-570); the only notification sent by the test (:613) releases that first waiter. The test then waits only for the shared refreshing set to become empty (:614-620), not for all scheduled refresh tasks. Finishing the first probe removes the host marker in Refreshing::drop (:240-247), even if the duplicate has since reached the held uname. The subsequent success/retarget assertions (:621-637) do not inspect the counter again, join the duplicate, or release its waiter. run_async at farhelm-testtrace/src/lib.rs:1007-1019 drops the runtime after the test body returns and accepts the returned outcome; cancelling a leftover task is not a failed test. Thus a duplicate can remain blocked and be cancelled at successful teardown without failing any assertion.\n\nThe current production admission branch is correct; that does not refute this independent test sensitivity problem. Test-authoring contract: assert an observable that distinguishes competing mechanisms, and establish the fixture premise at the action/measurement boundary. The test docstring at :552-554 specifically promises that background refreshes join per host. Fix direction: use an observable admission/task-start boundary for all accepted refreshes, or another deterministic test seam that proves the second request joined before asserting there is only one probe; retain the deliberately held first command. Do not rely on a scheduling sleep.\n\nRange persistence checked by complete assigned-file diff through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db: this test body is unchanged, now :851-933 (second refresh/counter at :904-905). The later Notify used by runtime/fresh consumers does not add a test join or final counter assertion. Suggested bucket: other/test assurance. Confidence: confirmed by source/contract and pinned runtime semantics; no runtime test, mutation test or reproduction run, and no claim that a false pass was observed in execution. proposed_drop: false. possible_cover: none among the supplied exact interface findings; prohibited coverage sources not searched. Could-be-highest: false; no security or user-work-loss route is alleged. All readily checkable runtime and teardown premises are resolved; original suspected false-pass consequence retained."
+          }
+        }
+      ],
+      "latest": {
+        "line": 14,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l5",
+          "state": "open",
+          "summary": "Probe deduplication test checks its counter before a duplicate task can run",
+          "location": "crates/farhelm-helm/src/environment/podman_probe.rs:609",
+          "detail": "# Probe deduplication test checks before a duplicate task can run\n\nReviewed commit: 04ffdbb35773cef36e73eb798c005ddbeb9a9de6\n\n## TLDR\n\nThe background-probe test can pass an implementation that starts two checks for the same host. Its claimed deduplication coverage therefore does not establish the behavior it is supposed to protect. This is a test-oracle defect, not an observed product failure.\n\n## Details\n\nAssigned test refresh_is_background_deduplicated_and_route_bound calls a second refresh at podman_probe.rs:609 and immediately asserts calls==1 at :610. refresh schedules the command chain with tokio::spawn at :201 and returns at :230 without awaiting that task. The test has the default current-thread runtime: farhelm-testtrace-macros/src/lib.rs:55-64 expands the async test through run_async, :247-259 chooses CurrentThread unless explicitly multi_thread, and farhelm-testtrace/src/lib.rs:1131-1142 builds that runtime. Cargo.lock:6278-6280 pins Tokio 1.53.2; its installed primary source src/task/spawn.rs:22-29 explicitly guarantees spawn does not synchronously poll the task and that outstanding tasks are dropped at runtime shutdown. Consequently, if the refresh admission at podman_probe.rs:197-199 regressed to allowing duplicates while retaining its refreshing marker insertion, the second spawned probe would still be unpolled at the immediate counter assertion on this runtime. The first probe is already held at its release.notified await (:567-570); the only notification sent by the test (:613) releases that first waiter. The test then waits only for the shared refreshing set to become empty (:614-620), not for all scheduled refresh tasks. Finishing the first probe removes the host marker in Refreshing::drop (:240-247), even if the duplicate has since reached the held uname. The subsequent success/retarget assertions (:621-637) do not inspect the counter again, join the duplicate, or release its waiter. run_async at farhelm-testtrace/src/lib.rs:1007-1019 drops the runtime after the test body returns and accepts the returned outcome; cancelling a leftover task is not a failed test. Thus a duplicate can remain blocked and be cancelled at successful teardown without failing any assertion.\n\nThe current production admission branch is correct; that does not refute this independent test sensitivity problem. Test-authoring contract: assert an observable that distinguishes competing mechanisms, and establish the fixture premise at the action/measurement boundary. The test docstring at :552-554 specifically promises that background refreshes join per host. Fix direction: use an observable admission/task-start boundary for all accepted refreshes, or another deterministic test seam that proves the second request joined before asserting there is only one probe; retain the deliberately held first command. Do not rely on a scheduling sleep.\n\nRange persistence checked by complete assigned-file diff through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db: this test body is unchanged, now :851-933 (second refresh/counter at :904-905). The later Notify used by runtime/fresh consumers does not add a test join or final counter assertion. Suggested bucket: other/test assurance. Confidence: confirmed by source/contract and pinned runtime semantics; no runtime test, mutation test or reproduction run, and no claim that a false pass was observed in execution. proposed_drop: false. possible_cover: none among the supplied exact interface findings; prohibited coverage sources not searched. Could-be-highest: false; no security or user-work-loss route is alleged. All readily checkable runtime and teardown premises are resolved; original suspected false-pass consequence retained."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g064/findings.jsonl",
+        "id": "l5",
+        "line": 14,
+        "disposition": "verified",
+        "group": "podman-probe-dedup-test-asserts-before-spawned-task",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-041 after inspecting it. The regression's immediate counter check cannot observe a duplicate task just spawned by the second refresh. Its later wait witnesses one shared marker clearing, not completion of every scheduled probe. This is an independent test-oracle defect even though current production deduplication is correct. Record as other/test assurance with source-confirmed scheduling and teardown premises, and preserve that this is not an observed production deduplication failure. Checked source/results: [\"04ffdbb35773cef36e73eb798c005ddbeb9a9de6: environment/podman_probe.rs:197-201 admits via a shared set and spawns; no await follows that spawn before refresh returns230. Test609-610 immediately checks the command count after its second refresh. The held uname567-570 has one release613;614-620 waits only for the shared refreshing flag, and621-637 never rechecks count or joins a duplicate.\",\"Same revision, Refreshing::drop240-247 clears that shared host marker when either task finishes. With admission regressed to allow a duplicate while retaining marker insertion, a second probe can remain blocked after the first clears the marker.\",\"Same revision, farhelm-testtrace-macros/src/lib.rs:55-64,247-259 selects CurrentThread by default; farhelm-testtrace/src/lib.rs:1007-1019 drops the runtime after body completion and accepts the body's outcome;1131-1142 builds the current-thread runtime.\",\"Cargo.lock at that revision6278-6280 pins Tokio1.53.2. Installed primary source tokio-1.53.2/src/task/spawn.rs:22-29 guarantees spawn does not synchronously poll and outstanding tasks are dropped at shutdown. Thus the immediate assertion does not see the newly spawned duplicate, whose cancellation need not fail the test.\",\"00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db: podman_probe.rs:851-933 retains the same test, with second refresh/counter904-905 and no final count/join. No mutation test, false pass or runtime reproduction was observed.\"] Current coverage/results: [\"Searched both specifications for background probes/deduplication; SPEC.md Container sessions and SPEC_impl.md Podman places require background capability checks but do not accept an ineffective regression. The test's own552-554 contract promises per-host joining.\",\"TODO Planned is empty. plans/queue searches for probe/deduplication/test names and schema/source names found no planned repair. BUGS.md is unrelated.\",\"INDEX.md includes other ineffective or premature test oracles, but exact probe test/source-name searches of queue files found none for this root. Active TRIAGE_OUTCOMES.md has no matching disposition. FILTER.md's rare product-glitch filters do not cover this persistent test sensitivity defect.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The test can pass duplicate probes; no product security or user-work-loss route was alleged.\"; \"None for the source-level oracle gap. Whether a particular mutation falsely passes in execution was not measured and is not needed to claim the missing distinguishing observation.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g064/l5",
+        "line": 14,
+        "disposition": "verified",
+        "group": "podman-probe-dedup-test-asserts-before-spawned-task",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-041 after inspecting it. The regression's immediate counter check cannot observe a duplicate task just spawned by the second refresh. Its later wait witnesses one shared marker clearing, not completion of every scheduled probe. This is an independent test-oracle defect even though current production deduplication is correct. Record as other/test assurance with source-confirmed scheduling and teardown premises, and preserve that this is not an observed production deduplication failure. Checked source/results: [\"04ffdbb35773cef36e73eb798c005ddbeb9a9de6: environment/podman_probe.rs:197-201 admits via a shared set and spawns; no await follows that spawn before refresh returns230. Test609-610 immediately checks the command count after its second refresh. The held uname567-570 has one release613;614-620 waits only for the shared refreshing flag, and621-637 never rechecks count or joins a duplicate.\",\"Same revision, Refreshing::drop240-247 clears that shared host marker when either task finishes. With admission regressed to allow a duplicate while retaining marker insertion, a second probe can remain blocked after the first clears the marker.\",\"Same revision, farhelm-testtrace-macros/src/lib.rs:55-64,247-259 selects CurrentThread by default; farhelm-testtrace/src/lib.rs:1007-1019 drops the runtime after body completion and accepts the body's outcome;1131-1142 builds the current-thread runtime.\",\"Cargo.lock at that revision6278-6280 pins Tokio1.53.2. Installed primary source tokio-1.53.2/src/task/spawn.rs:22-29 guarantees spawn does not synchronously poll and outstanding tasks are dropped at shutdown. Thus the immediate assertion does not see the newly spawned duplicate, whose cancellation need not fail the test.\",\"00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db: podman_probe.rs:851-933 retains the same test, with second refresh/counter904-905 and no final count/join. No mutation test, false pass or runtime reproduction was observed.\"] Current coverage/results: [\"Searched both specifications for background probes/deduplication; SPEC.md Container sessions and SPEC_impl.md Podman places require background capability checks but do not accept an ineffective regression. The test's own552-554 contract promises per-host joining.\",\"TODO Planned is empty. plans/queue searches for probe/deduplication/test names and schema/source names found no planned repair. BUGS.md is unrelated.\",\"INDEX.md includes other ineffective or premature test oracles, but exact probe test/source-name searches of queue files found none for this root. Active TRIAGE_OUTCOMES.md has no matching disposition. FILTER.md's rare product-glitch filters do not cover this persistent test sensitivity defect.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The test can pass duplicate probes; no product security or user-work-loss route was alleged.\"; \"None for the source-level oracle gap. Whether a particular mutation falsely passes in execution was not measured and is not needed to claim the missing distinguishing observation.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-041",
+          "key": "g064/l5",
+          "latest_line": 14,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "podman-probe-dedup-test-asserts-before-spawned-task",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The regression's immediate counter check cannot observe a duplicate task just spawned by the second refresh. Its later wait witnesses one shared marker clearing, not completion of every scheduled probe. This is an independent test-oracle defect even though current production deduplication is correct.",
+          "checks": [
+            "04ffdbb35773cef36e73eb798c005ddbeb9a9de6: environment/podman_probe.rs:197-201 admits via a shared set and spawns; no await follows that spawn before refresh returns230. Test609-610 immediately checks the command count after its second refresh. The held uname567-570 has one release613;614-620 waits only for the shared refreshing flag, and621-637 never rechecks count or joins a duplicate.",
+            "Same revision, Refreshing::drop240-247 clears that shared host marker when either task finishes. With admission regressed to allow a duplicate while retaining marker insertion, a second probe can remain blocked after the first clears the marker.",
+            "Same revision, farhelm-testtrace-macros/src/lib.rs:55-64,247-259 selects CurrentThread by default; farhelm-testtrace/src/lib.rs:1007-1019 drops the runtime after body completion and accepts the body's outcome;1131-1142 builds the current-thread runtime.",
+            "Cargo.lock at that revision6278-6280 pins Tokio1.53.2. Installed primary source tokio-1.53.2/src/task/spawn.rs:22-29 guarantees spawn does not synchronously poll and outstanding tasks are dropped at shutdown. Thus the immediate assertion does not see the newly spawned duplicate, whose cancellation need not fail the test.",
+            "00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db: podman_probe.rs:851-933 retains the same test, with second refresh/counter904-905 and no final count/join. No mutation test, false pass or runtime reproduction was observed."
+          ],
+          "coverage_checked": [
+            "Searched both specifications for background probes/deduplication; SPEC.md Container sessions and SPEC_impl.md Podman places require background capability checks but do not accept an ineffective regression. The test's own552-554 contract promises per-host joining.",
+            "TODO Planned is empty. plans/queue searches for probe/deduplication/test names and schema/source names found no planned repair. BUGS.md is unrelated.",
+            "INDEX.md includes other ineffective or premature test oracles, but exact probe test/source-name searches of queue files found none for this root. Active TRIAGE_OUTCOMES.md has no matching disposition. FILTER.md's rare product-glitch filters do not cover this persistent test sensitivity defect."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "None for the source-level oracle gap. Whether a particular mutation falsely passes in execution was not measured and is not needed to claim the missing distinguishing observation.",
+          "original_stronger_consequence": "The test can pass duplicate probes; no product security or user-work-loss route was alleged.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Record as other/test assurance with source-confirmed scheduling and teardown premises, and preserve that this is not an observed production deduplication failure."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "podman-probe-dedup-test-asserts-before-spawned-task",
+        "destination": "trailing-podman-probe-dedup-test-asserts-before-spawned-task.md"
+      }
+    },
+    {
+      "key": "g064/c6",
+      "owner": "g064",
+      "id": "c6",
+      "domain": "podman-environments",
+      "purpose": "podman-environments: crates/farhelm-helm/src/environment/podman_probe.rs, crates/farhelm-helm/src/store/podman.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 15,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c6",
+            "state": "open",
+            "summary": "Migration sentinel observes the real foreign-key cascade boundary",
+            "location": "crates/farhelm-helm/src/store/podman.rs:570",
+            "detail": "Reviewed commit: 04ffdbb35773cef36e73eb798c005ddbeb9a9de6. TLDR: The considered false-pass concern in the migration-preservation test is refuted: the tested upgrade enables foreign-key enforcement before migration, so its dependent sentinel can detect a hosts-table rebuild that deletes dependent state. Details: schema_83_appends_columns_without_rebuilding_hosts creates migration_sentinel with REFERENCES hosts(id) ON DELETE CASCADE at store/podman.rs:570, removes the added columns and sets schema 82 at :571-579, then records the sentinel and rootpage at :581-592. Its raw fixture connection does not explicitly enable foreign keys, which initially raised whether the sentinel could fail to detect cascade deletion. The actual destructive-operation boundary is the subsequent HelmStore::open at :594, however. The caller open_inner at store.rs:5326-5336 configures durability, then exactly conn.pragma_update(None, \"foreign_keys\", true) before apply_schema. apply_schema invokes podman::migrate and commits at :4772-4780. Thus the upgrade's connection, rather than the earlier fixture-creation connection, enforces the sentinel reference. Post-upgrade assertions compare all hosts, original rootpage and retained sentinel payload at podman.rs:595-612. Suggested bucket if the oracle were deficient: other/test assurance. Confidence: confirmed source refutation; proposed_drop: the actual migration connection explicitly enables foreign keys before apply_schema, so no missing-cascade oracle established. possible_cover: none; supplied neighbour records and prohibited coverage sources were not used to dismiss it. Could-be-highest: false; this candidate concerns test sensitivity, with no production data-loss route alleged. No runtime test or reproduction performed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 15,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c6",
+          "state": "open",
+          "summary": "Migration sentinel observes the real foreign-key cascade boundary",
+          "location": "crates/farhelm-helm/src/store/podman.rs:570",
+          "detail": "Reviewed commit: 04ffdbb35773cef36e73eb798c005ddbeb9a9de6. TLDR: The considered false-pass concern in the migration-preservation test is refuted: the tested upgrade enables foreign-key enforcement before migration, so its dependent sentinel can detect a hosts-table rebuild that deletes dependent state. Details: schema_83_appends_columns_without_rebuilding_hosts creates migration_sentinel with REFERENCES hosts(id) ON DELETE CASCADE at store/podman.rs:570, removes the added columns and sets schema 82 at :571-579, then records the sentinel and rootpage at :581-592. Its raw fixture connection does not explicitly enable foreign keys, which initially raised whether the sentinel could fail to detect cascade deletion. The actual destructive-operation boundary is the subsequent HelmStore::open at :594, however. The caller open_inner at store.rs:5326-5336 configures durability, then exactly conn.pragma_update(None, \"foreign_keys\", true) before apply_schema. apply_schema invokes podman::migrate and commits at :4772-4780. Thus the upgrade's connection, rather than the earlier fixture-creation connection, enforces the sentinel reference. Post-upgrade assertions compare all hosts, original rootpage and retained sentinel payload at podman.rs:595-612. Suggested bucket if the oracle were deficient: other/test assurance. Confidence: confirmed source refutation; proposed_drop: the actual migration connection explicitly enables foreign keys before apply_schema, so no missing-cascade oracle established. possible_cover: none; supplied neighbour records and prohibited coverage sources were not used to dismiss it. Could-be-highest: false; this candidate concerns test sensitivity, with no production data-loss route alleged. No runtime test or reproduction performed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g064/findings.jsonl",
+        "id": "c6",
+        "line": 15,
+        "disposition": "excluded",
+        "group": "podman-migration-test-foreign-key-enforcement-premise",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-041 after inspecting it. The tested upgrade connection explicitly enables foreign keys before schema application. Lack of an explicit pragma on the earlier fixture-writing connection does not disable the dependent sentinel at the destructive migration boundary. Source refutation at the actual migration connection, rather than assuming fixture creation enforces foreign keys. Checked source/results: [\"04ffdbb35773cef36e73eb798c005ddbeb9a9de6: store/podman.rs:568-593 builds the ON DELETE CASCADE sentinel and old schema fixture.594 opens HelmStore for the actual migration;595-612 compares host rows, hosts rootpage and sentinel payload afterwards.\",\"Same revision, store.rs:5326-5336 configures durability and calls conn.pragma_update(None, foreign_keys, true) before apply_schema. The named missing-cascade-oracle premise is therefore false. No runtime test or reproduction ran.\"] Current coverage/results: [\"SPEC_impl.md Environment rows and provider state:5955-5968 requires additive columns without rebuilding hosts; the historical clause is56659839:6434-6445. It supplies the sentinel's contract, not acceptance of an ineffective test. SPEC.md has no separate test-oracle acceptance.\",\"TODO Planned is empty. plans/queue/podman-environments.md describes additive host columns and records unrelated stripped-back old checkout-fixture repairs at746-750,837-839; no exact missing-foreign-key test coverage. BUGS.md is unrelated.\",\"Exact schema_83/migration_sentinel/foreign-key/source-name searches found no matching INDEX/queue item or active TRIAGE_OUTCOMES.md decision. FILTER.md not applied.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Potential false-pass in a migration-preservation test, other/test assurance. The history alleges no production loss-of-work route.\"; \"None for refuting this specific missing-foreign-key premise; no broader claim about all migration test sensitivity is made.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g064/c6",
+        "line": 15,
+        "disposition": "excluded",
+        "group": "podman-migration-test-foreign-key-enforcement-premise",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-041 after inspecting it. The tested upgrade connection explicitly enables foreign keys before schema application. Lack of an explicit pragma on the earlier fixture-writing connection does not disable the dependent sentinel at the destructive migration boundary. Source refutation at the actual migration connection, rather than assuming fixture creation enforces foreign keys. Checked source/results: [\"04ffdbb35773cef36e73eb798c005ddbeb9a9de6: store/podman.rs:568-593 builds the ON DELETE CASCADE sentinel and old schema fixture.594 opens HelmStore for the actual migration;595-612 compares host rows, hosts rootpage and sentinel payload afterwards.\",\"Same revision, store.rs:5326-5336 configures durability and calls conn.pragma_update(None, foreign_keys, true) before apply_schema. The named missing-cascade-oracle premise is therefore false. No runtime test or reproduction ran.\"] Current coverage/results: [\"SPEC_impl.md Environment rows and provider state:5955-5968 requires additive columns without rebuilding hosts; the historical clause is56659839:6434-6445. It supplies the sentinel's contract, not acceptance of an ineffective test. SPEC.md has no separate test-oracle acceptance.\",\"TODO Planned is empty. plans/queue/podman-environments.md describes additive host columns and records unrelated stripped-back old checkout-fixture repairs at746-750,837-839; no exact missing-foreign-key test coverage. BUGS.md is unrelated.\",\"Exact schema_83/migration_sentinel/foreign-key/source-name searches found no matching INDEX/queue item or active TRIAGE_OUTCOMES.md decision. FILTER.md not applied.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Potential false-pass in a migration-preservation test, other/test assurance. The history alleges no production loss-of-work route.\"; \"None for refuting this specific missing-foreign-key premise; no broader claim about all migration test sensitivity is made.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-041",
+          "key": "g064/c6",
+          "latest_line": 15,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "podman-migration-test-foreign-key-enforcement-premise",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The tested upgrade connection explicitly enables foreign keys before schema application. Lack of an explicit pragma on the earlier fixture-writing connection does not disable the dependent sentinel at the destructive migration boundary.",
+          "checks": [
+            "04ffdbb35773cef36e73eb798c005ddbeb9a9de6: store/podman.rs:568-593 builds the ON DELETE CASCADE sentinel and old schema fixture.594 opens HelmStore for the actual migration;595-612 compares host rows, hosts rootpage and sentinel payload afterwards.",
+            "Same revision, store.rs:5326-5336 configures durability and calls conn.pragma_update(None, foreign_keys, true) before apply_schema. The named missing-cascade-oracle premise is therefore false. No runtime test or reproduction ran."
+          ],
+          "coverage_checked": [
+            "SPEC_impl.md Environment rows and provider state:5955-5968 requires additive columns without rebuilding hosts; the historical clause is56659839:6434-6445. It supplies the sentinel's contract, not acceptance of an ineffective test. SPEC.md has no separate test-oracle acceptance.",
+            "TODO Planned is empty. plans/queue/podman-environments.md describes additive host columns and records unrelated stripped-back old checkout-fixture repairs at746-750,837-839; no exact missing-foreign-key test coverage. BUGS.md is unrelated.",
+            "Exact schema_83/migration_sentinel/foreign-key/source-name searches found no matching INDEX/queue item or active TRIAGE_OUTCOMES.md decision. FILTER.md not applied."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "None for refuting this specific missing-foreign-key premise; no broader claim about all migration test sensitivity is made.",
+          "original_stronger_consequence": "Potential false-pass in a migration-preservation test, other/test assurance. The history alleges no production loss-of-work route.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation at the actual migration connection, rather than assuming fixture creation enforces foreign keys."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "podman-migration-test-foreign-key-enforcement-premise",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete. All 1,364 assigned patch lines reviewed at their recorded revisions.\n\nNo reportable findings or open leads. Three rejected candidates are recorded in [findings.jsonl]([private-run]/g064/findings.jsonl); progress is updated. No tests or reproductions run."
+    },
+    {
+      "turn": 2,
+      "reply": "- `c1` revised: integrated callers satisfy atomic login/facts admission before creation. Pre-registration approval remains separate under `g020/l1`.\n- `c3` revised to a source-supported finding with a specification-based proposed drop: power loss can erase registration after external creation. No drop accepted; parent should relay to `g065/g068`.\n\nUnresolved lead IDs: none."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass complete; something new was found.\n\n- New verified ID: `l5` — the deduplication test can miss a duplicate probe task.\n- Checks: assigned validation, migration, refresh lifecycle, tests, pinned runtime semantics, and endpoint persistence.\n- New unverified IDs: none.\n- Open leads: none.\n\nLog and progress updated. No runtime execution."
+    },
+    {
+      "turn": 4,
+      "reply": "Discovery pass 2 found no new reportable issue.\n\n- Checked decoder mappings, migration/FK boundaries, admission guards, refresh cleanup, and follow-up comments.\n- Recorded source-refuted candidate `c6`.\n- New verified finding IDs: none.\n- New unverified finding IDs: none.\n- Open leads: none.\n\nProgress updated. No runtime execution."
+    }
+  ],
+  "progress": "# g064 podman-environments\n\nInitial review, turn 1, complete. Discovery passes: 0 (initial assigned pass only; later synthesis not started).\n\nRead the complete inventory commits field and all 1,364 assigned patch lines through evidence read: 00149-000.patch 1-676, 00157-000.patch 1-660, 01524-000.patch 1-28. Unread assigned scope: none. Reviewed each at its recorded revision, including the comment-only follow-up, with the Podman product and implementation contracts at both pinned revisions. Read the required queue priority/recording sections and test-authoring checklist. No coverage metadata or queue findings read.\n\nChecked probe prerequisites, route-bound cache publication and consumption, command quoting and environment scrubbing, bounded capture/error sanitization, exact proxy parsing, canonical identity validation, install admission, migration callers, and host retarget/removal transactions. Read production callers and staged-provider assembly at the initial revision. No tests, builds, reproductions, or live-install actions performed; all conclusions are source-derived.\n\nInterface assumptions: ordinary place routes come from access::base_route; container rows keep place IDs and canonical container IDs; referenced places cannot be retargeted or removed through ordinary store paths; the initial commit exposes probe endpoints but has no production container-creation caller. Later provider integration is assigned elsewhere, so the storage API alone cannot establish a later external-create route. The follow-up patch changes explanatory comments only and matches the scrubbing present at that revision.\n\nDurable records: c1 rejects an initial login-coordinate API mismatch without a production creation route; c2 rejects a proxy-credential leak through public probe errors (line references corrected by a same-ID revision); c3 rejects an external-create power-loss consequence without an integrated external-create caller at the initial revision. Verified findings: none. Unverified findings: none. Open leads: none. All candidates retain their possible highest consequences and source bases in findings.jsonl.\n\nNext action: return to the caller for the later synthesis turn. No further pass performed inside this initial turn.\n\nLater-turn synthesis, turn 2, complete. Discovery passes: 0; this was the requested synthesis, not a separate discovery protocol. All mandatory scope remains read (delivery audit: 1,364 lines, zero gaps). No new mandatory scope. No runtime work or reproductions.\n\nReopened c1 and c3 as leads immediately on locating the integrated production caller. Both were resolved under their original IDs. c1 is now a source-refuted candidate grounded in the actual pending-registration/atomic-login/facts/send-admission sequence, rather than the absence of a foundation-stage caller. Checked provisioning registration, per-host provisioning lock, preparation/create ordering, saved-fact installation admission, and endpoint diffs. c1 explicitly excludes g020/l1's pre-registration approval/retarget problem; read only the caller-directed latest record at g020/findings.jsonl line 9. Referenced-place refusal cannot protect a card that exists before any reference is stored.\n\nc3 is now a source-supported finding with proposed_drop based on the exact ordinary WAL/NORMAL acceptance in SPEC_impl.md, Helm internals. The ordinary Db::call wrapper adds no sync barrier. Pre-send atomic admission survives process crashes, but the last commits may be lost on OS crash/power failure while an external container survives. Source shows label-based orphan discovery and refusal to claim a same-name resource without ID/pending evidence. Actual destruction of work is not established. Preserve potentially highest consequence for parent review; no drop accepted. Parent should relay the concrete ordering/durability invariant and proposed drop to g065/g068. c2 was not broadened: its prior source refutation concerns only the probe error/projection paths already named.\n\nIDs revised this turn: c1, c3 (lead transitions and final candidate/finding revisions). New IDs: none. Verified new unaccepted defects: none; verified durability consequence awaiting proposed-drop check: c3. Unverified findings: none. Unresolved lead IDs: none. Next action: parent independent drop/owner checks and any later discovery instruction.\n\nDiscovery turn 3, pass 1, complete. New verified finding: l5. New unverified-after-investigation findings: none. Remaining lead IDs: none. Something new was found: a distinct assigned-test oracle defect, recorded and investigated under l5. The pass continued through the remaining assigned store tests, probe prerequisite/validation block and comment-only follow-up after recording l5.\n\nRead discovery-neighbours.json completely in bounded chunks (1-55, 56-100, 101-140, 141-200, 201-250, 251-298); the earlier oversized preview was re-read in those complete packets. Synthesized the named g003/f1 proxy-cache question before independent discovery: directly checked cache ready/fresh/runtime, probe sampling, provider place/create consumption, creation-time proxy contract and admitted-snapshot preservation. c4 was opened immediately and resolved as a source-confirmed alias of supplied g003/f1, with no separate finding/discovery credit and no accepted drop. Existing c1/c2/c3 dispositions were not changed or silently accepted.\n\nIndependent discovery re-read the assigned original cache/refresh runner, store migration/decode/identity/admission writers, both sets of assigned tests, prerequisite/info validation and follow-up comment patch. Checked test promises separately from product correctness. l5 identifies the immediate calls==1 assertion after second refresh scheduling: current-thread test runtime cannot poll the new task synchronously; after the first command is released, its guard can clear the shared refreshing marker while a duplicate remains held. No later counter assertion or join detects the duplicate before runtime drop. Checked the test macro expansion/default runtime, run_async teardown, Cargo.lock-pinned Tokio 1.53.2 primary source spawn contract, full assigned-file diff and unchanged endpoint test at lines 851-933. The runtime dependency was read from its installed pinned source, with no installation or execution. No mutation/reproduction was written or run.\n\nChecks after finding l5: all remaining assigned store tests establish their relevant row/FK/sentinel/admission observations, prerequisite parser accepts/refuses its declared conditions, and the follow-up comments match the runner's actual scrubbing. No additional distinct substantive finding arose. All mandatory scope remains read/audited; no omitted assigned scope. No tests, builds, runtime reproductions or live-install actions. Next action: return delta to parent; l5 requires the caller's next synthesis/discovery handling as a substantive new discovery.\n\nDiscovery turn 4, pass 2, complete. Result: no new reportable issue. New verified finding IDs: none. New unverified-after-investigation finding IDs: none. Remaining lead IDs: none. New considered candidate: c6, source-refuted migration-sentinel concern. Existing records, consequences, priorities and proposed drops were not revised or accepted.\n\nRead the entire updated discovery-neighbours.json (409 lines, 145,913 bytes) in bounded packets: 1-55, 56-100, 101-155, 156-200, 201-245, 246-300, 301-345, 346-380, 381-409. No named pending questions were supplied, and the updated interface results added no distinct assigned-group premise requiring a new synthesis record. Used those records only for interface context and novelty.\n\nNew source checks beyond the known findings: compared the initial list_hosts SELECT order, raw tuple, provider-kind decoding and Podman binding arguments for every newly added coordinate; they agree. Checked access::base_route refuses both environment host kinds, so malformed nested places do not become recursive exec routes. Rechecked identity/name/canonical-ID validation and conditional install/canonical-ID writers at the original revision, plus migration commit ordering and the actual open_inner foreign-key enablement before apply_schema. Reviewed the migration sentinel/rootpage/host preservation assertions separately from runtime correctness. c6 was recorded immediately once the suspected missing-FK test premise was refuted by store.rs:5333-5336: the upgrade connection enables enforcement before the migration, regardless of the fixture-creation connection's setting. No missing premise remains there.\n\nAlso rechecked refresh guard release on early current-row/route failure, route-qualified result publication, nonce-owned scope cleanup, explicit Podman configuration refusals, and the comment-only follow-up against its real local/remote scrubbing. These checks produced no further substantive lead. All assigned mandatory scope remains audited/read, with no omitted material. Source-only: no tests, builds, reproductions, helper agents, repository modifications or live-install actions. Next action: return this empty discovery result to the parent.\n"
+}

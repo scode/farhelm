@@ -1,0 +1,11 @@
+{
+  "groups": 200,
+  "reconstruction_verified": 1023,
+  "parts": 1114,
+  "mandatory_lines": 201772,
+  "mandatory_bytes": 10810386,
+  "lines_min": 3,
+  "lines_median": 1147,
+  "lines_max": 1695,
+  "interfaces": 3100
+}

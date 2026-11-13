@@ -1,0 +1,925 @@
+{
+  "group": {
+    "id": "g181",
+    "domain": "browser-terminal-regressions",
+    "purpose": "browser-terminal-regressions: e2e/tests/terminal-reconnect.spec.ts, e2e/tests/terminal-replay-rename.spec.ts, e2e/tests/terminal-tabs.spec.ts, e2e/tests/terminal.spec.ts, e2e/grid-client/grid-terminal.spec.ts, e2e/tests/terminal-clipboard.spec.ts, e2e/tests/terminal-flood.spec.ts, e2e/tests/terminal-restart.spec.ts, e2e/tests/terminal-unicode.spec.ts; phases complete small per-commit changes",
+    "interfaces": [
+      "g002",
+      "g006",
+      "g009",
+      "g010",
+      "g011",
+      "g079",
+      "g080",
+      "g081",
+      "g082",
+      "g083",
+      "g084",
+      "g091",
+      "g092",
+      "g174",
+      "g175",
+      "g176",
+      "g177",
+      "g178",
+      "g179",
+      "g180",
+      "g182"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/01176-000.patch",
+        "ranges": [
+          [
+            1,
+            89
+          ]
+        ],
+        "original_path": "e2e/tests/terminal-reconnect.spec.ts",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,5752)",
+        "lines": 89,
+        "bytes": 5762,
+        "start": 0,
+        "end": 5752,
+        "original": "[private-run]/prep/originals/01176.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01177-000.patch",
+        "ranges": [
+          [
+            1,
+            135
+          ]
+        ],
+        "original_path": "e2e/tests/terminal-replay-rename.spec.ts",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,7793)",
+        "lines": 135,
+        "bytes": 7813,
+        "start": 0,
+        "end": 7793,
+        "original": "[private-run]/prep/originals/01177.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01178-000.patch",
+        "ranges": [
+          [
+            1,
+            132
+          ]
+        ],
+        "original_path": "e2e/tests/terminal-tabs.spec.ts",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,7220)",
+        "lines": 132,
+        "bytes": 7220,
+        "start": 0,
+        "end": 7220,
+        "original": "[private-run]/prep/originals/01178.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01180-000.patch",
+        "ranges": [
+          [
+            1,
+            306
+          ]
+        ],
+        "original_path": "e2e/tests/terminal.spec.ts",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,18532)",
+        "lines": 306,
+        "bytes": 18562,
+        "start": 0,
+        "end": 18532,
+        "original": "[private-run]/prep/originals/01180.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01506-000.patch",
+        "ranges": [
+          [
+            1,
+            71
+          ]
+        ],
+        "original_path": "e2e/grid-client/grid-terminal.spec.ts",
+        "commit": "61e632323dbc6b4a35ed27bf5b9833102ffd5a4e",
+        "notes": "patch header; patch character offsets [0,4382)",
+        "lines": 71,
+        "bytes": 4386,
+        "start": 0,
+        "end": 4382,
+        "original": "[private-run]/prep/originals/01506.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01513-000.patch",
+        "ranges": [
+          [
+            1,
+            42
+          ]
+        ],
+        "original_path": "e2e/tests/terminal-clipboard.spec.ts",
+        "commit": "61e632323dbc6b4a35ed27bf5b9833102ffd5a4e",
+        "notes": "patch header; patch character offsets [0,2814)",
+        "lines": 42,
+        "bytes": 2834,
+        "start": 0,
+        "end": 2814,
+        "original": "[private-run]/prep/originals/01513.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01514-000.patch",
+        "ranges": [
+          [
+            1,
+            71
+          ]
+        ],
+        "original_path": "e2e/tests/terminal-flood.spec.ts",
+        "commit": "61e632323dbc6b4a35ed27bf5b9833102ffd5a4e",
+        "notes": "patch header; patch character offsets [0,4693)",
+        "lines": 71,
+        "bytes": 4699,
+        "start": 0,
+        "end": 4693,
+        "original": "[private-run]/prep/originals/01514.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01516-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "e2e/tests/terminal-replay-rename.spec.ts",
+        "commit": "61e632323dbc6b4a35ed27bf5b9833102ffd5a4e",
+        "notes": "patch header; patch character offsets [0,768)",
+        "lines": 13,
+        "bytes": 770,
+        "start": 0,
+        "end": 768,
+        "original": "[private-run]/prep/originals/01516.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01517-000.patch",
+        "ranges": [
+          [
+            1,
+            150
+          ]
+        ],
+        "original_path": "e2e/tests/terminal-restart.spec.ts",
+        "commit": "61e632323dbc6b4a35ed27bf5b9833102ffd5a4e",
+        "notes": "patch header; patch character offsets [0,9096)",
+        "lines": 150,
+        "bytes": 9126,
+        "start": 0,
+        "end": 9096,
+        "original": "[private-run]/prep/originals/01517.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01519-000.patch",
+        "ranges": [
+          [
+            1,
+            15
+          ]
+        ],
+        "original_path": "e2e/tests/terminal-unicode.spec.ts",
+        "commit": "61e632323dbc6b4a35ed27bf5b9833102ffd5a4e",
+        "notes": "patch header; patch character offsets [0,1154)",
+        "lines": 15,
+        "bytes": 1162,
+        "start": 0,
+        "end": 1154,
+        "original": "[private-run]/prep/originals/01519.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01602-000.patch",
+        "ranges": [
+          [
+            1,
+            15
+          ]
+        ],
+        "original_path": "e2e/tests/terminal-flood.spec.ts",
+        "commit": "4b489b4f2eeade14f119b186ecb16eeaaf027021",
+        "notes": "patch header; patch character offsets [0,937)",
+        "lines": 15,
+        "bytes": 937,
+        "start": 0,
+        "end": 937,
+        "original": "[private-run]/prep/originals/01602.patch"
+      }
+    ],
+    "lines": 1039,
+    "bytes": 63271
+  },
+  "records": [
+    {
+      "key": "g181/c1",
+      "owner": "g181",
+      "id": "c1",
+      "domain": "browser-terminal-regressions",
+      "purpose": "browser-terminal-regressions: e2e/tests/terminal-reconnect.spec.ts, e2e/tests/terminal-replay-rename.spec.ts, e2e/tests/terminal-tabs.spec.ts, e2e/tests/terminal.spec.ts, e2e/grid-client/grid-terminal.spec.ts, e2e/tests/terminal-clipboard.spec.ts, e2e/tests/terminal-flood.spec.ts, e2e/tests/terminal-restart.spec.ts, e2e/tests/terminal-unicode.spec.ts; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "removed watermark assertions describe a retired input path",
+            "location": "e2e/tests/terminal.spec.ts:532",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\nThe removed fresh-counter assertions do not leave a current browser flow-control contract untested: the grid client has no page-side pause/resume counters.\n\n## Details\nConsidered whether removing paused/pauseCount/resumeCount checks weakened protection against leaked attachment state. At this revision terminal.js has no watermark, pauseCount, or resumeCount references (targeted source search), and SPEC_impl.md, Terminal widget: the grid island, lines 1717-1721 states: 'the page applies every message as it arrives and sends no flow control of its own.' The changed test still requires a defined new hook object, and a distinct grid instance, before checking replay. Suggested bucket: other. Confidence: confirmed by source; no execution. proposed_drop: retired mechanism, not a regression in the grid attachment contract. possible_cover: none; coverage sources not searched. Could-be-highest: no; this consideration concerns test assertions only, with no established security or loss-of-work route. Caveat: this does not judge server-side flow-control coverage, outside this assignment."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "fresh attachment guarantees survive removal of retired watermark fields",
+            "location": "e2e/tests/terminal.spec.ts:445-560",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\nRevisited the original concern: a reused attachment or leaked paused state could leave a reopened session showing old output and ignoring new work. The surviving test checks distinguish that failure from a healthy fresh attachment.\n\n## Details\nSynthesis checked the complete caller, terminal.spec.ts:445-563. Before leaving it stamps the live grid and retains the owned WebSocket and hook. After switching, it requires a defined replacement grid with a different marker, the old socket CLOSED, and all four old socket handlers null. After returning, it waits for the requested session's reveal, checks a fresh grid and defined distinct hook, requires the old output marker, and sends marker-after-reopen, requiring the live echo. The final echo is backend-independent evidence against a persistently paused or dead new attachment; the removed zero counters were an implementation-specific observation, not the only liveness observable. SPEC_impl.md, Terminal widget: the grid island: 'the page applies every message as it arrives and sends no flow control of its own.' The applicable guarantee remains SPEC.md, Terminal experience: 'Reconnecting replays the terminal so the session looks as it would have had the client stayed attached'. Suggested bucket: other. Confidence: confirmed by source, no execution. proposed_drop: preserve the original proposed drop, now supported by the surviving socket teardown, object identity, replayed old marker and post-reopen live echo checks rather than absence of the old counters alone. possible_cover: none; no queue or coverage sources searched. Could-be-highest: no established security or loss-of-work route in this assertion change. Caveat: the live echo establishes liveness for this fixture, not a broad stress proof of server flow control. Prior wording called watermark an input path; the removed counters measured output backpressure, and this revision corrects that terminology."
+          }
+        }
+      ],
+      "latest": {
+        "line": 5,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "fresh attachment guarantees survive removal of retired watermark fields",
+          "location": "e2e/tests/terminal.spec.ts:445-560",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\nRevisited the original concern: a reused attachment or leaked paused state could leave a reopened session showing old output and ignoring new work. The surviving test checks distinguish that failure from a healthy fresh attachment.\n\n## Details\nSynthesis checked the complete caller, terminal.spec.ts:445-563. Before leaving it stamps the live grid and retains the owned WebSocket and hook. After switching, it requires a defined replacement grid with a different marker, the old socket CLOSED, and all four old socket handlers null. After returning, it waits for the requested session's reveal, checks a fresh grid and defined distinct hook, requires the old output marker, and sends marker-after-reopen, requiring the live echo. The final echo is backend-independent evidence against a persistently paused or dead new attachment; the removed zero counters were an implementation-specific observation, not the only liveness observable. SPEC_impl.md, Terminal widget: the grid island: 'the page applies every message as it arrives and sends no flow control of its own.' The applicable guarantee remains SPEC.md, Terminal experience: 'Reconnecting replays the terminal so the session looks as it would have had the client stayed attached'. Suggested bucket: other. Confidence: confirmed by source, no execution. proposed_drop: preserve the original proposed drop, now supported by the surviving socket teardown, object identity, replayed old marker and post-reopen live echo checks rather than absence of the old counters alone. possible_cover: none; no queue or coverage sources searched. Could-be-highest: no established security or loss-of-work route in this assertion change. Caveat: the live echo establishes liveness for this fixture, not a broad stress proof of server flow control. Prior wording called watermark an input path; the removed counters measured output backpressure, and this revision corrects that terminology."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g181/findings.jsonl",
+        "id": "c1",
+        "line": 5,
+        "disposition": "excluded",
+        "group": "reopen-test-retired-output-watermark-counters",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-112 after inspecting it. The removed counters belong to retired page output backpressure. The surviving test still observes replacement identity, complete socket teardown, old replayed output and new live output, so it does not newly admit the named dead/reused attachment failure. Refute the alleged newly lost attachment-liveness oracle, preserving the limitation that fixture liveness is not a general stress proof. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:e2e/tests/terminal.spec.ts:445-563 stamps the old component, requires a defined replacement, CLOSED old socket and four null old handlers, then fresh grid/distinct defined hook, old marker and marker-after-reopen echo.\",\"The same commit's patch removes paused/pauseCount/resumeCount while preserving these independent assertions. These counters measured output backpressure, not an input path.\",\"SPEC_impl.md Terminal widget states the grid page sends no flow control; The grid client assigns grid flow control to the helm. This supports retirement of the old counters without asserting broad stress coverage.\"] Current coverage/results: [\"SPEC.md Terminal experience replay and SPEC_impl Terminal widget/The grid client checked. They require replay/liveness; no accepted dead attachment behavior found.\",\"TODO Planned empty; searches of unlanded plans/queue, BUGS, INDEX/matching files and active TRIAGE_OUTCOMES found no exact counter-removal test defect cover. Related server flow-control items have different scope.\",\"No FILTER.md boundary is used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A reused attachment or leaked paused state could show only old output and ignore new work. The retained post-reopen live echo discriminates that fixture failure; no shipped user-work loss route was established.\"; \"No general server flow-control stress proof is claimed by this fixture or this disposition.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g181/c1",
+        "line": 5,
+        "disposition": "excluded",
+        "group": "reopen-test-retired-output-watermark-counters",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-112 after inspecting it. The removed counters belong to retired page output backpressure. The surviving test still observes replacement identity, complete socket teardown, old replayed output and new live output, so it does not newly admit the named dead/reused attachment failure. Refute the alleged newly lost attachment-liveness oracle, preserving the limitation that fixture liveness is not a general stress proof. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:e2e/tests/terminal.spec.ts:445-563 stamps the old component, requires a defined replacement, CLOSED old socket and four null old handlers, then fresh grid/distinct defined hook, old marker and marker-after-reopen echo.\",\"The same commit's patch removes paused/pauseCount/resumeCount while preserving these independent assertions. These counters measured output backpressure, not an input path.\",\"SPEC_impl.md Terminal widget states the grid page sends no flow control; The grid client assigns grid flow control to the helm. This supports retirement of the old counters without asserting broad stress coverage.\"] Current coverage/results: [\"SPEC.md Terminal experience replay and SPEC_impl Terminal widget/The grid client checked. They require replay/liveness; no accepted dead attachment behavior found.\",\"TODO Planned empty; searches of unlanded plans/queue, BUGS, INDEX/matching files and active TRIAGE_OUTCOMES found no exact counter-removal test defect cover. Related server flow-control items have different scope.\",\"No FILTER.md boundary is used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A reused attachment or leaked paused state could show only old output and ignore new work. The retained post-reopen live echo discriminates that fixture failure; no shipped user-work loss route was established.\"; \"No general server flow-control stress proof is claimed by this fixture or this disposition.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-112",
+          "key": "g181/c1",
+          "latest_line": 5,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "reopen-test-retired-output-watermark-counters",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The removed counters belong to retired page output backpressure. The surviving test still observes replacement identity, complete socket teardown, old replayed output and new live output, so it does not newly admit the named dead/reused attachment failure.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e:e2e/tests/terminal.spec.ts:445-563 stamps the old component, requires a defined replacement, CLOSED old socket and four null old handlers, then fresh grid/distinct defined hook, old marker and marker-after-reopen echo.",
+            "The same commit's patch removes paused/pauseCount/resumeCount while preserving these independent assertions. These counters measured output backpressure, not an input path.",
+            "SPEC_impl.md Terminal widget states the grid page sends no flow control; The grid client assigns grid flow control to the helm. This supports retirement of the old counters without asserting broad stress coverage."
+          ],
+          "coverage_checked": [
+            "SPEC.md Terminal experience replay and SPEC_impl Terminal widget/The grid client checked. They require replay/liveness; no accepted dead attachment behavior found.",
+            "TODO Planned empty; searches of unlanded plans/queue, BUGS, INDEX/matching files and active TRIAGE_OUTCOMES found no exact counter-removal test defect cover. Related server flow-control items have different scope.",
+            "No FILTER.md boundary is used."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No general server flow-control stress proof is claimed by this fixture or this disposition.",
+          "original_stronger_consequence": "A reused attachment or leaked paused state could show only old output and ignore new work. The retained post-reopen live echo discriminates that fixture failure; no shipped user-work loss route was established.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Refute the alleged newly lost attachment-liveness oracle, preserving the limitation that fixture liveness is not a general stress proof."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "reopen-test-retired-output-watermark-counters",
+        "destination": null
+      }
+    },
+    {
+      "key": "g181/c2",
+      "owner": "g181",
+      "id": "c2",
+      "domain": "browser-terminal-regressions",
+      "purpose": "browser-terminal-regressions: e2e/tests/terminal-reconnect.spec.ts, e2e/tests/terminal-replay-rename.spec.ts, e2e/tests/terminal-tabs.spec.ts, e2e/tests/terminal.spec.ts, e2e/grid-client/grid-terminal.spec.ts, e2e/tests/terminal-clipboard.spec.ts, e2e/tests/terminal-flood.spec.ts, e2e/tests/terminal-restart.spec.ts, e2e/tests/terminal-unicode.spec.ts; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "replay assertion removals retain the current hidden-until-reveal contract",
+            "location": "e2e/tests/terminal-replay-rename.spec.ts:115,364",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\nRemoving byte/chunk buffer overrides and a bufferedBytes assertion does not remove a current replay guarantee: the new renderer applies incoming grid messages while hidden, then paints and reveals.\n\n## Details\nConsidered whether the changed replay test would cease to exercise the production bounds or accept incomplete replay visibility. The patch removes only retired buffer controls and bufferedBytes, not the hidden-terminal/visible-placeholder assertions, marker reveal reason, first-visible-frame tail assertion, visibility or live-input checks. At the reviewed revision terminal.js:3476-3487 defines replay observability without bufferedBytes, and :3755-3782 scrolls to bottom and flushes before showing the terminal. Source search of the full test finds no surviving bufferBytes/bufferChunks callers, so narrowing the helper override type strands no scenario. SPEC_impl.md, Terminal widget: the grid island, states 'the page applies every message as it arrives and sends no flow control of its own'; The grid client states history is applied 'in slices between frames so that the screen stays usable'. Suggested bucket: other. Confidence: confirmed by source; no execution. proposed_drop: removed assertions and controls describe the retired byte-stream buffer, not an active grid contract. possible_cover: none; coverage sources not searched. Could-be-highest: no; no security or loss-of-work route was identified. Caveat: this conclusion concerns the changed assertions; it does not claim that the unchanged last-line check proves every historical row arrived."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c2",
+            "state": "open",
+            "summary": "check surviving replay observables against sliced history application",
+            "location": "e2e/tests/terminal-replay-rename.spec.ts:128-150,364-375",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\nThe backend-independent concern is whether a replay test can pass while older output is missing, even though the current screen and new typing work. This is under investigation.\n\n## Details\nSynthesis found terminal.js:4073-4082 sets the held marker via endCatchUp directly when replay_complete arrives, while grid-terminal.js:1876-1930 applies queued history in later animation-frame/message-channel slices. Thus the revised helper comment that the replay has 'arrived and been applied' is stronger than the synchronization it observes. The parent test asserts spam-line-200, which can be current-screen text. The preceding revision already used that last-line check and already applied grids while hidden; its extra bufferedBytes==0 was an old byte-buffer observation. Missing checks: read termText/islandText implementations and replay readiness helpers; determine whether they wait for history drain or whether any genuinely lost guarantee follows from this assigned patch. Need distinguish stale documentation or pre-existing weak completeness assertion from a regression caused here. Original proposed_drop (retired byte-buffer control removal) is preserved as prior reasoning but not accepted as resolving completeness. Suggested bucket: other (test/documentation issue; no shipped loss route established). Confidence: unverified lead, source-only. proposed_drop: unresolved pending caller/helper checks. possible_cover: none. Could-be-highest: no established security or user-work-loss route; test coverage alone does not establish such a route. No execution performed."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c2",
+            "state": "open",
+            "summary": "held-replay helper claims history is applied before its oracle proves it",
+            "location": "e2e/tests/terminal-replay-rename.spec.ts:128-150",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\nThe revised test helper describes a fully applied replay, but it only waits for the replay marker. Older terminal output can still be queued at that point. This is a test synchronization/documentation defect; no shipped output loss has been demonstrated.\n\n## Details\nThe changed docstring says 'the replay has arrived and been applied to the still-hidden terminal'. The helper at :136-154 polls only __farhelmIslands[el].test.replay.heldReason == marker. terminal.js:4073-4082 handles replay_complete by immediately calling endCatchUp, whose :3886-3888 held-marker path sets heldReason without waiting for the grid's history queue. grid-terminal.js:1876-1930 drains queued history in bounded slices scheduled on later animation frames/message-channel tasks. term.ts:162-215 explicitly states and implements that unapplied history is absent from text reads, and terminal-readiness.ts:40-55 waits only for revealed. Therefore neither this helper nor the subsequent reveal wait establishes the newly documented applied-history boundary. SPEC_impl.md, The grid client, explicitly says the client applies a large history 'in slices between frames so that the screen stays usable'. terminal.js:3774-3776 also explicitly says history may still be applying when the screen reveals.\n\nThe backend-independent completeness concern remains narrower than a product bug: the agent test at :371-375 reads only spam-line-200, which is in the current screen after spam 200; the tab test waits only for TABSPAM-200. Those observables do not independently prove historical rows arrived. That weak last-line assertion was already present before this commit, so it is not claimed as newly introduced missing-history behavior. The newly changed helper contract should say the replay marker arrived and the current screen was applied, with history potentially pending. If callers need fully applied history, add a separately named history-drained oracle and assert an older line as well; do not make all held-state tests wait for a stronger boundary indiscriminately.\n\nSuggested bucket: other, confined to test synchronization documentation and its overstated observable. Confidence: confirmed by source/contract analysis; no execution. proposed_drop: false for the newly false helper contract. Preserve prior proposed drop for bufferBytes/bufferChunks/bufferedBytes themselves: those removed controls describe the retired byte-stream buffer and are not current grid guarantees. The previous broad c2 dismissal is narrowed by this revision, not silently removed. possible_cover: none; no queue or coverage sources searched. Could-be-highest: no established security or loss-of-work route; missing test evidence alone does not prove such harm. Caveat: the current callers' hidden/visible, marker-reason, first-frame-tail and live-input assertions remain useful and this finding does not require reveal to block on all history."
+          }
+        }
+      ],
+      "latest": {
+        "line": 7,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "c2",
+          "state": "open",
+          "summary": "held-replay helper claims history is applied before its oracle proves it",
+          "location": "e2e/tests/terminal-replay-rename.spec.ts:128-150",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\nThe revised test helper describes a fully applied replay, but it only waits for the replay marker. Older terminal output can still be queued at that point. This is a test synchronization/documentation defect; no shipped output loss has been demonstrated.\n\n## Details\nThe changed docstring says 'the replay has arrived and been applied to the still-hidden terminal'. The helper at :136-154 polls only __farhelmIslands[el].test.replay.heldReason == marker. terminal.js:4073-4082 handles replay_complete by immediately calling endCatchUp, whose :3886-3888 held-marker path sets heldReason without waiting for the grid's history queue. grid-terminal.js:1876-1930 drains queued history in bounded slices scheduled on later animation frames/message-channel tasks. term.ts:162-215 explicitly states and implements that unapplied history is absent from text reads, and terminal-readiness.ts:40-55 waits only for revealed. Therefore neither this helper nor the subsequent reveal wait establishes the newly documented applied-history boundary. SPEC_impl.md, The grid client, explicitly says the client applies a large history 'in slices between frames so that the screen stays usable'. terminal.js:3774-3776 also explicitly says history may still be applying when the screen reveals.\n\nThe backend-independent completeness concern remains narrower than a product bug: the agent test at :371-375 reads only spam-line-200, which is in the current screen after spam 200; the tab test waits only for TABSPAM-200. Those observables do not independently prove historical rows arrived. That weak last-line assertion was already present before this commit, so it is not claimed as newly introduced missing-history behavior. The newly changed helper contract should say the replay marker arrived and the current screen was applied, with history potentially pending. If callers need fully applied history, add a separately named history-drained oracle and assert an older line as well; do not make all held-state tests wait for a stronger boundary indiscriminately.\n\nSuggested bucket: other, confined to test synchronization documentation and its overstated observable. Confidence: confirmed by source/contract analysis; no execution. proposed_drop: false for the newly false helper contract. Preserve prior proposed drop for bufferBytes/bufferChunks/bufferedBytes themselves: those removed controls describe the retired byte-stream buffer and are not current grid guarantees. The previous broad c2 dismissal is narrowed by this revision, not silently removed. possible_cover: none; no queue or coverage sources searched. Could-be-highest: no established security or loss-of-work route; missing test evidence alone does not prove such harm. Caveat: the current callers' hidden/visible, marker-reason, first-frame-tail and live-input assertions remain useful and this finding does not require reveal to block on all history."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g181/findings.jsonl",
+        "id": "c2",
+        "line": 7,
+        "disposition": "verified",
+        "group": "held-replay-helper-misstates-history-drained-boundary",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-112 after inspecting it. The newly changed helper docstring claims replay has been applied, but the helper observes only marker arrival. Queued older history can still be pending. This establishes an inaccurate test synchronization contract, not shipped output loss or a reproduced false pass. Record as other: clarify marker/current-screen readiness versus fully applied history. If a caller needs all history, give it an explicit drained-history witness; this finding does not require delaying every reveal. Preserve the prior dismissal only for retired byte-buffer controls. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:e2e/tests/terminal-replay-rename.spec.ts:127-154 newly says replay has arrived and been applied, then polls only test.replay.heldReason == marker. The commit patch confirms this wording is newly authored.\",\"Same revision terminal.js:4073-4082 calls endCatchUp(marker) directly on replay_complete; :3886-3888 records heldReason without a history-drain condition. :3774-3776 explicitly permits history still applying at reveal.\",\"Same revision grid-terminal.js:1876-1930 drains history in slices scheduled on future animation frames/message-channel tasks. helpers/term.ts:162-215 explicitly excludes unapplied history from text reads. helpers/terminal-readiness.ts:40-55 waits for revealed, not historyPending == 0.\",\"The patch retains hidden/placeholder, marker-reason, first-visible-frame-tail and current-screen/live-input checks. Removed bufferBytes/bufferChunks/bufferedBytes are old byte-buffer observations. The existing spam-line-200/TABSPAM-200 checks do not independently prove all historical rows; that weakness predates this patch.\"] Current coverage/results: [\"SPEC.md Terminal experience requires replayed screen and scrollback; SPEC_impl.md The grid client explicitly permits large history application in slices. That acceptance does not accept a falsely documented test boundary.\",\"TODO Planned is empty. Searches of plans/queue found no unlanded fix for this helper contract; empty-scrollback-messages and tmux removal plans are landed (plans/REPORTS.md:9,29,32). BUGS has no matching item.\",\"INDEX/matching queue search found replacement-history-absence-asserted-before-delivery.md. Its full record concerns a negative old-history assertion in replace.spec.ts without a delivery witness, not this positive held-marker helper docstring. Shared sliced-history mechanism is context, not exact coverage or an alias.\",\"Active TRIAGE_OUTCOMES searches found no matching decision. FILTER.md does not match this ordinary, persistent documentation overstatement.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Initially considered lost replay completeness coverage after removal of byte buffers. That broad dismissal was reopened: a test can observe marker/current screen while older output remains queued. Latest scope retains only the newly false helper contract; weak last-line completeness assertions already existed. No actual product loss was established or lowered from highest.\"; \"No runtime ordering, false pass or shipped history-loss consequence was observed. Those stronger claims need separate evidence; the false helper contract is established by source.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g181/c2",
+        "line": 7,
+        "disposition": "verified",
+        "group": "held-replay-helper-misstates-history-drained-boundary",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-112 after inspecting it. The newly changed helper docstring claims replay has been applied, but the helper observes only marker arrival. Queued older history can still be pending. This establishes an inaccurate test synchronization contract, not shipped output loss or a reproduced false pass. Record as other: clarify marker/current-screen readiness versus fully applied history. If a caller needs all history, give it an explicit drained-history witness; this finding does not require delaying every reveal. Preserve the prior dismissal only for retired byte-buffer controls. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:e2e/tests/terminal-replay-rename.spec.ts:127-154 newly says replay has arrived and been applied, then polls only test.replay.heldReason == marker. The commit patch confirms this wording is newly authored.\",\"Same revision terminal.js:4073-4082 calls endCatchUp(marker) directly on replay_complete; :3886-3888 records heldReason without a history-drain condition. :3774-3776 explicitly permits history still applying at reveal.\",\"Same revision grid-terminal.js:1876-1930 drains history in slices scheduled on future animation frames/message-channel tasks. helpers/term.ts:162-215 explicitly excludes unapplied history from text reads. helpers/terminal-readiness.ts:40-55 waits for revealed, not historyPending == 0.\",\"The patch retains hidden/placeholder, marker-reason, first-visible-frame-tail and current-screen/live-input checks. Removed bufferBytes/bufferChunks/bufferedBytes are old byte-buffer observations. The existing spam-line-200/TABSPAM-200 checks do not independently prove all historical rows; that weakness predates this patch.\"] Current coverage/results: [\"SPEC.md Terminal experience requires replayed screen and scrollback; SPEC_impl.md The grid client explicitly permits large history application in slices. That acceptance does not accept a falsely documented test boundary.\",\"TODO Planned is empty. Searches of plans/queue found no unlanded fix for this helper contract; empty-scrollback-messages and tmux removal plans are landed (plans/REPORTS.md:9,29,32). BUGS has no matching item.\",\"INDEX/matching queue search found replacement-history-absence-asserted-before-delivery.md. Its full record concerns a negative old-history assertion in replace.spec.ts without a delivery witness, not this positive held-marker helper docstring. Shared sliced-history mechanism is context, not exact coverage or an alias.\",\"Active TRIAGE_OUTCOMES searches found no matching decision. FILTER.md does not match this ordinary, persistent documentation overstatement.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Initially considered lost replay completeness coverage after removal of byte buffers. That broad dismissal was reopened: a test can observe marker/current screen while older output remains queued. Latest scope retains only the newly false helper contract; weak last-line completeness assertions already existed. No actual product loss was established or lowered from highest.\"; \"No runtime ordering, false pass or shipped history-loss consequence was observed. Those stronger claims need separate evidence; the false helper contract is established by source.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-112",
+          "key": "g181/c2",
+          "latest_line": 7,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "held-replay-helper-misstates-history-drained-boundary",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The newly changed helper docstring claims replay has been applied, but the helper observes only marker arrival. Queued older history can still be pending. This establishes an inaccurate test synchronization contract, not shipped output loss or a reproduced false pass.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e:e2e/tests/terminal-replay-rename.spec.ts:127-154 newly says replay has arrived and been applied, then polls only test.replay.heldReason == marker. The commit patch confirms this wording is newly authored.",
+            "Same revision terminal.js:4073-4082 calls endCatchUp(marker) directly on replay_complete; :3886-3888 records heldReason without a history-drain condition. :3774-3776 explicitly permits history still applying at reveal.",
+            "Same revision grid-terminal.js:1876-1930 drains history in slices scheduled on future animation frames/message-channel tasks. helpers/term.ts:162-215 explicitly excludes unapplied history from text reads. helpers/terminal-readiness.ts:40-55 waits for revealed, not historyPending == 0.",
+            "The patch retains hidden/placeholder, marker-reason, first-visible-frame-tail and current-screen/live-input checks. Removed bufferBytes/bufferChunks/bufferedBytes are old byte-buffer observations. The existing spam-line-200/TABSPAM-200 checks do not independently prove all historical rows; that weakness predates this patch."
+          ],
+          "coverage_checked": [
+            "SPEC.md Terminal experience requires replayed screen and scrollback; SPEC_impl.md The grid client explicitly permits large history application in slices. That acceptance does not accept a falsely documented test boundary.",
+            "TODO Planned is empty. Searches of plans/queue found no unlanded fix for this helper contract; empty-scrollback-messages and tmux removal plans are landed (plans/REPORTS.md:9,29,32). BUGS has no matching item.",
+            "INDEX/matching queue search found replacement-history-absence-asserted-before-delivery.md. Its full record concerns a negative old-history assertion in replace.spec.ts without a delivery witness, not this positive held-marker helper docstring. Shared sliced-history mechanism is context, not exact coverage or an alias.",
+            "Active TRIAGE_OUTCOMES searches found no matching decision. FILTER.md does not match this ordinary, persistent documentation overstatement."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No runtime ordering, false pass or shipped history-loss consequence was observed. Those stronger claims need separate evidence; the false helper contract is established by source.",
+          "original_stronger_consequence": "Initially considered lost replay completeness coverage after removal of byte buffers. That broad dismissal was reopened: a test can observe marker/current screen while older output remains queued. Latest scope retains only the newly false helper contract; weak last-line completeness assertions already existed. No actual product loss was established or lowered from highest.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Record as other: clarify marker/current-screen readiness versus fully applied history. If a caller needs all history, give it an explicit drained-history witness; this finding does not require delaying every reveal. Preserve the prior dismissal only for retired byte-buffer controls."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "held-replay-helper-misstates-history-drained-boundary",
+        "destination": "trailing-held-replay-helper-misstates-history-drained-boundary.md"
+      }
+    },
+    {
+      "key": "g181/c3",
+      "owner": "g181",
+      "id": "c3",
+      "domain": "browser-terminal-regressions",
+      "purpose": "browser-terminal-regressions: e2e/tests/terminal-reconnect.spec.ts, e2e/tests/terminal-replay-rename.spec.ts, e2e/tests/terminal-tabs.spec.ts, e2e/tests/terminal.spec.ts, e2e/grid-client/grid-terminal.spec.ts, e2e/tests/terminal-clipboard.spec.ts, e2e/tests/terminal-flood.spec.ts, e2e/tests/terminal-restart.spec.ts, e2e/tests/terminal-unicode.spec.ts; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "grid-only teardown and clean-screen assertions use the correct object and coordinates",
+            "location": "e2e/tests/terminal-tabs.spec.ts:1965",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\nThe simplified checks still inspect the renderer users receive, and the clean-tab assertion compares screen-relative row numbers correctly.\n\n## Details\nConsidered whether deleting the old-terminal fallback made instance checks or below-cursor checks vacuous, including whether snapshot.lines mixed history with screen-relative cursor.y. At this revision terminal.js:3386-3394 unconditionally creates the grid surface before creating the socket. grid-terminal.js:2091-2105 returns screen rows as lines, history separately, and the screen-relative model cursor. Thus terminal-tabs.spec.ts:1965-1970 compares coordinates in the same space. The deleted branch merely handled the retired xterm model; the grid branch was already present before this patch. Snapshot screen counts use grid-terminal.js:344's one grid-terminal-screen element per component. SPEC_impl.md, Terminal widget: the grid island, says 'Every terminal runs in a terminal host' and 'the browser draws a grid stream with its own grid client'. Suggested bucket: other. Confidence: confirmed by source; no execution. proposed_drop: no active renderer branch is omitted and no coordinate mismatch is introduced. possible_cover: none; coverage sources not searched. Could-be-highest: no; this test-only simplification establishes no security or loss-of-work route. Caveat: unchanged historical comments about the original tmux bug remain historical context; this does not assess retired implementation independently."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "grid-only assertions retain fresh-instance and geometry observables",
+            "location": "e2e/tests/terminal-tabs.spec.ts:668-723,1294-1324,1590-1661,1965-1970",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\nRevisited whether the simplified checks could pass while old tab attachments survive, hidden tabs have unusable geometry, or a fresh tab displays residue. The surviving assertions still discriminate those failures.\n\n## Details\nThe full teardown caller (:668-723) establishes exactly three original registry keys, retains all three socket/component objects, requires all original sockets CLOSED after leaving and both tab islands absent, then waits for the exact original nonempty registry key set before comparing every new grid against the retained components. Thus deleting the old-renderer fallback does not turn the instance comparison into an empty-array success. Production terminal.js:4313 builds the grid, :4660 publishes the primary grid, and :4668 publishes the same object into each island record, matching these reads. The hidden-geometry caller (:1294-1324) confirms the tab is hidden, checks its element's real width/height and nondegenerate grid.size(), then selects it and requires a live shell marker. Resize callers (:1590-1661) inspect committed grid.model rows/columns and require changes on confirmation open/window resize and restoration on confirmation cancel, preserving the program-visible sizing observable. The clean-screen test uses grid.snapshot().lines with cursor.y; grid-terminal.js:2091-2105 returns screen rows and cursor together, with history separate, so its coordinate space remains valid. SPEC_impl.md, The grid client: 'Drawing still rounds cells at the supervisor-committed size'. SPEC_impl.md, Terminal widget: the grid island: 'Every terminal runs in a terminal host' and the browser draws a grid stream.\n\nSuggested bucket: other. Confidence: confirmed by source, no execution. proposed_drop: retain the original no-active-renderer/coordinate-regression basis, supplemented by the actual nonempty-instance, closed-socket, real-geometry and live-input assertions. possible_cover: none; no queue or coverage sources searched. Could-be-highest: no established security or loss-of-work route from these changes. Caveat: object replacement plus closed sockets does not measure heap reclamation; neither the removed fallback nor this patch promised a heap measurement. The same grid branch and clean-screen coordinate use already existed before the patch."
+          }
+        }
+      ],
+      "latest": {
+        "line": 8,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "grid-only assertions retain fresh-instance and geometry observables",
+          "location": "e2e/tests/terminal-tabs.spec.ts:668-723,1294-1324,1590-1661,1965-1970",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\nRevisited whether the simplified checks could pass while old tab attachments survive, hidden tabs have unusable geometry, or a fresh tab displays residue. The surviving assertions still discriminate those failures.\n\n## Details\nThe full teardown caller (:668-723) establishes exactly three original registry keys, retains all three socket/component objects, requires all original sockets CLOSED after leaving and both tab islands absent, then waits for the exact original nonempty registry key set before comparing every new grid against the retained components. Thus deleting the old-renderer fallback does not turn the instance comparison into an empty-array success. Production terminal.js:4313 builds the grid, :4660 publishes the primary grid, and :4668 publishes the same object into each island record, matching these reads. The hidden-geometry caller (:1294-1324) confirms the tab is hidden, checks its element's real width/height and nondegenerate grid.size(), then selects it and requires a live shell marker. Resize callers (:1590-1661) inspect committed grid.model rows/columns and require changes on confirmation open/window resize and restoration on confirmation cancel, preserving the program-visible sizing observable. The clean-screen test uses grid.snapshot().lines with cursor.y; grid-terminal.js:2091-2105 returns screen rows and cursor together, with history separate, so its coordinate space remains valid. SPEC_impl.md, The grid client: 'Drawing still rounds cells at the supervisor-committed size'. SPEC_impl.md, Terminal widget: the grid island: 'Every terminal runs in a terminal host' and the browser draws a grid stream.\n\nSuggested bucket: other. Confidence: confirmed by source, no execution. proposed_drop: retain the original no-active-renderer/coordinate-regression basis, supplemented by the actual nonempty-instance, closed-socket, real-geometry and live-input assertions. possible_cover: none; no queue or coverage sources searched. Could-be-highest: no established security or loss-of-work route from these changes. Caveat: object replacement plus closed sockets does not measure heap reclamation; neither the removed fallback nor this patch promised a heap measurement. The same grid branch and clean-screen coordinate use already existed before the patch."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g181/findings.jsonl",
+        "id": "c3",
+        "line": 8,
+        "disposition": "excluded",
+        "group": "grid-tab-test-identity-geometry-coordinate-oracles",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-112 after inspecting it. The retained grid assertions are non-vacuous and use consistent screen coordinates. They still discriminate surviving old attachments, unusable hidden geometry and visible residue in a new tab. Refute the alleged newly vacuous/coordinate-mismatched grid assertions, without certifying unrelated heap reclamation. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:e2e/tests/terminal-tabs.spec.ts:668-723 requires exactly the three original island keys, closes all retained sockets, waits for those exact keys after reopening and compares each component with retained old components.\",\"Same file :1294-1324 observes hidden pane, actual positive dimensions, nondegenerate grid.size and a live shell marker after selection. :1963-1973 checks snapshot.lines below snapshot.cursor.y.\",\"Same revision grid-terminal.js:2091-2105 returns screen lines and screen cursor, with history separately. terminal.js:4313 and :4658-4668 create/publish those same grids. SPEC_impl The grid client distinguishes fit proposals from committed drawn size.\"] Current coverage/results: [\"SPEC.md Terminal experience and SPEC_impl Terminal widget/The grid client checked for size, tab and renderer contract; no active second renderer exists.\",\"TODO Planned empty; searches of plans/queue, BUGS, INDEX/matching files and active TRIAGE_OUTCOMES found no exact oracle-loss cover. No same-root alias among supplied claims.\",\"No FILTER.md disposition proposed.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Simplifications might pass with old tab attachments surviving, hidden tabs unusably sized or fresh tabs containing residue; an additional concern was history/screen cursor coordinate mismatch. These named assertion failures are source-refuted, not empirically tested.\"; \"Object replacement and closed sockets do not measure heap reclamation. Neither the removed alternative nor the retained grid branch measured it.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g181/c3",
+        "line": 8,
+        "disposition": "excluded",
+        "group": "grid-tab-test-identity-geometry-coordinate-oracles",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-112 after inspecting it. The retained grid assertions are non-vacuous and use consistent screen coordinates. They still discriminate surviving old attachments, unusable hidden geometry and visible residue in a new tab. Refute the alleged newly vacuous/coordinate-mismatched grid assertions, without certifying unrelated heap reclamation. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:e2e/tests/terminal-tabs.spec.ts:668-723 requires exactly the three original island keys, closes all retained sockets, waits for those exact keys after reopening and compares each component with retained old components.\",\"Same file :1294-1324 observes hidden pane, actual positive dimensions, nondegenerate grid.size and a live shell marker after selection. :1963-1973 checks snapshot.lines below snapshot.cursor.y.\",\"Same revision grid-terminal.js:2091-2105 returns screen lines and screen cursor, with history separately. terminal.js:4313 and :4658-4668 create/publish those same grids. SPEC_impl The grid client distinguishes fit proposals from committed drawn size.\"] Current coverage/results: [\"SPEC.md Terminal experience and SPEC_impl Terminal widget/The grid client checked for size, tab and renderer contract; no active second renderer exists.\",\"TODO Planned empty; searches of plans/queue, BUGS, INDEX/matching files and active TRIAGE_OUTCOMES found no exact oracle-loss cover. No same-root alias among supplied claims.\",\"No FILTER.md disposition proposed.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Simplifications might pass with old tab attachments surviving, hidden tabs unusably sized or fresh tabs containing residue; an additional concern was history/screen cursor coordinate mismatch. These named assertion failures are source-refuted, not empirically tested.\"; \"Object replacement and closed sockets do not measure heap reclamation. Neither the removed alternative nor the retained grid branch measured it.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-112",
+          "key": "g181/c3",
+          "latest_line": 8,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "grid-tab-test-identity-geometry-coordinate-oracles",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The retained grid assertions are non-vacuous and use consistent screen coordinates. They still discriminate surviving old attachments, unusable hidden geometry and visible residue in a new tab.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e:e2e/tests/terminal-tabs.spec.ts:668-723 requires exactly the three original island keys, closes all retained sockets, waits for those exact keys after reopening and compares each component with retained old components.",
+            "Same file :1294-1324 observes hidden pane, actual positive dimensions, nondegenerate grid.size and a live shell marker after selection. :1963-1973 checks snapshot.lines below snapshot.cursor.y.",
+            "Same revision grid-terminal.js:2091-2105 returns screen lines and screen cursor, with history separately. terminal.js:4313 and :4658-4668 create/publish those same grids. SPEC_impl The grid client distinguishes fit proposals from committed drawn size."
+          ],
+          "coverage_checked": [
+            "SPEC.md Terminal experience and SPEC_impl Terminal widget/The grid client checked for size, tab and renderer contract; no active second renderer exists.",
+            "TODO Planned empty; searches of plans/queue, BUGS, INDEX/matching files and active TRIAGE_OUTCOMES found no exact oracle-loss cover. No same-root alias among supplied claims.",
+            "No FILTER.md disposition proposed."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "Object replacement and closed sockets do not measure heap reclamation. Neither the removed alternative nor the retained grid branch measured it.",
+          "original_stronger_consequence": "Simplifications might pass with old tab attachments surviving, hidden tabs unusably sized or fresh tabs containing residue; an additional concern was history/screen cursor coordinate mismatch. These named assertion failures are source-refuted, not empirically tested.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Refute the alleged newly vacuous/coordinate-mismatched grid assertions, without certifying unrelated heap reclamation."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "grid-tab-test-identity-geometry-coordinate-oracles",
+        "destination": null
+      }
+    },
+    {
+      "key": "g181/c4",
+      "owner": "g181",
+      "id": "c4",
+      "domain": "browser-terminal-regressions",
+      "purpose": "browser-terminal-regressions: e2e/tests/terminal-reconnect.spec.ts, e2e/tests/terminal-replay-rename.spec.ts, e2e/tests/terminal-tabs.spec.ts, e2e/tests/terminal.spec.ts, e2e/grid-client/grid-terminal.spec.ts, e2e/tests/terminal-clipboard.spec.ts, e2e/tests/terminal-flood.spec.ts, e2e/tests/terminal-restart.spec.ts, e2e/tests/terminal-unicode.spec.ts; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "updated restart and terminal comments preserve the specified contracts",
+            "location": "e2e/tests/terminal-restart.spec.ts:1002",
+            "detail": "Reviewed commits: 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e and 4b489b4f2eeade14f119b186ecb16eeaaf027021\n\n## TLDR\nThe remaining assigned changes update test explanations for terminal hosts; they do not change test execution or relax the restart promise.\n\n## Details\nChecked the changed restart wording against SPEC.md:1939-1953 at 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e: 'the terminal is replaced by a new one for each run, which starts with the old one's scrollback above a blank screen in default modes' and 'Restart does NOT preserve the previous run's last visible screen'. The comments explicitly distinguish scrollback from the discarded visible grid and the test actions/assertions are unchanged. Terminal experience:2889-2907 says the terminal outlives an exited process and replay sends current screen and scrollback, matching the flood/clipboard explanation updates. SPEC_impl.md:1836-1866 assigns input encoding to the supervisor and sliced history application to the grid, matching the grid-client comments. Source search confirms grid-terminal.js:1096-1102 retains ceil(raw + 0.5) - 1 rounding and :1478-1500 retains sendUserInput and paste message handling. The Unicode change only replaces the terminal substrate's name; the 4b489b4f2eeade14f119b186ecb16eeaaf027021 patch only corrects a historical fixture's tense. Suggested bucket: other. Confidence: confirmed by patch and contract analysis; no execution. proposed_drop: no contradictory contract or executable regression in these comment-only changes. possible_cover: none; coverage sources not searched. Could-be-highest: no; no new behavioral change or established harm route. Caveat: this does not independently re-review the historical raw-mode fixture or retired Rust tests mentioned in comments."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "comment-only substrate updates keep independent restart and live-input witnesses",
+            "location": "e2e/tests/terminal-restart.spec.ts:1022-1086; e2e/tests/terminal-clipboard.spec.ts:45-64",
+            "detail": "Reviewed commits: 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e and 4b489b4f2eeade14f119b186ecb16eeaaf027021\n\n## TLDR\nRevisited whether renamed terminal mechanisms hide an unchanged test that no longer proves restart history, live clipboard delivery or Unicode replay. The inspected callers retain witnesses for those behaviors; the assigned patches change their comments only.\n\n## Details\nRestart retention (:1022-1086) sends a unique prior-run marker, pushes it into history with spam 60, then sends a distinct grid-only marker. After restart it polls for prior marker before the last new-run banner and absence of the grid-only marker in one text snapshot. This genuinely distinguishes retained history from merely preserving the visible screen. SPEC.md, Lifecycle operations: 'the terminal is replaced by a new one for each run, which starts with the old one's scrollback above a blank screen in default modes' and 'Restart does NOT preserve the previous run's last visible screen'. Clipboard callers (:330-347, :369-407, :431-450) hold emission behind read, use attachSession before Enter, and observe either the exact clipboard value or a printed post-query sentinel. attachSession delegates to waitForSessionReady (term.ts:319-336), whose socket-identity, OPEN, reveal and actual input-focus checks are in terminal-readiness.ts. Thus the header's weaker statement that OPEN is required does not imply the actual callers send before replay. The read-query leg seeds and observes a secret before querying and checks outbound data plus the unchanged real clipboard; this patch removes no security assertion. Unicode replay (:130-177) requires a different socket, marker-ended reveal, exact buffer and DOM rows, cursor coordinates and a fresh continue reply after reconnect. Flood (:217-288) observes xy before erase, waits for live echo:x before Ctrl-C and checks for a forbidden subsequent echo over its observation window. Those are backend-independent witnesses; the 4b patch changes only the historical fixture's verb tense. Grid-client comment changes retain the same assertions and the same documented rounding/input encoding as recorded previously.\n\nSuggested bucket: other. Confidence: confirmed by source/contract analysis; no execution. proposed_drop: preserve original comment/contract consistency basis, now supplemented by the actual surviving restart ordering/absence and post-attach command witnesses. possible_cover: none; no queue or coverage sources searched. Could-be-highest: the clipboard read contract is security-sensitive, but the assigned change only rewrites the launch/replay explanation and removes no security behavior or test observable; no substantive highest issue is being dropped by specification acceptance. Caveat: this does not independently certify clipboard security across all wire frames or re-review unchanged test limitations outside the assigned edits. No current input-loss or terminal-history loss was observed or reproduced."
+          }
+        }
+      ],
+      "latest": {
+        "line": 9,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c4",
+          "state": "open",
+          "summary": "comment-only substrate updates keep independent restart and live-input witnesses",
+          "location": "e2e/tests/terminal-restart.spec.ts:1022-1086; e2e/tests/terminal-clipboard.spec.ts:45-64",
+          "detail": "Reviewed commits: 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e and 4b489b4f2eeade14f119b186ecb16eeaaf027021\n\n## TLDR\nRevisited whether renamed terminal mechanisms hide an unchanged test that no longer proves restart history, live clipboard delivery or Unicode replay. The inspected callers retain witnesses for those behaviors; the assigned patches change their comments only.\n\n## Details\nRestart retention (:1022-1086) sends a unique prior-run marker, pushes it into history with spam 60, then sends a distinct grid-only marker. After restart it polls for prior marker before the last new-run banner and absence of the grid-only marker in one text snapshot. This genuinely distinguishes retained history from merely preserving the visible screen. SPEC.md, Lifecycle operations: 'the terminal is replaced by a new one for each run, which starts with the old one's scrollback above a blank screen in default modes' and 'Restart does NOT preserve the previous run's last visible screen'. Clipboard callers (:330-347, :369-407, :431-450) hold emission behind read, use attachSession before Enter, and observe either the exact clipboard value or a printed post-query sentinel. attachSession delegates to waitForSessionReady (term.ts:319-336), whose socket-identity, OPEN, reveal and actual input-focus checks are in terminal-readiness.ts. Thus the header's weaker statement that OPEN is required does not imply the actual callers send before replay. The read-query leg seeds and observes a secret before querying and checks outbound data plus the unchanged real clipboard; this patch removes no security assertion. Unicode replay (:130-177) requires a different socket, marker-ended reveal, exact buffer and DOM rows, cursor coordinates and a fresh continue reply after reconnect. Flood (:217-288) observes xy before erase, waits for live echo:x before Ctrl-C and checks for a forbidden subsequent echo over its observation window. Those are backend-independent witnesses; the 4b patch changes only the historical fixture's verb tense. Grid-client comment changes retain the same assertions and the same documented rounding/input encoding as recorded previously.\n\nSuggested bucket: other. Confidence: confirmed by source/contract analysis; no execution. proposed_drop: preserve original comment/contract consistency basis, now supplemented by the actual surviving restart ordering/absence and post-attach command witnesses. possible_cover: none; no queue or coverage sources searched. Could-be-highest: the clipboard read contract is security-sensitive, but the assigned change only rewrites the launch/replay explanation and removes no security behavior or test observable; no substantive highest issue is being dropped by specification acceptance. Caveat: this does not independently certify clipboard security across all wire frames or re-review unchanged test limitations outside the assigned edits. No current input-loss or terminal-history loss was observed or reproduced."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g181/findings.jsonl",
+        "id": "c4",
+        "line": 9,
+        "disposition": "under-investigation",
+        "group": "g181-c4",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-112",
+          "key": "g181/c4",
+          "latest_line": 9,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "terminal-host-comment-refresh-preserves-test-contracts",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The named patches update explanations to the terminal-host/grid mechanism without changing the test actions or security assertions. The restart explanation matches the governing history-versus-screen contract. No new contradictory contract was established in these named changes.",
+          "checks": [
+            "61e632323dbc6b4a35ed27bf5b9833102ffd5a4e patches for terminal-restart.spec.ts, terminal-clipboard.spec.ts, terminal-flood.spec.ts, terminal-unicode.spec.ts and grid-client/grid-terminal.spec.ts contain only comment changes. 4b489b4f2eeade14f119b186ecb16eeaaf027021 changes hexecho's historical tense only.",
+            "61e632323dbc6b4a35ed27bf5b9833102ffd5a4e:SPEC.md:1939-1953 expressly retains old scrollback above a blank default-mode screen in a new terminal and discards the previous visible screen; the refreshed restart comments preserve this distinction.",
+            "Clipboard comment refresh describes creation-time process launch and current screen/scrollback replay rather than escape-byte replay; SPEC_impl Terminal widget's write-only clipboard contract agrees. The patch removes no OSC52 read/query assertion or clipboard witness.",
+            "The Unicode cursor substrate rename and grid rounding/sendUserInput comments do not alter their assertions. Existing replay timing limitations are not cured merely by this comment-only conclusion."
+          ],
+          "coverage_checked": [
+            "SPEC.md Lifecycle operations/Terminal experience and SPEC_impl Terminal widget/The grid client govern the named explanations; no contrary intended behavior found.",
+            "TODO Planned empty; plans/queue, BUGS, INDEX/matching files and active TRIAGE_OUTCOMES searches found no exact new comment-contract defect cover. Landed documentation cleanup is not unlanded coverage.",
+            "No FILTER.md rule is used. g182/l1 is a separately named stale restart-status paragraph, not an alias of these consistent explanations."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No general clipboard-security certification, input-loss route or runtime history-loss observation follows from reading these comment-only patches.",
+          "original_stronger_consequence": "Renamed mechanisms might conceal tests that no longer prove restart history, live clipboard delivery or Unicode replay. The clipboard read contract is security-sensitive; no removed security observable or executable change was found in these patches.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Refute only the alleged newly inconsistent explanations/oracle removal. Preserve the security-sensitive clipboard context for the independent drop check, even though the established consequence is test commentary only."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "terminal-host-comment-refresh-preserves-test-contracts",
+        "destination": null
+      }
+    },
+    {
+      "key": "g181/c5",
+      "owner": "g181",
+      "id": "c5",
+      "domain": "browser-terminal-regressions",
+      "purpose": "browser-terminal-regressions: e2e/tests/terminal-reconnect.spec.ts, e2e/tests/terminal-replay-rename.spec.ts, e2e/tests/terminal-tabs.spec.ts, e2e/tests/terminal.spec.ts, e2e/grid-client/grid-terminal.spec.ts, e2e/tests/terminal-clipboard.spec.ts, e2e/tests/terminal-flood.spec.ts, e2e/tests/terminal-restart.spec.ts, e2e/tests/terminal-unicode.spec.ts; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c5",
+            "state": "open",
+            "summary": "grid-only theme selectors retain the painted-surface checks",
+            "location": "e2e/tests/terminal.spec.ts:113-133,150-213",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\nDiscovery considered whether simplifying the theme/frame tests makes them inspect an unrelated wrapper or lets a missing renderer pass. The selectors still address the actual painted grid surface and retain the observed background and geometry checks.\n\n## Details\nterminal.spec.ts:113-133 reads the defined primary grid's inline background, computed grid background and computed outer terminal background; it requires the exact expected rgb value and equality to the wrapper. At :150-213 the selected outer island scopes its grid surface, and the test checks frame appearance through Settings and host appearance changes while surface colors and client dimensions stay fixed. grid-terminal.js:341-344 creates distinct grid-terminal and grid-terminal-screen elements, :829-834 paints the grid root's defaults.bg inline, and app.css:8614-8615 scopes the host-colored shadow to the outer direct child terminal. SPEC.md, Terminal experience: 'The terminal background, text palette and size do not change.' Thus the new selectors do not substitute an unpainted test property for the old surface observable. The grid branch already used the same inline/background checks before this commit; this patch removes the retired alternative. The test does not assert every ANSI palette entry, and that is not claimed as a new lost assertion. Suggested bucket: other. Confidence: confirmed source-only; no runtime execution. proposed_drop: no new surface/selector oracle defect established by the assigned simplification. possible_cover: none; no queue or coverage sources searched. Could-be-highest: no; these visual test assertions have no established security or loss-of-work route. Material caveat: background checks do not independently certify every row's foreground/palette rendering, and a correct current implementation alone would not refute a removed distinct assertion; none was removed from the grid branch here."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c5",
+          "state": "open",
+          "summary": "grid-only theme selectors retain the painted-surface checks",
+          "location": "e2e/tests/terminal.spec.ts:113-133,150-213",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\nDiscovery considered whether simplifying the theme/frame tests makes them inspect an unrelated wrapper or lets a missing renderer pass. The selectors still address the actual painted grid surface and retain the observed background and geometry checks.\n\n## Details\nterminal.spec.ts:113-133 reads the defined primary grid's inline background, computed grid background and computed outer terminal background; it requires the exact expected rgb value and equality to the wrapper. At :150-213 the selected outer island scopes its grid surface, and the test checks frame appearance through Settings and host appearance changes while surface colors and client dimensions stay fixed. grid-terminal.js:341-344 creates distinct grid-terminal and grid-terminal-screen elements, :829-834 paints the grid root's defaults.bg inline, and app.css:8614-8615 scopes the host-colored shadow to the outer direct child terminal. SPEC.md, Terminal experience: 'The terminal background, text palette and size do not change.' Thus the new selectors do not substitute an unpainted test property for the old surface observable. The grid branch already used the same inline/background checks before this commit; this patch removes the retired alternative. The test does not assert every ANSI palette entry, and that is not claimed as a new lost assertion. Suggested bucket: other. Confidence: confirmed source-only; no runtime execution. proposed_drop: no new surface/selector oracle defect established by the assigned simplification. possible_cover: none; no queue or coverage sources searched. Could-be-highest: no; these visual test assertions have no established security or loss-of-work route. Material caveat: background checks do not independently certify every row's foreground/palette rendering, and a correct current implementation alone would not refute a removed distinct assertion; none was removed from the grid branch here."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g181/findings.jsonl",
+        "id": "c5",
+        "line": 10,
+        "disposition": "excluded",
+        "group": "grid-theme-tests-retain-painted-surface-observable",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-112 after inspecting it. The simplified selectors still inspect the actual grid element's drawn default background and compare it with the surrounding terminal. The pre-existing grid branch keeps the same visual observations. Refute only the named newly lost painted-surface oracle, preserving the narrower palette-coverage limitation. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:e2e/tests/terminal.spec.ts:113-133 reads __farhelmGrid.element.style.backgroundColor and computed grid/wrapper colors, requires rgb(40,44,52), and compares wrapper equality.\",\"The patch at :150-213 scopes the grid inside the selected outer island and retains frame, color and client-dimension checks across Settings/host appearance changes. It removes the old renderer alternative, not a grid observable.\",\"terminal.js:4313-4334 constructs that grid using the real theme and :4658-4668 publishes it. SPEC.md Terminal experience requires host-colored frames without changing terminal background, palette or size.\"] Current coverage/results: [\"SPEC.md Terminal experience and SPEC_impl The grid client/Terminal widget checked for painted grid/frame contract.\",\"TODO Planned empty; plans/queue, BUGS, INDEX/matching files and active TRIAGE_OUTCOMES searches found no exact surface-selector defect cover. Palette bugs elsewhere do not cover this alleged removed assertion.\",\"No FILTER.md boundary used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Theme/frame tests might inspect an unrelated wrapper or accept a missing renderer after selector cleanup. The actual grid dereference and computed background assertions refute those routes; no runtime visual verification performed.\"; \"Background observations do not certify all ANSI foreground/palette entries. No such independent grid assertion was removed here.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g181/c5",
+        "line": 10,
+        "disposition": "excluded",
+        "group": "grid-theme-tests-retain-painted-surface-observable",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-112 after inspecting it. The simplified selectors still inspect the actual grid element's drawn default background and compare it with the surrounding terminal. The pre-existing grid branch keeps the same visual observations. Refute only the named newly lost painted-surface oracle, preserving the narrower palette-coverage limitation. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:e2e/tests/terminal.spec.ts:113-133 reads __farhelmGrid.element.style.backgroundColor and computed grid/wrapper colors, requires rgb(40,44,52), and compares wrapper equality.\",\"The patch at :150-213 scopes the grid inside the selected outer island and retains frame, color and client-dimension checks across Settings/host appearance changes. It removes the old renderer alternative, not a grid observable.\",\"terminal.js:4313-4334 constructs that grid using the real theme and :4658-4668 publishes it. SPEC.md Terminal experience requires host-colored frames without changing terminal background, palette or size.\"] Current coverage/results: [\"SPEC.md Terminal experience and SPEC_impl The grid client/Terminal widget checked for painted grid/frame contract.\",\"TODO Planned empty; plans/queue, BUGS, INDEX/matching files and active TRIAGE_OUTCOMES searches found no exact surface-selector defect cover. Palette bugs elsewhere do not cover this alleged removed assertion.\",\"No FILTER.md boundary used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Theme/frame tests might inspect an unrelated wrapper or accept a missing renderer after selector cleanup. The actual grid dereference and computed background assertions refute those routes; no runtime visual verification performed.\"; \"Background observations do not certify all ANSI foreground/palette entries. No such independent grid assertion was removed here.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-112",
+          "key": "g181/c5",
+          "latest_line": 10,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "grid-theme-tests-retain-painted-surface-observable",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The simplified selectors still inspect the actual grid element's drawn default background and compare it with the surrounding terminal. The pre-existing grid branch keeps the same visual observations.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e:e2e/tests/terminal.spec.ts:113-133 reads __farhelmGrid.element.style.backgroundColor and computed grid/wrapper colors, requires rgb(40,44,52), and compares wrapper equality.",
+            "The patch at :150-213 scopes the grid inside the selected outer island and retains frame, color and client-dimension checks across Settings/host appearance changes. It removes the old renderer alternative, not a grid observable.",
+            "terminal.js:4313-4334 constructs that grid using the real theme and :4658-4668 publishes it. SPEC.md Terminal experience requires host-colored frames without changing terminal background, palette or size."
+          ],
+          "coverage_checked": [
+            "SPEC.md Terminal experience and SPEC_impl The grid client/Terminal widget checked for painted grid/frame contract.",
+            "TODO Planned empty; plans/queue, BUGS, INDEX/matching files and active TRIAGE_OUTCOMES searches found no exact surface-selector defect cover. Palette bugs elsewhere do not cover this alleged removed assertion.",
+            "No FILTER.md boundary used."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "Background observations do not certify all ANSI foreground/palette entries. No such independent grid assertion was removed here.",
+          "original_stronger_consequence": "Theme/frame tests might inspect an unrelated wrapper or accept a missing renderer after selector cleanup. The actual grid dereference and computed background assertions refute those routes; no runtime visual verification performed.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Refute only the named newly lost painted-surface oracle, preserving the narrower palette-coverage limitation."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "grid-theme-tests-retain-painted-surface-observable",
+        "destination": null
+      }
+    },
+    {
+      "key": "g181/c6",
+      "owner": "g181",
+      "id": "c6",
+      "domain": "browser-terminal-regressions",
+      "purpose": "browser-terminal-regressions: e2e/tests/terminal-reconnect.spec.ts, e2e/tests/terminal-replay-rename.spec.ts, e2e/tests/terminal-tabs.spec.ts, e2e/tests/terminal.spec.ts, e2e/grid-client/grid-terminal.spec.ts, e2e/tests/terminal-clipboard.spec.ts, e2e/tests/terminal-flood.spec.ts, e2e/tests/terminal-restart.spec.ts, e2e/tests/terminal-unicode.spec.ts; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c6",
+            "state": "open",
+            "summary": "failed-mount singleton simplification does not remove a distinct grid rollback observable",
+            "location": "e2e/tests/terminal.spec.ts:795-850",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\nDiscovery considered whether the failed-mount test now passes when a half-created grid remains, because checking an unpublished singleton alone cannot prove disposal. The current test's guard/retry observable remains intact; the broader disposal limitation predates the entire pinned range.\n\n## Details\nAt reviewed terminal.spec.ts:795-850 the sabotage makes WebSocket construction throw after grid creation, waits for the failure banner, checks the primary grid singleton is absent, restores WebSocket, bounces selection and requires the same session to reveal and show its ready banner. The removed assertion checked the retired singleton in addition to that same grid singleton, not DOM teardown or grid.dispose. Exclusive-base 6e423e30068b62c6cfa276c6d720ee35bb70387a terminal.spec.ts:814-866 has the same WebSocket failure boundary, singleton-only teardown observation and same-session remount check, and its introductory comment already claims disposal. Thus heap/DOM disposal is not a newly removed independent assertion within this pinned range. Reviewed terminal.js:4702-4737 separately disposes the grid and resets presentation before reporting failure; correctness of that code is context, not the reason to dismiss a lost oracle. SPEC_impl.md, The grid client: 'terminal.js owns the connection and mounts the grid component for every terminal before the socket exists'. This also validates the revised stated injection boundary. Suggested bucket: other. Confidence: confirmed source and exclusive-base comparison, no execution. proposed_drop: no in-range independent rollback-assertion loss or newly false construction-order explanation from this change. possible_cover: supplied g083/l1 concerns a different pre-grid-construction FileLinks fixture and is not used to dismiss this post-grid-construction WebSocket test. Could-be-highest: no; no established security or loss-of-work route. Caveat: the singleton and successful remount do not independently certify heap reclamation or every possible cleanup throw, and the record does not claim that they do."
+          }
+        }
+      ],
+      "latest": {
+        "line": 11,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c6",
+          "state": "open",
+          "summary": "failed-mount singleton simplification does not remove a distinct grid rollback observable",
+          "location": "e2e/tests/terminal.spec.ts:795-850",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\nDiscovery considered whether the failed-mount test now passes when a half-created grid remains, because checking an unpublished singleton alone cannot prove disposal. The current test's guard/retry observable remains intact; the broader disposal limitation predates the entire pinned range.\n\n## Details\nAt reviewed terminal.spec.ts:795-850 the sabotage makes WebSocket construction throw after grid creation, waits for the failure banner, checks the primary grid singleton is absent, restores WebSocket, bounces selection and requires the same session to reveal and show its ready banner. The removed assertion checked the retired singleton in addition to that same grid singleton, not DOM teardown or grid.dispose. Exclusive-base 6e423e30068b62c6cfa276c6d720ee35bb70387a terminal.spec.ts:814-866 has the same WebSocket failure boundary, singleton-only teardown observation and same-session remount check, and its introductory comment already claims disposal. Thus heap/DOM disposal is not a newly removed independent assertion within this pinned range. Reviewed terminal.js:4702-4737 separately disposes the grid and resets presentation before reporting failure; correctness of that code is context, not the reason to dismiss a lost oracle. SPEC_impl.md, The grid client: 'terminal.js owns the connection and mounts the grid component for every terminal before the socket exists'. This also validates the revised stated injection boundary. Suggested bucket: other. Confidence: confirmed source and exclusive-base comparison, no execution. proposed_drop: no in-range independent rollback-assertion loss or newly false construction-order explanation from this change. possible_cover: supplied g083/l1 concerns a different pre-grid-construction FileLinks fixture and is not used to dismiss this post-grid-construction WebSocket test. Could-be-highest: no; no established security or loss-of-work route. Caveat: the singleton and successful remount do not independently certify heap reclamation or every possible cleanup throw, and the record does not claim that they do."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g181/findings.jsonl",
+        "id": "c6",
+        "line": 11,
+        "disposition": "excluded",
+        "group": "failed-mount-test-retains-grid-guard-remount-oracle",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-112 after inspecting it. The removed assertion checked the retired singleton in addition to the same grid singleton. It never independently measured DOM disposal or heap reclamation. The test still exercises a post-grid-construction failure and successful same-session retry. Refute the in-range regression claim; preserve the real pre-existing limit of its disposal evidence. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:terminal.spec.ts patch :784-850 changes the construction-order explanation and removes only __farhelmTerm from the absence assertion. It retains WebSocket-constructor sabotage, failure banner, __farhelmGrid absence and same-session remount.\",\"Exclusive-base 6e423e30068b62c6cfa276c6d720ee35bb70387a:e2e/tests/terminal.spec.ts:814-869 has the same sabotage, singleton-only teardown observation and bounce-back retry. Thus the broader disposal-oracle limitation predates the range.\",\"SPEC_impl.md The grid client states that terminal.js mounts the component before creating its socket. This validates the revised injection-boundary explanation; production cleanup correctness alone is not the basis for rejecting a test defect.\"] Current coverage/results: [\"Both specifications searched for mount/terminal lifetime; SPEC_impl The grid client supplies construction order, not acceptance of missing disposal tests.\",\"TODO Planned empty; plans/queue, BUGS, INDEX/matching files and active TRIAGE_OUTCOMES searches found no exact newly lost rollback-oracle cover. The supplied g083/l1 concerns a different pre-grid FileLinks failure and is not used as coverage.\",\"No FILTER.md disposition used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The test might pass while a half-created grid remains because an unpublished singleton alone does not prove disposal. That limitation is preserved as pre-base context; no newly lost independent assertion or newly false construction-order explanation was found.\"; \"Singleton absence plus remount does not certify heap reclamation or every cleanup-throw path; those broader guarantees were not introduced or removed by this patch.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g181/c6",
+        "line": 11,
+        "disposition": "excluded",
+        "group": "failed-mount-test-retains-grid-guard-remount-oracle",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-112 after inspecting it. The removed assertion checked the retired singleton in addition to the same grid singleton. It never independently measured DOM disposal or heap reclamation. The test still exercises a post-grid-construction failure and successful same-session retry. Refute the in-range regression claim; preserve the real pre-existing limit of its disposal evidence. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:terminal.spec.ts patch :784-850 changes the construction-order explanation and removes only __farhelmTerm from the absence assertion. It retains WebSocket-constructor sabotage, failure banner, __farhelmGrid absence and same-session remount.\",\"Exclusive-base 6e423e30068b62c6cfa276c6d720ee35bb70387a:e2e/tests/terminal.spec.ts:814-869 has the same sabotage, singleton-only teardown observation and bounce-back retry. Thus the broader disposal-oracle limitation predates the range.\",\"SPEC_impl.md The grid client states that terminal.js mounts the component before creating its socket. This validates the revised injection-boundary explanation; production cleanup correctness alone is not the basis for rejecting a test defect.\"] Current coverage/results: [\"Both specifications searched for mount/terminal lifetime; SPEC_impl The grid client supplies construction order, not acceptance of missing disposal tests.\",\"TODO Planned empty; plans/queue, BUGS, INDEX/matching files and active TRIAGE_OUTCOMES searches found no exact newly lost rollback-oracle cover. The supplied g083/l1 concerns a different pre-grid FileLinks failure and is not used as coverage.\",\"No FILTER.md disposition used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The test might pass while a half-created grid remains because an unpublished singleton alone does not prove disposal. That limitation is preserved as pre-base context; no newly lost independent assertion or newly false construction-order explanation was found.\"; \"Singleton absence plus remount does not certify heap reclamation or every cleanup-throw path; those broader guarantees were not introduced or removed by this patch.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-112",
+          "key": "g181/c6",
+          "latest_line": 11,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "failed-mount-test-retains-grid-guard-remount-oracle",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The removed assertion checked the retired singleton in addition to the same grid singleton. It never independently measured DOM disposal or heap reclamation. The test still exercises a post-grid-construction failure and successful same-session retry.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e:terminal.spec.ts patch :784-850 changes the construction-order explanation and removes only __farhelmTerm from the absence assertion. It retains WebSocket-constructor sabotage, failure banner, __farhelmGrid absence and same-session remount.",
+            "Exclusive-base 6e423e30068b62c6cfa276c6d720ee35bb70387a:e2e/tests/terminal.spec.ts:814-869 has the same sabotage, singleton-only teardown observation and bounce-back retry. Thus the broader disposal-oracle limitation predates the range.",
+            "SPEC_impl.md The grid client states that terminal.js mounts the component before creating its socket. This validates the revised injection-boundary explanation; production cleanup correctness alone is not the basis for rejecting a test defect."
+          ],
+          "coverage_checked": [
+            "Both specifications searched for mount/terminal lifetime; SPEC_impl The grid client supplies construction order, not acceptance of missing disposal tests.",
+            "TODO Planned empty; plans/queue, BUGS, INDEX/matching files and active TRIAGE_OUTCOMES searches found no exact newly lost rollback-oracle cover. The supplied g083/l1 concerns a different pre-grid FileLinks failure and is not used as coverage.",
+            "No FILTER.md disposition used."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "Singleton absence plus remount does not certify heap reclamation or every cleanup-throw path; those broader guarantees were not introduced or removed by this patch.",
+          "original_stronger_consequence": "The test might pass while a half-created grid remains because an unpublished singleton alone does not prove disposal. That limitation is preserved as pre-base context; no newly lost independent assertion or newly false construction-order explanation was found.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Refute the in-range regression claim; preserve the real pre-existing limit of its disposal evidence."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "failed-mount-test-retains-grid-guard-remount-oracle",
+        "destination": null
+      }
+    },
+    {
+      "key": "g181/c7",
+      "owner": "g181",
+      "id": "c7",
+      "domain": "browser-terminal-regressions",
+      "purpose": "browser-terminal-regressions: e2e/tests/terminal-reconnect.spec.ts, e2e/tests/terminal-replay-rename.spec.ts, e2e/tests/terminal-tabs.spec.ts, e2e/tests/terminal.spec.ts, e2e/grid-client/grid-terminal.spec.ts, e2e/tests/terminal-clipboard.spec.ts, e2e/tests/terminal-flood.spec.ts, e2e/tests/terminal-restart.spec.ts, e2e/tests/terminal-unicode.spec.ts; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c7",
+            "state": "open",
+            "summary": "snapshot selector cleanup preserves real gesture and detached-state observables",
+            "location": "e2e/tests/terminal-reconnect.spec.ts:775-864",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\nDiscovery considered whether grid-only row selectors stop testing the retained non-live screen or mistake an active replacement for a snapshot. The test retains explicit detached-state, painted-row and real-gesture witnesses.\n\n## Details\nThe complete caller (:775-864) requires an empty island registry before observing the held screen; reads the marker from visible DOM instead of an unpublished model; measures a visible grid row containing each link before deriving coordinates; verifies drag does not open a web target; verifies the click opens the exact URL or downloads the exact file bytes; makes a real selection and observes the clipboard argument/value; and reasserts that no island attached. terminal.js:1566-1570 keeps the island's actual grid component as the held snapshot before unmount, and grid-terminal.js:2075-2085 freezes sending/resizing while retaining the same screen, selection and links. grid-terminal-row is the same DOM row class created at grid-terminal.js:620, so narrowing the selector still reaches the frozen component's actual painted rows. SPEC.md, Terminal experience: a displaced client 'keeps a non-live snapshot and an explicit take-control action'. Exclusive-base 6e423e30068b62c6cfa276c6d720ee35bb70387a terminal-reconnect.spec.ts:801-856 has the same grid selector alternative, geometry calculation and concrete gesture assertions; :1893-1899 and :2026-2032 already count the grid screen alongside the old renderer. This is not a newly introduced helper-only opinion replacing a DOM witness. Suggested bucket: other. Confidence: confirmed source and full-range-base comparison; no execution. proposed_drop: no distinct snapshot gesture/state observable removed by these selector changes. possible_cover: none; no prohibited coverage sources searched. Could-be-highest: no established security or loss-of-work route; test selects and opens fixture-controlled targets and no production admission change is alleged. Caveat: these assertions do not exhaust all link admission or overlay cases; supplied neighbours own those distinct known gaps."
+          }
+        }
+      ],
+      "latest": {
+        "line": 12,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c7",
+          "state": "open",
+          "summary": "snapshot selector cleanup preserves real gesture and detached-state observables",
+          "location": "e2e/tests/terminal-reconnect.spec.ts:775-864",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\nDiscovery considered whether grid-only row selectors stop testing the retained non-live screen or mistake an active replacement for a snapshot. The test retains explicit detached-state, painted-row and real-gesture witnesses.\n\n## Details\nThe complete caller (:775-864) requires an empty island registry before observing the held screen; reads the marker from visible DOM instead of an unpublished model; measures a visible grid row containing each link before deriving coordinates; verifies drag does not open a web target; verifies the click opens the exact URL or downloads the exact file bytes; makes a real selection and observes the clipboard argument/value; and reasserts that no island attached. terminal.js:1566-1570 keeps the island's actual grid component as the held snapshot before unmount, and grid-terminal.js:2075-2085 freezes sending/resizing while retaining the same screen, selection and links. grid-terminal-row is the same DOM row class created at grid-terminal.js:620, so narrowing the selector still reaches the frozen component's actual painted rows. SPEC.md, Terminal experience: a displaced client 'keeps a non-live snapshot and an explicit take-control action'. Exclusive-base 6e423e30068b62c6cfa276c6d720ee35bb70387a terminal-reconnect.spec.ts:801-856 has the same grid selector alternative, geometry calculation and concrete gesture assertions; :1893-1899 and :2026-2032 already count the grid screen alongside the old renderer. This is not a newly introduced helper-only opinion replacing a DOM witness. Suggested bucket: other. Confidence: confirmed source and full-range-base comparison; no execution. proposed_drop: no distinct snapshot gesture/state observable removed by these selector changes. possible_cover: none; no prohibited coverage sources searched. Could-be-highest: no established security or loss-of-work route; test selects and opens fixture-controlled targets and no production admission change is alleged. Caveat: these assertions do not exhaust all link admission or overlay cases; supplied neighbours own those distinct known gaps."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g181/findings.jsonl",
+        "id": "c7",
+        "line": 12,
+        "disposition": "under-investigation",
+        "group": "g181-c7",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-112",
+          "key": "g181/c7",
+          "latest_line": 12,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "snapshot-grid-selector-retains-detached-gesture-evidence",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The changed selectors reach the actual frozen grid rows, and the test independently proves there is no live attachment while it exercises links, downloads and selection copy. No distinct snapshot state or gesture witness is removed.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e:e2e/tests/terminal-reconnect.spec.ts:775-864 requires an empty island registry, visible DOM marker, painted link rows/real coordinates, no open after drag, exact clicked URL/download bytes, real selection copy, and registry still empty.",
+            "Same revision terminal.js:4810-4849 freezes retained components while closing/unpublishing their sockets; grid-terminal.js:2075-2085 freeze stops sending and resizing but retains screen, selection and links.",
+            "SPEC.md Terminal experience requires a displaced client to keep a non-live snapshot. These assertions distinguish that snapshot from a newly attached replacement. This is source evidence only."
+          ],
+          "coverage_checked": [
+            "SPEC.md Terminal experience and SPEC_impl Terminal widget/The grid client checked for snapshot and rendering contract; no acceptance of losing snapshot gesture coverage found.",
+            "TODO Planned empty; plans/queue, BUGS, INDEX/matching files and active TRIAGE_OUTCOMES searches found no exact selector/state-oracle defect cover. Link-admission findings elsewhere concern distinct gaps, not these controlled-target assertions.",
+            "No FILTER.md rule used."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "These fixture gestures do not exhaust every link admission or overlay case and establish no product security defect.",
+          "original_stronger_consequence": "A grid-only selector might stop testing the retained non-live screen or mistake an active replacement for a snapshot. The test retains both detached-state and exact gesture outcomes; no production admission change or loss-of-work route was established.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Refute the named newly lost snapshot observables. Conservatively retain the link/download boundary in the independent drop register; this is not a broad security assurance."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "snapshot-grid-selector-retains-detached-gesture-evidence",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete: all 11 assigned patches reviewed at their recorded revisions.\n\nNo reportable findings or unresolved leads. Recorded candidates c1–c4 with source-based reasons for dropping them in [findings.jsonl]([private-run]/g181/findings.jsonl). Progress updated.\n\nNo assigned material remains unread. No tests or reproductions run; no checkout changes."
+    },
+    {
+      "turn": 2,
+      "reply": "Coverage repaired: all 11 assigned patches delivered through evidence reads; no mandatory ranges remain unread. Requested synthesis completed.\n\n- **c2 promoted to an `other` finding:** the helper claims replay is applied, but its marker wait can finish while history remains queued.\n- **c1, c3, c4 revised** with caller and surviving-observable checks; prior proposed drops preserved.\n- **Open leads:** none.\n\nLog and progress updated. Source-only; no reproductions or tests run."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 complete. No new reportable issue found.\n\nChecked theme/frame selectors, partial-mount rollback observables, and frozen-snapshot gesture checks against pinned source and the range’s exclusive base. Recorded considered candidates c5–c7 with source-based reasons for dropping them.\n\n- New verified findings: none.\n- New unverified-after-investigation findings: none.\n- Open leads: none.\n- Unread mandatory scope: none.\n\nProgress updated. Source-only; no execution."
+    }
+  ],
+  "progress": "# g181 progress\n\nGroup: browser-terminal-regressions.\nTurn type/count: initial review / 1. Discovery-pass count: 0 (later discovery not started).\nState: assigned initial pass complete; awaiting the caller's later synthesis/discovery prompt.\n\nCoverage: read the brief fully and all commits from inventory.json's commits field only. All 11 assigned patch files were read through evidence read, including both bounded packets of 01180. Reviewed patches at f560058da19e02716e6f943883a9508b447aff4e, 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e, and 4b489b4f2eeade14f119b186ecb16eeaaf027021, including intermediate semantics. No assigned patch material omitted or unread. Consulted pinned Terminal experience, Lifecycle operations, grid widget/client, and GUI answer-binding contracts, plus source context for grid creation, reveal, snapshot coordinates, row classes, rounding and input helpers. One broad specification diff was clipped; it was not used as evidence of a complete read. The relevant complete pinned specification sections were read directly instead.\n\nInterface assumptions: all current browser terminals use the grid surface; grid snapshot lines are screen-only and history is separate; the page has no old watermark flow-control counters; replay applies grid messages while hidden and flushes the current screen before reveal, while history can drain in slices. No cross-group defect or dependency requiring parent investigation identified.\n\nDurable records: c1-c4, all candidates with source/contract refutations. New verified finding IDs: none. New unverified finding IDs: none. Open lead IDs: none. Candidates remain state=open because the evidence event schema permits open/withdrawn; their kind and proposed_drop detail record the decision, not unresolved investigation. The first c1 record attempt used unsupported state=closed and failed without appending; corrected to state=open and successfully recorded immediately.\n\nNo reproductions, runtime tests, or builds performed. Conclusions are source-supported, not execution observations. No checkout files changed, no coverage-exclusion metadata or queue findings read, no helper agents spawned, and no live installation touched.\n\nNext action: return the initial-pass coverage and record delta; later turns follow the caller's requested synthesis/discovery protocol. Do not restart the review or truncate findings.jsonl.\n\nTurn 2: missing-packet initial-review repair, followed by synthesis as explicitly requested. Previous delivery claim is superseded: parent reports all 11 packets unsupported. Re-reading all mandatory patch ranges through direct stdout, preserving c1-c4 and investigating surviving guarantees. No leads currently open.\n\n## Turn 2 completion: coverage repair and requested synthesis\n\nCurrent state supersedes the turn-1 delivery claim. Reread brief.md fully. Delivered all exact missing ranges as direct stdout through evidence read, each in its own shell call: 01176:1-89; 01177:1-135; 01178:1-132; 01180:1-160 and 161-306; 01506:1-71; 01513:1-42; 01514:1-71; 01516:1-13; 01517:1-150; 01519:1-15; 01602:1-15. All packets have complete END markers and no clipping. Unread assigned mandatory ranges: none.\n\nTurn type/count: initial missing-packet repair plus synthesis / 2. Synthesis count: 1, expressly requested in the same turn. Discovery-pass count: 0; no separate discovery turn performed.\n\nRevisited c1-c4 against whole changed callers and current production assumptions, not only removed mechanisms. c1 revised with closed-socket/null-handler, new object, replayed old marker and live new echo evidence. c3 revised with the nonempty exact registry assertion, three closed sockets, committed geometry and post-selection shell echo. c4 revised with restart marker ordering and visible-grid absence, gated clipboard emission after identity/OPEN/reveal/focus readiness, and Unicode post-reconnect row/cursor/live-reply witnesses. Their prior proposed drops and caveats remain under their original IDs; no parent acceptance presumed.\n\nc2 revised to a lead immediately upon identifying a mismatch between the new applied-replay helper contract and sliced history. Source checks settled it and revised it to a finding: the marker-only held oracle does not prove history fully applied. Bucket other, a test-helper synchronization/documentation defect; no product output loss established. Removed byte-buffer-specific controls remain proposed-drop with their original basis. The unchanged last-line completeness check is explicitly distinguished from the newly changed false helper contract.\n\nNew verified finding IDs this turn: c2 (promoted from candidate through lead). New unverified finding IDs: none. Open lead IDs: none. Revised candidate IDs: c1, c3, c4. No new standalone IDs. Findings log remains append-only.\n\nInterface assumptions now made explicit: screen apply/flush and history-drained are distinct boundaries; reveal and held marker do not wait for queued history. Text helpers omit unapplied history. Test setup readiness separately establishes socket identity, OPEN, reveal and input focus, and does not imply full-history drain. No cross-group production bug inferred from test evidence gaps.\n\nNo reproductions, builds or runtime tests; all conclusions source-supported. No queue/coverage-source search, helper agent, checkout mutation or live-install action. Next action: return delta and coverage status; any later discovery follows a new caller prompt, especially because c2 is a substantive new finding.\n\nTurn 3: separate discovery pass 1 started. Read interface context first, then search assigned patches beyond known c1-c4. Existing history preserved. No pending cross-group questions; no open own leads at entry.\n\nInterface synthesis before discovery: read discovery-neighbours.json lines 1-291 fully in six bounded chunks. No named pending question. Treat g182/c1 (false two-column geometry rationale), g177/l1 (idle policy coverage), g178/l2 (mouse rationale), g083/l1 (construction cleanup fixture), and other supplied records as known interface issues, not new discoveries. c3 actual geometry/identity checks do not refute g182/c1 documentation defect. Legacy JSON reinterpretation and retirement assurance remain other owners scopes; no expansion or duplication. Continue only assigned patch semantics beyond these known records.\n\n## Turn 3 completion: separate discovery pass 1\n\nRead all 291 lines of discovery-neighbours.json in six bounded chunks before new source search. Interface records were used only for context/novelty; no parent drop/lowering accepted and no prohibited queue/coverage source searched. No named pending question required investigation. In particular, the known g182/c1 false two-column explanation remains a documentation defect independent of c3's useful geometry and live-input assertions; no duplication or refutation of that finding is claimed here.\n\nDiscovery checked assigned unreviewed corners beyond known findings: the actual inline/default background painter and CSS frame ownership against theme/frame selectors; the WebSocket-throw partial-mount boundary, failure banner, primary publication and remount oracle against production rollback; snapshot DOM row selectors, frozen-component identity, empty registry, link/drag/download and copy observables. Compared the relevant caller shapes against exclusive-base 6e423e30068b62c6cfa276c6d720ee35bb70387a, not only the immediate parent, and inspected the path-specific commit list through inclusive tip to avoid treating later retirement as earlier support. Pinned source reads at f560058da19e02716e6f943883a9508b447aff4e; no runtime execution.\n\nImmediate durable records added: c5 (theme selectors), c6 (rollback oracle limitation and full-range attribution), c7 (snapshot selector/gesture check). All are candidates with source-based proposed-drop bases, explicit limits and could-be-highest statements. No new reportable issue found. Existing finding c2 and earlier candidates remain unchanged; their complete history is retained.\n\nTurn count: 3. Discovery-pass count: 1. New verified finding IDs: none. New unverified-after-investigation finding IDs: none. Remaining open lead IDs: none. New candidate IDs: c5, c6, c7. Unread assigned mandatory source ranges: none (repair from turn 2 retained). No omitted assigned patch scope in this pass.\n\nInterface assumptions unchanged except the explicit distinction that an actual geometry/gesture assertion does not certify adjacent explanatory prose. Production correctness was used as context, not as a blanket refutation of test/documentation defects. Next action: return useful checks/results and empty-discovery status; any further discovery needs a new caller turn. No reproductions, tests, builds, helper agents, checkout changes, or live-install actions.\n"
+}

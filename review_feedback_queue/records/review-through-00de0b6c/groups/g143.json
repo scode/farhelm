@@ -1,0 +1,752 @@
+{
+  "group": {
+    "id": "g143",
+    "domain": "rust-session-agent-regressions",
+    "purpose": "rust-session-agent-regressions: crates/farhelm/tests/e2e/launch_sentinel_error_status.rs, crates/farhelm/tests/e2e/marker_model.rs, crates/farhelm/tests/e2e/prompt_running_agent.rs, crates/farhelm/tests/e2e/restart_under_concurrency.rs, crates/farhelm/tests/e2e/restart_with_resume.rs, crates/farhelm/tests/e2e/session_lifecycle.rs, crates/farhelm/tests/e2e/session_rename.rs, crates/farhelm/tests/e2e/structured_launches.rs, crates/farhelm/tests/e2e/supervisor_stop.rs, crates/farhelm/tests/e2e/wrapper_launch.rs, crates/farhelm/tests/version_lock_forwarder.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g006",
+      "g137",
+      "g138",
+      "g139",
+      "g140",
+      "g141",
+      "g142",
+      "g144",
+      "g145",
+      "g146"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/01573-000.patch",
+        "ranges": [
+          [
+            1,
+            67
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/launch_sentinel_error_status.rs",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,4164)",
+        "lines": 67,
+        "bytes": 4172,
+        "start": 0,
+        "end": 4164,
+        "original": "[private-run]/prep/originals/01573.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01575-000.patch",
+        "ranges": [
+          [
+            1,
+            21
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/marker_model.rs",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,1278)",
+        "lines": 21,
+        "bytes": 1282,
+        "start": 0,
+        "end": 1278,
+        "original": "[private-run]/prep/originals/01575.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01579-000.patch",
+        "ranges": [
+          [
+            1,
+            10
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/prompt_running_agent.rs",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,578)",
+        "lines": 10,
+        "bytes": 578,
+        "start": 0,
+        "end": 578,
+        "original": "[private-run]/prep/originals/01579.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01580-000.patch",
+        "ranges": [
+          [
+            1,
+            24
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/restart_under_concurrency.rs",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,1540)",
+        "lines": 24,
+        "bytes": 1542,
+        "start": 0,
+        "end": 1540,
+        "original": "[private-run]/prep/originals/01580.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01581-000.patch",
+        "ranges": [
+          [
+            1,
+            71
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/restart_with_resume.rs",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,4186)",
+        "lines": 71,
+        "bytes": 4186,
+        "start": 0,
+        "end": 4186,
+        "original": "[private-run]/prep/originals/01581.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01582-000.patch",
+        "ranges": [
+          [
+            1,
+            389
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/session_lifecycle.rs",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,22688)",
+        "lines": 389,
+        "bytes": 22740,
+        "start": 0,
+        "end": 22688,
+        "original": "[private-run]/prep/originals/01582.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01583-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/session_rename.rs",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,780)",
+        "lines": 13,
+        "bytes": 780,
+        "start": 0,
+        "end": 780,
+        "original": "[private-run]/prep/originals/01583.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01584-000.patch",
+        "ranges": [
+          [
+            1,
+            22
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/structured_launches.rs",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,996)",
+        "lines": 22,
+        "bytes": 996,
+        "start": 0,
+        "end": 996,
+        "original": "[private-run]/prep/originals/01584.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01585-000.patch",
+        "ranges": [
+          [
+            1,
+            14
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/supervisor_stop.rs",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,937)",
+        "lines": 14,
+        "bytes": 937,
+        "start": 0,
+        "end": 937,
+        "original": "[private-run]/prep/originals/01585.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01588-000.patch",
+        "ranges": [
+          [
+            1,
+            31
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/wrapper_launch.rs",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,1962)",
+        "lines": 31,
+        "bytes": 1964,
+        "start": 0,
+        "end": 1962,
+        "original": "[private-run]/prep/originals/01588.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01590-000.patch",
+        "ranges": [
+          [
+            1,
+            15
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/version_lock_forwarder.rs",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,1028)",
+        "lines": 15,
+        "bytes": 1028,
+        "start": 0,
+        "end": 1028,
+        "original": "[private-run]/prep/originals/01590.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01601-000.patch",
+        "ranges": [
+          [
+            1,
+            33
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/session_lifecycle.rs",
+        "commit": "4b489b4f2eeade14f119b186ecb16eeaaf027021",
+        "notes": "patch header; patch character offsets [0,1817)",
+        "lines": 33,
+        "bytes": 1817,
+        "start": 0,
+        "end": 1817,
+        "original": "[private-run]/prep/originals/01601.patch"
+      }
+    ],
+    "lines": 710,
+    "bytes": 42022
+  },
+  "records": [
+    {
+      "key": "g143/g143-l1",
+      "owner": "g143",
+      "id": "g143-l1",
+      "domain": "rust-session-agent-regressions",
+      "purpose": "rust-session-agent-regressions: crates/farhelm/tests/e2e/launch_sentinel_error_status.rs, crates/farhelm/tests/e2e/marker_model.rs, crates/farhelm/tests/e2e/prompt_running_agent.rs, crates/farhelm/tests/e2e/restart_under_concurrency.rs, crates/farhelm/tests/e2e/restart_with_resume.rs, crates/farhelm/tests/e2e/session_lifecycle.rs, crates/farhelm/tests/e2e/session_rename.rs, crates/farhelm/tests/e2e/structured_launches.rs, crates/farhelm/tests/e2e/supervisor_stop.rs, crates/farhelm/tests/e2e/wrapper_launch.rs, crates/farhelm/tests/version_lock_forwarder.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "g143-l1",
+            "state": "open",
+            "summary": "Check whether the ambient-tab test actually passes the marker to the agent",
+            "location": "crates/farhelm/tests/e2e/marker_model.rs:17",
+            "detail": "Reviewed commit: 08399d092d20815ced6619c26df2391944ae2b4a. TLDR: the revised test explanation says inner agents inherit an outer tab marker, but the specification says launch boundaries scrub the opposite marker. Source read: marker_model.rs:12-91 injects FARHELM_TAB_ID through SupervisorSeams.launch_env and then checks Stop; SPEC_impl.md:4792-4806 says 'Launch boundaries scrub the opposite kind’s marker so nested supervisors do not misclassify a new agent as an outer tab’s process.' Check still needed: determine where host_child_env overlays launch_env relative to the agent launch shim's scrub, and whether the comment describes a historical failure or claims a current fixture premise. Suspected consequence is misleading test documentation or an unproved fixture premise, not an established product failure. Suggested bucket: other; could-be-highest: false (test explanation only; no product mutation in the patch). Confidence: unresolved lead, source-only. proposed_drop: false. possible_cover: none. No execution or reproduction performed."
+          }
+        },
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "g143-l1",
+            "state": "open",
+            "summary": "Ambient marker reaches the host child before the tested scrub",
+            "location": "crates/farhelm/tests/e2e/marker_model.rs:17",
+            "detail": "Reviewed commit: 08399d092d20815ced6619c26df2391944ae2b4a. TLDR: no regression established in the revised ambient-marker test explanation. Original concern: the explanation could imply the final agent still wears an outer tab marker, contradicting the required scrub and overstating the fixture premise. Source checks: service/core/host_launch.rs:133-160 overlays launch_env on the supervisor environment without removing FARHELM_TAB_ID; :488-517 passes that environment to ChildSpec. launch.rs:1226-1231 explicitly identifies this inheritance and the final exec as its boundary. agent_command at :1244-1260 uses launch_child_command, whose preparation_child_command at :1390-1423 calls scrub_preparation_authority; :1428-1439 removes TAB_ID_ENV_VAR. Thus the seam really supplies the ambient value on the same pre-shim route as an outer supervisor environment; the regression checks that the inherited input does not escape correct cleanup. The test comment at marker_model.rs:19-21 describes the historical exclusion-based failure, and its wording did not introduce the existing claim that the final agent wears the marker. Contract: SPEC_impl.md:4792-4806, 'Launch boundaries scrub the opposite kind’s marker so nested supervisors do not misclassify a new agent as an outer tab’s process.' Suggested bucket: other; could-be-highest: false (the concern is documentation/fixture wording, with no established product change). Confidence: confirmed source analysis. proposed_drop: source refutation of an introduced behavior or fixture-route regression; no finding proposed. possible_cover: none. Caveat: the wording is broad, but the tested launch path and scrub are intact. No runtime observations or reproductions."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "g143-l1",
+            "state": "open",
+            "summary": "Ambient inheritance is a pre-shim input, not a final-agent marker premise",
+            "location": "crates/farhelm/tests/e2e/marker_model.rs:17",
+            "detail": "Reviewed commit: 08399d092d20815ced6619c26df2391944ae2b4a. TLDR: the revised explanation correctly identifies how an ambient outer-tab marker enters the host-backed launch path. It must not be read as proof that the final agent still wears that marker or that this test independently isolates positive selection from marker scrubbing. Original concern retained: describing every inner agent as inheriting the marker could overstate the final-process fixture premise and mislead a reader about the intended regression. Synthesis source checks: marker_model.rs:12-27 describes the historical exclusion-based failure and the seam's route; :34-40 injects FARHELM_TAB_ID with launch_env; :61-88 observes agent readiness, daemon creation, Stop and eventual cleanup, without asserting the final process environment. host_launch.rs:133-160 overlays launch_env into the host child's environment, and :488-517 puts it into ChildSpec. launch.rs:130-134 explicitly says the opposite marker cannot survive the launch boundary; :1255-1262 constructs the final agent command through launch_child_command, and :1390-1439 installs the own-agent marker and removes TAB_ID_ENV_VAR. Thus the seam reaches the pre-shim launch context; the current exec scrub deliberately ends that inheritance. The regression's observable is correct cleanup when the supervisor launch context starts with an ambient marker, not persistence of that marker in the final fixture. SPEC_impl.md:4792-4806 states: 'Launch boundaries scrub the opposite kind’s marker so nested supervisors do not misclassify a new agent as an outer tab’s process.' Suggested bucket: other; could-be-highest: false (wording/fixture interpretation, no product mutation or established product failure). Confidence: confirmed source analysis. proposed_drop: source refutation of a new inheritance-route or cleanup regression; no finding proposed. possible_cover: none. Material caveats: the prose is broad and the test name is historical; it does not isolate the sweep's positive-marker selection while the scrub remains intact. No assertion about installed vendor behavior, no runtime observation, no reproduction. This revision narrows the earlier candidate's explanation without changing its disposition."
+          }
+        }
+      ],
+      "latest": {
+        "line": 6,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "g143-l1",
+          "state": "open",
+          "summary": "Ambient inheritance is a pre-shim input, not a final-agent marker premise",
+          "location": "crates/farhelm/tests/e2e/marker_model.rs:17",
+          "detail": "Reviewed commit: 08399d092d20815ced6619c26df2391944ae2b4a. TLDR: the revised explanation correctly identifies how an ambient outer-tab marker enters the host-backed launch path. It must not be read as proof that the final agent still wears that marker or that this test independently isolates positive selection from marker scrubbing. Original concern retained: describing every inner agent as inheriting the marker could overstate the final-process fixture premise and mislead a reader about the intended regression. Synthesis source checks: marker_model.rs:12-27 describes the historical exclusion-based failure and the seam's route; :34-40 injects FARHELM_TAB_ID with launch_env; :61-88 observes agent readiness, daemon creation, Stop and eventual cleanup, without asserting the final process environment. host_launch.rs:133-160 overlays launch_env into the host child's environment, and :488-517 puts it into ChildSpec. launch.rs:130-134 explicitly says the opposite marker cannot survive the launch boundary; :1255-1262 constructs the final agent command through launch_child_command, and :1390-1439 installs the own-agent marker and removes TAB_ID_ENV_VAR. Thus the seam reaches the pre-shim launch context; the current exec scrub deliberately ends that inheritance. The regression's observable is correct cleanup when the supervisor launch context starts with an ambient marker, not persistence of that marker in the final fixture. SPEC_impl.md:4792-4806 states: 'Launch boundaries scrub the opposite kind’s marker so nested supervisors do not misclassify a new agent as an outer tab’s process.' Suggested bucket: other; could-be-highest: false (wording/fixture interpretation, no product mutation or established product failure). Confidence: confirmed source analysis. proposed_drop: source refutation of a new inheritance-route or cleanup regression; no finding proposed. possible_cover: none. Material caveats: the prose is broad and the test name is historical; it does not isolate the sweep's positive-marker selection while the scrub remains intact. No assertion about installed vendor behavior, no runtime observation, no reproduction. This revision narrows the earlier candidate's explanation without changing its disposition."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g143/findings.jsonl",
+        "id": "g143-l1",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "ambient-tab-marker-test-pre-shim-inheritance-description",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-091 after inspecting it. The seam supplies the ambient marker to the host child's pre-shim environment, where a real supervisor's inherited value would enter. The final exec deliberately removes it. The test checks cleanup under that launch context; it does not prove the final agent wears an outer marker or independently isolate positive selection from scrubbing. Refute an introduced inheritance-route or cleanup regression, while preserving the broad prose and historical-name caveat. The valid seam and final scrub do not turn this into an independent test of positive marker selection. Checked source/results: [\"At 08399d092d20815ced6619c26df2391944ae2b4a, marker_model.rs:12-27 describes the historical exclusion failure and launch_env route; :34-40 sets FARHELM_TAB_ID; :61-88 observes readiness, daemon creation, Stop and cleanup without examining the final process environment.\",\"At that revision, service/core/host_launch.rs:106-113 excludes six unrelated inherited variables, not FARHELM_TAB_ID. :133-157 overlays launch_env onto the base environment, and :488-516 passes it into ChildSpec.\",\"launch.rs:1225-1231 explicitly names final exec as the end of this inheritance. :1255-1262 constructs the final command through launch_child_command; :1390-1437 adds own markers and removes the opposite tab marker.\",\"The full-range marker_model.rs diff preserves the earlier broad claim that every inner agent inherits the marker; the reviewed wording replaces the tmux intermediate with the host-child route. It does not add an assertion that the final fixture environment retains it.\",\"SPEC_impl.md at that revision :4793-4805 requires the opposite-kind scrub. All conclusions are source-only, with no installed-harness or runtime observation.\"] Current coverage/results: {\"SPEC.md\":\"Current cleanup/lifecycle paragraphs read. They require identifying and cleaning ordinary descendants; they do not require preserving the opposite marker in the final agent.\",\"SPEC_impl.md\":\"Current process-tree ownership paragraph :4793-4805 read; it explicitly requires scrubbing the opposite marker. This supports the launch-boundary distinction rather than excusing misleading final-process wording.\",\"TODO.md Planned\":\"Empty; no coverage.\",\"plans/queue\":\"Searched ambient marker, positive marker, marker_model and tab-marker cleanup. No unlanded plan addresses this exact comment/fixture interpretation; tmux cleanup/documentation plans are landed per REPORTS.md:29-32.\",\"BUGS.md\":\"Read in full; no matching issue.\",\"INDEX.md and queue\":\"Full index read and targeted ambient/positive marker searches found no exact queue alias or useful extension.\",\"TRIAGE_OUTCOMES.md\":\"Searched active ledger for ambient tab, positive marking and the test/fixture premise; no matching decision.\",\"FILTER.md\":\"No filter used; source distinguishes the pre-shim input from the final process contract.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The broad explanation could imply the final agent retains the outer tab marker, conflict with the required scrub, and overstate the regression fixture's premise. No product failure or loss-of-work route was alleged.\"; \"No new false final-process assertion or broken inheritance route was shown. The test still does not separately prove positive sweep selection while the scrub succeeds; that limitation is preserved, not certified away.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g143/g143-l1",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "ambient-tab-marker-test-pre-shim-inheritance-description",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-091 after inspecting it. The seam supplies the ambient marker to the host child's pre-shim environment, where a real supervisor's inherited value would enter. The final exec deliberately removes it. The test checks cleanup under that launch context; it does not prove the final agent wears an outer marker or independently isolate positive selection from scrubbing. Refute an introduced inheritance-route or cleanup regression, while preserving the broad prose and historical-name caveat. The valid seam and final scrub do not turn this into an independent test of positive marker selection. Checked source/results: [\"At 08399d092d20815ced6619c26df2391944ae2b4a, marker_model.rs:12-27 describes the historical exclusion failure and launch_env route; :34-40 sets FARHELM_TAB_ID; :61-88 observes readiness, daemon creation, Stop and cleanup without examining the final process environment.\",\"At that revision, service/core/host_launch.rs:106-113 excludes six unrelated inherited variables, not FARHELM_TAB_ID. :133-157 overlays launch_env onto the base environment, and :488-516 passes it into ChildSpec.\",\"launch.rs:1225-1231 explicitly names final exec as the end of this inheritance. :1255-1262 constructs the final command through launch_child_command; :1390-1437 adds own markers and removes the opposite tab marker.\",\"The full-range marker_model.rs diff preserves the earlier broad claim that every inner agent inherits the marker; the reviewed wording replaces the tmux intermediate with the host-child route. It does not add an assertion that the final fixture environment retains it.\",\"SPEC_impl.md at that revision :4793-4805 requires the opposite-kind scrub. All conclusions are source-only, with no installed-harness or runtime observation.\"] Current coverage/results: {\"SPEC.md\":\"Current cleanup/lifecycle paragraphs read. They require identifying and cleaning ordinary descendants; they do not require preserving the opposite marker in the final agent.\",\"SPEC_impl.md\":\"Current process-tree ownership paragraph :4793-4805 read; it explicitly requires scrubbing the opposite marker. This supports the launch-boundary distinction rather than excusing misleading final-process wording.\",\"TODO.md Planned\":\"Empty; no coverage.\",\"plans/queue\":\"Searched ambient marker, positive marker, marker_model and tab-marker cleanup. No unlanded plan addresses this exact comment/fixture interpretation; tmux cleanup/documentation plans are landed per REPORTS.md:29-32.\",\"BUGS.md\":\"Read in full; no matching issue.\",\"INDEX.md and queue\":\"Full index read and targeted ambient/positive marker searches found no exact queue alias or useful extension.\",\"TRIAGE_OUTCOMES.md\":\"Searched active ledger for ambient tab, positive marking and the test/fixture premise; no matching decision.\",\"FILTER.md\":\"No filter used; source distinguishes the pre-shim input from the final process contract.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"The broad explanation could imply the final agent retains the outer tab marker, conflict with the required scrub, and overstate the regression fixture's premise. No product failure or loss-of-work route was alleged.\"; \"No new false final-process assertion or broken inheritance route was shown. The test still does not separately prove positive sweep selection while the scrub succeeds; that limitation is preserved, not certified away.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-091",
+          "key": "g143/g143-l1",
+          "latest_line": 6,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "ambient-tab-marker-test-pre-shim-inheritance-description",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The seam supplies the ambient marker to the host child's pre-shim environment, where a real supervisor's inherited value would enter. The final exec deliberately removes it. The test checks cleanup under that launch context; it does not prove the final agent wears an outer marker or independently isolate positive selection from scrubbing.",
+          "checks": [
+            "At 08399d092d20815ced6619c26df2391944ae2b4a, marker_model.rs:12-27 describes the historical exclusion failure and launch_env route; :34-40 sets FARHELM_TAB_ID; :61-88 observes readiness, daemon creation, Stop and cleanup without examining the final process environment.",
+            "At that revision, service/core/host_launch.rs:106-113 excludes six unrelated inherited variables, not FARHELM_TAB_ID. :133-157 overlays launch_env onto the base environment, and :488-516 passes it into ChildSpec.",
+            "launch.rs:1225-1231 explicitly names final exec as the end of this inheritance. :1255-1262 constructs the final command through launch_child_command; :1390-1437 adds own markers and removes the opposite tab marker.",
+            "The full-range marker_model.rs diff preserves the earlier broad claim that every inner agent inherits the marker; the reviewed wording replaces the tmux intermediate with the host-child route. It does not add an assertion that the final fixture environment retains it.",
+            "SPEC_impl.md at that revision :4793-4805 requires the opposite-kind scrub. All conclusions are source-only, with no installed-harness or runtime observation."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "Current cleanup/lifecycle paragraphs read. They require identifying and cleaning ordinary descendants; they do not require preserving the opposite marker in the final agent.",
+            "SPEC_impl.md": "Current process-tree ownership paragraph :4793-4805 read; it explicitly requires scrubbing the opposite marker. This supports the launch-boundary distinction rather than excusing misleading final-process wording.",
+            "TODO.md Planned": "Empty; no coverage.",
+            "plans/queue": "Searched ambient marker, positive marker, marker_model and tab-marker cleanup. No unlanded plan addresses this exact comment/fixture interpretation; tmux cleanup/documentation plans are landed per REPORTS.md:29-32.",
+            "BUGS.md": "Read in full; no matching issue.",
+            "INDEX.md and queue": "Full index read and targeted ambient/positive marker searches found no exact queue alias or useful extension.",
+            "TRIAGE_OUTCOMES.md": "Searched active ledger for ambient tab, positive marking and the test/fixture premise; no matching decision.",
+            "FILTER.md": "No filter used; source distinguishes the pre-shim input from the final process contract."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "No new false final-process assertion or broken inheritance route was shown. The test still does not separately prove positive sweep selection while the scrub succeeds; that limitation is preserved, not certified away.",
+          "original_stronger_consequence": "The broad explanation could imply the final agent retains the outer tab marker, conflict with the required scrub, and overstate the regression fixture's premise. No product failure or loss-of-work route was alleged.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Refute an introduced inheritance-route or cleanup regression, while preserving the broad prose and historical-name caveat. The valid seam and final scrub do not turn this into an independent test of positive marker selection."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "ambient-tab-marker-test-pre-shim-inheritance-description",
+        "destination": null
+      }
+    },
+    {
+      "key": "g143/g143-c2",
+      "owner": "g143",
+      "id": "g143-c2",
+      "domain": "rust-session-agent-regressions",
+      "purpose": "rust-session-agent-regressions: crates/farhelm/tests/e2e/launch_sentinel_error_status.rs, crates/farhelm/tests/e2e/marker_model.rs, crates/farhelm/tests/e2e/prompt_running_agent.rs, crates/farhelm/tests/e2e/restart_under_concurrency.rs, crates/farhelm/tests/e2e/restart_with_resume.rs, crates/farhelm/tests/e2e/session_lifecycle.rs, crates/farhelm/tests/e2e/session_rename.rs, crates/farhelm/tests/e2e/structured_launches.rs, crates/farhelm/tests/e2e/supervisor_stop.rs, crates/farhelm/tests/e2e/wrapper_launch.rs, crates/farhelm/tests/version_lock_forwarder.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "g143-c2",
+            "state": "open",
+            "summary": "The attach/delete race test's broad error allowance predates this patch",
+            "location": "crates/farhelm/tests/e2e/session_lifecycle.rs:5386",
+            "detail": "Reviewed commit: 08399d092d20815ced6619c26df2391944ae2b4a. TLDR: the comment now explicitly admits that the old generic-error outcome has not been checked for terminal hosts; this is not a newly introduced test or product regression in this patch. Considered consequence: allowing any Internal error could conceal an unrelated attach failure and weaken the race assertion. Source: session_lifecycle.rs:5386-5403 still accepts ErrorKind::NotFound | ErrorKind::Internal, while :5408-5417 independently requires successful deletion and an empty final listing. Assigned patch 01582-000.patch:375-389 changes only the explanation, preserving that error predicate. It says, exactly, '`Internal` was the other shape of this race when Attach called tmux (the entry still in the map, its terminal already ended underneath it); whether an attach to a just-ended host can still produce it has not been checked.' The change retracts the former unconditional rationale rather than claiming the old outcome is proved for hosts. SPEC_impl.md:2567-2601 distinguishes ended-host streams from unavailable-host refusal but makes no assertion that all generic Internal errors are expected. Suggested bucket: other; could-be-highest: false (test diagnostic quality only; no established product impact). Confidence: confirmed source analysis of patch scope. proposed_drop: unchanged test behavior, with newly accurate uncertainty in its comment; not an introduced finding. possible_cover: none. Caveat: this does not validate the existing broad error allowance or infer runtime behavior. No execution or reproduction performed."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "g143-c2",
+            "state": "open",
+            "summary": "Generic Internal remains an acknowledged unverified race allowance",
+            "location": "crates/farhelm/tests/e2e/session_lifecycle.rs:5386",
+            "detail": "Reviewed commit: 08399d092d20815ced6619c26df2391944ae2b4a. TLDR: the assigned comment accurately retains uncertainty about whether terminal-host attach/delete races produce the old generic Internal error. Original consequence retained: accepting arbitrary Internal errors could hide an unrelated attach failure; the assigned patch does not introduce that allowance or establish that it is valid for hosts. Synthesis source: session_lifecycle.rs:5318-5330 describes the intended NotFound-or-detached outcome; :5347-5349 deliberately attaches at the pre-replay boundary so Delete's detach remains observable; :5360-5382 requires a delete-naming Detached reason after a successful attach. The unchanged :5396-5401 accepts NotFound or Internal, and :5406-5413 still requires the Delete task to succeed and leave no sessions. The revised comment :5387-5395 explicitly states that the Internal route existed with tmux and that its terminal-host counterpart 'has not been checked'. SPEC_impl.md:2551-2581 specifies grid attach/stream behavior but supplies no proof that every Internal error is a legitimate race outcome. The final empty listing validates deletion only; it does not prove the cause of an earlier Internal error. Suggested bucket: other; could-be-highest: false (existing test assertion quality, no established user impact or changed product behavior). Confidence: confirmed source analysis that the revised text is accurate uncertainty; host-backed generic-error route remains unverified and is not asserted proved. proposed_drop: unchanged allowance with explicitly qualified new commentary; no introduced finding proposed. possible_cover: none. Material caveat: this disposition does not certify the broad existing error predicate. No runtime observations or reproductions, and no installed-vendor behavior claim. Same-ID synthesis revision; disposition unchanged and not asserted accepted by the parent."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "g143-c2",
+            "state": "open",
+            "summary": "Generic Internal allowance also predates the complete pinned range",
+            "location": "crates/farhelm/tests/e2e/session_lifecycle.rs:5386",
+            "detail": "Reviewed commit: 08399d092d20815ced6619c26df2391944ae2b4a; full-range attribution checked against exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a and inclusive tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: the assigned comment accurately acknowledges uncertainty about generic Internal errors in host-backed attach/delete races. Original consequence retained: the broad allowance can conceal an unrelated attach failure; it is not proved valid by current product code or by the final empty listing. New attribution check: base session_lifecycle.rs:7075-7093 already has the same expected_race_outcome predicate accepting NotFound | Internal. The whole-range diff changes its explanation, not that predicate. At the reviewed revision :5387-5395 the new comment says the tmux route was formerly legitimate and the terminal-host route 'has not been checked'; :5396-5401 retains the allowance, while :5406-5413 requires successful Delete and no remaining session. The :5347-5382 successful-attach branch deliberately observes the pre-replay boundary and requires a delete-naming detach. SPEC_impl.md:2551-2581 defines host-backed catch-up and stream behavior without proving that every Internal is expected. Suggested bucket: other; could-be-highest: false (existing test-oracle weakness, no established product impact). Confidence: confirmed source analysis of full-range attribution and accurate uncertainty; the host-specific generic-error route is not asserted verified. proposed_drop: unchanged allowance predates the entire reviewed range, and the assigned commentary qualifies rather than proves it; no new finding proposed. possible_cover: none. Material caveats: production correctness does not validate the test oracle; final empty listing validates deletion only, not the cause of attach refusal. No runtime observations, reproduction or installed-vendor claim. Same-ID discovery revision strengthens attribution without lowering the original consequence or assuming parent acceptance."
+          }
+        }
+      ],
+      "latest": {
+        "line": 12,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "g143-c2",
+          "state": "open",
+          "summary": "Generic Internal allowance also predates the complete pinned range",
+          "location": "crates/farhelm/tests/e2e/session_lifecycle.rs:5386",
+          "detail": "Reviewed commit: 08399d092d20815ced6619c26df2391944ae2b4a; full-range attribution checked against exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a and inclusive tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: the assigned comment accurately acknowledges uncertainty about generic Internal errors in host-backed attach/delete races. Original consequence retained: the broad allowance can conceal an unrelated attach failure; it is not proved valid by current product code or by the final empty listing. New attribution check: base session_lifecycle.rs:7075-7093 already has the same expected_race_outcome predicate accepting NotFound | Internal. The whole-range diff changes its explanation, not that predicate. At the reviewed revision :5387-5395 the new comment says the tmux route was formerly legitimate and the terminal-host route 'has not been checked'; :5396-5401 retains the allowance, while :5406-5413 requires successful Delete and no remaining session. The :5347-5382 successful-attach branch deliberately observes the pre-replay boundary and requires a delete-naming detach. SPEC_impl.md:2551-2581 defines host-backed catch-up and stream behavior without proving that every Internal is expected. Suggested bucket: other; could-be-highest: false (existing test-oracle weakness, no established product impact). Confidence: confirmed source analysis of full-range attribution and accurate uncertainty; the host-specific generic-error route is not asserted verified. proposed_drop: unchanged allowance predates the entire reviewed range, and the assigned commentary qualifies rather than proves it; no new finding proposed. possible_cover: none. Material caveats: production correctness does not validate the test oracle; final empty listing validates deletion only, not the cause of attach refusal. No runtime observations, reproduction or installed-vendor claim. Same-ID discovery revision strengthens attribution without lowering the original consequence or assuming parent acceptance."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g143/findings.jsonl",
+        "id": "g143-c2",
+        "line": 12,
+        "disposition": "excluded",
+        "group": "attach-delete-race-test-accepts-arbitrary-internal-errors",
+        "reason": "Parent explicitly accepted named out-of-range proposal from claims-091 after inspecting it. The broad NotFound-or-Internal error allowance predates the exclusive base. The assigned change accurately admits that the host-specific Internal route has not been checked. It does not introduce or validate the existing oracle weakness. Exclude only as a pre-existing test-oracle allowance outside the pinned range. Preserve the unverified host-specific route and do not treat qualified commentary as proof that the predicate is sound. Checked source/results: [\"At exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a, session_lifecycle.rs:7076-7092 already accepts any SupervisorError with NotFound or Internal. The final successful Delete and empty-list requirements are present at :7097-7104.\",\"At 08399d092d20815ced6619c26df2391944ae2b4a, session_lifecycle.rs:5387-5395 qualifies the old tmux explanation and says the host-specific route 'has not been checked'; :5396-5401 retains the same broad predicate. :5406-5413 still checks deletion, not the cause of any earlier Internal error.\",\"The assigned commit's hunk changes commentary, not the predicate. The reviewed-to-inclusive-tip diff in this file changes separate scrollback/dead-agent wording only, leaving this allowance and qualification in place.\",\"At the reviewed revision, :5347-5382 uses the pre-replay attach boundary and requires a delete-naming Detached reason on the successful branch. SPEC_impl.md:2551-2588 specifies host streams and unavailable refusals without declaring arbitrary Internal errors legitimate.\",\"No runtime observation, product defect or mutation test was claimed. Production correctness and final empty listing do not refute the inherited test-oracle weakness.\"] Current coverage/results: {\"SPEC.md\":\"Terminal and lifecycle contracts searched/read; no rule accepts arbitrary unrelated Attach failures as legitimate deletion races.\",\"SPEC_impl.md\":\"Current Grid streams and host-refusal paragraphs read; no blanket Internal allowance found.\",\"TODO.md Planned\":\"Empty; no coverage.\",\"plans/queue\":\"Searched attach/delete race, Internal allowance and session_lifecycle test references; no unlanded exact fix found. Landed tmux documentation work is not future coverage.\",\"BUGS.md\":\"Read in full; no matching test-oracle issue.\",\"INDEX.md and queue\":\"Full index read plus targeted attach/delete, generic Internal and expected_race_outcome searches found no same-root item.\",\"TRIAGE_OUTCOMES.md\":\"Searched active ledger for this test and its broad error predicate; no matching decision.\",\"FILTER.md\":\"No filter used. Attribution, not rarity or expected product behavior, is the proposed basis.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Accepting arbitrary Internal errors could hide an unrelated attach failure and weaken the consistency regression. That consequence remains valid as a pre-existing oracle concern; successful deletion does not settle it.\"; \"The host-specific legitimate Internal producer remains unverified. No within-range introduction of the broad arbitrary-error predicate was shown; it is explicit at the exclusive base.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g143/g143-c2",
+        "line": 12,
+        "disposition": "excluded",
+        "group": "attach-delete-race-test-accepts-arbitrary-internal-errors",
+        "bucket": "other",
+        "recording": "out-of-range",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named out-of-range proposal from claims-091 after inspecting it. The broad NotFound-or-Internal error allowance predates the exclusive base. The assigned change accurately admits that the host-specific Internal route has not been checked. It does not introduce or validate the existing oracle weakness. Exclude only as a pre-existing test-oracle allowance outside the pinned range. Preserve the unverified host-specific route and do not treat qualified commentary as proof that the predicate is sound. Checked source/results: [\"At exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a, session_lifecycle.rs:7076-7092 already accepts any SupervisorError with NotFound or Internal. The final successful Delete and empty-list requirements are present at :7097-7104.\",\"At 08399d092d20815ced6619c26df2391944ae2b4a, session_lifecycle.rs:5387-5395 qualifies the old tmux explanation and says the host-specific route 'has not been checked'; :5396-5401 retains the same broad predicate. :5406-5413 still checks deletion, not the cause of any earlier Internal error.\",\"The assigned commit's hunk changes commentary, not the predicate. The reviewed-to-inclusive-tip diff in this file changes separate scrollback/dead-agent wording only, leaving this allowance and qualification in place.\",\"At the reviewed revision, :5347-5382 uses the pre-replay attach boundary and requires a delete-naming Detached reason on the successful branch. SPEC_impl.md:2551-2588 specifies host streams and unavailable refusals without declaring arbitrary Internal errors legitimate.\",\"No runtime observation, product defect or mutation test was claimed. Production correctness and final empty listing do not refute the inherited test-oracle weakness.\"] Current coverage/results: {\"SPEC.md\":\"Terminal and lifecycle contracts searched/read; no rule accepts arbitrary unrelated Attach failures as legitimate deletion races.\",\"SPEC_impl.md\":\"Current Grid streams and host-refusal paragraphs read; no blanket Internal allowance found.\",\"TODO.md Planned\":\"Empty; no coverage.\",\"plans/queue\":\"Searched attach/delete race, Internal allowance and session_lifecycle test references; no unlanded exact fix found. Landed tmux documentation work is not future coverage.\",\"BUGS.md\":\"Read in full; no matching test-oracle issue.\",\"INDEX.md and queue\":\"Full index read plus targeted attach/delete, generic Internal and expected_race_outcome searches found no same-root item.\",\"TRIAGE_OUTCOMES.md\":\"Searched active ledger for this test and its broad error predicate; no matching decision.\",\"FILTER.md\":\"No filter used. Attribution, not rarity or expected product behavior, is the proposed basis.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Accepting arbitrary Internal errors could hide an unrelated attach failure and weaken the consistency regression. That consequence remains valid as a pre-existing oracle concern; successful deletion does not settle it.\"; \"The host-specific legitimate Internal producer remains unverified. No within-range introduction of the broad arbitrary-error predicate was shown; it is explicit at the exclusive base.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-091",
+          "key": "g143/g143-c2",
+          "latest_line": 12,
+          "recommendation": "out-of-range",
+          "bucket": "other",
+          "underlying_key": "attach-delete-race-test-accepts-arbitrary-internal-errors",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The broad NotFound-or-Internal error allowance predates the exclusive base. The assigned change accurately admits that the host-specific Internal route has not been checked. It does not introduce or validate the existing oracle weakness.",
+          "checks": [
+            "At exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a, session_lifecycle.rs:7076-7092 already accepts any SupervisorError with NotFound or Internal. The final successful Delete and empty-list requirements are present at :7097-7104.",
+            "At 08399d092d20815ced6619c26df2391944ae2b4a, session_lifecycle.rs:5387-5395 qualifies the old tmux explanation and says the host-specific route 'has not been checked'; :5396-5401 retains the same broad predicate. :5406-5413 still checks deletion, not the cause of any earlier Internal error.",
+            "The assigned commit's hunk changes commentary, not the predicate. The reviewed-to-inclusive-tip diff in this file changes separate scrollback/dead-agent wording only, leaving this allowance and qualification in place.",
+            "At the reviewed revision, :5347-5382 uses the pre-replay attach boundary and requires a delete-naming Detached reason on the successful branch. SPEC_impl.md:2551-2588 specifies host streams and unavailable refusals without declaring arbitrary Internal errors legitimate.",
+            "No runtime observation, product defect or mutation test was claimed. Production correctness and final empty listing do not refute the inherited test-oracle weakness."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "Terminal and lifecycle contracts searched/read; no rule accepts arbitrary unrelated Attach failures as legitimate deletion races.",
+            "SPEC_impl.md": "Current Grid streams and host-refusal paragraphs read; no blanket Internal allowance found.",
+            "TODO.md Planned": "Empty; no coverage.",
+            "plans/queue": "Searched attach/delete race, Internal allowance and session_lifecycle test references; no unlanded exact fix found. Landed tmux documentation work is not future coverage.",
+            "BUGS.md": "Read in full; no matching test-oracle issue.",
+            "INDEX.md and queue": "Full index read plus targeted attach/delete, generic Internal and expected_race_outcome searches found no same-root item.",
+            "TRIAGE_OUTCOMES.md": "Searched active ledger for this test and its broad error predicate; no matching decision.",
+            "FILTER.md": "No filter used. Attribution, not rarity or expected product behavior, is the proposed basis."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "The host-specific legitimate Internal producer remains unverified. No within-range introduction of the broad arbitrary-error predicate was shown; it is explicit at the exclusive base.",
+          "original_stronger_consequence": "Accepting arbitrary Internal errors could hide an unrelated attach failure and weaken the consistency regression. That consequence remains valid as a pre-existing oracle concern; successful deletion does not settle it.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Exclude only as a pre-existing test-oracle allowance outside the pinned range. Preserve the unverified host-specific route and do not treat qualified commentary as proof that the predicate is sound."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "attach-delete-race-test-accepts-arbitrary-internal-errors",
+        "destination": null
+      }
+    },
+    {
+      "key": "g143/g143-c3",
+      "owner": "g143",
+      "id": "g143-c3",
+      "domain": "rust-session-agent-regressions",
+      "purpose": "rust-session-agent-regressions: crates/farhelm/tests/e2e/launch_sentinel_error_status.rs, crates/farhelm/tests/e2e/marker_model.rs, crates/farhelm/tests/e2e/prompt_running_agent.rs, crates/farhelm/tests/e2e/restart_under_concurrency.rs, crates/farhelm/tests/e2e/restart_with_resume.rs, crates/farhelm/tests/e2e/session_lifecycle.rs, crates/farhelm/tests/e2e/session_rename.rs, crates/farhelm/tests/e2e/structured_launches.rs, crates/farhelm/tests/e2e/supervisor_stop.rs, crates/farhelm/tests/e2e/wrapper_launch.rs, crates/farhelm/tests/version_lock_forwarder.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "g143-c3",
+            "state": "open",
+            "summary": "The dead-agent comment does not claim its terminal host exits",
+            "location": "crates/farhelm/tests/e2e/session_lifecycle.rs:3940",
+            "detail": "Reviewed commit: 4b489b4f2eeade14f119b186ecb16eeaaf027021. TLDR: no lifecycle regression or materially misleading host-lifetime contract established in the comment saying 'its terminal ends'. Considered concern: readers could confuse the agent's death with ending its long-lived terminal host. Exact replacement: 'Kill the agent’s own process directly: its terminal ends (the host keeps the ended terminal viewable), leaving no live pid for kill_process_tree to walk ancestry from at all.' Source context at :3890-3952 states the terminal retains the exited child's status, kills only self_pid with SIGKILL, waits for that pid to disappear, then calls Stop to reap the separately alive daemon. The parenthetical expressly preserves the host; terminal-host/SPEC.md:128-147 says 'Neither event ends the host. It keeps serving the journal until it is told to stop.' SPEC_impl.md:2070-2105 likewise defines exited child versus gone host. Suggested bucket: other; could-be-highest: false (test comment wording only; no product or test action changed). Confidence: confirmed source analysis. proposed_drop: surrounding explanation and unchanged test operations refute a host-lifetime contract change; no finding proposed. possible_cover: none. Caveat: 'terminal ends' is imprecise, but the adjacent text supplies the distinction. No execution or reproduction performed."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "g143-c3",
+            "state": "open",
+            "summary": "The dead-agent comment does not claim its terminal host exits",
+            "location": "crates/farhelm/tests/e2e/session_lifecycle.rs:3937",
+            "detail": "Reviewed commit: 4b489b4f2eeade14f119b186ecb16eeaaf027021. TLDR: no lifecycle regression or materially misleading host-lifetime contract established in the comment saying 'its terminal ends'. Considered concern: readers could confuse the agent's death with ending its long-lived terminal host. Exact replacement: 'Kill the agent’s own process directly: its terminal ends (the host keeps the ended terminal viewable), leaving no live pid for kill_process_tree to walk ancestry from at all.' Source context at :3890-3952 states the terminal retains the exited child's status, kills only self_pid with SIGKILL, waits for that pid to disappear, then calls Stop to reap the separately alive daemon. The parenthetical expressly preserves the host; terminal-host/SPEC.md:128-147 says 'Neither event ends the host. It keeps serving the journal until it is told to stop.' SPEC_impl.md:2134-2146 likewise defines exited child versus gone host. Suggested bucket: other; could-be-highest: false (test comment wording only; no product or test action changed). Confidence: confirmed source analysis. proposed_drop: surrounding explanation and unchanged test operations refute a host-lifetime contract change; no finding proposed. possible_cover: none. Caveat: 'terminal ends' is imprecise, but the adjacent text supplies the distinction. No execution or reproduction performed."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "g143-c3",
+            "state": "open",
+            "summary": "Direct kill and wait establish the daemon test's dead-agent boundary",
+            "location": "crates/farhelm/tests/e2e/session_lifecycle.rs:3937",
+            "detail": "Reviewed commit: 4b489b4f2eeade14f119b186ecb16eeaaf027021. TLDR: the changed wording does not introduce a host-lifetime or exit-fixture regression. Original concern retained: 'its terminal ends' can conflate the agent's death with the terminal host's death, but its parenthetical says the host keeps the terminal viewable. Synthesis checked the actual boundary: session_lifecycle.rs:3890-3895 says the terminal retains the exit; :3900-3905 explicitly disables scopes; :3932-3935 verifies no recorded scope and an alive daemon before the kill; :3942-3945 kills only the fixture-reported agent pid and waits for it to be gone before :3947 invokes Stop. harness.rs:2281-2302 defines gone as absent or zombie, and :2329-2345 polls that predicate to a deadline. Thus a merely successful create, host readiness, or the terminal host ending is not substituted for agent death in this test. terminal-host/SPEC.md:128-147 explicitly says neither child exit nor end of output ends the host, matching the parenthetical. The direct-kill-and-wait boundary is not evidence that the host's drained exit record has already reached the supervisor, nor does the test need to claim that: its intended premise is no live agent root when Stop must find the marked survivor. No source premise inspected here connects this unchanged test to the distinct fixture cleanup/exit issues the caller attributes to g114/g115; no conclusion about those other findings is made. Suggested bucket: other; could-be-highest: false (test-comment interpretation only, no product/test action changed). Confidence: confirmed source analysis. proposed_drop: adjacent contract and direct test actions refute an introduced host-lifetime or fixture-boundary defect; no finding proposed. possible_cover: none. Material caveat: 'terminal ends' remains imprecise; this disposition does not certify all fixture cleanup or process-observation helpers. No installed-vendor behavior claim, runtime observation or reproduction. Same-ID synthesis revision; disposition unchanged and not asserted accepted by the parent."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "g143-c3",
+            "state": "open",
+            "summary": "Direct kill and process-table checks establish the dead-agent root boundary",
+            "location": "crates/farhelm/tests/e2e/session_lifecycle.rs:3937",
+            "detail": "Reviewed commit: 4b489b4f2eeade14f119b186ecb16eeaaf027021. TLDR: the wording does not introduce a host-lifetime or exit-fixture regression. Original concern retained: 'its terminal ends' can conflate agent death with terminal-host death, but the adjacent parenthetical preserves the host and its viewable terminal. Source: session_lifecycle.rs:3890-3895 explicitly retains the terminal; :3900-3905 disables scopes; :3932-3935 verifies no scope and a live daemon; :3942-3945 sends SIGKILL to the fixture-reported agent and waits for its death before :3947 calls Stop. harness.rs:2281-2302 defines gone as absent or zombie; :2329-2345 polls it to a deadline. Additional synthesis check: hosts/terminal.rs:711-751 and :787-832 re-read the pinned child from the process table for a kill root and the lifecycle probe; a zombie or absent child gives no root and probes dead even before the host's drained exit record reaches the supervisor. Thus this test's direct kill-and-wait establishes the no-live-root premise without needing host exit, host readiness alone, or a processed exit record. terminal-host/SPEC.md:128-147 explicitly keeps the host serving after child exit. No checked source premise connects this test to the distinct g114/g115 fixture issues described by the caller; this record makes no verdict on those findings. Suggested bucket: other; could-be-highest: false (test-comment interpretation only, no changed action or established product impact). Confidence: confirmed source analysis. proposed_drop: adjacent contract and direct test/root checks refute an introduced lifetime or fixture-boundary defect; no finding proposed. possible_cover: none. Material caveats: 'terminal ends' is imprecise; this is not a certification of all process-observation helpers or fixture cleanup. No installed-vendor behavior claim, runtime observation or reproduction. Same-ID synthesis revision adds the readily checked lifecycle-consumer premise; disposition unchanged and not asserted accepted by the parent."
+          }
+        }
+      ],
+      "latest": {
+        "line": 9,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "g143-c3",
+          "state": "open",
+          "summary": "Direct kill and process-table checks establish the dead-agent root boundary",
+          "location": "crates/farhelm/tests/e2e/session_lifecycle.rs:3937",
+          "detail": "Reviewed commit: 4b489b4f2eeade14f119b186ecb16eeaaf027021. TLDR: the wording does not introduce a host-lifetime or exit-fixture regression. Original concern retained: 'its terminal ends' can conflate agent death with terminal-host death, but the adjacent parenthetical preserves the host and its viewable terminal. Source: session_lifecycle.rs:3890-3895 explicitly retains the terminal; :3900-3905 disables scopes; :3932-3935 verifies no scope and a live daemon; :3942-3945 sends SIGKILL to the fixture-reported agent and waits for its death before :3947 calls Stop. harness.rs:2281-2302 defines gone as absent or zombie; :2329-2345 polls it to a deadline. Additional synthesis check: hosts/terminal.rs:711-751 and :787-832 re-read the pinned child from the process table for a kill root and the lifecycle probe; a zombie or absent child gives no root and probes dead even before the host's drained exit record reaches the supervisor. Thus this test's direct kill-and-wait establishes the no-live-root premise without needing host exit, host readiness alone, or a processed exit record. terminal-host/SPEC.md:128-147 explicitly keeps the host serving after child exit. No checked source premise connects this test to the distinct g114/g115 fixture issues described by the caller; this record makes no verdict on those findings. Suggested bucket: other; could-be-highest: false (test-comment interpretation only, no changed action or established product impact). Confidence: confirmed source analysis. proposed_drop: adjacent contract and direct test/root checks refute an introduced lifetime or fixture-boundary defect; no finding proposed. possible_cover: none. Material caveats: 'terminal ends' is imprecise; this is not a certification of all process-observation helpers or fixture cleanup. No installed-vendor behavior claim, runtime observation or reproduction. Same-ID synthesis revision adds the readily checked lifecycle-consumer premise; disposition unchanged and not asserted accepted by the parent."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g143/findings.jsonl",
+        "id": "g143-c3",
+        "line": 9,
+        "disposition": "excluded",
+        "group": "dead-agent-test-comment-host-lifetime-and-no-live-root",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-091 after inspecting it. The adjacent parenthetical expressly preserves the terminal host. The test kills and waits for the agent, while production root/probe checks independently consult the pinned process identity. No processed exit record or host death is substituted for the dead-agent premise. Refute the narrow lifetime/fixture-boundary interpretation using the explicit host-survival parenthetical, direct kill-and-wait and independent root checks. Preserve the wording caveat and every separate fixture issue. Checked source/results: [\"At 4b489b4f2eeade14f119b186ecb16eeaaf027021, session_lifecycle.rs:3890-3895 says the terminal retains exit status; :3900-3905 disables scopes; :3932-3935 verifies no scope and a live daemon. :3937-3945 kills only the fixture-reported agent and waits for its death before :3947 invokes Stop.\",\"At that revision, harness.rs:2281-2302 defines gone as absent or zombie and :2329-2345 polls that predicate to a deadline. This is the named test's source boundary, not runtime proof that every process-observation helper is sound.\",\"At that revision, hosts/terminal.rs:711-751 and :787-832 re-read the pinned child from the process table for root/probe answers; a zombie or missing child supplies no live root even before the exit record is processed.\",\"The previously inspected crates/terminal-host/SPEC.md:130-147 preserves the host after child exit and end of output, matching the comment's parenthetical. Current SPEC_impl.md:2135-2148 distinguishes root checks from durable exit evidence.\",\"The through-tip session_lifecycle.rs diff confirms this change is wording only. No tests or reproductions were performed, and this check makes no verdict on distinct fixture cleanup, transcript parsing or exit-observation findings.\"] Current coverage/results: {\"SPEC.md\":\"Current Terminal experience and lifecycle cleanup paragraphs read: the terminal outlives its child, and identified survivors remain cleanup targets.\",\"SPEC_impl.md\":\"Current terminal runtime/root and switch-point paragraphs read. Host survival and process-table root checks support the stated distinction; no requirement to wait for exit publication before recognizing a dead root.\",\"TODO.md Planned\":\"Empty; no coverage.\",\"plans/queue\":\"Searched dead-agent, marker/root, terminal-host lifetime and session_lifecycle references; no exact unlanded cover found. Matching tmux removal plans are already landed.\",\"BUGS.md\":\"Read in full; no match.\",\"INDEX.md and queue\":\"Full index read and targeted searches found separate stop-annotation, transcript/PID and process-observation concerns. None is an exact alias of this narrow comment/root-premise interpretation, and this consultation does not resolve those separate claims.\",\"TRIAGE_OUTCOMES.md\":\"Searched active ledger for the dead-agent/host-lifetime comment and its no-live-root premise; no matching decision.\",\"FILTER.md\":\"No filter used; the parenthetical and source boundary refute the alleged host-lifetime contract change.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A reader could confuse agent death with terminal-host death, or mistake readiness/host termination for the dead-agent root boundary, misreading the regression's purpose. No product or test action change, security route or user-work-loss consequence was alleged by this record.\"; \"'Its terminal ends' remains imprecise in isolation. No introduced host-death claim or dependency on an already processed exit record is established. This is not certification of all PID extraction or fixture cleanup behavior.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g143/g143-c3",
+        "line": 9,
+        "disposition": "excluded",
+        "group": "dead-agent-test-comment-host-lifetime-and-no-live-root",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-091 after inspecting it. The adjacent parenthetical expressly preserves the terminal host. The test kills and waits for the agent, while production root/probe checks independently consult the pinned process identity. No processed exit record or host death is substituted for the dead-agent premise. Refute the narrow lifetime/fixture-boundary interpretation using the explicit host-survival parenthetical, direct kill-and-wait and independent root checks. Preserve the wording caveat and every separate fixture issue. Checked source/results: [\"At 4b489b4f2eeade14f119b186ecb16eeaaf027021, session_lifecycle.rs:3890-3895 says the terminal retains exit status; :3900-3905 disables scopes; :3932-3935 verifies no scope and a live daemon. :3937-3945 kills only the fixture-reported agent and waits for its death before :3947 invokes Stop.\",\"At that revision, harness.rs:2281-2302 defines gone as absent or zombie and :2329-2345 polls that predicate to a deadline. This is the named test's source boundary, not runtime proof that every process-observation helper is sound.\",\"At that revision, hosts/terminal.rs:711-751 and :787-832 re-read the pinned child from the process table for root/probe answers; a zombie or missing child supplies no live root even before the exit record is processed.\",\"The previously inspected crates/terminal-host/SPEC.md:130-147 preserves the host after child exit and end of output, matching the comment's parenthetical. Current SPEC_impl.md:2135-2148 distinguishes root checks from durable exit evidence.\",\"The through-tip session_lifecycle.rs diff confirms this change is wording only. No tests or reproductions were performed, and this check makes no verdict on distinct fixture cleanup, transcript parsing or exit-observation findings.\"] Current coverage/results: {\"SPEC.md\":\"Current Terminal experience and lifecycle cleanup paragraphs read: the terminal outlives its child, and identified survivors remain cleanup targets.\",\"SPEC_impl.md\":\"Current terminal runtime/root and switch-point paragraphs read. Host survival and process-table root checks support the stated distinction; no requirement to wait for exit publication before recognizing a dead root.\",\"TODO.md Planned\":\"Empty; no coverage.\",\"plans/queue\":\"Searched dead-agent, marker/root, terminal-host lifetime and session_lifecycle references; no exact unlanded cover found. Matching tmux removal plans are already landed.\",\"BUGS.md\":\"Read in full; no match.\",\"INDEX.md and queue\":\"Full index read and targeted searches found separate stop-annotation, transcript/PID and process-observation concerns. None is an exact alias of this narrow comment/root-premise interpretation, and this consultation does not resolve those separate claims.\",\"TRIAGE_OUTCOMES.md\":\"Searched active ledger for the dead-agent/host-lifetime comment and its no-live-root premise; no matching decision.\",\"FILTER.md\":\"No filter used; the parenthetical and source boundary refute the alleged host-lifetime contract change.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A reader could confuse agent death with terminal-host death, or mistake readiness/host termination for the dead-agent root boundary, misreading the regression's purpose. No product or test action change, security route or user-work-loss consequence was alleged by this record.\"; \"'Its terminal ends' remains imprecise in isolation. No introduced host-death claim or dependency on an already processed exit record is established. This is not certification of all PID extraction or fixture cleanup behavior.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-091",
+          "key": "g143/g143-c3",
+          "latest_line": 9,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "dead-agent-test-comment-host-lifetime-and-no-live-root",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The adjacent parenthetical expressly preserves the terminal host. The test kills and waits for the agent, while production root/probe checks independently consult the pinned process identity. No processed exit record or host death is substituted for the dead-agent premise.",
+          "checks": [
+            "At 4b489b4f2eeade14f119b186ecb16eeaaf027021, session_lifecycle.rs:3890-3895 says the terminal retains exit status; :3900-3905 disables scopes; :3932-3935 verifies no scope and a live daemon. :3937-3945 kills only the fixture-reported agent and waits for its death before :3947 invokes Stop.",
+            "At that revision, harness.rs:2281-2302 defines gone as absent or zombie and :2329-2345 polls that predicate to a deadline. This is the named test's source boundary, not runtime proof that every process-observation helper is sound.",
+            "At that revision, hosts/terminal.rs:711-751 and :787-832 re-read the pinned child from the process table for root/probe answers; a zombie or missing child supplies no live root even before the exit record is processed.",
+            "The previously inspected crates/terminal-host/SPEC.md:130-147 preserves the host after child exit and end of output, matching the comment's parenthetical. Current SPEC_impl.md:2135-2148 distinguishes root checks from durable exit evidence.",
+            "The through-tip session_lifecycle.rs diff confirms this change is wording only. No tests or reproductions were performed, and this check makes no verdict on distinct fixture cleanup, transcript parsing or exit-observation findings."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "Current Terminal experience and lifecycle cleanup paragraphs read: the terminal outlives its child, and identified survivors remain cleanup targets.",
+            "SPEC_impl.md": "Current terminal runtime/root and switch-point paragraphs read. Host survival and process-table root checks support the stated distinction; no requirement to wait for exit publication before recognizing a dead root.",
+            "TODO.md Planned": "Empty; no coverage.",
+            "plans/queue": "Searched dead-agent, marker/root, terminal-host lifetime and session_lifecycle references; no exact unlanded cover found. Matching tmux removal plans are already landed.",
+            "BUGS.md": "Read in full; no match.",
+            "INDEX.md and queue": "Full index read and targeted searches found separate stop-annotation, transcript/PID and process-observation concerns. None is an exact alias of this narrow comment/root-premise interpretation, and this consultation does not resolve those separate claims.",
+            "TRIAGE_OUTCOMES.md": "Searched active ledger for the dead-agent/host-lifetime comment and its no-live-root premise; no matching decision.",
+            "FILTER.md": "No filter used; the parenthetical and source boundary refute the alleged host-lifetime contract change."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "'Its terminal ends' remains imprecise in isolation. No introduced host-death claim or dependency on an already processed exit record is established. This is not certification of all PID extraction or fixture cleanup behavior.",
+          "original_stronger_consequence": "A reader could confuse agent death with terminal-host death, or mistake readiness/host termination for the dead-agent root boundary, misreading the regression's purpose. No product or test action change, security route or user-work-loss consequence was alleged by this record.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Refute the narrow lifetime/fixture-boundary interpretation using the explicit host-survival parenthetical, direct kill-and-wait and independent root checks. Preserve the wording caveat and every separate fixture issue."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "dead-agent-test-comment-host-lifetime-and-no-live-root",
+        "destination": null
+      }
+    },
+    {
+      "key": "g143/g143-l4",
+      "owner": "g143",
+      "id": "g143-l4",
+      "domain": "rust-session-agent-regressions",
+      "purpose": "rust-session-agent-regressions: crates/farhelm/tests/e2e/launch_sentinel_error_status.rs, crates/farhelm/tests/e2e/marker_model.rs, crates/farhelm/tests/e2e/prompt_running_agent.rs, crates/farhelm/tests/e2e/restart_under_concurrency.rs, crates/farhelm/tests/e2e/restart_with_resume.rs, crates/farhelm/tests/e2e/session_lifecycle.rs, crates/farhelm/tests/e2e/session_rename.rs, crates/farhelm/tests/e2e/structured_launches.rs, crates/farhelm/tests/e2e/supervisor_stop.rs, crates/farhelm/tests/e2e/wrapper_launch.rs, crates/farhelm/tests/version_lock_forwarder.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "g143-l4",
+            "state": "open",
+            "summary": "Check the claim that leaving the alternate screen removes it from the emulator",
+            "location": "crates/farhelm/tests/e2e/session_lifecycle.rs:3679",
+            "detail": "Reviewed commit: 08399d092d20815ced6619c26df2391944ae2b4a. TLDR: the revised regression explanation says the exited application's alternate-screen frame is gone from the terminal emulator entirely. If the emulator instead retains an inactive alternate buffer, the explanation would misstate the test's oracle and could misdirect future maintenance even if current replay is correct. Source basis: assigned patch 01582-000.patch replaces the claim that the frame is gone from tmux with 'the alt-screen frame is gone from the terminal’s emulator entirely, and only a capture taken before the kill could bring its marker back'. Earlier pass inspected the test's no-marker replay assertion and host lifetime contract, not the emulator's alternate-buffer retention. Check needed: inspect the fixture's SIGTERM screen sequence and the emulator's implementation of leaving the alternate screen, then compare both versions against the full pinned range before attributing a documentation defect. Suggested bucket: other; could-be-highest: false (test explanation only; no product failure or user-work-loss route established). Confidence: unresolved source lead. proposed_drop: false. possible_cover: none. No runtime tests, reproduction or installed-vendor behavior claim."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "g143-l4",
+            "state": "open",
+            "summary": "Correct the stopped alternate-screen test's emulator-retention explanation",
+            "location": "crates/farhelm/tests/e2e/session_lifecycle.rs:3677",
+            "detail": "Reviewed commit: 08399d092d20815ced6619c26df2391944ae2b4a. TLDR: the revised regression explanation tells maintainers that leaving a full-screen application erases its frame from Farhelm's emulator. The emulator actually keeps that frame in its inactive buffer. The test verifies that replay shows the restored primary screen; it does not establish that the alternate frame no longer exists, or that only a stop-time capture could make it reappear. Details: session_lifecycle.rs:3677-3681 now says 'the alt-screen frame is gone from the terminal’s emulator entirely, and only a capture taken before the kill could bring its marker back'. The fixture's SIGTERM handler at crates/farhelm-fixtures/src/fake_agent.rs:1730-1742 writes only ESC[?1049l and exits. Farhelm's QueryHandler::unset_private_mode at crates/farhelm-terminal-emulator/src/queries.rs:435-453 delegates mode 1049 to Term. vendor/alacritty_terminal/src/term/mod.rs:2523-2526 implements that reset with swap_alt. swap_alt at :794-814 clears inactive_grid only when ENTERING alternate mode (:795-804); when LEAVING, it simply swaps grid and inactive_grid (:811-812), retaining the old alternate contents in inactive_grid. Thus the stated erasure does not happen. The assertions at session_lifecycle.rs:3713-3735 inspect complete replay for absence of the two alternate markers and absence of the obsolete snapshots directory. That is a valid visible-replay oracle, but a projection accidentally selecting the retained inactive buffer could also violate it without any pre-kill capture. This is a documentation defect, not a claim that current replay is wrong or that the test fails. Attribution checked across the whole pinned range: the exclusive-base version at 6e423e30068b62c6cfa276c6d720ee35bb70387a:5249-5254 describes tmux, not Farhelm's emulator; the assigned hunk at 08399d092d20815ced6619c26df2391944ae2b4a explicitly transfers that erasure claim to the host-side emulator. SPEC.md Terminal experience at this revision promises the terminal's visible result and forbids painting a captured frame into another terminal; SPEC_impl.md:2603-2611 likewise says an exited terminal shows what its emulator holds and forbids stop-time screen capture. Neither requires erasing the inactive buffer. Suggested fix: explain that graceful exit switches back to the primary screen and that replay must use that active screen, without claiming inactive-buffer erasure or a unique cause for a future marker regression. Suggested bucket: other (misleading test documentation/diagnostic rationale, no established user-facing failure). Confidence: confirmed source and contract analysis. proposed_drop: false. possible_cover: none; prohibited coverage sources not searched. Could-be-highest: false; no security, user-work-loss or catastrophic tooling route established or alleged. Material caveats: the existing no-replay-marker and no-obsolete-snapshot assertions remain useful; this finding does not allege a missing live-alt-screen reconnect oracle, which is a distinct neighbour finding. No tests, reproduction, execution evidence or installed-vendor behavior claims. Same-ID revision resolves the concrete lead to a finding."
+          }
+        },
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "g143-l4",
+            "state": "open",
+            "summary": "Correct the stopped alternate-screen test's emulator-retention explanation",
+            "location": "crates/farhelm/tests/e2e/session_lifecycle.rs:3677",
+            "detail": "Reviewed commit: 08399d092d20815ced6619c26df2391944ae2b4a; persistence checked through inclusive tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: the revised regression explanation tells maintainers that leaving a full-screen application erases its frame from Farhelm's emulator. The emulator actually retains the frame in its inactive buffer. The valid replay assertion checks the restored primary screen, not erasure of the alternate frame or proof that only a stop-time capture could make it reappear. Details: session_lifecycle.rs:3677-3681 says 'the alt-screen frame is gone from the terminal’s emulator entirely, and only a capture taken before the kill could bring its marker back'. The fixture's SIGTERM handler at crates/farhelm-fixtures/src/fake_agent.rs:1730-1742 only writes ESC[?1049l and exits. QueryHandler::unset_private_mode at crates/farhelm-terminal-emulator/src/queries.rs:435-453 delegates mode 1049 to Term. vendor/alacritty_terminal/src/term/mod.rs:2523-2526 resets that mode with swap_alt; :794-814 clears inactive_grid only on ENTRY (:795-804), while EXIT simply swaps grid and inactive_grid (:811-812), preserving the old alternate cells in inactive_grid. Readily checkable post-exit premise was then checked: hosts/terminal.rs:3911-3923 flushes an open synchronized update and records liveness without erasing that grid. Snapshot painter comments at snapshot/v1/paint.rs:183-187 independently state that alternate cells are cleared on entry. Current rendering is correct: grid_output.rs:327-337 reads term.grid(), the active screen, and service/grid_stream.rs:423-460 uses that projection for catch-up. The test at session_lifecycle.rs:3713-3735 asserts complete replay lacks the two alternate markers and that the obsolete snapshots directory is absent. A regression selecting the retained inactive grid could also fail those marker assertions without a pre-kill capture. This is a documentation/diagnostic-rationale defect, not a present replay failure or lost test coverage claim. Full-range attribution: exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:5249-5254 describes tmux; the assigned 08399d09 hunk explicitly transfers the erasure claim to Farhelm's emulator. The later through-tip diff changes only separate scrollback and dead-agent comments, leaving this wording and the cited implementation unchanged. Contract: SPEC.md:2893-2898 defines viewability by what the terminal holds and forbids painting a captured frame into another terminal; SPEC_impl.md:2603-2611 specifies visible exited-session semantics and no stop-time captured frame. Neither requires inactive-buffer erasure. Fix direction: explain that graceful exit selects the primary screen and replay must project that active screen, without claiming erasure or a unique cause for future marker failures. Suggested bucket: other (misleading maintainer/test documentation). Confidence: confirmed source/contract analysis. proposed_drop: false. possible_cover: none; prohibited coverage sources not searched. Could-be-highest: false; no security, user-work-loss or catastrophic tooling route alleged. Material caveats: the existing visible no-marker/no-obsolete-snapshot assertions remain useful; this is distinct from the neighbour's missing positive live-alt-screen reconnect oracle. No tests, builds, reproduction, runtime observation or installed-vendor claim. Same-ID revision adds post-exit/projection and through-tip checks; original consequence preserved."
+          }
+        }
+      ],
+      "latest": {
+        "line": 13,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "g143-l4",
+          "state": "open",
+          "summary": "Correct the stopped alternate-screen test's emulator-retention explanation",
+          "location": "crates/farhelm/tests/e2e/session_lifecycle.rs:3677",
+          "detail": "Reviewed commit: 08399d092d20815ced6619c26df2391944ae2b4a; persistence checked through inclusive tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: the revised regression explanation tells maintainers that leaving a full-screen application erases its frame from Farhelm's emulator. The emulator actually retains the frame in its inactive buffer. The valid replay assertion checks the restored primary screen, not erasure of the alternate frame or proof that only a stop-time capture could make it reappear. Details: session_lifecycle.rs:3677-3681 says 'the alt-screen frame is gone from the terminal’s emulator entirely, and only a capture taken before the kill could bring its marker back'. The fixture's SIGTERM handler at crates/farhelm-fixtures/src/fake_agent.rs:1730-1742 only writes ESC[?1049l and exits. QueryHandler::unset_private_mode at crates/farhelm-terminal-emulator/src/queries.rs:435-453 delegates mode 1049 to Term. vendor/alacritty_terminal/src/term/mod.rs:2523-2526 resets that mode with swap_alt; :794-814 clears inactive_grid only on ENTRY (:795-804), while EXIT simply swaps grid and inactive_grid (:811-812), preserving the old alternate cells in inactive_grid. Readily checkable post-exit premise was then checked: hosts/terminal.rs:3911-3923 flushes an open synchronized update and records liveness without erasing that grid. Snapshot painter comments at snapshot/v1/paint.rs:183-187 independently state that alternate cells are cleared on entry. Current rendering is correct: grid_output.rs:327-337 reads term.grid(), the active screen, and service/grid_stream.rs:423-460 uses that projection for catch-up. The test at session_lifecycle.rs:3713-3735 asserts complete replay lacks the two alternate markers and that the obsolete snapshots directory is absent. A regression selecting the retained inactive grid could also fail those marker assertions without a pre-kill capture. This is a documentation/diagnostic-rationale defect, not a present replay failure or lost test coverage claim. Full-range attribution: exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:5249-5254 describes tmux; the assigned 08399d09 hunk explicitly transfers the erasure claim to Farhelm's emulator. The later through-tip diff changes only separate scrollback and dead-agent comments, leaving this wording and the cited implementation unchanged. Contract: SPEC.md:2893-2898 defines viewability by what the terminal holds and forbids painting a captured frame into another terminal; SPEC_impl.md:2603-2611 specifies visible exited-session semantics and no stop-time captured frame. Neither requires inactive-buffer erasure. Fix direction: explain that graceful exit selects the primary screen and replay must project that active screen, without claiming erasure or a unique cause for future marker failures. Suggested bucket: other (misleading maintainer/test documentation). Confidence: confirmed source/contract analysis. proposed_drop: false. possible_cover: none; prohibited coverage sources not searched. Could-be-highest: false; no security, user-work-loss or catastrophic tooling route alleged. Material caveats: the existing visible no-marker/no-obsolete-snapshot assertions remain useful; this is distinct from the neighbour's missing positive live-alt-screen reconnect oracle. No tests, builds, reproduction, runtime observation or installed-vendor claim. Same-ID revision adds post-exit/projection and through-tip checks; original consequence preserved."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g143/findings.jsonl",
+        "id": "g143-l4",
+        "line": 13,
+        "disposition": "verified",
+        "group": "stopped-altscreen-test-comment-claims-inactive-buffer-erasure",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-091 after inspecting it. The newly migrated explanation says the alternate frame is gone from the emulator entirely. The fixture only leaves alternate mode, and the emulator retains those cells in its inactive grid. The valid replay assertions test the active primary screen; they establish neither erasure nor a unique stop-time-capture cause for a future marker failure. Retain in other with confirmed source confidence. Explain primary-screen selection and active-screen replay without claiming inactive-buffer erasure or a unique cause for marker regressions. Preserve the useful existing assertions and distinguish the separate missing positive reconnect oracle. Checked source/results: [\"At 08399d092d20815ced6619c26df2391944ae2b4a, session_lifecycle.rs:3677-3683 claims complete emulator erasure and a unique pre-kill capture explanation. :3713-3735 checks complete replay for absence of two alternate markers and for absence of the obsolete snapshots directory. These remain useful assertions.\",\"At that revision, fake_agent.rs:1730-1742 writes only ESC[?1049l then _exit(0). Emulator queries.rs:435-453 delegates mode 1049 reset to Term. vendor/alacritty_terminal/src/term/mod.rs:2523-2526 calls swap_alt, whose :795-804 clears alternate cells only on entry; exit at :811-814 swaps grids without erasing the old alternate cells.\",\"At that revision, hosts/terminal.rs:3911-3923 flushes synchronized output and records exit without clearing the retained inactive grid. grid_output.rs:327-337 projects term.grid(), the active screen, and service/grid_stream.rs:423-460 uses that projection for catch-up. Current rendering is therefore not alleged wrong.\",\"At exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a, session_lifecycle.rs:5249-5254 described tmux. The 08399d09 hunk explicitly transfers the erasure claim to Farhelm's emulator. The reviewed-to-tip diff leaves this wording and the cited emulator/projection implementation unchanged.\",\"Historical SPEC.md:2893-2898 and SPEC_impl.md:2603-2611 describe visible exited-terminal semantics and forbid stop-time captured-frame painting. Neither requires inactive-buffer erasure. A projection mistakenly selecting inactive cells could violate the marker oracle without taking a pre-kill capture. This is a source-established documentation defect, not observed replay failure, lost test coverage or user-work loss.\"] Current coverage/results: {\"SPEC.md\":\"Current Terminal experience paragraph :2893-2898 read in context. 'Viewable means what the terminal itself holds' concerns visible results; the following full-screen-exit wording does not require destruction of an inactive grid. No exact accepted cover.\",\"SPEC_impl.md\":\"Current Grid streams, Launch failure classification and emulator descriptions searched/read. Active visible screen and no captured-frame painting do not authorize claiming inactive-buffer erasure.\",\"TODO.md Planned\":\"Empty; no coverage. Other snapshot topics do not cover this explanatory error.\",\"plans/queue\":\"Searched altscreen, alternate/inactive buffer, stop-time capture and the named test. tmux-drop-from-docs.md was read in full; its generic comment audit is already landed per plans/REPORTS.md:32, so it is not an unlanded exact fix. No other matching plan found.\",\"BUGS.md\":\"Read in full; unrelated SSH provisioning issue only.\",\"INDEX.md and queue\":\"Full index read and targeted queue searches for altscreen, inactive grids/buffers, stop-time screen capture and the exact explanation found no same-root item. Alternate-screen selection and snapshot issues have different triggers/consequences. No extension recommended.\",\"TRIAGE_OUTCOMES.md\":\"Searched active ledger for the named test and inactive-buffer/alternate-erasure/stop-capture explanation; no matching decision.\",\"FILTER.md\":\"No filter fully matches. This is a persistent test explanation under the ordinary graceful-exit fixture, not an imprecise diagnostic reached only through a rare trigger.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Maintainers can misread the regression oracle and diagnose any reappearing alternate marker as evidence of pre-kill screen capture, even though inactive-buffer retention supplies another possible source. Earlier unresolved lead became this source-verified finding; its consequence was not lowered.\"; \"None for the documentation defect. No runtime failure, installed-vendor behavior or positive live-alt-screen reconnect coverage claim is established or needed.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g143/g143-l4",
+        "line": 13,
+        "disposition": "verified",
+        "group": "stopped-altscreen-test-comment-claims-inactive-buffer-erasure",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": "review_feedback_queue/stopped-altscreen-emulator-retention-explanation.md",
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-091 after inspecting it. The newly migrated explanation says the alternate frame is gone from the emulator entirely. The fixture only leaves alternate mode, and the emulator retains those cells in its inactive grid. The valid replay assertions test the active primary screen; they establish neither erasure nor a unique stop-time-capture cause for a future marker failure. Retain in other with confirmed source confidence. Explain primary-screen selection and active-screen replay without claiming inactive-buffer erasure or a unique cause for marker regressions. Preserve the useful existing assertions and distinguish the separate missing positive reconnect oracle. Checked source/results: [\"At 08399d092d20815ced6619c26df2391944ae2b4a, session_lifecycle.rs:3677-3683 claims complete emulator erasure and a unique pre-kill capture explanation. :3713-3735 checks complete replay for absence of two alternate markers and for absence of the obsolete snapshots directory. These remain useful assertions.\",\"At that revision, fake_agent.rs:1730-1742 writes only ESC[?1049l then _exit(0). Emulator queries.rs:435-453 delegates mode 1049 reset to Term. vendor/alacritty_terminal/src/term/mod.rs:2523-2526 calls swap_alt, whose :795-804 clears alternate cells only on entry; exit at :811-814 swaps grids without erasing the old alternate cells.\",\"At that revision, hosts/terminal.rs:3911-3923 flushes synchronized output and records exit without clearing the retained inactive grid. grid_output.rs:327-337 projects term.grid(), the active screen, and service/grid_stream.rs:423-460 uses that projection for catch-up. Current rendering is therefore not alleged wrong.\",\"At exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a, session_lifecycle.rs:5249-5254 described tmux. The 08399d09 hunk explicitly transfers the erasure claim to Farhelm's emulator. The reviewed-to-tip diff leaves this wording and the cited emulator/projection implementation unchanged.\",\"Historical SPEC.md:2893-2898 and SPEC_impl.md:2603-2611 describe visible exited-terminal semantics and forbid stop-time captured-frame painting. Neither requires inactive-buffer erasure. A projection mistakenly selecting inactive cells could violate the marker oracle without taking a pre-kill capture. This is a source-established documentation defect, not observed replay failure, lost test coverage or user-work loss.\"] Current coverage/results: {\"SPEC.md\":\"Current Terminal experience paragraph :2893-2898 read in context. 'Viewable means what the terminal itself holds' concerns visible results; the following full-screen-exit wording does not require destruction of an inactive grid. No exact accepted cover.\",\"SPEC_impl.md\":\"Current Grid streams, Launch failure classification and emulator descriptions searched/read. Active visible screen and no captured-frame painting do not authorize claiming inactive-buffer erasure.\",\"TODO.md Planned\":\"Empty; no coverage. Other snapshot topics do not cover this explanatory error.\",\"plans/queue\":\"Searched altscreen, alternate/inactive buffer, stop-time capture and the named test. tmux-drop-from-docs.md was read in full; its generic comment audit is already landed per plans/REPORTS.md:32, so it is not an unlanded exact fix. No other matching plan found.\",\"BUGS.md\":\"Read in full; unrelated SSH provisioning issue only.\",\"INDEX.md and queue\":\"Full index read and targeted queue searches for altscreen, inactive grids/buffers, stop-time screen capture and the exact explanation found no same-root item. Alternate-screen selection and snapshot issues have different triggers/consequences. No extension recommended.\",\"TRIAGE_OUTCOMES.md\":\"Searched active ledger for the named test and inactive-buffer/alternate-erasure/stop-capture explanation; no matching decision.\",\"FILTER.md\":\"No filter fully matches. This is a persistent test explanation under the ordinary graceful-exit fixture, not an imprecise diagnostic reached only through a rare trigger.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Maintainers can misread the regression oracle and diagnose any reappearing alternate marker as evidence of pre-kill screen capture, even though inactive-buffer retention supplies another possible source. Earlier unresolved lead became this source-verified finding; its consequence was not lowered.\"; \"None for the documentation defect. No runtime failure, installed-vendor behavior or positive live-alt-screen reconnect coverage claim is established or needed.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-091",
+          "key": "g143/g143-l4",
+          "latest_line": 13,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "stopped-altscreen-test-comment-claims-inactive-buffer-erasure",
+          "aliases": [],
+          "target_queue_file": "review_feedback_queue/stopped-altscreen-emulator-retention-explanation.md",
+          "why": "The newly migrated explanation says the alternate frame is gone from the emulator entirely. The fixture only leaves alternate mode, and the emulator retains those cells in its inactive grid. The valid replay assertions test the active primary screen; they establish neither erasure nor a unique stop-time-capture cause for a future marker failure.",
+          "checks": [
+            "At 08399d092d20815ced6619c26df2391944ae2b4a, session_lifecycle.rs:3677-3683 claims complete emulator erasure and a unique pre-kill capture explanation. :3713-3735 checks complete replay for absence of two alternate markers and for absence of the obsolete snapshots directory. These remain useful assertions.",
+            "At that revision, fake_agent.rs:1730-1742 writes only ESC[?1049l then _exit(0). Emulator queries.rs:435-453 delegates mode 1049 reset to Term. vendor/alacritty_terminal/src/term/mod.rs:2523-2526 calls swap_alt, whose :795-804 clears alternate cells only on entry; exit at :811-814 swaps grids without erasing the old alternate cells.",
+            "At that revision, hosts/terminal.rs:3911-3923 flushes synchronized output and records exit without clearing the retained inactive grid. grid_output.rs:327-337 projects term.grid(), the active screen, and service/grid_stream.rs:423-460 uses that projection for catch-up. Current rendering is therefore not alleged wrong.",
+            "At exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a, session_lifecycle.rs:5249-5254 described tmux. The 08399d09 hunk explicitly transfers the erasure claim to Farhelm's emulator. The reviewed-to-tip diff leaves this wording and the cited emulator/projection implementation unchanged.",
+            "Historical SPEC.md:2893-2898 and SPEC_impl.md:2603-2611 describe visible exited-terminal semantics and forbid stop-time captured-frame painting. Neither requires inactive-buffer erasure. A projection mistakenly selecting inactive cells could violate the marker oracle without taking a pre-kill capture. This is a source-established documentation defect, not observed replay failure, lost test coverage or user-work loss."
+          ],
+          "coverage_checked": {
+            "SPEC.md": "Current Terminal experience paragraph :2893-2898 read in context. 'Viewable means what the terminal itself holds' concerns visible results; the following full-screen-exit wording does not require destruction of an inactive grid. No exact accepted cover.",
+            "SPEC_impl.md": "Current Grid streams, Launch failure classification and emulator descriptions searched/read. Active visible screen and no captured-frame painting do not authorize claiming inactive-buffer erasure.",
+            "TODO.md Planned": "Empty; no coverage. Other snapshot topics do not cover this explanatory error.",
+            "plans/queue": "Searched altscreen, alternate/inactive buffer, stop-time capture and the named test. tmux-drop-from-docs.md was read in full; its generic comment audit is already landed per plans/REPORTS.md:32, so it is not an unlanded exact fix. No other matching plan found.",
+            "BUGS.md": "Read in full; unrelated SSH provisioning issue only.",
+            "INDEX.md and queue": "Full index read and targeted queue searches for altscreen, inactive grids/buffers, stop-time screen capture and the exact explanation found no same-root item. Alternate-screen selection and snapshot issues have different triggers/consequences. No extension recommended.",
+            "TRIAGE_OUTCOMES.md": "Searched active ledger for the named test and inactive-buffer/alternate-erasure/stop-capture explanation; no matching decision.",
+            "FILTER.md": "No filter fully matches. This is a persistent test explanation under the ordinary graceful-exit fixture, not an imprecise diagnostic reached only through a rare trigger."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "None for the documentation defect. No runtime failure, installed-vendor behavior or positive live-alt-screen reconnect coverage claim is established or needed.",
+          "original_stronger_consequence": "Maintainers can misread the regression oracle and diagnose any reappearing alternate marker as evidence of pre-kill screen capture, even though inactive-buffer retention supplies another possible source. Earlier unresolved lead became this source-verified finding; its consequence was not lowered.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain in other with confirmed source confidence. Explain primary-screen selection and active-screen replay without claiming inactive-buffer erasure or a unique cause for marker regressions. Preserve the useful existing assertions and distinguish the separate missing positive reconnect oracle."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "stopped-altscreen-test-comment-claims-inactive-buffer-erasure",
+        "destination": "trailing-stopped-altscreen-test-comment-claims-inactive-buffer-erasure.md"
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete: all 710 assigned patch lines covered.\n\nNo substantive findings; three ruled-out candidates recorded, with no unresolved leads. Findings log and progress file are updated. No tests or reproductions run."
+    },
+    {
+      "turn": 2,
+      "reply": "Synthesis complete; revised original IDs:\n\n- `g143-l1`: clarified pre-shim inheritance versus final-exec scrub.\n- `g143-c2`: retained generic-Internal uncertainty without claiming proof.\n- `g143-c3`: confirmed the direct-kill/wait premise against lifecycle root checks.\n\nNo new findings. Unresolved lead IDs: none."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 complete.\n\n- Checks: fixture exit sequence, emulator buffer retention, replay projection, post-exit handling, and full-range attribution.\n- New verified: `g143-l4` — incorrect alternate-buffer erasure claim in test documentation.\n- New unverified: none.\n- Open leads: none.\n- Something new found: yes. Log and progress updated; no runtime execution."
+    },
+    {
+      "turn": 4,
+      "reply": "Discovery pass 2 complete.\n\n- Checked readiness, shutdown observation, restart cwd propagation, reload/delete assertions, artifact-failure isolation, and argv-generation premises.\n- New verified IDs: none.\n- New unverified IDs: none.\n- Open leads: none.\n- Nothing new found. Progress updated; no runtime execution."
+    }
+  ],
+  "progress": "# g143 progress\n\nGroup: rust-session-agent-regressions.\nState: initial review complete; turn 1 (initial); discovery passes 0. Awaiting the caller's later synthesis/discovery turn.\nRead the full brief and complete inventory commits field. Root AGENTS.md End sentinel is present. No excluded coverage metadata or prohibited coverage sources read.\n\n## Result\n\nNo substantive findings. Three retained candidates document concerns considered and ruled out: g143-l1 (ambient-marker route), g143-c2 (unchanged broad attach/delete error allowance), g143-c3 (dead-agent comment's host-lifetime wording). g143-l1 began as a lead and was resolved to a candidate after inspecting environment construction and the launch shim's scrub. No open leads. New verified finding IDs: none. New unverified finding IDs: none.\n\nAll 710 assigned patch lines were read through the evidence command, in 13 packets: 01573 1-67; 01575 1-21; 01579 1-10; 01580 1-24; 01581 1-71; 01582 1-195 and 196-389; 01583 1-13; 01584 1-22; 01585 1-14; 01588 1-31; 01590 1-15; 01601 1-33. All patches change comments or assertion text, with no changed executable test behavior.\n\nThe evidence recorder rejected one attempted candidate revision using state=closed. It appended nothing for that attempt. I read its documented state rules and successfully re-recorded the event as state=open with kind=candidate, which resolves the earlier lead. A later same-ID event corrects g143-c3's source line references. The findings command reports active=0, open_candidates=3, open_leads=0.\n\n## Contracts and context read\n\nUnless otherwise noted, source reads are pinned to 08399d092d20815ced6619c26df2391944ae2b4a. The later commit is 4b489b4f2eeade14f119b186ecb16eeaaf027021. All source reads are git show, not working-tree substitutions.\n\nSPEC.md: headings and targeted searches; 970-1011 (working-directory/title/wrapper paragraphs); complete Lifecycle operations 1888-2130, Status 2651-2854, Terminal experience 2855-3170, Durability and resume 3436-3753.\nSPEC_impl.md: headings and targeted searches; 1069-1113 (Answers bind to what was drawn and following GUI paragraphs); complete Terminal host and Launch failure classification 1888-2668; 4783-4832 (process ownership and stop guards); 7416-7455 (version-lock/forwarder contract); complete Testing 8163-8230. Compared both specifications across the two assigned commits: SPEC.md unchanged, SPEC_impl.md only changes unrelated CLI setup prose.\ncrates/terminal-host/SPEC.md: headings and targeted searches; complete Command line and child spec and Lifecycle sections 42-167.\n\ncrates/farhelm/tests/e2e/marker_model.rs: 1-190.\ncrates/farhelm/tests/e2e/launch_sentinel_error_status.rs: 210-315, 524-590.\ncrates/farhelm/tests/e2e/restart_under_concurrency.rs: 140-220, 365-440.\ncrates/farhelm/tests/e2e/restart_with_resume.rs: 1180-1245, in addition to all assigned hunks.\ncrates/farhelm/tests/e2e/wrapper_launch.rs: 695-800, in addition to all assigned hunks.\ncrates/farhelm/tests/e2e/session_lifecycle.rs: 1744-1805, 2618-2655, 3664-3770, 5375-5425; numbered confirmation 5383-5419. At the later commit: 1416-1525, 3890-3985; numbered confirmation 3928-3957. All other assigned hunks read in full through evidence packets.\ncrates/farhelm/tests/e2e/structured_launches.rs: 307-340.\ncrates/farhelm/tests/e2e/session_rename.rs: 174-230.\ncrates/farhelm/tests/e2e/supervisor_stop.rs: 326-410.\ncrates/farhelm/tests/e2e/prompt_running_agent.rs: 1-80.\ncrates/farhelm/tests/version_lock_forwarder.rs: 297-395.\ncrates/farhelm/tests/e2e/harness.rs: targeted symbol search; 142-197, 259-337, 1743-1798.\ncrates/farhelm-supervisor/src/service/core/host_launch.rs: targeted symbol search; 100-185, 455-535.\ncrates/farhelm-supervisor/src/launch.rs: targeted symbol search; 1200-1265, 1368-1456.\n\n## Boundaries and next action\n\nInterface assumptions checked: host children receive the supervisor environment overlaid with launch_env, then the shim removes opposite-kind markers; Stop leaves the host serving the final screen; Delete ends recorded hosts; the harness waits for ReplayComplete; grid screen rows add a newline even at soft wraps; reboot fixtures explicitly end owned terminal hosts; child specs require absolute cwd and nonzero bounded dimensions. The source and specifications support the revised terminology.\n\nUnread assigned scope: none. Adjacent implementations outside the needed contract checks were not reviewed wholesale. Parent owns cross-group and queue coverage. No checkout files changed, no runtime tests, no builds, no reproductions, no live-install actions, and no helper agents.\nNext action: respond to the caller's later-turn prompt; do not count this initial pass as a synthesis/discovery pass.\n\n## Turn 2: later-turn synthesis\n\nState: synthesis complete; turn count 2; discovery passes 0. No new verified or unverified findings. Revised g143-l1, g143-c2 and g143-c3 under their original IDs (four appended events; c3's second revision adds the lifecycle consumer check). No open leads. No unread assigned scope. No parent acceptance of a proposed drop is inferred.\n\nRevisited cross-batch assumptions: ambient outer-tab markers enter the host-child/pre-shim context, then the final exec scrub removes them. The cleanup test does not independently prove positive marker selection while the scrub remains intact, nor does it prove a final agent wears the outer marker. Checked LaunchSpec.env's origin: prepare_launch receives integration environment from with_farhelm_args, not launch_env; no-integration expansion has an empty env, so the fixture seam is not reapplied after the scrub. Retained attach/delete's generic-Internal allowance as accurate uncertainty, with no new proof of its host-backed route. The final empty listing proves deletion, not why an earlier attach failed. The direct-kill-and-wait daemon test separately verifies no scope, a live daemon, and agent death before Stop; the host lifecycle consumer rechecks the pinned child against the process table, so it needs no processed exit-record premise to lack a live root. No checked route ties it to the other groups' fixture cleanup/exit issues.\n\nAdditional pinned source reads this turn:\n- 08399d092d20815ced6619c26df2391944ae2b4a: launch.rs 100-148 and 1244-1295; marker_model.rs 10-95; host_tabs.rs 579-624; session_lifecycle.rs 5300-5414; service/core.rs 2910-3000, 14212-14280 and 14300-14500; agent_kind/mod.rs 527-551. Targeted symbol searches identified prepare_launch and with_farhelm_args.\n- 4b489b4f2eeade14f119b186ecb16eeaaf027021: session_lifecycle.rs 3880-3950; harness.rs 2270-2355; terminal-host/SPEC.md 128-147; hosts/terminal.rs 711-835, with targeted root/probe symbol searches. A narrower search for kill_root/root_pid yielded no matches; the follow-up found and inspected the actual child_root/live_root/probe consumer.\n\nOnly private review artifacts changed. No tests, builds, reproductions, installed-vendor observations, checkout edits, helper agents or live-install actions. Next action: await the caller's later-turn prompt.\n\n## Turn 3: discovery pass 1 (in progress)\n\nRead discovery-neighbours.json in one bounded 114-line/23,846-byte packet. No pending named questions. Began a distinct discovery pass beyond the prior candidates, using interface records only for context and novelty.\nNew lead g143-l4 was recorded immediately, then resolved to a confirmed finding after checking fixture mode-1049 reset, QueryHandler delegation and Term::swap_alt. The revised comment wrongly claims the inactive alternate frame is erased from the emulator; the visible primary-screen replay assertion is a different contract. No new unverified finding or open lead at this checkpoint. Continue through the remaining assigned wording and test-oracle claims; do not stop at this finding.\n\n## Turn 3: discovery pass 1 (complete)\n\nState: discovery complete; turn count 3; discovery-pass count 1. New verified finding: g143-l4. New unverified-after-investigation findings: none. Open leads: none. Something new was found: the assigned stopped-alt-screen explanation wrongly equates selecting the primary screen with erasing the inactive alternate buffer. It is a documentation/diagnostic-rationale defect, not a product replay failure or missing test oracle. The original lead was resolved under the same ID. Continue any later pass only when the caller requests it; no later-turn synthesis was simulated inside this discovery turn.\n\nCompleted the pass after recording that finding. Rechecked remaining assigned wording against existing source/contract context: create validation and absolute cwd, fresh status projection, launch-spec publication before starting the host, size clamping, host persistence/reboot simulation, tab cell projection, scope/terminal ownership signposts, restart/replay text extraction, and version-lock helper purpose. No additional substantive concern arose. The neighbouring missing deep legacy replay, raw input and live alternate-screen reconnect oracles remain distinct and are not claimed addressed or refuted here.\n\nFull-range attribution check for existing g143-c2 was added under the original ID: the same NotFound | Internal predicate already exists at exclusive base session_lifecycle.rs:7087-7088. This strengthens the scope basis without using correct production behavior to certify an existing test oracle. No parent acceptance is assumed.\n\nAdditional exact source checks this discovery turn, all git-show reads at the named pinned revision:\n- discovery-neighbours.json: full 1-114 (23,846 bytes); interface context only.\n- Full assigned-path commit list over exclusive base through inclusive tip; whole-range session_lifecycle.rs diff searched around the error allowance, alternate-screen rationale and sleep rationale.\n- 08399d092d20815ced6619c26df2391944ae2b4a: fake_agent.rs 1706-1745 and 1745-1845; queries.rs 180-235 and 414-475; vendored term/mod.rs 770-831 and 2508-2536; emulator.rs 330-380; snapshot/v1/paint.rs 145-207; hosts/terminal.rs 3900-3926 and 3925-4018; grid_stream.rs 380-478; grid_output.rs 320-352. Targeted searches identified the exact screen-switch, exit and active-screen projection implementations.\n- Same revision, assigned tests: session_lifecycle.rs 100-130,1080-1158,2867-2889,3668-3740,4380-4449; restart_with_resume.rs 670-715. These supplement the complete assigned patches already read.\n- Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a: targeted original stopped-alt-screen test/rationale around 5249-5254 and generic error allowance around 7075-7093.\n- Through-tip diff from 08399d09 for the test and fixture/emulator files confirms no later removal of g143-l4's wording or change to the checked implementation (only the two separately assigned lifecycle comment edits).\n- Rechecked exact contract paragraphs SPEC.md 2890-2902 and SPEC_impl.md 2603-2614, within the complete sections already read.\n\nUnread assigned scope: none. No tests, builds, reproductions, installed-vendor observations, checkout edits, helper agents or live-install actions. No prohibited coverage sources searched. Only private review artifacts changed. Next action: await the caller's next turn.\n\n## Turn 4: discovery pass 2 (in progress)\n\nRead the refreshed discovery-neighbours.json in bounded complete ranges 1-34,35-66,67-98,99-126,127-152 after the initial oversized 1-120 request was clipped. The file is 152 lines/49,519 bytes; the smaller reads delivered it completely. Interface updates contain no named pending question for this group. Existing own candidates and finding remain in context; do not repeat them as new discoveries.\nNext action: inspect the remaining launch/restart/teardown assertions and comment claims against their direct callers and complete-range attribution, without reviewing another group's patches as new assigned scope. No new IDs or open leads at pass start.\n\n## Turn 4: discovery pass 2 (complete)\n\nState: discovery complete; turn count 4; discovery-pass count 2. Result: empty new-discovery pass. New verified IDs: none. New unverified-after-investigation IDs: none. New candidate IDs: none. Open lead IDs: none. Existing findings/candidates and proposed-drop bases were not changed or declared accepted.\n\nUseful additional source checks: the missing-directory/restart annotation test waits for actual agent readiness before Stop and explicitly reconciles the annotation; its comments do not substitute create completion for post-exec readiness. The external-terminal-end Delete test calls the helper that performs protocol shutdown and then waits for the running supervisor to observe the disappearance. The wrapper's restart cwd explanation matches ensure_cwd_identity's returned canonical path and the restart caller carrying that path onward. The launch-error reload test separately asserts an existing recorded host, successful attach, and host disappearance after Delete rather than checking the row alone. The launch-artifact failure fixture removes the waypoint and host record, then explicitly asserts only its planted spec remains before making unlink fail. The systemd-only test uses an owned direct child with piped stdout and checks its pid matches the fixture; it has no supervisor or terminal host in that scenario. The named-restart fixture checks its generation premise before measuring successor argv. No new substantive source contradiction or unsupported newly introduced oracle claim was found in these checks.\n\nAdditional reads, pinned to 08399d092d20815ced6619c26df2391944ae2b4a:\n- session_lifecycle.rs 3630-3670,3790-3835,2260-2310,4540-4640,5180-5238.\n- restart_with_resume.rs 830-885,38-92,153-205; wrapper_launch.rs 31-70.\n- launch_sentinel_error_status.rs 275-357.\n- harness.rs 1840-1908 and 1053-1120; targeted searches for end_agent_terminal and readiness helpers.\n- service/core.rs 3355-3452 and 12312-12358, following targeted ensure_cwd_identity/ensure_cwd_usable searches.\nThe complete earlier patch/context reads and contract sections were reused. Refreshed neighbour data was read completely in the five bounded packets recorded above and used only for interface/novelty context.\n\nUnread assigned scope: none. No tests, builds, reproductions, runtime observations, installed-vendor claims, checkout edits, helper agents or live-install actions. No prohibited coverage sources searched. Only progress.md changed this turn; no durable finding event was needed because no new substantive lead, finding or rejected candidate arose. Next action: await the caller's next turn.\n"
+}

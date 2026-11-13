@@ -1,0 +1,71 @@
+[
+  {
+    "key": "g073/c2",
+    "latest_line": 6,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "release-payload-tmux-removal-changed-selection-or-cache-authentication",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The named regression is source-refuted: the three production host targets still choose distinct farhelm archives and the same farhelm member, with unchanged asset-keyed verification/publication. Tmux removal itself is explicitly accepted. These are separate grounds; acceptance of retirement does not certify cache authentication generally. The reviewer proposed dropping this candidate in both recorded versions; that proposal still needs an independent check because the considered untrusted-executable consequence is security-related.",
+    "checks": [
+      "At 500548b9253b07a26fd03119679184b69544e31d^, release_payloads.rs:805-868 already selects farhelm_archive_for(target), checks the asset-keyed cache, looks up the signed entry, verifies download, extracts, publishes its locally computed digest marker and renames the executable. At cb762a313abbe6da03ae0bf041f07486c4ed4df9:805-853 the same farhelm path remains; removal eliminates only the tmux branch/copy path.",
+      "At 500548b9253b07a26fd03119679184b69544e31d:811-866, archive_member receives the archive/member together from the fixed target mapping. Explicit git grep at that revision finds only this production caller and the absent-entry test at :2538. No production arbitrary-member caller is present.",
+      "At cb762a313abbe6da03ae0bf041f07486c4ed4df9, assets.rs:43-85 maps Linux x86_64, Linux aarch64 and macOS aarch64 to distinct archives, all with member farhelm. release_payloads.rs:375-391 keys the generation by version and normalized-base-URL digest; :814-837 retains the full asset name in lock and per-asset file keys.",
+      "At cb762a313abbe6da03ae0bf041f07486c4ed4df9, release_payloads.rs:451-492 and :899-939,991-1002 authenticate signature and exact version before parsing/publishing controls; :824-830 refuses an absent entry before downloading; :781-799 compares the archive digest before rename. payloads.rs:631-675 requires exactly one regular matching member before publication.",
+      "At cb762a313abbe6da03ae0bf041f07486c4ed4df9, release_payloads.rs:599-610 explicitly limits cached binaries to local self-consistency, not provenance. :618-644,1381-1416 reverify controls and compare the binary to its local marker, without cryptographically binding that binary to the signed archive or rechecking warm-hit membership. The same trust-model comment was present in the baseline. :90-91 states published checksum files are never re-signed or replaced.",
+      "The once-cell at cb762a313abbe6da03ae0bf041f07486c4ed4df9 release_payloads.rs:451-454 serializes the initial authenticated control fetch; per-asset locks cover later download/extraction. This check does not establish arbitrary concurrent control-repair behavior, crash behavior, or general freedom from cache defects. No runtime test or reproduction was run."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:181-188 explicitly accepts no tmux retrieval/install and its named removal step. Historical SPEC.md at 500548b9253b07a26fd03119679184b69544e31d:182-189 says the same. This covers retirement only.",
+      "Current SPEC_impl.md:7996-8020 says provisioning no longer inspects, downloads, uploads or installs tmux; :8039-8079 describes the one host payload, version/base-URL cache separation, signed checksums and by-name lookup. It does not independently prove cache-hit provenance.",
+      "TODO.md Planned is empty (:23-25). Searches of BUGS.md, active TRIAGE_OUTCOMES.md, the full INDEX.md and queue files found no exact selection/cache-authentication regression coverage. BUGS.md's SSH-helper output hang has a different trigger and consequence.",
+      "plans/queue searches identify tmux-drop-from-install.md criteria 2 and 5 (:49-76), which authorize removal and fixture replacement, not an integrity bug. plans/REPORTS.md:30 marks that plan landed; it is not unlanded-plan coverage. Other tmux plan hits concern lifecycle/tooling/docs and do not cover this cache claim.",
+      "FILTER.md was checked. No filter is needed or used: a security/trust-boundary consequence would be outside the rare-diagnostic filter. No exact same-root alias or useful extension was found among the two supplied records or existing queue items; the history's g062/c3 and g063/c1 references concern other inventory/build consumers and are not asserted to be duplicates here."
+    ],
+    "exact_cover_quotes": [
+      {
+        "source": "SPEC.md:181; historical 500548b9253b07a26fd03119679184b69544e31d:SPEC.md:182",
+        "quote": "Setting up or updating a remote Linux host neither needs nor installs tmux.",
+        "scope": "Tmux retrieval retirement only; not cache authentication."
+      },
+      {
+        "source": "SPEC_impl.md:8007",
+        "quote": "Provisioning no longer inspects, downloads, uploads or installs any tmux",
+        "scope": "Tmux retrieval retirement only."
+      }
+    ],
+    "missing_premise": "To revive the wrong/untrusted executable regression, show a production input or changed cache path that defeats the fixed archive/member selection or authenticated cold publication. Replacing both files in trusted local state, or assuming a second authenticated manifest for the same immutable release, is not established by these changes. This is not a whole-range audit of all historical cache behavior.",
+    "original_stronger_consequence": "Broken host setup or a wrong cached executable; potentially highest if untrusted asset/member selection or an authentication bypass makes attacker-controlled bytes become the host's farhelm. Neither stronger route was established, and no bug was reproduced.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Source refutation of the named changed-selection/cache-integrity regression, plus exact specification acceptance of tmux retrieval removal only. Submit the original/latest wording and these separate grounds to the independent drop check; this consultation does not approve a drop."
+  },
+  {
+    "key": "g073/c3",
+    "latest_line": 7,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "missing-release-entry-test-count-does-not-prove-exact-variant-inventory",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The diagnostic overclaim is established by the new assertion, even though the committed fixture is correct and the production refusal mechanism remains independently asserted. Retain narrowly as a test explanation/oracle-specificity issue. The reviewer's proposal to omit it as insignificant is a significance judgment, not source refutation or exact coverage; no FILTER.md boundary fully settles it.",
+    "checks": [
+      "At cb762a313abbe6da03ae0bf041f07486c4ed4df9, release_payloads.rs:2524-2529 checks only absence of the requested Linux aarch64 archive and total size equal to sums_members().len()-1. That predicate permits substituting an unrelated key for another expected remaining entry; it cannot establish the diagnostic's 'and nothing else' claim. This is static boolean reasoning, not a mutation experiment.",
+      "The explicit cb762a313abbe6da03ae0bf041f07486c4ed4df9 parent diff adds this premise assertion. The earlier absent-entry test had no such set assertion, so the diagnostic overclaim is introduced within the review range.",
+      "At cb762a313abbe6da03ae0bf041f07486c4ed4df9, tests/fixtures/release/SHA256SUMS lists four ordinary archives. variants/without-linux-aarch64/SHA256SUMS lists exactly the other three, with the same digests. assets.rs:43-64,88-108 supplies the expected four-name payload inventory. No currently incorrect fixture is established.",
+      "At cb762a313abbe6da03ae0bf041f07486c4ed4df9, release_payloads.rs:2498-2506 states the actual target: refuse an asset missing from an authentic signed manifest while still serving that archive. :2532-2545 requires the exact missing-entry error and no request for that archive. Drift among unrelated manifest keys would not remove those assertions. No concrete lost absent-entry check, current false pass of that mechanism, runtime failure or security regression is claimed."
+    ],
+    "coverage_checked": [
+      "Searched both specifications for release payloads, checksum/manifest fixtures, inventory equality, omitted/missing entries and cache scope. SPEC_impl.md:8060-8079 defines release layout and by-name production authentication; it does not accept inaccurate test-inventory claims. SPEC.md:945-946 concerns filesystem-refusal evidence in uninstall acceptance, a different trigger/scope.",
+      "TODO.md Planned is empty (:23-25). No matching item was found in BUGS.md or active TRIAGE_OUTCOMES.md; other manifest hits in the active ledger concern the runtime-test recorder, not release fixtures.",
+      "Searched plans/queue for the actual missing-entry/fixture/inventory behavior. tmux-drop-from-install.md:69-76 requires replacing the without-tmux signed variant with another missing asset; it does not accept or schedule correction of this assertion. plans/REPORTS.md:30 marks that plan landed. No matching unlanded plan was found.",
+      "Read INDEX.md in bounded chunks and searched queue files for release_payloads, without-linux, sums_members, missing checksum entries and fixture inventory. No exact queue item or useful same-root extension was found. Other oracle weaknesses concern different tests and do not cover this one.",
+      "FILTER.md's rare/imprecise-diagnostic filter requires a rare timing/crash/shipped-input trigger as well as a confined diagnostic consequence. This is an unconditional static mismatch between what a test assertion proves and what its message says; no qualifying rare trigger is established. Do not apply that filter solely because the consequence is small."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No premise is missing for the narrow assertion/message mismatch. A stronger claim that this weakens the missing-entry refusal mechanism, masks a production security bug, or currently fails the test is not established; unrelated remaining keys are not needed to distinguish the mechanism tested.",
+    "original_stronger_consequence": "The original record identifies only a test diagnostic/oracle-specificity limitation and explicitly disclaims a lost absent-entry assertion, failing current test, security consequence or user-work-loss route. It proposes omitting the surplus exact-set diagnostic as insignificant, pending the caller's judgment.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain the source-confirmed diagnostic limitation in other, preserving the reviewer's proposed significance drop and all limits. Either compare the exact key set if exact inventory is intended, or narrow the diagnostic to the absence/count predicate actually checked. The proper product refusal is not a refutation of this test-text defect."
+  }
+]

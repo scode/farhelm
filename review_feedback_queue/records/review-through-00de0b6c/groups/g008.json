@@ -1,0 +1,616 @@
+{
+  "group": {
+    "id": "g008",
+    "domain": "product-contracts",
+    "purpose": "product-contracts: SPEC_impl.md; phases complete small per-commit changes",
+    "interfaces": [
+      "g001",
+      "g003",
+      "g004",
+      "g005",
+      "g006",
+      "g007",
+      "g009",
+      "g010",
+      "g011",
+      "g012",
+      "g014",
+      "g015",
+      "g016",
+      "g032",
+      "g071",
+      "g079",
+      "g090",
+      "g093",
+      "g095",
+      "g096",
+      "g097",
+      "g098",
+      "g099",
+      "g100",
+      "g101",
+      "g102",
+      "g103",
+      "g104",
+      "g110",
+      "g111",
+      "g112",
+      "g113",
+      "g114",
+      "g115",
+      "g117",
+      "g118",
+      "g119",
+      "g120",
+      "g121",
+      "g122",
+      "g124",
+      "g125",
+      "g126",
+      "g127",
+      "g128",
+      "g129",
+      "g130",
+      "g131",
+      "g132",
+      "g133",
+      "g134",
+      "g139",
+      "g140",
+      "g142",
+      "g144",
+      "g145",
+      "g150",
+      "g151",
+      "g153",
+      "g154",
+      "g155",
+      "g156",
+      "g159",
+      "g160",
+      "g161",
+      "g162",
+      "g163",
+      "g164",
+      "g165",
+      "g166",
+      "g167",
+      "g168",
+      "g169",
+      "g170",
+      "g171",
+      "g172",
+      "g183",
+      "g184"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00900-000.patch",
+        "ranges": [
+          [
+            1,
+            503
+          ]
+        ],
+        "original_path": "SPEC_impl.md",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,55902)",
+        "lines": 503,
+        "bytes": 55934,
+        "start": 0,
+        "end": 55902,
+        "original": "[private-run]/prep/originals/00900.patch"
+      }
+    ],
+    "lines": 503,
+    "bytes": 55934
+  },
+  "records": [
+    {
+      "key": "g008/f1",
+      "owner": "g008",
+      "id": "f1",
+      "domain": "product-contracts",
+      "purpose": "product-contracts: SPEC_impl.md; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "f1",
+            "state": "open",
+            "summary": "Check explicit acceptance of ending old terminals on upgrade",
+            "location": "SPEC_impl.md:1974",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333\n\nTLDR: Starting the upgraded supervisor ends terminals created by older releases, including running agents and shell tabs, and their retained output is no longer available.\n\nDetails: Assigned patch lines 101-111 replaces preservation of old tmux terminals with ending them at startup; lines 429-501 remove the history-preserving tmux-to-host Restart path. SPEC_impl.md:2880 onward describes startup termination and conversion to interrupted. Need check complete governing SPEC.md terminal/upgrade contracts and implementation startup route to distinguish intended breaking behavior from an unauthorized loss-of-work change. Suggested bucket: potentially highest (processes and retained terminal work). Confidence: source-confirmed design; contract acceptance not yet fully checked. Could-be-highest: yes. proposed_drop: false pending contract review. possible_cover: none; no coverage sources searched. No runtime behavior observed and no reproduction requested."
+          }
+        },
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f1",
+            "state": "open",
+            "summary": "Proposed drop: ending old terminals is explicitly specified",
+            "location": "SPEC_impl.md:1974",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333\n\nTLDR: The upgraded supervisor stops agents and shell tabs still in old tmux terminals and loses their retained screen and scrollback; subsequent Restart starts an empty terminal. This could otherwise be loss of user-owned processes/work.\n\nDetails: Assigned SPEC_impl.md patch lines 101-111 states that old tmux terminals end at startup; lines 429-501 remove the history-preserving tmux-to-host Restart path. The complete SPEC.md Terminal experience section at the same revision explicitly requires this breaking behavior, at lines 3003-3016: \"This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.\" It continues: \"one whose agent had already ended keeps its outcome, but its terminal's last screen, which lived in the server, is gone; old tabs are closed.\" It also says: \"After an update to this release, Restart, Clone and Replace start such a session in a new, empty terminal.\" SPEC_impl.md:2880-2930 describes the replacement cleanup/conversion contract. Suggested bucket: highest if unintended, because the consequence includes terminating user-owned processes and losing retained output; could-be-highest: yes. Confidence: confirmed source/contract acceptance, not runtime-observed. proposed_drop: explicit product specification acceptance quoted above; preserve for independent highest-drop check. possible_cover: none; no coverage sources searched. Caveat: this excludes independent cleanup ownership or implementation failures, which are not excused merely by the intended migration. Revision closes the initial lead by establishing the missing acceptance premise."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f1",
+            "state": "open",
+            "summary": "Proposed drop: ending old terminals is explicitly specified",
+            "location": "SPEC_impl.md:1974",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333\n\nTLDR: The upgraded supervisor stops agents and shell tabs still in old tmux terminals and loses their retained screen and scrollback; subsequent Restart starts an empty terminal. This could otherwise be loss of user-owned processes/work.\n\nDetails: Assigned SPEC_impl.md patch lines 101-111 states that old tmux terminals end at startup; lines 429-501 remove the history-preserving tmux-to-host Restart path. The complete SPEC.md Terminal experience section at the same revision explicitly requires this breaking behavior, at lines 3003-3016: \"This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.\" It continues: \"one whose agent had already ended keeps its outcome, but its terminal's last screen, which lived in the server, is gone; old tabs are closed.\" It also says: \"After an update to this release, Restart, Clone and Replace start such a session in a new, empty terminal.\" SPEC_impl.md:2880-2930 describes the replacement cleanup/conversion contract. Suggested bucket: highest if unintended, because the consequence includes terminating user-owned processes and losing retained output; could-be-highest: yes. Confidence: confirmed source/contract acceptance, not runtime-observed. proposed_drop: explicit product specification acceptance quoted above; preserve for independent highest-drop check. possible_cover: none; no coverage sources searched. Caveat: this excludes independent cleanup ownership or implementation failures, which are not excused merely by the intended migration. Revision closes the initial lead by establishing the missing acceptance premise.\n\nSynthesis source check: the immediate parent revision already contains the identical explicit acceptance in SPEC.md:3003-3016. Its core.rs:6434 already calls OldTerminals::end_private_server, and its core.rs:6969 already resolves TerminalKind::Tmux to no terminal. Thus this assigned documentation rewrite catches up to existing behavior and product acceptance; it does not itself introduce the loss-of-process/output transition. Original consequence and potential highest bucket remain recorded, with proposed_drop still requiring the caller independent check. No additional implementation defect is established by this concern."
+          }
+        }
+      ],
+      "latest": {
+        "line": 7,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "f1",
+          "state": "open",
+          "summary": "Proposed drop: ending old terminals is explicitly specified",
+          "location": "SPEC_impl.md:1974",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333\n\nTLDR: The upgraded supervisor stops agents and shell tabs still in old tmux terminals and loses their retained screen and scrollback; subsequent Restart starts an empty terminal. This could otherwise be loss of user-owned processes/work.\n\nDetails: Assigned SPEC_impl.md patch lines 101-111 states that old tmux terminals end at startup; lines 429-501 remove the history-preserving tmux-to-host Restart path. The complete SPEC.md Terminal experience section at the same revision explicitly requires this breaking behavior, at lines 3003-3016: \"This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.\" It continues: \"one whose agent had already ended keeps its outcome, but its terminal's last screen, which lived in the server, is gone; old tabs are closed.\" It also says: \"After an update to this release, Restart, Clone and Replace start such a session in a new, empty terminal.\" SPEC_impl.md:2880-2930 describes the replacement cleanup/conversion contract. Suggested bucket: highest if unintended, because the consequence includes terminating user-owned processes and losing retained output; could-be-highest: yes. Confidence: confirmed source/contract acceptance, not runtime-observed. proposed_drop: explicit product specification acceptance quoted above; preserve for independent highest-drop check. possible_cover: none; no coverage sources searched. Caveat: this excludes independent cleanup ownership or implementation failures, which are not excused merely by the intended migration. Revision closes the initial lead by establishing the missing acceptance premise.\n\nSynthesis source check: the immediate parent revision already contains the identical explicit acceptance in SPEC.md:3003-3016. Its core.rs:6434 already calls OldTerminals::end_private_server, and its core.rs:6969 already resolves TerminalKind::Tmux to no terminal. Thus this assigned documentation rewrite catches up to existing behavior and product acceptance; it does not itself introduce the loss-of-process/output transition. Original consequence and potential highest bucket remain recorded, with proposed_drop still requiring the caller independent check. No additional implementation defect is established by this concern."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g008/findings.jsonl",
+        "id": "f1",
+        "line": 7,
+        "disposition": "under-investigation",
+        "group": "g008-f1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-003",
+          "key": "g008/f1",
+          "latest_line": 7,
+          "recommendation": "covered",
+          "bucket": "highest",
+          "underlying_key": "upgrade-intentionally-ends-old-private-terminals-and-history",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Terminating old terminals and losing their retained screen/scrollback is explicitly specified product behavior. The reviewed implementation-specification rewrite catches up to behavior introduced earlier within this review range; being pre-existing to that one patch does not itself make the concern out of range.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333:SPEC_impl.md:2880-2930 describes replacement shutdown/conversion and removal of history-preserving tmux Restart. Same-revision SPEC.md:3003-3016 explicitly requires ending old processes, losing their server-held screen and starting Restart/Clone/Replace empty.",
+            "The immediately preceding reviewed retirement commit dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 already has the same product acceptance and core.rs:6427-6442 calls retirement before forcing the driver absent. This is accepted in-range behavior, not an out-of-range dismissal.",
+            "Current SPEC.md:2998-3014 and SPEC_impl.md:2780-2825 retain that acceptance. No execution, actual lost processes/output or exhaustive cleanup-ownership audit."
+          ],
+          "coverage_checked": [
+            "Both specifications' full old-terminal paragraphs read at reviewed and current revisions. Planned empty, BUGS.md unrelated. Matching tmux-end-old-terminals/docs plans are landed per plans/REPORTS.md:29,32, not pending repair cover.",
+            "INDEX.md, matching queue and active TRIAGE_OUTCOMES.md searched for upgrade/old-terminal termination/history loss. No exact queued remainder or active conflicting decision found. Other terminal-history bugs concern new host recovery and do not extend this accepted destruction. No archive; filter unnecessary because ordinary upgrade alone is enough for this behavior."
+          ],
+          "exact_cover_quotes": [
+            "1ed482dd:SPEC.md:3003-3006: This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.",
+            "1ed482dd:SPEC.md:3007-3009: one whose agent had already ended keeps its outcome, but its terminal's last screen, which lived in the server, is gone; old tabs are closed.",
+            "1ed482dd:SPEC.md:3016: After an update to this release, Restart, Clone and Replace start such a session in a new, empty terminal."
+          ],
+          "missing_premise": "None for explicit acceptance of this exact behavior. Acceptance does not cover stopping another owner's terminals, cleanup implementation errors, misleading later confirmations or effects beyond old terminal processes/output.",
+          "original_stronger_consequence": "Upgrade stops user-owned agents and shell tabs, loses old retained screen/scrollback and makes subsequent Restart empty. Preserve highest absent explicit acceptance; no runtime loss was observed. Later documentation attribution does not erase earlier in-range introduction.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Exact product acceptance of terminating old terminals and dropping their history, independently checked before exclusion. Scope excludes implementation ownership failures and later misleading destructive consent."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-003.json",
+          "key": "g008/f1",
+          "proposal": "claim-checks/claims-003/result.json",
+          "parent_proposal": "covered",
+          "final_independent_gate": "required-before-highest-drop",
+          "reason": "Full003in-rangedbfcintentionallyendsoldprivateagents/tabsandlosesserverheldscreen/history;1edSPECrewritesexistingin-rangebehavior. Exactproducttextacceptstermination,historylossandnewemptyRestart/Clone/Replace. Parentproposesexactacceptancedrop, notoutofrangebecausepredatesassignedpatch. Freshcheckhighestwork/outputloss andlimits: nootherowner/cleanupimplementationerror/laterfalseconfirmation accepted, ordinaryupgradealoneenoughso no rarefilterbasis."
+        }
+      ],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "upgrade-intentionally-ends-old-private-terminals-and-history",
+        "destination": "trailing-upgrade-intentionally-ends-old-private-terminals-and-history.md"
+      }
+    },
+    {
+      "key": "g008/f2",
+      "owner": "g008",
+      "id": "f2",
+      "domain": "product-contracts",
+      "purpose": "product-contracts: SPEC_impl.md; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "f2",
+            "state": "open",
+            "summary": "Check rewritten terminal switch-point reference against removed type",
+            "location": "SPEC_impl.md:2209",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333\n\nTLDR: The implementation specification may direct future changes to a terminal abstraction that this commit deletes, obscuring where terminal behavior now belongs.\n\nDetails: Assigned patch lines 125-126 rewrites the switch-point description as `service/terminals.rs`'s `Terminal`, now described as a host runtime. The pinned service/terminals.rs header and first 180 lines instead identify and return `HostTerminal`, imported from hosts, with no `Terminal` shown. Need inspect the whole file's definitions and actual host methods to settle whether a compatibility alias exists or the architecture pointer is stale. Suggested bucket: other, documentation correctness. Could-be-highest: no; no established security or loss-of-work route from this developer pointer. Confidence: unresolved source lead. proposed_drop: false. possible_cover: none. No execution observed."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f2",
+            "state": "open",
+            "summary": "Rewritten terminal contract points to the deleted Terminal type",
+            "location": "SPEC_impl.md:2210",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333\n\nTLDR: Developers following the authoritative implementation specification are directed to a terminal type and implementation location that no longer exist, making the new terminal ownership and safety behavior harder to find. This is documentation drift, with no demonstrated runtime effect.\n\nDetails: SPEC_impl.md:2210-2211 (assigned patch lines 125-126) explicitly rewrites the switch-point map to say `service/terminals.rs`'s `Terminal` is now a host runtime. The same commit deletes that enum and its dispatch implementation from crates/farhelm-supervisor/src/service/terminals.rs; the new module imports HostTerminal at line 13 and resolve_terminal returns it at lines 122-128. Whole-file git grep -w Terminal at the reviewed revision found only the English word in the module header, and no alias or type. The actual runtime is HostTerminal in crates/farhelm-supervisor/src/hosts/terminal.rs:1226, with status at 2113, evidence at 2539, sweep_root at 2571 and wire_kind/tab_info at 2641/2648. The contract should name HostTerminal and its actual module, retaining service/terminals.rs only for identity resolution and attachment bookkeeping. Suggested bucket: other (incorrect developer-facing architecture pointer). Confidence: confirmed through pinned source and the per-commit deletion, not execution. Could-be-highest: no; no established security or loss-of-work route from this pointer. proposed_drop: false. possible_cover: none; no coverage sources searched. Material caveat: behavior described in the rest of the paragraph may still be correct; the finding concerns the stale abstraction/location newly presented as the replacement architecture. Revision closes f2's alias-existence check."
+          }
+        }
+      ],
+      "latest": {
+        "line": 4,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "f2",
+          "state": "open",
+          "summary": "Rewritten terminal contract points to the deleted Terminal type",
+          "location": "SPEC_impl.md:2210",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333\n\nTLDR: Developers following the authoritative implementation specification are directed to a terminal type and implementation location that no longer exist, making the new terminal ownership and safety behavior harder to find. This is documentation drift, with no demonstrated runtime effect.\n\nDetails: SPEC_impl.md:2210-2211 (assigned patch lines 125-126) explicitly rewrites the switch-point map to say `service/terminals.rs`'s `Terminal` is now a host runtime. The same commit deletes that enum and its dispatch implementation from crates/farhelm-supervisor/src/service/terminals.rs; the new module imports HostTerminal at line 13 and resolve_terminal returns it at lines 122-128. Whole-file git grep -w Terminal at the reviewed revision found only the English word in the module header, and no alias or type. The actual runtime is HostTerminal in crates/farhelm-supervisor/src/hosts/terminal.rs:1226, with status at 2113, evidence at 2539, sweep_root at 2571 and wire_kind/tab_info at 2641/2648. The contract should name HostTerminal and its actual module, retaining service/terminals.rs only for identity resolution and attachment bookkeeping. Suggested bucket: other (incorrect developer-facing architecture pointer). Confidence: confirmed through pinned source and the per-commit deletion, not execution. Could-be-highest: no; no established security or loss-of-work route from this pointer. proposed_drop: false. possible_cover: none; no coverage sources searched. Material caveat: behavior described in the rest of the paragraph may still be correct; the finding concerns the stale abstraction/location newly presented as the replacement architecture. Revision closes f2's alias-existence check."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g008/findings.jsonl",
+        "id": "f2",
+        "line": 4,
+        "disposition": "verified",
+        "group": "spec-terminal-switch-point-names-deleted-terminal-type",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-004 after inspecting it. The rewritten authoritative architecture pointer names a deleted type in the wrong module. This is established documentation drift; no runtime failure is claimed. Retain the narrow in-range documentation defect. Source checks only; no runtime observation. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333:SPEC_impl.md:2210-2211 names service/terminals.rs's Terminal; the base-to-reviewed diff explicitly rewrites this pointer while retaining the old name.\",\"At that hash, service/terminals.rs:1-13 names/imports HostTerminal and :122-128 returns HostTerminal. Whole-file git grep -w Terminal finds only the English word at line 1, not an alias or definition.\",\"Recording-time SPEC_impl.md:2134 retains the stale pointer. The claim concerns finding the abstraction, not whether the rest of its behavioral description is correct.\"] Current coverage/results: [\"Current SPEC.md/SPEC_impl.md searched for terminal switch points, HostTerminal and service/terminals; the incorrect pointer is the subject, not an acceptance of incorrect architecture guidance.\",\"TODO.md Planned is empty (:25-26). BUGS.md contains only an unrelated SSH provisioning hang. Active TRIAGE_OUTCOMES.md and full INDEX.md have no matching item.\",\"Matching plans tmux-end-old-terminals and tmux-drop-from-docs are already landed (plans/REPORTS.md:29,32), so their broad cleanup criteria are not pending coverage. No unlanded matching plan was found.\",\"FILTER.md: an incorrect architecture pointer is neither a rare self-correcting display nor a diagnostic, and no other filter boundary matches.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"No stronger runtime consequence was alleged: developers are directed to a nonexistent abstraction and implementation location; ordinary behavior may remain correct.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g008/f2",
+        "line": 4,
+        "disposition": "verified",
+        "group": "spec-terminal-switch-point-names-deleted-terminal-type",
+        "bucket": "other",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-004 after inspecting it. The rewritten authoritative architecture pointer names a deleted type in the wrong module. This is established documentation drift; no runtime failure is claimed. Retain the narrow in-range documentation defect. Source checks only; no runtime observation. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333:SPEC_impl.md:2210-2211 names service/terminals.rs's Terminal; the base-to-reviewed diff explicitly rewrites this pointer while retaining the old name.\",\"At that hash, service/terminals.rs:1-13 names/imports HostTerminal and :122-128 returns HostTerminal. Whole-file git grep -w Terminal finds only the English word at line 1, not an alias or definition.\",\"Recording-time SPEC_impl.md:2134 retains the stale pointer. The claim concerns finding the abstraction, not whether the rest of its behavioral description is correct.\"] Current coverage/results: [\"Current SPEC.md/SPEC_impl.md searched for terminal switch points, HostTerminal and service/terminals; the incorrect pointer is the subject, not an acceptance of incorrect architecture guidance.\",\"TODO.md Planned is empty (:25-26). BUGS.md contains only an unrelated SSH provisioning hang. Active TRIAGE_OUTCOMES.md and full INDEX.md have no matching item.\",\"Matching plans tmux-end-old-terminals and tmux-drop-from-docs are already landed (plans/REPORTS.md:29,32), so their broad cleanup criteria are not pending coverage. No unlanded matching plan was found.\",\"FILTER.md: an incorrect architecture pointer is neither a rare self-correcting display nor a diagnostic, and no other filter boundary matches.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"No stronger runtime consequence was alleged: developers are directed to a nonexistent abstraction and implementation location; ordinary behavior may remain correct.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-004",
+          "key": "g008/f2",
+          "latest_line": 4,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "spec-terminal-switch-point-names-deleted-terminal-type",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The rewritten authoritative architecture pointer names a deleted type in the wrong module. This is established documentation drift; no runtime failure is claimed.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333:SPEC_impl.md:2210-2211 names service/terminals.rs's Terminal; the base-to-reviewed diff explicitly rewrites this pointer while retaining the old name.",
+            "At that hash, service/terminals.rs:1-13 names/imports HostTerminal and :122-128 returns HostTerminal. Whole-file git grep -w Terminal finds only the English word at line 1, not an alias or definition.",
+            "Recording-time SPEC_impl.md:2134 retains the stale pointer. The claim concerns finding the abstraction, not whether the rest of its behavioral description is correct."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md/SPEC_impl.md searched for terminal switch points, HostTerminal and service/terminals; the incorrect pointer is the subject, not an acceptance of incorrect architecture guidance.",
+            "TODO.md Planned is empty (:25-26). BUGS.md contains only an unrelated SSH provisioning hang. Active TRIAGE_OUTCOMES.md and full INDEX.md have no matching item.",
+            "Matching plans tmux-end-old-terminals and tmux-drop-from-docs are already landed (plans/REPORTS.md:29,32), so their broad cleanup criteria are not pending coverage. No unlanded matching plan was found.",
+            "FILTER.md: an incorrect architecture pointer is neither a rare self-correcting display nor a diagnostic, and no other filter boundary matches."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "No stronger runtime consequence was alleged: developers are directed to a nonexistent abstraction and implementation location; ordinary behavior may remain correct.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain the narrow in-range documentation defect. Source checks only; no runtime observation."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "spec-terminal-switch-point-names-deleted-terminal-type",
+        "destination": "trailing-spec-terminal-switch-point-names-deleted-terminal-type.md"
+      }
+    },
+    {
+      "key": "g008/f3",
+      "owner": "g008",
+      "id": "f3",
+      "domain": "product-contracts",
+      "purpose": "product-contracts: SPEC_impl.md; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "f3",
+            "state": "open",
+            "summary": "Removed tmux pause and sink mechanics belong to the retired producer",
+            "location": "SPEC_impl.md:1748",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333\n\nTLDR: Removing the old pause/sink explanation does not by itself change a viewer's output retention or let a slow viewer block another terminal; the current supervisor serves terminal-host grids instead.\n\nDetails: Assigned patch lines 19-85 removes tmux pause-after, per-session sink and xterm/tmux retention-size details. Considered whether this removes a live flow-control safety invariant. Refuted by the replacement at SPEC_impl.md:1748-1753, which explicitly scopes byte-stream mechanics to earlier supervisors, and by the complete Terminal host / Grid streams contract (SPEC_impl.md:2627 onward): a paused grid sender reads the emulator's current screen and sends retained history, independently of the terminal host consuming the program's output. Pinned crates/farhelm-supervisor/src/service/terminals.rs:1-9 identifies HostTerminal as the only backing runtime, resolve_terminal returns HostTerminal, and service/connection.rs:8-9 identifies the output side as the grid sender. The old driver's sink-specific mechanism is no longer an implementation obligation for a current terminal. No independent source route to lost work was established from deleting this explanatory text. Suggested bucket: other, if documentation incompleteness had remained; could-be-highest: no established security or loss-of-work premise from this deletion, distinct from f1's explicitly accepted terminal shutdown. Confidence: confirmed source refutation of this concern; not runtime-observed. proposed_drop: source refutation above; no live tmux producer remains at the reviewed revision. possible_cover: none. Material caveat: existing older supervisors retain their own implementation and must still satisfy the byte-stream product contract; this review did not re-audit retired code for unrelated bugs."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "f3",
+            "state": "open",
+            "summary": "Removed tmux pause and sink mechanics belong to the retired producer",
+            "location": "SPEC_impl.md:1748",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333\n\nTLDR: Removing the old pause/sink explanation does not by itself change a viewer's output retention or let a slow viewer block another terminal; the current supervisor serves terminal-host grids instead.\n\nDetails: Assigned patch lines 19-85 removes tmux pause-after, per-session sink and xterm/tmux retention-size details. Considered whether this removes a live flow-control safety invariant. Refuted by the replacement at SPEC_impl.md:1748-1753, which explicitly scopes byte-stream mechanics to earlier supervisors, and by the complete Terminal host / Grid streams contract (SPEC_impl.md:2627 onward): a paused grid sender reads the emulator's current screen and sends retained history, independently of the terminal host consuming the program's output. Pinned crates/farhelm-supervisor/src/service/terminals.rs:1-9 identifies HostTerminal as the only backing runtime, resolve_terminal returns HostTerminal, and service/connection.rs:8-9 identifies the output side as the grid sender. The old driver's sink-specific mechanism is no longer an implementation obligation for a current terminal. No independent source route to lost work was established from deleting this explanatory text. Suggested bucket: other, if documentation incompleteness had remained; could-be-highest: no established security or loss-of-work premise from this deletion, distinct from f1's explicitly accepted terminal shutdown. Confidence: confirmed source refutation of this concern; not runtime-observed. proposed_drop: source refutation above; no live tmux producer remains at the reviewed revision. possible_cover: none. Material caveat: existing older supervisors retain their own implementation and must still satisfy the byte-stream product contract; this review did not re-audit retired code for unrelated bugs.\n\nExact replacement text, SPEC_impl.md:1748-1749: \"This supervisor produces no byte stream: every terminal it serves is in a terminal host, and reaches a viewer as a grid\". This directly limits the removal to the retired producer, rather than weakening the live grid contract."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "f3",
+            "state": "open",
+            "summary": "Removed tmux pause and sink mechanics belong to the retired producer",
+            "location": "SPEC_impl.md:1748",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333\n\nTLDR: Removing the old pause/sink explanation does not by itself change a viewer's output retention or let a slow viewer block another terminal; the current supervisor serves terminal-host grids instead.\n\nDetails: Assigned patch lines 19-85 removes tmux pause-after, per-session sink and xterm/tmux retention-size details. Considered whether this removes a live flow-control safety invariant. Refuted by the replacement at SPEC_impl.md:1748-1753, which explicitly scopes byte-stream mechanics to earlier supervisors, and by the complete Terminal host / Grid streams contract (SPEC_impl.md:2627 onward): a paused grid sender reads the emulator's current screen and sends retained history, independently of the terminal host consuming the program's output. Pinned crates/farhelm-supervisor/src/service/terminals.rs:1-9 identifies HostTerminal as the only backing runtime, resolve_terminal returns HostTerminal, and service/connection.rs:8-9 identifies the output side as the grid sender. The old driver's sink-specific mechanism is no longer an implementation obligation for a current terminal. No independent source route to lost work was established from deleting this explanatory text. Suggested bucket: other, if documentation incompleteness had remained; could-be-highest: no established security or loss-of-work premise from this deletion, distinct from f1's explicitly accepted terminal shutdown. Confidence: confirmed source refutation of this concern; not runtime-observed. proposed_drop: source refutation above; no live tmux producer remains at the reviewed revision. possible_cover: none. Material caveat: existing older supervisors retain their own implementation and must still satisfy the byte-stream product contract; this review did not re-audit retired code for unrelated bugs.\n\nExact replacement text, SPEC_impl.md:1748-1749: \"This supervisor produces no byte stream: every terminal it serves is in a terminal host, and reaches a viewer as a grid\". This directly limits the removal to the retired producer, rather than weakening the live grid contract.\n\nSynthesis caller check: service/handlers.rs:1697-1713 explicitly refuses !grid with InvalidRequest before takeover, and :1927-1956 sends StreamKind::Grid and constructs GridStream/GridSender unconditionally. This checks the shipped attachment caller, not only the architecture prose or return type. There is no legacy byte-stream fallback behind this updated contract at the reviewed revision. Candidate remains source-refuted; original possible slowdown/output-retention consequence is unchanged and no runtime observation was made."
+          }
+        }
+      ],
+      "latest": {
+        "line": 8,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "f3",
+          "state": "open",
+          "summary": "Removed tmux pause and sink mechanics belong to the retired producer",
+          "location": "SPEC_impl.md:1748",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333\n\nTLDR: Removing the old pause/sink explanation does not by itself change a viewer's output retention or let a slow viewer block another terminal; the current supervisor serves terminal-host grids instead.\n\nDetails: Assigned patch lines 19-85 removes tmux pause-after, per-session sink and xterm/tmux retention-size details. Considered whether this removes a live flow-control safety invariant. Refuted by the replacement at SPEC_impl.md:1748-1753, which explicitly scopes byte-stream mechanics to earlier supervisors, and by the complete Terminal host / Grid streams contract (SPEC_impl.md:2627 onward): a paused grid sender reads the emulator's current screen and sends retained history, independently of the terminal host consuming the program's output. Pinned crates/farhelm-supervisor/src/service/terminals.rs:1-9 identifies HostTerminal as the only backing runtime, resolve_terminal returns HostTerminal, and service/connection.rs:8-9 identifies the output side as the grid sender. The old driver's sink-specific mechanism is no longer an implementation obligation for a current terminal. No independent source route to lost work was established from deleting this explanatory text. Suggested bucket: other, if documentation incompleteness had remained; could-be-highest: no established security or loss-of-work premise from this deletion, distinct from f1's explicitly accepted terminal shutdown. Confidence: confirmed source refutation of this concern; not runtime-observed. proposed_drop: source refutation above; no live tmux producer remains at the reviewed revision. possible_cover: none. Material caveat: existing older supervisors retain their own implementation and must still satisfy the byte-stream product contract; this review did not re-audit retired code for unrelated bugs.\n\nExact replacement text, SPEC_impl.md:1748-1749: \"This supervisor produces no byte stream: every terminal it serves is in a terminal host, and reaches a viewer as a grid\". This directly limits the removal to the retired producer, rather than weakening the live grid contract.\n\nSynthesis caller check: service/handlers.rs:1697-1713 explicitly refuses !grid with InvalidRequest before takeover, and :1927-1956 sends StreamKind::Grid and constructs GridStream/GridSender unconditionally. This checks the shipped attachment caller, not only the architecture prose or return type. There is no legacy byte-stream fallback behind this updated contract at the reviewed revision. Candidate remains source-refuted; original possible slowdown/output-retention consequence is unchanged and no runtime observation was made."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g008/findings.jsonl",
+        "id": "f3",
+        "line": 8,
+        "disposition": "under-investigation",
+        "group": "g008-f3",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-004",
+          "key": "g008/f3",
+          "latest_line": 8,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "removed-retired-tmux-flow-control-explanation",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Deleting the retired producer's explanation does not remove the current grid flow-control contract. The caller really refuses non-grid attachments and constructs only a grid sender.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333:SPEC_impl.md:1748-1753 explicitly limits byte-stream and tmux mechanics to older supervisors; :2627-2660 separately specifies grid pause, current-screen sampling and retained-history delivery.",
+            "At that hash service/terminals.rs:1-13,122-128 exposes HostTerminal only; service/handlers.rs:1697-1713 refuses !grid with InvalidRequest before takeover, and :1927-1956 returns StreamKind::Grid and constructs GridStream/GridSender.",
+            "This refutes the claimed implication of this text deletion. It does not certify every flow-control implementation or retrospectively audit older supervisors."
+          ],
+          "coverage_checked": [
+            "Current SPEC_impl.md:1715-1719 preserves the no-silent-output-drop rule; :2551-2591 preserves grid pause/resume and retained-history behavior. SPEC.md terminal/recovery wording also retains output/history behavior; no weakened live contract found for this deletion.",
+            "TODO Planned empty; BUGS.md unrelated; active TRIAGE_OUTCOMES.md and INDEX.md searched for pause-after, slow/stalled viewers and flow control. Existing host-flood-stall-window-claim and stopped-reader-output-witness concern test premises, not deleting retired producer prose.",
+            "Matching tmux plans already landed per plans/REPORTS.md:29,32; no unlanded repair covers this alleged cause. FILTER.md is not the proposed basis."
+          ],
+          "exact_cover_quotes": [
+            "1ed482dde220452e424973faf38a5e1318986333:SPEC_impl.md:1748-1749: This supervisor produces no byte stream: every terminal it serves is in a terminal host, and reaches a viewer as a grid"
+          ],
+          "missing_premise": "No source path links this deletion to loss of retained output or one slow viewer blocking another terminal.",
+          "original_stronger_consequence": "The original concern was removal of a live flow-control invariant, potentially weakening output retention or allowing a slow viewer to block another terminal. Older supervisors keep their own byte-stream obligations.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Propose source refutation limited to the deletion's supposed live effect. Because the abandoned concern mentions lost terminal output, send the proposed exclusion through the parent's independent drop check."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-004.json",
+          "key": "g008/f3",
+          "proposal": "claim-checks/claims-004/result.json",
+          "parent_proposal": "source-refuted-retired-producer-contract",
+          "final_independent_gate": "required-before-drop",
+          "reason": "Parentreadfull004. Deletedtmuxbyte-streamflowexplanationexplicitlyassignedtooldersupervisors; currentHost-onlyresolver/refuse-nongridbeforetakeover/GridStreamcaller matches separatelyretainedgridpause/historycontract. Refutesdeletionofcurrentflowinvariant, notallruntimeflowcorrectness orretroactiveauditoldsupervisors. Preserveoriginaloutputretention/cross-terminalstallpossibleworkconsequence forfreshcheck; nofiltertestpremiseconflation."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "removed-retired-tmux-flow-control-explanation",
+        "destination": null
+      }
+    },
+    {
+      "key": "g008/f4",
+      "owner": "g008",
+      "id": "f4",
+      "domain": "product-contracts",
+      "purpose": "product-contracts: SPEC_impl.md; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "f4",
+            "state": "open",
+            "summary": "Check retry-refusal rollback wording against allocated-checkout preservation",
+            "location": "SPEC_impl.md:2263",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333\n\nTLDR: The rewritten host-create paragraph describes a refused old-terminal retry as rolled back, while its actual helper can retain an already allocated checkout and visible session. Need establish whether this is inaccurate documentation or uses rollback in the same qualified sense as the governing create-failure contract.\n\nDetails: Assigned patch lines 280-287 retains the statement that a retried tmux row claimed by takeover is refused and rolled back like a launch whose spec never landed. At the reviewed revision core.rs:14700-14763 refuses before new allocation, but retains the earlier attempt's allocated or unreadable checkout via retain_create_refusal; only an unallocated plan or non-checkout attempt takes row rollback. Checks needed: complete governing create-failure terminology and original/base introduction across the pinned range, plus exact assigned line. Suggested bucket: other for possible contract ambiguity; no established current runtime damage. Could-be-highest: no established security or loss-of-work route from this wording; source currently preserves the checkout. Confidence: unresolved source/documentation lead. proposed_drop: false pending checks. possible_cover: none from neighbour context for this wording. Source-only, no execution or reproduction."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f4",
+            "state": "open",
+            "summary": "Old-terminal retry documentation omits retained allocated checkouts",
+            "location": "SPEC_impl.md:2258-2259",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. In-range introduction: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513.\n\nTLDR: The implementation specification tells maintainers that an old-terminal create retry is rolled back when refused, but an earlier attempt that already allocated its checkout deliberately keeps a visible error session and its ownership records. This is inaccurate failure-lifecycle documentation; the inspected implementation preserves the checkout correctly.\n\nDetails: Assigned patch lines 280-287 rewrites/reflows the Creating agents in hosts paragraph. At the reviewed source SPEC_impl.md:2258-2259 it says a row the takeover claims is refused before anything starts and \"rolled back like a launch whose spec never landed\", with its refusal settled against the intent key, without the allocated-checkout distinction. core.rs:14700-14763 implements two different outcomes: no checkout or a still-Planned checkout can roll back; an allocated or unreadable checkout calls retain_create_refusal and keeps the session and checkout records. The source contract explicitly states why: deleting the last ownership record would orphan the checkout. Ordinary post-allocation failure handling at core.rs:11104-11112 likewise explicitly calls its retained-refusal path \"not a rollback\". Product contract SPEC.md:1757 says exactly: \"Once allocation has occurred, failures retain the session and its checkout association for inspection and Delete.\" SPEC_impl.md:3807-3809 says: \"A post-allocation failure atomically retains an error session and membership instead of losing the only deletion handle.\" Those correct governing statements make the blanket retry-rollback wording inconsistent; production correctness does not refute the distinct documentation defect. Clarify the retry paragraph with the same pre-allocation/allocated distinction as the helper.\n\nAttribution checked across the pinned range: the exclusive base has no retried-tmux/takeover rollback assertion in SPEC_impl.md. git log -S identifies 647f0227 as its introduction (then SPEC_impl.md:2315-2319); that revision's core.rs:15854-15925 already implements and documents the allocated-checkout retention branch. Thus predating 1ed482d does not put the defect outside the review range; 1ed482d retains it in this assigned rewrite. The concern is not a new runtime regression at either revision.\n\nSuggested bucket: other (documentation contract accuracy). Confidence: confirmed by source, governing contracts and full-range attribution; no runtime behavior observed. Could-be-highest: no established security or loss-of-work route from this prose; the current runtime explicitly retains user work and its deletion handle. proposed_drop: false. possible_cover: none found in the supplied interface context; no prohibited coverage sources searched. Caveats: ordinary non-checkout retry rollback is correct; the defect is the omitted allocated-checkout exception, not the refusal itself, the existence of a terminal-host replacement, or the accepted retirement consequence. This revision closes f4's rollback-terminology lead under its original ID."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f4",
+            "state": "open",
+            "summary": "Old-terminal retry documentation omits retained allocated checkouts",
+            "location": "SPEC_impl.md:2258-2259",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. In-range introduction: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513.\n\nTLDR: The implementation specification tells maintainers that an old-terminal create retry is rolled back when refused, but an earlier attempt that already allocated its checkout deliberately keeps a visible error session and its ownership records. This is inaccurate failure-lifecycle documentation; the inspected implementation preserves the checkout correctly.\n\nDetails: Assigned patch lines 280-287 rewrites/reflows the Creating agents in hosts paragraph. At the reviewed source SPEC_impl.md:2258-2259 it says a row the takeover claims is refused before anything starts and \"rolled back like a launch whose spec never landed\", with its refusal settled against the intent key, without the allocated-checkout distinction. core.rs:14700-14763 implements two different outcomes: no checkout or a still-Planned checkout can roll back; an allocated or unreadable checkout calls retain_create_refusal and keeps the session and checkout records. The source contract explicitly states why: deleting the last ownership record would orphan the checkout. Ordinary post-allocation failure handling at core.rs:11104-11112 likewise explicitly calls its retained-refusal path \"not a rollback\". Product contract SPEC.md:1757 says exactly: \"Once allocation has occurred, failures retain the session and its checkout association for inspection and Delete.\" SPEC_impl.md:3807-3809 says: \"A post-allocation failure atomically retains an error session and membership instead of losing the only deletion handle.\" Those correct governing statements make the blanket retry-rollback wording inconsistent; production correctness does not refute the distinct documentation defect. Clarify the retry paragraph with the same pre-allocation/allocated distinction as the helper.\n\nAttribution checked across the pinned range: the exclusive base has no retried-tmux/takeover rollback assertion in SPEC_impl.md. git log -S identifies 647f0227 as its introduction (then SPEC_impl.md:2315-2319); that revision's core.rs:15854-15925 already implements and documents the allocated-checkout retention branch. Thus predating 1ed482d does not put the defect outside the review range; 1ed482d retains it in this assigned rewrite. The concern is not a new runtime regression at either revision.\n\nSuggested bucket: other (documentation contract accuracy). Confidence: confirmed by source, governing contracts and full-range attribution; no runtime behavior observed. Could-be-highest: no established security or loss-of-work route from this prose; the current runtime explicitly retains user work and its deletion handle. proposed_drop: false. possible_cover: none found in the supplied interface context; no prohibited coverage sources searched. Caveats: ordinary non-checkout retry rollback is correct; the defect is the omitted allocated-checkout exception, not the refusal itself, the existence of a terminal-host replacement, or the accepted retirement consequence. This revision closes f4's rollback-terminology lead under its original ID.\n\nEndpoint check: inclusive pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:SPEC_impl.md:2180-2185 retains the same unqualified refusal/rollback wording; no later repair was found. Exact numbered current ordinary-create contrast is core.rs:11102-11107 (post-mkdir failure uses retained-refusal, explicitly not a rollback). The earlier broad line references include this passage and do not identify a separate defect. Introduction search used the shorter stable subject A retried keyed create whose interrupted because line wrapping changes the longer rollback phrase."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f4",
+            "state": "open",
+            "summary": "Old-terminal retry documentation omits retained allocated checkouts",
+            "location": "SPEC_impl.md:2259",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. In-range introduction: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513.\n\nTLDR: The implementation specification tells maintainers that an old-terminal create retry is rolled back when refused, but an earlier attempt that already allocated its checkout deliberately keeps a visible error session and its ownership records. This is inaccurate failure-lifecycle documentation; the inspected implementation preserves the checkout correctly.\n\nDetails: Assigned patch lines 280-287 rewrites/reflows the Creating agents in hosts paragraph. At the reviewed source SPEC_impl.md:2258-2259 it says a row the takeover claims is refused before anything starts and \"rolled back like a launch whose spec never landed\", with its refusal settled against the intent key, without the allocated-checkout distinction. core.rs:14700-14763 implements two different outcomes: no checkout or a still-Planned checkout can roll back; an allocated or unreadable checkout calls retain_create_refusal and keeps the session and checkout records. The source contract explicitly states why: deleting the last ownership record would orphan the checkout. Ordinary post-allocation failure handling at core.rs:11104-11112 likewise explicitly calls its retained-refusal path \"not a rollback\". Product contract SPEC.md:1757 says exactly: \"Once allocation has occurred, failures retain the session and its checkout association for inspection and Delete.\" SPEC_impl.md:3807-3809 says: \"A post-allocation failure atomically retains an error session and membership instead of losing the only deletion handle.\" Those correct governing statements make the blanket retry-rollback wording inconsistent; production correctness does not refute the distinct documentation defect. Clarify the retry paragraph with the same pre-allocation/allocated distinction as the helper.\n\nAttribution checked across the pinned range: the exclusive base has no retried-tmux/takeover rollback assertion in SPEC_impl.md. git log -S identifies 647f0227 as its introduction (then SPEC_impl.md:2315-2319); that revision's core.rs:15854-15925 already implements and documents the allocated-checkout retention branch. Thus predating 1ed482d does not put the defect outside the review range; 1ed482d retains it in this assigned rewrite. The concern is not a new runtime regression at either revision.\n\nSuggested bucket: other (documentation contract accuracy). Confidence: confirmed by source, governing contracts and full-range attribution; no runtime behavior observed. Could-be-highest: no established security or loss-of-work route from this prose; the current runtime explicitly retains user work and its deletion handle. proposed_drop: false. possible_cover: none found in the supplied interface context; no prohibited coverage sources searched. Caveats: ordinary non-checkout retry rollback is correct; the defect is the omitted allocated-checkout exception, not the refusal itself, the existence of a terminal-host replacement, or the accepted retirement consequence. This revision closes f4's rollback-terminology lead under its original ID.\n\nEndpoint check: inclusive pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:SPEC_impl.md:2180-2185 retains the same unqualified refusal/rollback wording; no later repair was found. Exact numbered current ordinary-create contrast is core.rs:11102-11107 (post-mkdir failure uses retained-refusal, explicitly not a rollback). The earlier broad line references include this passage and do not identify a separate defect. Introduction search used the shorter stable subject A retried keyed create whose interrupted because line wrapping changes the longer rollback phrase.\n\nCompleted governing-context check: read the complete Managed checkouts subsection (SPEC.md:1570-1883) and complete Owned checkout admission and lifetime subsection (SPEC_impl.md:3776-4102). They retain the allocated-session rule and explicitly distinguish retained error sessions from no-surviving-row refusals; no rule was found making allocated old-terminal retries an exception. This is a bounded documentation finding, with no additional runtime defect inferred."
+          }
+        },
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "f4",
+            "state": "open",
+            "summary": "Rollback phrase references a policy that already retains allocated checkouts",
+            "location": "SPEC_impl.md:2259",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. In-range introduction: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513.\n\nTLDR: The implementation specification tells maintainers that an old-terminal create retry is rolled back when refused, but an earlier attempt that already allocated its checkout deliberately keeps a visible error session and its ownership records. This is inaccurate failure-lifecycle documentation; the inspected implementation preserves the checkout correctly.\n\nDetails: Assigned patch lines 280-287 rewrites/reflows the Creating agents in hosts paragraph. At the reviewed source SPEC_impl.md:2258-2259 it says a row the takeover claims is refused before anything starts and \"rolled back like a launch whose spec never landed\", with its refusal settled against the intent key, without the allocated-checkout distinction. core.rs:14700-14763 implements two different outcomes: no checkout or a still-Planned checkout can roll back; an allocated or unreadable checkout calls retain_create_refusal and keeps the session and checkout records. The source contract explicitly states why: deleting the last ownership record would orphan the checkout. Ordinary post-allocation failure handling at core.rs:11104-11112 likewise explicitly calls its retained-refusal path \"not a rollback\". Product contract SPEC.md:1757 says exactly: \"Once allocation has occurred, failures retain the session and its checkout association for inspection and Delete.\" SPEC_impl.md:3807-3809 says: \"A post-allocation failure atomically retains an error session and membership instead of losing the only deletion handle.\" Those correct governing statements make the blanket retry-rollback wording inconsistent; production correctness does not refute the distinct documentation defect. Clarify the retry paragraph with the same pre-allocation/allocated distinction as the helper.\n\nAttribution checked across the pinned range: the exclusive base has no retried-tmux/takeover rollback assertion in SPEC_impl.md. git log -S identifies 647f0227 as its introduction (then SPEC_impl.md:2315-2319); that revision's core.rs:15854-15925 already implements and documents the allocated-checkout retention branch. Thus predating 1ed482d does not put the defect outside the review range; 1ed482d retains it in this assigned rewrite. The concern is not a new runtime regression at either revision.\n\nSuggested bucket: other (documentation contract accuracy). Confidence: confirmed by source, governing contracts and full-range attribution; no runtime behavior observed. Could-be-highest: no established security or loss-of-work route from this prose; the current runtime explicitly retains user work and its deletion handle. proposed_drop: false. possible_cover: none found in the supplied interface context; no prohibited coverage sources searched. Caveats: ordinary non-checkout retry rollback is correct; the defect is the omitted allocated-checkout exception, not the refusal itself, the existence of a terminal-host replacement, or the accepted retirement consequence. This revision closes f4's rollback-terminology lead under its original ID.\n\nEndpoint check: inclusive pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:SPEC_impl.md:2180-2185 retains the same unqualified refusal/rollback wording; no later repair was found. Exact numbered current ordinary-create contrast is core.rs:11102-11107 (post-mkdir failure uses retained-refusal, explicitly not a rollback). The earlier broad line references include this passage and do not identify a separate defect. Introduction search used the shorter stable subject A retried keyed create whose interrupted because line wrapping changes the longer rollback phrase.\n\nCompleted governing-context check: read the complete Managed checkouts subsection (SPEC.md:1570-1883) and complete Owned checkout admission and lifetime subsection (SPEC_impl.md:3776-4102). They retain the allocated-session rule and explicitly distinguish retained error sessions from no-surviving-row refusals; no rule was found making allocated old-terminal retries an exception. This is a bounded documentation finding, with no additional runtime defect inferred.\n\nTurn-5 reconciliation with caller-supplied g006/f3 latest event: revise my earlier confirmed-mismatch judgment. The exact sentence says rolled back LIKE A LAUNCH WHOSE SPEC NEVER LANDED, not that every row or checkout is deleted. Read as a policy reference, that comparison imports the post-allocation exception explicitly specified by the complete Owned checkout admission subsection and SPEC.md Managed checkouts. Directly checked 647f0227 core.rs:11827-11863: the referenced FailedStart::Spec branch itself distinguishes ordinary rollback from retain_create_refusal after allocation. The old-terminal helper at :15866-15924 makes exactly the same distinction. This matters independently of production correctness: the prose cross-reference and its governing allocation rule describe the same qualified policy. My earlier use of core.rs:11102-11107 saying not a rollback does not establish a stronger claim of unconditional row deletion in this paragraph; it distinguishes a branch within that same policy. The stronger contradiction I previously asserted is therefore not established. Original possible reader consequence remains: an isolated literal reading of rolled back could lead a maintainer to expect no retained session; a clarity improvement could name the exception locally. That is not enough to report a separate correctness defect when the sentence expressly points at an already qualified failure policy.\n\nCurrent suggested bucket if the ambiguity were retained: other. Could-be-highest: no established or suspected security/work-loss route; preserve the prior consequence without manufacturing runtime damage. Current confidence: source/contract refutation of the claimed policy mismatch, not execution-based. Current proposed_drop: exact comparison wording plus SPEC.md:1757, Once allocation has occurred, failures retain the session and its checkout association for inspection and Delete, and SPEC_impl.md:3807-3809, A post-allocation failure atomically retains an error session and membership instead of losing the only deletion handle. These explicit qualifications apply to the referenced spec-not-landed policy as the directly read branch confirms. This is a proposed exclusion only; no parent drop is accepted or inferred. possible_cover: g006/f3 is the exact same wording concern with this same interpretation, supplied by the caller and read directly; not a second defect. Original finding rationale, source evidence, allocation-preservation motivation, range attribution and strongest consequence remain above in this append-only record. No source premise remains open for this bounded documentation interpretation."
+          }
+        }
+      ],
+      "latest": {
+        "line": 13,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "f4",
+          "state": "open",
+          "summary": "Rollback phrase references a policy that already retains allocated checkouts",
+          "location": "SPEC_impl.md:2259",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. In-range introduction: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513.\n\nTLDR: The implementation specification tells maintainers that an old-terminal create retry is rolled back when refused, but an earlier attempt that already allocated its checkout deliberately keeps a visible error session and its ownership records. This is inaccurate failure-lifecycle documentation; the inspected implementation preserves the checkout correctly.\n\nDetails: Assigned patch lines 280-287 rewrites/reflows the Creating agents in hosts paragraph. At the reviewed source SPEC_impl.md:2258-2259 it says a row the takeover claims is refused before anything starts and \"rolled back like a launch whose spec never landed\", with its refusal settled against the intent key, without the allocated-checkout distinction. core.rs:14700-14763 implements two different outcomes: no checkout or a still-Planned checkout can roll back; an allocated or unreadable checkout calls retain_create_refusal and keeps the session and checkout records. The source contract explicitly states why: deleting the last ownership record would orphan the checkout. Ordinary post-allocation failure handling at core.rs:11104-11112 likewise explicitly calls its retained-refusal path \"not a rollback\". Product contract SPEC.md:1757 says exactly: \"Once allocation has occurred, failures retain the session and its checkout association for inspection and Delete.\" SPEC_impl.md:3807-3809 says: \"A post-allocation failure atomically retains an error session and membership instead of losing the only deletion handle.\" Those correct governing statements make the blanket retry-rollback wording inconsistent; production correctness does not refute the distinct documentation defect. Clarify the retry paragraph with the same pre-allocation/allocated distinction as the helper.\n\nAttribution checked across the pinned range: the exclusive base has no retried-tmux/takeover rollback assertion in SPEC_impl.md. git log -S identifies 647f0227 as its introduction (then SPEC_impl.md:2315-2319); that revision's core.rs:15854-15925 already implements and documents the allocated-checkout retention branch. Thus predating 1ed482d does not put the defect outside the review range; 1ed482d retains it in this assigned rewrite. The concern is not a new runtime regression at either revision.\n\nSuggested bucket: other (documentation contract accuracy). Confidence: confirmed by source, governing contracts and full-range attribution; no runtime behavior observed. Could-be-highest: no established security or loss-of-work route from this prose; the current runtime explicitly retains user work and its deletion handle. proposed_drop: false. possible_cover: none found in the supplied interface context; no prohibited coverage sources searched. Caveats: ordinary non-checkout retry rollback is correct; the defect is the omitted allocated-checkout exception, not the refusal itself, the existence of a terminal-host replacement, or the accepted retirement consequence. This revision closes f4's rollback-terminology lead under its original ID.\n\nEndpoint check: inclusive pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:SPEC_impl.md:2180-2185 retains the same unqualified refusal/rollback wording; no later repair was found. Exact numbered current ordinary-create contrast is core.rs:11102-11107 (post-mkdir failure uses retained-refusal, explicitly not a rollback). The earlier broad line references include this passage and do not identify a separate defect. Introduction search used the shorter stable subject A retried keyed create whose interrupted because line wrapping changes the longer rollback phrase.\n\nCompleted governing-context check: read the complete Managed checkouts subsection (SPEC.md:1570-1883) and complete Owned checkout admission and lifetime subsection (SPEC_impl.md:3776-4102). They retain the allocated-session rule and explicitly distinguish retained error sessions from no-surviving-row refusals; no rule was found making allocated old-terminal retries an exception. This is a bounded documentation finding, with no additional runtime defect inferred.\n\nTurn-5 reconciliation with caller-supplied g006/f3 latest event: revise my earlier confirmed-mismatch judgment. The exact sentence says rolled back LIKE A LAUNCH WHOSE SPEC NEVER LANDED, not that every row or checkout is deleted. Read as a policy reference, that comparison imports the post-allocation exception explicitly specified by the complete Owned checkout admission subsection and SPEC.md Managed checkouts. Directly checked 647f0227 core.rs:11827-11863: the referenced FailedStart::Spec branch itself distinguishes ordinary rollback from retain_create_refusal after allocation. The old-terminal helper at :15866-15924 makes exactly the same distinction. This matters independently of production correctness: the prose cross-reference and its governing allocation rule describe the same qualified policy. My earlier use of core.rs:11102-11107 saying not a rollback does not establish a stronger claim of unconditional row deletion in this paragraph; it distinguishes a branch within that same policy. The stronger contradiction I previously asserted is therefore not established. Original possible reader consequence remains: an isolated literal reading of rolled back could lead a maintainer to expect no retained session; a clarity improvement could name the exception locally. That is not enough to report a separate correctness defect when the sentence expressly points at an already qualified failure policy.\n\nCurrent suggested bucket if the ambiguity were retained: other. Could-be-highest: no established or suspected security/work-loss route; preserve the prior consequence without manufacturing runtime damage. Current confidence: source/contract refutation of the claimed policy mismatch, not execution-based. Current proposed_drop: exact comparison wording plus SPEC.md:1757, Once allocation has occurred, failures retain the session and its checkout association for inspection and Delete, and SPEC_impl.md:3807-3809, A post-allocation failure atomically retains an error session and membership instead of losing the only deletion handle. These explicit qualifications apply to the referenced spec-not-landed policy as the directly read branch confirms. This is a proposed exclusion only; no parent drop is accepted or inferred. possible_cover: g006/f3 is the exact same wording concern with this same interpretation, supplied by the caller and read directly; not a second defect. Original finding rationale, source evidence, allocation-preservation motivation, range attribution and strongest consequence remain above in this append-only record. No source premise remains open for this bounded documentation interpretation."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g008/findings.jsonl",
+        "id": "f4",
+        "line": 13,
+        "disposition": "under-investigation",
+        "group": "g008-f4",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-004",
+          "key": "g008/f4",
+          "latest_line": 13,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "old-terminal-create-refusal-qualified-rollback-wording",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The sentence compares refusal with an existing qualified policy; it does not say every allocated checkout or row is removed. The original categorical contradiction is not established. The withdrawn stronger interpretation remains recorded here.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333:SPEC_impl.md:2258-2259 says rolled back LIKE a launch whose spec never landed. git log -S places introduction in in-range 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513; this is not a pre-range dismissal.",
+            "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:service/core.rs:11827-11863 makes FailedStart::Spec retain an allocated checkout, while ordinary non-checkout failure abandons the row. The referenced policy is itself qualified.",
+            "Same hash core.rs:15854-15925 documents and implements the same distinction for old-terminal retries: Planned can roll back; allocated or unreadable retains all ownership records. Correct runtime behavior alone is not the refutation; the comparison refers to that same failure policy.",
+            "Reviewed SPEC.md:1757 and SPEC_impl.md:3807-3809 explicitly retain post-allocation sessions and membership. Current SPEC_impl.md:2180-2185 retains the comparison, with the allocation rule at :3648-3650."
+          ],
+          "coverage_checked": [
+            "Current SPEC.md/SPEC_impl.md searched for spec-never-landed, rollback and post-allocation retention. The governing retention rules qualify the referenced policy; no rule accepts deleting allocated checkout ownership.",
+            "TODO Planned empty; BUGS.md unrelated; active TRIAGE_OUTCOMES.md, INDEX.md and matching queue references contain no exact wording item. confirmation-rollback-omits-container-cleanup and retained-refusal-can-clear-restart-delete-protection are different runtime causes.",
+            "The relevant tmux plans already landed per plans/REPORTS.md. No unlanded plan or exact queue item was found. FILTER.md is not the proposed basis."
+          ],
+          "exact_cover_quotes": [
+            "SPEC.md:1761: Once allocation has occurred, failures retain the session and its checkout association for inspection and Delete.",
+            "SPEC_impl.md:3648-3650: A post-allocation failure atomically retains an error session and membership instead of losing the only deletion handle."
+          ],
+          "missing_premise": "The claim of an unconditional removal policy would require text overriding the referenced failure policy's explicit post-allocation exception; none was identified.",
+          "original_stronger_consequence": "Earlier events called the paragraph inaccurate failure-lifecycle documentation that could make maintainers expect no retained session. Runtime preservation was always acknowledged; no actual deletion or orphaning was claimed. Latest event withdraws the categorical mismatch, preserving a possible isolated-reader clarity concern.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Propose the latest source/contract refutation, preserving the withdrawal. The original ambiguity touches the only deletion handle for user-owned checkout work, so obtain an independent drop judgment. History mentions external g006/f3 as an alias, but that record was not assigned or read here and no cross-batch duplicate decision is inferred."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-004.json",
+          "key": "g008/f4",
+          "proposal": "claim-checks/claims-004/result.json",
+          "parent_proposal": "source-refuted-same-root-g006/f3",
+          "final_independent_gate": "required-before-drop-and-withdrawal",
+          "reason": "Full004samequalifiedrollbackcomparisonas006f3, in-range647authorshipnotprebase. 'Likeaspecneverlanded' referencespolicywith explicitpostallocationretainerrorrow/membership; actualFailedStart::Specandoldretrybothpreserveallocated/unreadableorigins. No overridingunconditionaldeletiontext. Preserveearliercategoricaldocumentationfindingwithdrawal/isolatedreaderclarity/ownershiphandleharmforfreshgate, notrefutedmerelybyproductioncorrectness."
+        }
+      ],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "old-terminal-create-refusal-qualified-rollback-wording",
+        "destination": "trailing-old-terminal-create-refusal-qualified-rollback-wording.md"
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review is blocked by an invalid manifest: it requires lines 1–504, but the pinned patch contains 503 lines. Both evidence reads failed before certifying coverage.\n\nRead the complete brief and inventory’s commits field only. Recorded the blocker in `g008/progress.md`; findings log remains empty.\n\nThe caller must correct and re-pin the manifest before review can continue."
+    },
+    {
+      "turn": 2,
+      "reply": "Initial pass complete: all 503 mandatory lines delivered; no unread assigned scope.\n\n- **f2:** confirmed documentation defect—rewritten contract points to deleted `Terminal` type.\n- **f1:** proposed drop based on explicit specification acceptance; needs independent highest-impact check.\n- **f3:** flow-control concern rejected through source analysis.\n\nNo open leads. Findings and progress logs updated. No tests or reproductions run."
+    },
+    {
+      "turn": 3,
+      "reply": "Revised **f1**: the parent revision already specified and performed the accepted old-terminal shutdown.\n\nRevised **f3**: direct attachment-caller checks confirm grid-only delivery with no byte-stream fallback.\n\nNo new findings or severity changes. Unresolved leads: **none**."
+    },
+    {
+      "turn": 4,
+      "reply": "New verified finding: **f4**—retry-rollback documentation omits the allocated-checkout retention exception.\n\nChecked retry admission, tab lifecycle/order, launch-record timing, failure cleanup, and governing contracts; traced attribution across the range and checked the pinned tip.\n\nNew unverified IDs: none. Open leads: none. **Something new was found: f4.** Discovery count: 1."
+    },
+    {
+      "turn": 5,
+      "reply": "Revised **f4** to a candidate for exclusion after reconciling the qualified policy reference; original rationale remains recorded.\n\nDiscovery pass 2 checked schema migrations, test-host registration, and prompt sequencing. **Nothing new found.**\n\nNew verified IDs: none. New unverified IDs: none. Open leads: none."
+    }
+  ],
+  "progress": "Group: g008 product-contracts\nState: coverage repair and initial source-review pass completed; turn 2 (turn 1 blocked by old manifest); discovery passes 0.\nMandatory coverage: corrected manifest source 00900-000.patch lines 1..503 delivered in five evidence read packets: 1..100, 101..200, 201..300, 301..400, 401..503. No assigned unread material. Parent owns delivery audit.\nScope: assigned portion of SPEC_impl.md patch at 1ed482dde220452e424973faf38a5e1318986333; original commit list read completely from inventory.json commits field only on initial turn. No excluded coverage metadata read.\nContracts read: complete corrected brief; root AGENTS.md End sentinel; priority buckets and feedback format; SPEC_impl Workspace layout, terminal widget/xterm section including grid client (1507..1962), complete Terminal host section (1963..2700), terminal substrate section (2880..2991), Answers bind to what was drawn subsection; SPEC.md Terminal experience through the changed old-terminal and flow-control bullets, complete Lifecycle operations and Session view, opening Durability rules, Upgrade compatibility through schema-34 contract. All pinned to reviewed commit. Earlier combined output clipped; affected relevant sections reread in separate bounded commands.\nSource checks: constructor runs OldTerminals only with ownership, before reload (core.rs:6139..6185); reload maps Tmux rows to no terminal and converts live old rows to interrupted (core.rs:6370..6425, 6655..6830); host_restart module documents empty Restart for ended old terminals and host history retention; host_tabs module confirms host-only tabs and shared runtime cell; terminals.rs resolution returns HostTerminal, with no Terminal type or alias anywhere in file; HostTerminal owns status/evidence/root and wire kind/tab info; host_child_env strips old tmux/systemd variables and sets terminal identity. Source-only observations, no runtime execution.\nInterface assumptions: earlier supervisors retain byte streams and their own flow control; current supervisor serves host grids only. Product explicitly accepts ending old tmux agents/tabs/output on startup, while already-host terminals survive. No changed GUI handler is in this assigned patch. Other groups own implementation patches and remaining SPEC_impl fragments.\nRecords appended this pass: f1 lead -> finding with proposed_drop for explicit specification acceptance of potentially highest old-terminal loss; f2 lead -> confirmed other-bucket finding for rewritten architecture pointer to removed Terminal type; f3 candidate with source-refuted flow-control removal concern, revised with exact replacement quote.\nNew verified IDs: f2 (other). Proposed highest drop: f1, requires caller independent check. New unverified findings: none. Open leads: none.\nTests/reproductions: none requested or run; no builds; no checkout writes. Only private artifacts changed.\nNext action: return delta and coverage status; await caller's later synthesis/discovery instruction. No later-turn protocol performed in this pass.\nSynthesis turn 3 started; discovery passes remain 0. Revisiting f1/f2/f3 contract interactions and source premises. Mandatory scope remains fully delivered; no open leads at entry.\n\nSynthesis turn 3 completed; discovery passes 0.\nInteraction checks: immediate parent SPEC.md already contains the same old-terminal termination/empty-Restart acceptance and its startup already ends the private server and maps old rows to no terminal. f1 therefore describes pre-existing accepted transition, not newly introduced by this doc rewrite. f1 revised under original ID, preserving highest consequence and caller independent-drop requirement.\nAttachment caller checked directly: handlers.rs:1697..1713 refuses clients without grid capability before takeover; :1927..1956 always replies StreamKind::Grid and constructs GridStream/GridSender. f3 revised under original ID with direct shipped caller evidence; no byte-stream fallback remains.\nRestart caller checked directly: core.rs:12460..12496 reaps AgentOnly, retains tabs, and reads no seed when entry.terminal is absent; :13000..13029 always relaunches into a host and carries current tabs. Consistent with the replacement contract and f1/f3 separation. f2 remains a documentation-only stale abstraction pointer; no runtime consequence inferred from it.\nChanges this turn: f1 and f3 evidence revisions. No new IDs, withdrawals or severity changes. Open leads: none. Unread assigned scope: none; prior delivery audited by caller. No builds, tests, reproductions or checkout writes.\nNext: await caller's next review instruction. No discovery pass performed during synthesis.\nDiscovery turn 4 started; separate discovery pass 1. Named pending questions: none. Read neighbour context before source search; retain all original event IDs and consequences.\n\nDiscovery turn 4 completed; separate discovery pass count 1.\nRequired neighbour context: discovery-neighbours.json read fully in contiguous bounded ranges 1..80, 81..160, 161..260, 261..360, 361..460, 461..560, 561..660, 661..760, 761..860, 861..960, 961..1088. No named pending questions were supplied. Context supplied novelty boundaries; no prohibited coverage sources searched.\nNew search beyond existing records: checked claimed old-kind create retry selection and refusal ordering; allocated-checkout refusal retention; host-tab gate for Running/Exited/Gone/Unavailable; tag timestamp selection, unknown-stamp exclusion and stable list sorting; dead-at-open settle and final-exit detail timing; host and tab launch-record publication before first-stage spec delivery; failed-tab cleanup record removal after successful host end; new-host Restart seed/default and captured old-host retirement. Retained host contracts were not inferred safe merely from intended tmux retirement.\nNew finding: f4, other-bucket documentation contract error. SPEC_impl.md:2259 unqualified retry-rollback description omits existing allocated-checkout error-session retention. Closed f4 lead with current source, exact SPEC.md/SPEC_impl.md allocation contracts, in-range introduction at 647f0227, and through-tip wording persistence. Read complete Managed checkouts (SPEC.md:1570..1883) and Owned checkout admission and lifetime (SPEC_impl.md:3776..4102) governing sections before finalizing. Current implementation correctly retains work; no runtime loss alleged.\nExisting f1/f2/f3 unchanged. Original consequences, proposed-drop bases and independent-check requirements preserved; no parent drop or lowering accepted.\nNew verified IDs this pass: f4. New unverified-after-investigation IDs: none. Open lead IDs: none. Anything new found: yes, f4. No further independent concern established by remaining assigned-contract checks.\nUnread assigned scope: none; required delivery previously audited. No tests, builds, reproductions or live-install actions; no checkout mutations. Only private artifacts written.\nNext action: return discovery delta and await caller's next pass instruction. A substantive new discovery was made; caller's charter calls for another later pass rather than folding one into this turn.\nTurn 5: pending g006/f3 versus f4 reconciliation started before new search; separate discovery pass 2 pending. Existing records and consequences preserved, no parent drop or lowering accepted.\n\nTurn 5 completed: pending cross-group reconciliation followed by separate discovery pass 2.\nReconciliation: read exact latest g006/f3 directly from its log because it is a candidate and absent from the neighbour finding-only export. Checked the referenced 647f0227 FailedStart::Spec branch (core.rs:11827..11863) and governing allocation paragraph (SPEC_impl.md:4120..4125). Revised f4 under original ID from finding to open candidate proposed for exclusion: the phrase explicitly compares with the spec-not-landed policy, whose documented post-allocation retention exception applies. The paragraph does not promise unconditional row/checkout deletion. My prior use of a different branch's not-a-rollback terminology overclaimed a contradiction. Original isolated-reader confusion consequence, original rationale, range attribution and all source evidence are preserved in the event history; no parent drop is inferred accepted. No runtime-correctness-only dismissal was used.\nNeighbour context: reused previous complete interface context, read the updated export's complete owner/ID/summary/location inventory in two bounded chunks, and full relevant updated records g003/f4, g009/l1 and l3, g016/l3, g110/l1, g111/l2, g113/l4, g130/l3. Exact g006/f3 was read separately as requested. Saved this turn's export as discovery-neighbours.turn5.json for later delta reads. Nonpertinent expanded neighbour details were not reread; they are context, not mandatory assigned-source credit.\nNew search after reconciliation: checked assigned schema-32/33/34 explanation against store migration documentation and SQL, glibc-only unit-test loader registration and host command matching against hosts/test_program.rs, and prompt delivery sequence/modes against HostTerminal InputSequence, receipts, deliver_prompt_to_host and caught-up/bracketed-paste admission. Schema details and loader restriction agree with the assigned section. Prompt paste and submit share an epoch, submit waits for complete Written fate, and the contract's explicitly accepted input-between-paste-and-submit boundary matches the caller. No new concrete source concern arose. Existing neighbour findings set novelty boundaries, not blanket refutations.\nDiscovery count: 2. Changes this turn: f4 reconciliation only. New verified IDs: none. New unverified-after-investigation IDs: none. Remaining open leads: none. Anything new found in the separate discovery search: no.\nMandatory assigned source unread: none; earlier delivery and synthesis audited by caller. No tests, builds, reproductions, live-install actions or checkout writes. No parent drop/lowering accepted. Next: return delta and await caller instructions.\n"
+}

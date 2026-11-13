@@ -1,0 +1,575 @@
+{
+  "group": {
+    "id": "g175",
+    "domain": "browser-terminal-regressions",
+    "purpose": "browser-terminal-regressions: e2e/tests/terminal-flood.spec.ts, e2e/tests/terminal-multihost.spec.ts; phases @@ -1221,9 +85,7 @@ for line in sys.stdin:",
+    "interfaces": [
+      "g005",
+      "g006",
+      "g007",
+      "g079",
+      "g080",
+      "g081",
+      "g082",
+      "g083",
+      "g084",
+      "g091",
+      "g092",
+      "g174",
+      "g176",
+      "g179",
+      "g180",
+      "g181"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00830-000.patch",
+        "ranges": [
+          [
+            1,
+            1172
+          ]
+        ],
+        "original_path": "e2e/tests/terminal-flood.spec.ts",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,59721)",
+        "lines": 1172,
+        "bytes": 59875,
+        "start": 0,
+        "end": 59721,
+        "original": "[private-run]/prep/originals/00830.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00830-001.patch",
+        "ranges": [
+          [
+            1,
+            66
+          ]
+        ],
+        "original_path": "e2e/tests/terminal-flood.spec.ts",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "@@ -1221,9 +85,7 @@ for line in sys.stdin:; patch character offsets [59721,64129)",
+        "lines": 66,
+        "bytes": 4414,
+        "start": 59721,
+        "end": 64129,
+        "original": "[private-run]/prep/originals/00830.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00885-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "e2e/tests/terminal-multihost.spec.ts",
+        "commit": "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4",
+        "notes": "patch header; patch character offsets [0,798)",
+        "lines": 13,
+        "bytes": 798,
+        "start": 0,
+        "end": 798,
+        "original": "[private-run]/prep/originals/00885.patch"
+      }
+    ],
+    "lines": 1251,
+    "bytes": 65087
+  },
+  "records": [
+    {
+      "key": "g175/c1",
+      "owner": "g175",
+      "id": "c1",
+      "domain": "browser-terminal-regressions",
+      "purpose": "browser-terminal-regressions: e2e/tests/terminal-flood.spec.ts, e2e/tests/terminal-multihost.spec.ts; phases @@ -1221,9 +85,7 @@ for line in sys.stdin:",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Updated reboot notice assertion matches the shipped interruption contract",
+            "location": "e2e/tests/terminal-multihost.spec.ts:3667",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR: considered whether naming updates as well as reboots weakens or misstates the simulated reboot test; no defect established. Details: the changed assertion at e2e/tests/terminal-multihost.spec.ts:3667 matches the exact sentence prefix emitted for every branch of crates/farhelm-ui/src/session_view.rs:3876-3905. SPEC.md:3521-3537 explains the lost-track classification and says, verbatim, 'Opening an interrupted session shows a centered neutral card in the empty terminal area explaining that a host reboot or a Farhelm update ended the agent and that it needs an intentional restart.' The test still checks Interrupted and absence of the terminal and reconnect placeholder at lines 3668-3679; the change does not weaken those behavior oracles. Suggested bucket: other (test correctness only). Confidence: confirmed through source and contract analysis; no execution. proposed_drop: source refutation and explicit specification acceptance quoted above. possible_cover: none searched. Could-be-highest: no; this is one assertion's wording and retains the same interruption-state assertions. Caveat: this does not independently validate the reboot fixture or lifecycle implementation, which are unchanged by the assigned patch."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Updated reboot notice assertion matches the shipped interruption contract",
+            "location": "e2e/tests/terminal-multihost.spec.ts:3667",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. Original considered consequence preserved: naming updates as well as reboots might weaken or misstate the simulated reboot test. TLDR: the changed assertion still distinguishes the required interruption sentence and is followed by independent state and terminal-absence oracles. Synthesis source checks: terminal-multihost.spec.ts:3564-3580 waits for the helm to observe this identified session live before reboot; 3606-3615 stops the owned supervisor, checks stop-terminal-hosts exit status zero, writes a fresh boot identity and restores the same stack; 3656-3663 opens the identified row, waits for its reveal and fake-agent output, then runs that reboot. Thus the fixture does not establish interruption merely by displaying the same text the assertion expects. Lines 3668-3679 still reject a live terminal, reconnect placeholder or non-Interrupted status immediately and after a finite observation window. session_view.rs:3876-3905 emits the exact common sentence prefix the new assertion requires. SPEC.md:3531-3535 says exactly 'Opening an interrupted session shows a centered neutral card in the empty terminal area explaining that a host reboot or a Farhelm update ended the agent and that it needs an intentional restart.' Suggested bucket: other (test correctness). Confidence: confirmed source and contract analysis, no execution. proposed_drop: the assertion change remains sensitive to missing/wrong interruption text, and the unchanged independent state/absence checks reject a different lifecycle outcome; specification expressly requires the new wording. Proposed only, not independently accepted. possible_cover: none searched. Could-be-highest: no for this one-line test-assertion candidate. Caveats: the host-only reboot fixture is not an old-terminal retirement fixture and does not prove warning delivery, retirement cleanup or confirmation targeting during an update. The known retirement/duplicate-agent consequences supplied by the caller retain that neighbouring-group provenance; this assertion neither introduces them nor supplies a distinct route to them. Endpoint observations do not rule out every transient remount, as the test's own comment states."
+          }
+        }
+      ],
+      "latest": {
+        "line": 6,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Updated reboot notice assertion matches the shipped interruption contract",
+          "location": "e2e/tests/terminal-multihost.spec.ts:3667",
+          "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. Original considered consequence preserved: naming updates as well as reboots might weaken or misstate the simulated reboot test. TLDR: the changed assertion still distinguishes the required interruption sentence and is followed by independent state and terminal-absence oracles. Synthesis source checks: terminal-multihost.spec.ts:3564-3580 waits for the helm to observe this identified session live before reboot; 3606-3615 stops the owned supervisor, checks stop-terminal-hosts exit status zero, writes a fresh boot identity and restores the same stack; 3656-3663 opens the identified row, waits for its reveal and fake-agent output, then runs that reboot. Thus the fixture does not establish interruption merely by displaying the same text the assertion expects. Lines 3668-3679 still reject a live terminal, reconnect placeholder or non-Interrupted status immediately and after a finite observation window. session_view.rs:3876-3905 emits the exact common sentence prefix the new assertion requires. SPEC.md:3531-3535 says exactly 'Opening an interrupted session shows a centered neutral card in the empty terminal area explaining that a host reboot or a Farhelm update ended the agent and that it needs an intentional restart.' Suggested bucket: other (test correctness). Confidence: confirmed source and contract analysis, no execution. proposed_drop: the assertion change remains sensitive to missing/wrong interruption text, and the unchanged independent state/absence checks reject a different lifecycle outcome; specification expressly requires the new wording. Proposed only, not independently accepted. possible_cover: none searched. Could-be-highest: no for this one-line test-assertion candidate. Caveats: the host-only reboot fixture is not an old-terminal retirement fixture and does not prove warning delivery, retirement cleanup or confirmation targeting during an update. The known retirement/duplicate-agent consequences supplied by the caller retain that neighbouring-group provenance; this assertion neither introduces them nor supplies a distinct route to them. Endpoint observations do not rule out every transient remount, as the test's own comment states."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g175/findings.jsonl",
+        "id": "c1",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "reboot-interruption-notice-test-wording-update",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-109 after inspecting it. The updated assertion requires the interruption wording the specification demands. Independent fixture/state/no-terminal assertions remain, so adding updates to the sentence does not establish a weakened reboot oracle. Source refutation of this one-line test candidate only. Keep neighboring retirement product findings separate; this assertion neither causes nor proves them safe. No runtime check. Checked source/results: [\"dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:e2e/tests/terminal-multihost.spec.ts:3564-3580 witnesses the identified session live; :3606-3617 checks owned host termination and changes boot identity; :3656-3685 requires the card, Interrupted state, absent terminal/recovery surfaces, and repeats endpoint checks after the finite window.\",\"dbfc6975:SPEC.md:3521-3538 explicitly requires the card to explain a host reboot or Farhelm update ending the agent. The sentence is compatible with a simulated reboot; it need not name reboot alone.\"] Current coverage/results: [\"Historical SPEC.md:3531-3535 explicitly accepts/requires the updated wording; current Terminal experience and interruption classification preserve that contract.\",\"TODO.md Planned and plans/queue/INDEX.md empty; no exact BUGS.md, INDEX.md or active ledger finding about this wording. Existing reboot fixture/lifecycle records concern other boundaries. No filter needed.\"] Exact cited cover: [\"dbfc6975:SPEC.md:3531-3533: Opening an interrupted session shows a centered neutral card in the empty terminal area explaining that a host reboot or a Farhelm update ended the agent and that it needs an intentional restart.\"] Original stronger consequence and missing premise remain preserved: \"Original considered consequence: naming updates as well as reboots might weaken or misstate the simulated-reboot test. No production retirement/duplicate-agent consequence was attributed to this assertion. The host-only fixture does not validate retirement warnings, cleanup or confirmation targeting; finite endpoint checks do not rule out every transient remount.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g175/c1",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "reboot-interruption-notice-test-wording-update",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-109 after inspecting it. The updated assertion requires the interruption wording the specification demands. Independent fixture/state/no-terminal assertions remain, so adding updates to the sentence does not establish a weakened reboot oracle. Source refutation of this one-line test candidate only. Keep neighboring retirement product findings separate; this assertion neither causes nor proves them safe. No runtime check. Checked source/results: [\"dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:e2e/tests/terminal-multihost.spec.ts:3564-3580 witnesses the identified session live; :3606-3617 checks owned host termination and changes boot identity; :3656-3685 requires the card, Interrupted state, absent terminal/recovery surfaces, and repeats endpoint checks after the finite window.\",\"dbfc6975:SPEC.md:3521-3538 explicitly requires the card to explain a host reboot or Farhelm update ending the agent. The sentence is compatible with a simulated reboot; it need not name reboot alone.\"] Current coverage/results: [\"Historical SPEC.md:3531-3535 explicitly accepts/requires the updated wording; current Terminal experience and interruption classification preserve that contract.\",\"TODO.md Planned and plans/queue/INDEX.md empty; no exact BUGS.md, INDEX.md or active ledger finding about this wording. Existing reboot fixture/lifecycle records concern other boundaries. No filter needed.\"] Exact cited cover: [\"dbfc6975:SPEC.md:3531-3533: Opening an interrupted session shows a centered neutral card in the empty terminal area explaining that a host reboot or a Farhelm update ended the agent and that it needs an intentional restart.\"] Original stronger consequence and missing premise remain preserved: \"Original considered consequence: naming updates as well as reboots might weaken or misstate the simulated-reboot test. No production retirement/duplicate-agent consequence was attributed to this assertion. The host-only fixture does not validate retirement warnings, cleanup or confirmation targeting; finite endpoint checks do not rule out every transient remount.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-109",
+          "key": "g175/c1",
+          "latest_line": 6,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "reboot-interruption-notice-test-wording-update",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The updated assertion requires the interruption wording the specification demands. Independent fixture/state/no-terminal assertions remain, so adding updates to the sentence does not establish a weakened reboot oracle.",
+          "checks": [
+            "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:e2e/tests/terminal-multihost.spec.ts:3564-3580 witnesses the identified session live; :3606-3617 checks owned host termination and changes boot identity; :3656-3685 requires the card, Interrupted state, absent terminal/recovery surfaces, and repeats endpoint checks after the finite window.",
+            "dbfc6975:SPEC.md:3521-3538 explicitly requires the card to explain a host reboot or Farhelm update ending the agent. The sentence is compatible with a simulated reboot; it need not name reboot alone."
+          ],
+          "coverage_checked": [
+            "Historical SPEC.md:3531-3535 explicitly accepts/requires the updated wording; current Terminal experience and interruption classification preserve that contract.",
+            "TODO.md Planned and plans/queue/INDEX.md empty; no exact BUGS.md, INDEX.md or active ledger finding about this wording. Existing reboot fixture/lifecycle records concern other boundaries. No filter needed."
+          ],
+          "exact_cover_quotes": [
+            "dbfc6975:SPEC.md:3531-3533: Opening an interrupted session shows a centered neutral card in the empty terminal area explaining that a host reboot or a Farhelm update ended the agent and that it needs an intentional restart."
+          ],
+          "missing_premise": null,
+          "original_stronger_consequence": "Original considered consequence: naming updates as well as reboots might weaken or misstate the simulated-reboot test. No production retirement/duplicate-agent consequence was attributed to this assertion. The host-only fixture does not validate retirement warnings, cleanup or confirmation targeting; finite endpoint checks do not rule out every transient remount.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation of this one-line test candidate only. Keep neighboring retirement product findings separate; this assertion neither causes nor proves them safe. No runtime check."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "reboot-interruption-notice-test-wording-update",
+        "destination": null
+      }
+    },
+    {
+      "key": "g175/c2",
+      "owner": "g175",
+      "id": "c2",
+      "domain": "browser-terminal-regressions",
+      "purpose": "browser-terminal-regressions: e2e/tests/terminal-flood.spec.ts, e2e/tests/terminal-multihost.spec.ts; phases @@ -1221,9 +85,7 @@ for line in sys.stdin:",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Removed xterm-specific flood assertions do not apply to the host-terminal browser stack",
+            "location": "e2e/tests/terminal-flood.spec.ts:1",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: considered whether deleting whole-byte-stream verification, xterm pause/resume and paused-remount tests removes the corresponding grid-terminal behavior checks; no concrete regression established. Details: the removed cases were tagged OLD_TERMINAL_TAG and patched Terminal.prototype.write, raw byte socket input, and __farhelmTest's xterm counters. At this revision e2e/playwright.config.ts:1-4,109-114 runs a single host-terminal stack for each discovered spec and engine. SPEC_impl.md, The grid client (1948-2014), states exactly 'The client sends no flow-control pause or resume: it applies every message as it arrives, applying a large history in slices between frames so that the screen stays usable, and the helm pauses a grid stream on its own queue instead.' Grid stream frames are screen state and history, not a lossless copy of all producer bytes. e2e/tests/grid-flood.spec.ts:155-212 exercises the real stack and requires exactly the retained 12,000 history lines plus screen records, consecutive to the final marker. e2e/grid-client/grid-attach.spec.ts:1162-1175 checks that a stalled grid notice plus socket close retains the reason without reconnecting, and 1177-1192 checks recovery builds a fresh live grid. The removed same-realm counter assertions describe xterm-specific state that this grid does not hold. Suggested bucket: other (test coverage). Confidence: confirmed through source and contract analysis, no execution. proposed_drop: mechanisms differ as specified, and retained grid checks cover the corresponding content and client-lifecycle contract; no specific invalid surviving oracle or product defect identified. possible_cover: none searched. Could-be-highest: no; this candidate concerns automated test coverage only, without an established shipped loss-of-work route. Caveat: this does not claim the remaining grid test proves every transient screen or all old-terminal paths; grid screens may be skipped by contract, and old-terminal test removal is intentional in the assigned change. The separate relay and supervisor tests cited by the deleted comments still need source verification before completing this pass."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Removed xterm-specific flood assertions do not apply to the host-terminal browser stack",
+            "location": "e2e/tests/terminal-flood.spec.ts:1",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: considered whether deleting whole-byte-stream verification, xterm pause/resume, stalled-viewer and paused-remount tests removes the corresponding grid-terminal behavior checks; no concrete regression established. Details: removed tests are OLD_TERMINAL_TAG cases built around Terminal.prototype.write and xterm counters. e2e/playwright.config.ts:1-4,109-114 runs host-terminal stacks for all discovered specs in both engines. SPEC_impl.md, The grid client (1948-2014), says exactly 'The client sends no flow-control pause or resume: it applies every message as it arrives, applying a large history in slices between frames so that the screen stays usable, and the helm pauses a grid stream on its own queue instead.' e2e/tests/grid-flood.spec.ts:155-212 requires the exact consecutive retained history and screen records at the end of a real-stack flood. e2e/grid-client/grid-attach.spec.ts:1162-1192 checks a stall notice plus close does not reconnect and that recovery creates a fresh live grid. Follow-up source checks completed: crates/farhelm-helm/src/terminal.rs:1655-1815 verifies teardown while the browser is unread, with the grid pause observed before injected stalled detach; 2455-2640 verifies actual helm pause and resume, whole numbered frames in order, and that browser flow controls cannot override grid flow. crates/farhelm-supervisor/src/service/grid_stream/tests.rs:472-585 pins withheld paused output, lossless appended history, a full writer queue, and reset to retained history after eviction; 770-797 pins pause expiry to ForwarderEnd::Stalled, and 799-835 pins input failure while paused. Thus the replacement's separate layers have relevant assertions rather than only comments claiming coverage. Suggested bucket: other (test coverage). Confidence: confirmed by source and contract analysis, no execution. proposed_drop: xterm counter oracles do not apply to the specified grid mechanism, and retained source contains distinct content, flow-control, expiry, teardown and recovery oracles; no specific invalid surviving oracle or product defect identified. possible_cover: none searched. Could-be-highest: no; this concerns removed automated coverage, with no established shipped loss-of-work route. Caveats: these tests do not prove every transient screen, all old-terminal paths, or a real browser's full sixty-second timeout in one end-to-end run. Screen skipping is explicitly allowed by SPEC.md, Terminal experience: 'a viewer that falls behind is sent the screen as it is when it can take more, skipping the screens in between, while every line that entered the scrollback meanwhile is still sent, appended.' The assigned removal intentionally retires old-terminal-only browser cases; this record does not claim general exhaustive coverage."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Removed xterm-specific flood assertions do not apply to the host-terminal browser stack",
+            "location": "e2e/tests/terminal-flood.spec.ts:1",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. Synthesis context also checked at dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. Original considered consequence preserved: deleting whole-byte-stream verification, xterm pause/resume, stalled-viewer and paused-remount tests could remove corresponding behavior checks; no concrete regression established. TLDR: removal narrows automated coverage of old terminals; the retained grid responsibilities have different, concrete content, flow-control and lifecycle oracles. Important correction of scope: SPEC_impl.md:2021-2034,2294 onward at 647f0227 still preserves and serves old terminals from earlier supervisors. Later retirement at dbfc6975 must not be used to retroactively refute a test-sensitivity defect in 647f0227, and correct production alone is not such a refutation. The deleted tests instantiate old terminals with the removed test-only creation switch and patch xterm write callbacks/counters; these premises are not supplied by the remaining host-only browser stacks. SPEC_impl.md, The grid client, says exactly 'The client sends no flow-control pause or resume: it applies every message as it arrives, applying a large history in slices between frames so that the screen stays usable, and the helm pauses a grid stream on its own queue instead.' Retained oracles actually read: grid-flood.spec.ts:155-212 requires the exact consecutive retained history and screen; grid-client/grid-attach.spec.ts:1162-1192 checks stalled detach, no autonomous reconnect and a fresh live recovered grid; helm terminal.rs:1655-1815,2455-2640 checks stalled teardown and numbered frames through actual pause/resume; supervisor service/grid_stream/tests.rs:472-585,770-835 checks withheld output, lossless retained history, eviction reset, pause expiry and input failure. These are assertions, not inferred correctness of production. No particular surviving test claimed to catch an old-terminal mutation has been identified as insensitive. Suggested bucket: other (test coverage). Confidence: confirmed source analysis; no execution. proposed_drop: no concrete invalid surviving oracle identified; the removed xterm instrumentation cannot be carried unchanged onto the different grid stream. Proposed only, not independently accepted. possible_cover: none searched. Could-be-highest: no for this test-coverage candidate; no shipped loss-of-work/security route was attributed to these deleted tests. Known lifecycle provenance, not new discovery or a new drop: the caller reports neighbouring groups already covering deliberate old-tmux process/screen/history retirement and possible duplication after failed termination. At dbfc6975 SPEC.md:3003-3021 states that retirement explicitly; SPEC_impl.md:2954-3005 describes the bounded startup work and residuals. Source confirms constructor core.rs:6426-6472 ends the old server before reload; core.rs:7334-7382 sweeps before committing conversion and records the ended notice after commit; old_terminals.rs:282-409 sweeps only converted agents and attributable old tabs, excluding host-tab records, within its remaining budget. Those known product losses are not consequences newly discovered from this assigned deletion, and are not silently treated as approved drops here. Caveats retained: no exhaustive old-terminal coverage is claimed, no real-browser sixty-second end-to-end expiry is proved, and transient grid screens may be skipped by contract while retained scrollback must remain whole."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c2",
+            "state": "open",
+            "summary": "Check historical loss of old-terminal flood and remount regression oracles",
+            "location": "e2e/tests/terminal-flood.spec.ts:1",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: original considered consequence remains lost whole-stream, pause/resume, stall and same-realm paused-remount regression checks for old terminals. Caller parent/historical-test-oracles correctly identifies an unsettled premise in the prior proposed drop: no invalid surviving test is required for useful deleted coverage to be lost. Prior grid-coverage and fixture-portability rationale is preserved in earlier c2 events but is not a refutation of this historical old-path coverage question. Useful prior checks already established old terminals remain served at this revision and actual grid tests exercise different mechanisms. Next check: find any retained assertions that exercise the old page's byte-stream verifier, observed browser pause/resume and paused same-realm unmount/remount state; otherwise record the concrete intermediate coverage loss. Suggested bucket: other (tests only). Confidence: source-supported lead pending targeted retained-test checks. proposed_drop: prior proposal reopened, not accepted. possible_cover: supplied neighbouring g176/c2 and g176/c3 concern different late-flush and sibling-isolation oracles, not this flood/remount witness. Could-be-highest: no actual production loss/security failure alleged by removal of these tests. No runtime execution. Later retirement remains a separate lifecycle fact, not a refutation at the recorded revision."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c2",
+            "state": "open",
+            "summary": "Old-terminal flood and paused-remount checks disappear before retirement",
+            "location": "e2e/tests/terminal-flood.spec.ts:1 (deleted old-path cases)",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: sessions still using old terminals lose their real-browser checks for lossless flood delivery, observed pause/resume, stall handling and clean state after leaving a paused attachment. This is a historical regression-test coverage loss, not a demonstrated current production failure. Details: deleted parent terminal-flood.spec.ts:671-739 requires all 800,000 records exactly once/in order plus observed pauseCount>=1 and matching resumeCount, independently of the retained tail. Its stalled-viewer case at :780-937 forces an actual xterm watermark pause, requires the roughly sixty-second interval, visible stalled reason and no automatic recovery, then reattaches. Its same-realm case :987-1092 proves the old mount still paused, restores the shared prototype without releasing that mount, drains the producer off-screen, switches away/back without reloading the realm, and requires no inherited pause or bare resume on the replay-only mount. At the reviewed commit SPEC_impl.md:2294-2311 says the supervisor still adopts and serves an earlier tmux server, and :2956-2978 preserves old agents/tabs and old-terminal support. terminal.js:4712-4753,5335-5371 still implements the per-mount pendingWrite/paused/write-completion watermark mechanism. Competing regressions these deleted assertions distinguish include dropping an earlier flood batch while preserving the final retained tail, disabling watermark accounting while accepting all output, or moving paused/pendingWrite state to page scope so a new attachment inherits a prior pause. No mutation/reproduction was run. Retained-test checks: targeted pinned-tree searches across e2e, Rust end-to-end tests, helm and supervisor source for flood verifier, gated flood, pause counters, watermark, paused-remount and reset-flow witnesses find only the grid flood and a healthy remount hook assertion. terminal.spec.ts:535-577 asserts zeroed hook state but its host-only fixture never enters a byte-stream watermark pause; it cannot exercise inheriting an actually paused old mount. helm terminal.rs:1418-1463 injects pause/resume JSON into a scripted peer and verifies forwarding, not browser counter transitions or whole live old-terminal delivery. The previously read retained grid-flood, grid-attach, grid-stream and relay tests are useful but run different mechanisms and do not replace these old-page oracles. Suggested bucket: other, established harm is regression coverage in maintainer tooling. Confidence: confirmed source/contract analysis only. proposed_drop: false; prior proposals based on no functional regression, grid tests, fixture portability or later retirement are withdrawn, while their original text remains in prior c2 events. possible_cover: supplied g176/c2 is the distinct late-replay-write completion boundary, and g176/c3 is simultaneous sibling isolation; retain provenance without claiming this is their same witness. Could-be-highest: no established security or loss-of-work route from deleting a test alone; possible bugs named above are sensitivity examples, not alleged shipped failures. Later disposition: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 retires old terminals at startup, and f560058da19e02716e6f943883a9508b447aff4e removes the byte renderer/writeBytes. That makes the old-specific checks obsolete later, not at 647f0227. Historical fix direction: retain these assertions through an adopted-old fixture until retirement, or remove them together with their consumer. Do not restore a retired renderer on the pinned tip merely to run them. Original consequence preserved: lost whole-stream, flow/stall and paused-remount regression checks. No prohibited coverage sources searched and no runtime execution."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "c2",
+          "state": "open",
+          "summary": "Old-terminal flood and paused-remount checks disappear before retirement",
+          "location": "e2e/tests/terminal-flood.spec.ts:1 (deleted old-path cases)",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: sessions still using old terminals lose their real-browser checks for lossless flood delivery, observed pause/resume, stall handling and clean state after leaving a paused attachment. This is a historical regression-test coverage loss, not a demonstrated current production failure. Details: deleted parent terminal-flood.spec.ts:671-739 requires all 800,000 records exactly once/in order plus observed pauseCount>=1 and matching resumeCount, independently of the retained tail. Its stalled-viewer case at :780-937 forces an actual xterm watermark pause, requires the roughly sixty-second interval, visible stalled reason and no automatic recovery, then reattaches. Its same-realm case :987-1092 proves the old mount still paused, restores the shared prototype without releasing that mount, drains the producer off-screen, switches away/back without reloading the realm, and requires no inherited pause or bare resume on the replay-only mount. At the reviewed commit SPEC_impl.md:2294-2311 says the supervisor still adopts and serves an earlier tmux server, and :2956-2978 preserves old agents/tabs and old-terminal support. terminal.js:4712-4753,5335-5371 still implements the per-mount pendingWrite/paused/write-completion watermark mechanism. Competing regressions these deleted assertions distinguish include dropping an earlier flood batch while preserving the final retained tail, disabling watermark accounting while accepting all output, or moving paused/pendingWrite state to page scope so a new attachment inherits a prior pause. No mutation/reproduction was run. Retained-test checks: targeted pinned-tree searches across e2e, Rust end-to-end tests, helm and supervisor source for flood verifier, gated flood, pause counters, watermark, paused-remount and reset-flow witnesses find only the grid flood and a healthy remount hook assertion. terminal.spec.ts:535-577 asserts zeroed hook state but its host-only fixture never enters a byte-stream watermark pause; it cannot exercise inheriting an actually paused old mount. helm terminal.rs:1418-1463 injects pause/resume JSON into a scripted peer and verifies forwarding, not browser counter transitions or whole live old-terminal delivery. The previously read retained grid-flood, grid-attach, grid-stream and relay tests are useful but run different mechanisms and do not replace these old-page oracles. Suggested bucket: other, established harm is regression coverage in maintainer tooling. Confidence: confirmed source/contract analysis only. proposed_drop: false; prior proposals based on no functional regression, grid tests, fixture portability or later retirement are withdrawn, while their original text remains in prior c2 events. possible_cover: supplied g176/c2 is the distinct late-replay-write completion boundary, and g176/c3 is simultaneous sibling isolation; retain provenance without claiming this is their same witness. Could-be-highest: no established security or loss-of-work route from deleting a test alone; possible bugs named above are sensitivity examples, not alleged shipped failures. Later disposition: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 retires old terminals at startup, and f560058da19e02716e6f943883a9508b447aff4e removes the byte renderer/writeBytes. That makes the old-specific checks obsolete later, not at 647f0227. Historical fix direction: retain these assertions through an adopted-old fixture until retirement, or remove them together with their consumer. Do not restore a retired renderer on the pinned tip merely to run them. Original consequence preserved: lost whole-stream, flow/stall and paused-remount regression checks. No prohibited coverage sources searched and no runtime execution."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g175/findings.jsonl",
+        "id": "c2",
+        "line": 10,
+        "disposition": "rejected",
+        "group": "old-terminal-whole-stream-flow-stall-paused-remount-oracles-removed-before-retirement",
+        "reason": "Full109:647 removes800000record whole-stream correctness/observedwatermarkpause-resume/>55srealstallclosedoriginalsocket/no-reconnect andactuallypausedsame-realmremountreset browserwitnesses whileoldconsumersstillserved. Differentgridpacing orhealthyunpausedremountcannotreplacethem. Historicalprotectionlossreal, previousdifferentmechanisms/noinvalidoracle dismissalwithdrawn. dbfc/f560retireexactoldconsumerandcallbackflowbytip; no obsoletecurrentfixturefix or actualdeliveryfailure/worklossclaimed."
+      },
+      "accepted_parent_decision": {
+        "key": "g175/c2",
+        "line": 10,
+        "disposition": "rejected",
+        "group": "old-terminal-whole-stream-flow-stall-paused-remount-oracles-removed-before-retirement",
+        "bucket": "other",
+        "recording": "retired-in-range",
+        "needs_independent_drop_check": false,
+        "reason": "Full109:647 removes800000record whole-stream correctness/observedwatermarkpause-resume/>55srealstallclosedoriginalsocket/no-reconnect andactuallypausedsame-realmremountreset browserwitnesses whileoldconsumersstillserved. Differentgridpacing orhealthyunpausedremountcannotreplacethem. Historicalprotectionlossreal, previousdifferentmechanisms/noinvalidoracle dismissalwithdrawn. dbfc/f560retireexactoldconsumerandcallbackflowbytip; no obsoletecurrentfixturefix or actualdeliveryfailure/worklossclaimed."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-109",
+          "key": "g175/c2",
+          "latest_line": 10,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "old-terminal-whole-stream-flow-stall-paused-remount-oracles-removed-before-retirement",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The deletion removes browser-level whole-stream verification, observed watermark pause/resume, real stall and actually-paused same-realm remount witnesses during the interval old terminals remain supported. Grid tests exercise different mechanisms.",
+          "checks": [
+            "647f0227^:e2e/tests/terminal-flood.spec.ts:671-739 requires every 800000 record and matched observed pause/resume counts; :780-937 stalls xterm callbacks, witnesses pause, requires more than 55 seconds, observes original socket closure/no reconnect, and reattaches.",
+            "Parent :987-1092 proves the first mount is still paused, restores only the prototype, leaves the session, drains the producer offscreen, and remounts in the same realm requiring zero pause/resume state.",
+            "647f0227:SPEC_impl.md:2294-2311,2956-2978 still serves adopted old consumers. Targeted retained e2e/helm searches find only grid flood and an unpaused healthy remount hook check, plus scripted pause/resume forwarding; none supplies the deleted old-page witnesses.",
+            "dbfc6975:SPEC_impl.md:2954-2971 later retires old terminals, and f560058 removes the byte renderer. This ends the historical need rather than refuting the preceding gap."
+          ],
+          "coverage_checked": [
+            "SPEC.md Terminal experience requires viewer isolation, flow/stall behavior and retained output; neither specification explicitly accepts this removed test coverage. Grid screen-skipping acceptance is a different contract.",
+            "TODO.md Planned and plans/queue/INDEX.md empty. The tmux-end-old-terminals plan is already landed, not an unlanded fix cover.",
+            "Read stopped-reader-output-witness.md and host-flood-stall-window-claim.md: they concern grid overlap and an eight-second Rust test description, not deleted old-page whole-stream/remount witnesses. No exact BUGS.md or active ledger match. FILTER.md has no test-gap boundary."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No shipped lossless-delivery, watermark or remount failure was reproduced or alleged. Sensitivity examples are hypothetical regressions. At tip these old-specific mechanisms are gone; do not restore them.",
+          "original_stronger_consequence": "Lines 2/4/5 proposed dropping based on different grid mechanisms, surviving tests and no invalid surviving oracle; line 8 reopens that rationale and line 10 explicitly withdraws it. Original lost whole-stream, flow/stall and paused-remount consequences remain. Existing grid tests are useful, not exhaustive old-path substitutes. Neighboring g176 late-flush/sibling witnesses are distinct. Caller-supplied retirement work-loss/duplication provenance remains separate and is not silently accepted or dropped by this record.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain historical maintainer-test coverage loss with other priority. Later intentional retirement does not erase in-range test loss. No product security or user-work-loss route is part of this test-deletion claim."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "old-terminal-whole-stream-flow-stall-paused-remount-oracles-removed-before-retirement",
+        "destination": "trailing-old-terminal-whole-stream-flow-stall-paused-remount-oracles-removed-before-retirement.md"
+      }
+    },
+    {
+      "key": "g175/c3",
+      "owner": "g175",
+      "id": "c3",
+      "domain": "browser-terminal-regressions",
+      "purpose": "browser-terminal-regressions: e2e/tests/terminal-flood.spec.ts, e2e/tests/terminal-multihost.spec.ts; phases @@ -1221,9 +85,7 @@ for line in sys.stdin:",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Large-paste coverage uses the grid's chunked input contract",
+            "location": "e2e/tests/terminal-flood.spec.ts:85",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: considered whether deleting the over-one-megabyte raw WebSocket send leaves large user pastes untested; retained coverage checks the shipped grid paste path more directly. Details: the deleted case required an old-terminal socket to accept a single message above 1 MiB. SPEC_impl.md, Grid streams (3420-3436), explicitly says the helm 'ends the attachment on a message over the 64 KiB input bound rather than forward it'. crates/farhelm-ui/assets/grid-input.js:440-488 splits pastes at 32 KiB and bounds encoded messages at 64 KiB. Retained e2e/tests/terminal-flood.spec.ts:101-153 invokes the grid paste with 1 MiB + 1 bytes and requires the receiver's exact count and SHA-256, subsequent typed echo, and identity of the same open attachment. Its 23-character cycle avoids identical neighboring 32 KiB parts, so reordering or repeating a part changes the digest. crates/farhelm-helm/src/terminal.rs:2358-2372 separately tests oversized grid input refusal rather than promising acceptance. Suggested bucket: other (test coverage). Confidence: confirmed by source and contract analysis; no execution. proposed_drop: raw-byte single-message acceptance is not the grid contract, and the grid's large-paste count/digest and same-socket oracles remain. possible_cover: none searched. Could-be-highest: no; no shipped data-loss consequence is established by this test deletion. Caveat: a digest on one paste payload is not exhaustive paste correctness coverage; this candidate is limited to the claimed removal regression."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Large-paste coverage uses the grid's chunked input contract",
+            "location": "e2e/tests/terminal-flood.spec.ts:85",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. Original considered consequence preserved: deleting the over-one-megabyte raw WebSocket send could leave large user pastes untested. TLDR: the retained test's receiver, attachment and follow-up-input assertions remain sensitive to lost, reordered or altered paste bytes on the grid path. Synthesis caller checks: helpers/term.ts:391-409 selects the identified session and waits for its readiness; terminal-flood.spec.ts:113-126 creates a dedicated receiver session, opens it, waits for the receiver's raw-mode READY marker and asserts grid kind. grid-terminal.js:1500-1522 shows the invoked paste method calls the actual gridInput.pasteMessages and input send callback, not a test-only injection into the receiver or grid model. helpers/term.ts:237-284,371-377 reads the mounted grid's applied model contents, so the expected receiver count/digest is required in received terminal output rather than copied from the test's payload. The test computes its expected digest in Node and the separate Python receiver computes the actual digest from bytes read off its pty; missing/truncated/reordered parts cannot be masked merely by an open socket. It also requires subsequent echo and the same original open socket at terminal-flood.spec.ts:142-149. grid-input.js:440-488 splits within 32 KiB paste/64 KiB message bounds; SPEC_impl.md, Grid streams, states exactly that the helm 'ends the attachment on a message over the 64 KiB input bound rather than forward it'. helm terminal.rs:2358-2372 separately tests this refusal. Suggested bucket: other (test coverage). Confidence: confirmed source and contract analysis, no execution. proposed_drop: retained test assertions distinguish the claimed grid transport failure, whereas accepting one raw message over 1 MiB is an obsolete byte-stream test premise. This is based on oracle sensitivity, not production correctness alone. Proposed only, not independently accepted. possible_cover: none searched. Could-be-highest: no for this test-removal candidate; no shipped security/loss-of-work consequence established. Caveats: this test directly calls the product grid paste method and does not establish OS clipboard interception; it is not exhaustive paste testing. The assigned removal does not delete a prompt, launch-excerpt or tab-identity test, and no distinct route from it to wrong-target termination or unconfirmed Delete was found. Those unrelated responsibilities were not inferred covered by this paste test."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c3",
+            "state": "open",
+            "summary": "Check historical loss of oversized old-terminal input acceptance oracle",
+            "location": "e2e/tests/terminal-flood.spec.ts:56",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: original considered consequence remains lost regression coverage of a single old-terminal WebSocket message over 1 MiB staying attached and delivering later input. The retained grid count/digest test checks a different chunked-input contract; its sensitivity does not refute the old-path test loss while old terminals remain served. Caller parent/historical-test-oracles requests this distinction. Earlier c3 proposed-drop bases and exact grid acceptance/refusal text remain in history but are reopened, not accepted. Next check: find retained old-byte-stream single-message acceptance plus same-socket and post-send receiver evidence, or record the historical test-only gap. Suggested bucket: other. Confidence: source-supported lead pending retained-test search. proposed_drop: prior rationale reopened, not accepted. possible_cover: none for this oracle; neighbouring clipboard/link tests are different contracts. Could-be-highest: no established or alleged production security/loss-of-work failure from test removal alone. No runtime execution or reproduction."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c3",
+            "state": "open",
+            "summary": "Old-terminal large-message acceptance loses its regression check",
+            "location": "e2e/tests/terminal-flood.spec.ts:56 (deleted old-path case)",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: old terminals still supported at this intermediate revision lose the browser check that a paste sent as one message over 1 MiB does not disconnect them and still permits later input. This is historical test-only coverage loss, not an alleged production input failure. Details: deleted parent terminal-flood.spec.ts:1149-1193 proves receiver liveness with an echo before sending 1 MiB+1 raw bytes as one WebSocket message, requires the socket to drain while open, waits for a post-paste echo behind that ordered input, and checks that the attachment is still the same open socket. The recorded revision still serves adopted old terminals (SPEC_impl.md:2294-2311,2956-2978), and helm terminal.rs:539-554 expressly retains an 8 MiB message/frame cap because old xterm sends whole pastes as one message; :889-891 dispatches byte streams through the old chunked send_input path. A concrete competing regression is lowering TERM_WS_MAX_MESSAGE to 1 MiB: this deleted test fails because the 1 MiB+1 message closes the socket, but the retained grid paste remains below its 64 KiB-per-message bound and does not distinguish that cap regression. Retained checks actually inspected: terminal.rs:1623-1652 tests rejection at TERM_WS_MAX_MESSAGE+1, using the current constant, so it still passes if the constant is wrongly reduced; :2238-2356 accepts one grid message of exactly 64 KiB and :2372 onward checks oversized-grid refusal. terminal.rs:1271-1355's 8 MiB input is sent directly through SupervisorClient, bypassing WebSocket admission; it checks bounded detach, not socket acceptance or post-send receiver liveness. Searches across retained e2e/tests, grid-client, Rust end-to-end and helm tests for large binary messages, megabyte/paste bounds and raw frame sends found no retained positive old-WebSocket acceptance oracle. The grid digest test at terminal-flood.spec.ts:101-153 remains meaningful for grid byte integrity, but is not evidence for acceptance of an old raw message over 1 MiB. Suggested bucket: other, regression testing only. Confidence: confirmed source/contract analysis, no execution or reproduction. proposed_drop: false; earlier grid-contract/production-correctness proposed-drop rationale is withdrawn and preserved in original c3 history. possible_cover: none known; no prohibited coverage sources searched. Could-be-highest: no current security/loss-of-work route alleged from test deletion alone. Original consequence preserved: loss of oversized old-message acceptance, same-socket and follow-up input regression coverage. Later disposition is separate: old terminals retire at dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 and the byte renderer/protocol path is removed at f560058da19e02716e6f943883a9508b447aff4e, making this specific acceptance oracle obsolete then. Historical fix direction: preserve a byte-stream positive socket-bound check through an adopted-old fixture or scripted byte-stream peer until the consumer is removed, rather than restore the retired path at tip."
+          }
+        }
+      ],
+      "latest": {
+        "line": 11,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "c3",
+          "state": "open",
+          "summary": "Old-terminal large-message acceptance loses its regression check",
+          "location": "e2e/tests/terminal-flood.spec.ts:56 (deleted old-path case)",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: old terminals still supported at this intermediate revision lose the browser check that a paste sent as one message over 1 MiB does not disconnect them and still permits later input. This is historical test-only coverage loss, not an alleged production input failure. Details: deleted parent terminal-flood.spec.ts:1149-1193 proves receiver liveness with an echo before sending 1 MiB+1 raw bytes as one WebSocket message, requires the socket to drain while open, waits for a post-paste echo behind that ordered input, and checks that the attachment is still the same open socket. The recorded revision still serves adopted old terminals (SPEC_impl.md:2294-2311,2956-2978), and helm terminal.rs:539-554 expressly retains an 8 MiB message/frame cap because old xterm sends whole pastes as one message; :889-891 dispatches byte streams through the old chunked send_input path. A concrete competing regression is lowering TERM_WS_MAX_MESSAGE to 1 MiB: this deleted test fails because the 1 MiB+1 message closes the socket, but the retained grid paste remains below its 64 KiB-per-message bound and does not distinguish that cap regression. Retained checks actually inspected: terminal.rs:1623-1652 tests rejection at TERM_WS_MAX_MESSAGE+1, using the current constant, so it still passes if the constant is wrongly reduced; :2238-2356 accepts one grid message of exactly 64 KiB and :2372 onward checks oversized-grid refusal. terminal.rs:1271-1355's 8 MiB input is sent directly through SupervisorClient, bypassing WebSocket admission; it checks bounded detach, not socket acceptance or post-send receiver liveness. Searches across retained e2e/tests, grid-client, Rust end-to-end and helm tests for large binary messages, megabyte/paste bounds and raw frame sends found no retained positive old-WebSocket acceptance oracle. The grid digest test at terminal-flood.spec.ts:101-153 remains meaningful for grid byte integrity, but is not evidence for acceptance of an old raw message over 1 MiB. Suggested bucket: other, regression testing only. Confidence: confirmed source/contract analysis, no execution or reproduction. proposed_drop: false; earlier grid-contract/production-correctness proposed-drop rationale is withdrawn and preserved in original c3 history. possible_cover: none known; no prohibited coverage sources searched. Could-be-highest: no current security/loss-of-work route alleged from test deletion alone. Original consequence preserved: loss of oversized old-message acceptance, same-socket and follow-up input regression coverage. Later disposition is separate: old terminals retire at dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 and the byte renderer/protocol path is removed at f560058da19e02716e6f943883a9508b447aff4e, making this specific acceptance oracle obsolete then. Historical fix direction: preserve a byte-stream positive socket-bound check through an adopted-old fixture or scripted byte-stream peer until the consumer is removed, rather than restore the retired path at tip."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g175/findings.jsonl",
+        "id": "c3",
+        "line": 11,
+        "disposition": "rejected",
+        "group": "old-terminal-positive-large-websocket-message-oracle-removed-before-retirement",
+        "reason": "Full109:647 removes positiveone1MiB+1rawmessage acceptance whileliveoldreceiver/socketcontinuity/pre-andpostecho established. Gridchunkeddigest test andcap-relative8MiB+1negative test cannot detect loweringoldpositivethreshold; sourceconfirmsdistinctintermediateoracleloss. dbfc/f560endoldconsumerbytip, noreviveobsoletewholemessagefixture. Preserve originalgrid-substitute dismissalwithdrawal, usefulgridtest, no actualdisconnect/pasteloss/workloss."
+      },
+      "accepted_parent_decision": {
+        "key": "g175/c3",
+        "line": 11,
+        "disposition": "rejected",
+        "group": "old-terminal-positive-large-websocket-message-oracle-removed-before-retirement",
+        "bucket": "other",
+        "recording": "retired-in-range",
+        "needs_independent_drop_check": false,
+        "reason": "Full109:647 removes positiveone1MiB+1rawmessage acceptance whileliveoldreceiver/socketcontinuity/pre-andpostecho established. Gridchunkeddigest test andcap-relative8MiB+1negative test cannot detect loweringoldpositivethreshold; sourceconfirmsdistinctintermediateoracleloss. dbfc/f560endoldconsumerbytip, noreviveobsoletewholemessagefixture. Preserve originalgrid-substitute dismissalwithdrawal, usefulgridtest, no actualdisconnect/pasteloss/workloss."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-109",
+          "key": "g175/c3",
+          "latest_line": 11,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "old-terminal-positive-large-websocket-message-oracle-removed-before-retirement",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The removed case positively required one raw message above 1 MiB to reach a live old-terminal receiver without replacing its socket. The surviving grid paste deliberately splits input, and the cap-relative rejection test does not pin that positive threshold.",
+          "checks": [
+            "647f0227^:e2e/tests/terminal-flood.spec.ts:1149-1193 witnesses pre-send echo, sends one 1 MiB+1 raw message, requires drain while open, observes ordered post-paste echo, and checks identity of the original socket.",
+            "647f0227:crates/farhelm-helm/src/terminal.rs:539-554 expressly preserves the 8 MiB socket cap for old whole-message pastes. :1623-1652 rejects TERM_WS_MAX_MESSAGE+1, so reducing the constant would not violate that oracle; :2358 onward separately refuses grid messages over 64 KiB.",
+            "00de0b6c:e2e/tests/terminal-flood.spec.ts:85-153 retains meaningful grid count/SHA256, later echo and same-socket assertions, but its chunked input does not exercise acceptance of the old raw message. Targeted retained-source searches found no corresponding positive old-WebSocket case.",
+            "647f0227:SPEC_impl.md:2294-2311,2956-2978 retains old consumers. dbfc6975 retirement and f560058 removal subsequently end this old-specific need."
+          ],
+          "coverage_checked": [
+            "Both specifications' terminal/grid contracts distinguish bounded grid messages from historical whole old-terminal pastes; no exact acceptance of the intermediate test omission found.",
+            "TODO.md Planned and plans/queue/INDEX.md empty. No exact BUGS.md, INDEX.md or active TRIAGE_OUTCOMES.md match. Other paste-receipt and oversized-paste test items concern different oracles. FILTER.md supplies no matching omission boundary."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No actual oversized-input disconnect or production loss is shown. The source-supported cap-reduction example demonstrates distinct test sensitivity only. The old consumer is absent at tip.",
+          "original_stronger_consequence": "Lines 3/7 initially proposed dropping because grid paste integrity and grid oversize refusal remained; line 9 reopens that proposal and line 11 withdraws it. Preserve the original old single-message acceptance/same-socket/follow-up-input coverage loss. Retained grid digest test remains useful and does not certify OS clipboard interception or exhaustive paste behavior. Unrelated prompt/termination/Delete contracts were not inferred covered.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain the historical positive-admission test gap with other priority. It is distinct from g175/c2's output/flow/remount gap; neither is a shipped user-work-loss allegation."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "old-terminal-positive-large-websocket-message-oracle-removed-before-retirement",
+        "destination": "trailing-old-terminal-positive-large-websocket-message-oracle-removed-before-retirement.md"
+      }
+    },
+    {
+      "key": "g175/l1",
+      "owner": "g175",
+      "id": "l1",
+      "domain": "browser-terminal-regressions",
+      "purpose": "browser-terminal-regressions: e2e/tests/terminal-flood.spec.ts, e2e/tests/terminal-multihost.spec.ts; phases @@ -1221,9 +85,7 @@ for line in sys.stdin:",
+      "history": [
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Check whether host-only control-key test retains obsolete xterm/tmux rationale",
+            "location": "e2e/tests/terminal-flood.spec.ts:156",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: retained control-key test comments at :156-163 say keypresses go through xterm.js, and :211-216 explain retained terminal contents through tmux remain-on-exit, although this revision's browser stacks create only terminal hosts. This may be a newly universally false maintenance explanation after removing the alternate old-terminal suite, distinct from c2/c3's deleted test-oracle gaps. Useful checks already made: complete resulting control-key body :217-279 has no old-kind branch and attaches the shared session; reviewed playwright.config.ts and SPEC_impl.md Every new terminal in a host previously established host-only stacks. Pinned-tip terminal-flood.spec.ts:155-160 instead names grid key handling, suggesting a later correction within range. Exact missing attribution check: establish that the old-mode suite supplied the comments' valid applicability before 647f0227, locate when it disappears, and inspect the later comment correction rather than assume an unchanged overbroad statement is introduced here. Suggested bucket: other, internal test-documentation accuracy only. Confidence: source-supported lead pending complete history/fixture check. proposed_drop: false pending investigation. possible_cover: neighbour g079/l2 concerns a different CSS FitAddon rationale, not this test's input/terminal-lifetime explanation. Could-be-highest: no established or suspected security/loss-of-work route from this comment. No runtime reproduction or execution."
+          }
+        },
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Control-key test's obsolete renderer rationale predates the full range",
+            "location": "e2e/tests/terminal-flood.spec.ts:156",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513; full-range attribution checked against exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a. Original considered consequence preserved: xterm key-encoding and tmux remain-on-exit comments mislead a reader about this host-terminal test's input and terminal lifetime. TLDR: this is not introduced by the assigned deletion; the exact rationale was already inapplicable to this untagged host-only test before the pinned range. Checks/results: base terminal-flood.spec.ts:1294-1301 already says real keypresses go through xterm; :1348-1353 already explains final-screen retention through tmux remain-on-exit; :1354 declares the test without OLD_TERMINAL_TAG. Base playwright.config.ts:100-110 runs only tagged tests of terminal-flood.spec.ts in the old-terminal set, and suite-terminals.ts:4-20 says the ordinary run creates host terminals and old-mode projects exclude untagged cases. Thus this particular test never gained valid xterm applicability from the alternate old suite; removing that suite at 647f0227 does not remove a last valid referent, unlike neighbour g079/l2's distinct FitAddon case. At 647f0227 only the Rust-hexecho coverage references and earlier-test-history comments change in this block; the incorrect xterm/tmux clauses remain unchanged. Later f560058da19e02716e6f943883a9508b447aff4e corrects the key-handling explanation to grid messages; that is a later improvement to the pre-range stale statement, not evidence of new error at the assigned commit. Suggested bucket: other if reviewed as current documentation, but excluded as an independent pre-range defect for this review. Confidence: confirmed full-range source/fixture attribution; no execution. proposed_drop: source-refuted in-range introduction, with exact base/config references above; not an accepted parent drop. possible_cover: later partial source correction at f560058, no prohibited coverage search. Could-be-highest: no established or suspected security/loss-of-work route from this comment. The original l1 lead is resolved to this candidate; no missing premise remains. This conclusion does not withdraw c2/c3's independently established in-range test deletions."
+          }
+        }
+      ],
+      "latest": {
+        "line": 13,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l1",
+          "state": "open",
+          "summary": "Control-key test's obsolete renderer rationale predates the full range",
+          "location": "e2e/tests/terminal-flood.spec.ts:156",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513; full-range attribution checked against exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a. Original considered consequence preserved: xterm key-encoding and tmux remain-on-exit comments mislead a reader about this host-terminal test's input and terminal lifetime. TLDR: this is not introduced by the assigned deletion; the exact rationale was already inapplicable to this untagged host-only test before the pinned range. Checks/results: base terminal-flood.spec.ts:1294-1301 already says real keypresses go through xterm; :1348-1353 already explains final-screen retention through tmux remain-on-exit; :1354 declares the test without OLD_TERMINAL_TAG. Base playwright.config.ts:100-110 runs only tagged tests of terminal-flood.spec.ts in the old-terminal set, and suite-terminals.ts:4-20 says the ordinary run creates host terminals and old-mode projects exclude untagged cases. Thus this particular test never gained valid xterm applicability from the alternate old suite; removing that suite at 647f0227 does not remove a last valid referent, unlike neighbour g079/l2's distinct FitAddon case. At 647f0227 only the Rust-hexecho coverage references and earlier-test-history comments change in this block; the incorrect xterm/tmux clauses remain unchanged. Later f560058da19e02716e6f943883a9508b447aff4e corrects the key-handling explanation to grid messages; that is a later improvement to the pre-range stale statement, not evidence of new error at the assigned commit. Suggested bucket: other if reviewed as current documentation, but excluded as an independent pre-range defect for this review. Confidence: confirmed full-range source/fixture attribution; no execution. proposed_drop: source-refuted in-range introduction, with exact base/config references above; not an accepted parent drop. possible_cover: later partial source correction at f560058, no prohibited coverage search. Could-be-highest: no established or suspected security/loss-of-work route from this comment. The original l1 lead is resolved to this candidate; no missing premise remains. This conclusion does not withdraw c2/c3's independently established in-range test deletions."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g175/findings.jsonl",
+        "id": "l1",
+        "line": 13,
+        "disposition": "excluded",
+        "group": "control-key-test-preexisting-xterm-tmux-rationale",
+        "reason": "Parent explicitly accepted named out-of-range proposal from claims-109 after inspecting it. The same xterm key-handling and tmux remain-on-exit explanation already accompanied this untagged host-only test at the exclusive base. Removing the old suite did not make a previously valid explanation newly false. Exclude only the pre-range explanatory defect. No security or loss-of-work consequence was alleged; no runtime check. Checked source/results: [\"6e423e30068b62c6cfa276c6d720ee35bb70387a:e2e/tests/terminal-flood.spec.ts:1294-1304 already names xterm key handling; :1348-1362 already names tmux remain-on-exit and declares this test without OLD_TERMINAL_TAG.\",\"Base e2e/playwright.config.ts:100-110 and suite-terminals.ts:1-24 select only tagged tests in the old run, leaving this case on the ordinary host stack. Hence the historical old run did not supply applicability.\",\"00de0b6c:e2e/tests/terminal-flood.spec.ts:155 onward now names grid key handling. A later correction is not an introduction of the earlier error within this range.\"] Current coverage/results: [\"SPEC.md Terminal experience and SPEC_impl.md host/grid contract confirm the host interpretation, not acceptance of the stale prose.\",\"TODO.md Planned and plans/queue/INDEX.md empty. No exact BUGS.md, INDEX.md or active ledger item. Landed tmux docs cleanup is context, not an unlanded cover. FILTER.md is not used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Line 12 considered a newly universally false maintenance explanation after deleting the alternate suite; line 13 resolves it as pre-range. Original reader-confusion consequence is preserved. This is distinct from the caller-mentioned FitAddon rationale and does not withdraw g175/c2 or c3's in-range test deletions.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g175/l1",
+        "line": 13,
+        "disposition": "excluded",
+        "group": "control-key-test-preexisting-xterm-tmux-rationale",
+        "bucket": "other",
+        "recording": "out-of-range",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named out-of-range proposal from claims-109 after inspecting it. The same xterm key-handling and tmux remain-on-exit explanation already accompanied this untagged host-only test at the exclusive base. Removing the old suite did not make a previously valid explanation newly false. Exclude only the pre-range explanatory defect. No security or loss-of-work consequence was alleged; no runtime check. Checked source/results: [\"6e423e30068b62c6cfa276c6d720ee35bb70387a:e2e/tests/terminal-flood.spec.ts:1294-1304 already names xterm key handling; :1348-1362 already names tmux remain-on-exit and declares this test without OLD_TERMINAL_TAG.\",\"Base e2e/playwright.config.ts:100-110 and suite-terminals.ts:1-24 select only tagged tests in the old run, leaving this case on the ordinary host stack. Hence the historical old run did not supply applicability.\",\"00de0b6c:e2e/tests/terminal-flood.spec.ts:155 onward now names grid key handling. A later correction is not an introduction of the earlier error within this range.\"] Current coverage/results: [\"SPEC.md Terminal experience and SPEC_impl.md host/grid contract confirm the host interpretation, not acceptance of the stale prose.\",\"TODO.md Planned and plans/queue/INDEX.md empty. No exact BUGS.md, INDEX.md or active ledger item. Landed tmux docs cleanup is context, not an unlanded cover. FILTER.md is not used.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Line 12 considered a newly universally false maintenance explanation after deleting the alternate suite; line 13 resolves it as pre-range. Original reader-confusion consequence is preserved. This is distinct from the caller-mentioned FitAddon rationale and does not withdraw g175/c2 or c3's in-range test deletions.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-109",
+          "key": "g175/l1",
+          "latest_line": 13,
+          "recommendation": "out-of-range",
+          "bucket": "other",
+          "underlying_key": "control-key-test-preexisting-xterm-tmux-rationale",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The same xterm key-handling and tmux remain-on-exit explanation already accompanied this untagged host-only test at the exclusive base. Removing the old suite did not make a previously valid explanation newly false.",
+          "checks": [
+            "6e423e30068b62c6cfa276c6d720ee35bb70387a:e2e/tests/terminal-flood.spec.ts:1294-1304 already names xterm key handling; :1348-1362 already names tmux remain-on-exit and declares this test without OLD_TERMINAL_TAG.",
+            "Base e2e/playwright.config.ts:100-110 and suite-terminals.ts:1-24 select only tagged tests in the old run, leaving this case on the ordinary host stack. Hence the historical old run did not supply applicability.",
+            "00de0b6c:e2e/tests/terminal-flood.spec.ts:155 onward now names grid key handling. A later correction is not an introduction of the earlier error within this range."
+          ],
+          "coverage_checked": [
+            "SPEC.md Terminal experience and SPEC_impl.md host/grid contract confirm the host interpretation, not acceptance of the stale prose.",
+            "TODO.md Planned and plans/queue/INDEX.md empty. No exact BUGS.md, INDEX.md or active ledger item. Landed tmux docs cleanup is context, not an unlanded cover. FILTER.md is not used."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Line 12 considered a newly universally false maintenance explanation after deleting the alternate suite; line 13 resolves it as pre-range. Original reader-confusion consequence is preserved. This is distinct from the caller-mentioned FitAddon rationale and does not withdraw g175/c2 or c3's in-range test deletions.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Exclude only the pre-range explanatory defect. No security or loss-of-work consequence was alleged; no runtime check."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "control-key-test-preexisting-xterm-tmux-rationale",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete. All 1,251 assigned patch lines reviewed at their recorded revisions.\n\nNo reportable findings or unresolved leads. Three rejected candidates (`c1`–`c3`) are recorded in `findings.jsonl`; `progress.md` contains coverage and source checks. No tests or reproductions run."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised `c1`, `c2`, and `c3` with lifecycle, caller, and test-sensitivity checks. `c2` now explicitly distinguishes test deletion from later terminal retirement.\n\nNo new findings. No unresolved lead IDs. Proposed drops remain unaccepted. No runtime execution."
+    },
+    {
+      "turn": 3,
+      "reply": "Checked deleted assertions against retained old-path tests, socket limits, and pinned-range evolution.\n\n- Newly verified: `c2`, `c3`, revised under original IDs to historical test-coverage findings; prior drop proposals withdrawn.\n- New unverified IDs: none.\n- Open leads: none.\n- Separate discovery found no additional issue.\n\nSource analysis only; no runtime execution."
+    },
+    {
+      "turn": 4,
+      "reply": "Discovery pass 2 found no new in-scope issue.\n\nChecked retained imports/helper references, authentication isolation, control-key fixture semantics, and interruption assertions. Lead `l1` was recorded and resolved to a candidate: the stale explanation predates the full range.\n\nNew verified findings: none. New unverified findings: none. Open leads: none. No runtime execution."
+    }
+  ],
+  "progress": "Group g175: browser-terminal-regressions.\nTurn type/count: initial review, turn 1 completed. Discovery passes: 0 (this was the initial pass, not a later discovery or synthesis turn).\n\nAll mandatory material was read through the prescribed evidence command: 00830-000.patch lines 1-1172 in six packets (1-200, 201-400, 401-600, 601-800, 801-1000, 1001-1172); 00830-001.patch lines 1-66; 00885-000.patch lines 1-13. No unread assigned material. Complete inventory commits field read; excluded coverage metadata was not read.\n\nResult: no reportable findings, no unresolved leads. Candidates c1, c2, c3 recorded immediately; c2 revised after replacement relay and supervisor tests were checked. New verified finding IDs: none. New unverified finding IDs: none. Candidates are source-based rejections, not execution results.\n\nInterface assumptions: parent owns cross-group coverage and final queue handling. Removal is judged at 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513; interruption assertion at dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. No helper agents, checkout writes, runtime tests, reproductions or live-install actions.\n\nContracts read: root AGENTS.md injected through End sentinel; full machine, review queue AGENTS and recording instructions; scode-voice and skillette skills. At 647f0227: SPEC.md Terminal experience 2865-3206; SPEC_impl.md The grid client 1948-2014, Grid streams and following detach contracts 3420-3512, Testing 8602-8670, old-terminal flow-control context 1730-1814, Answers bind to what was drawn 1071-1105. At dbfc6975: SPEC.md reboot/interruption contract 3521-3537 with surrounding session context 3490-3548; SPEC_impl runtime-state and interruption context 4550-4615 plus interrupted-surface bullet 4616-4621.\n\nSource context read at 647f0227: terminal-flood.spec.ts 1-279 (entire resulting file); grid-flood.spec.ts 1-216 (entire file); helpers/terminal-suite.ts 1-270; playwright.config.ts 1-162 (entire file); grid-client/grid-attach.spec.ts 1140-1200; grid-input.js 400-490; helm terminal.rs 1650-1815, 2225-2385, 2450-2645; supervisor service/grid_stream/tests.rs 472-595, 765-842. At dbfc6975: terminal-multihost.spec.ts 3510-3780, session_view.rs 3835-3915. Targeted searches identified the relevant contracts and replacement test locations. No retired implementation was searched for independent defects.\n\nNext action: return to caller for the later synthesis turn. Do not treat this initial pass as later synthesis or discovery. Durable findings.jsonl contains the complete candidate details and caveats. The first c1 record attempt used an unsupported state; it failed before append and was immediately retried with state open, successfully. No event was lost or existing record truncated.\n\nTurn 2: later-turn synthesis completed. Discovery passes: 0. No new verified or unverified findings; no unresolved lead IDs. Revisions appended under original IDs c2, c1, c3 (in that order). All proposed drops remain proposals for caller handling; no independent acceptance is claimed.\n\nInteraction correction: 647f0227 removed old-terminal test creation, while product old terminals from earlier supervisors still survived at that revision. dbfc6975 subsequently retires them. c2 now makes this boundary explicit and does not use later retirement or correct production to refute a test-sensitivity allegation. Known retirement of processes/screens/history and possible duplicate agents retain provenance from the caller's neighbouring-group reports; no distinct loss-of-work/security route was found in the assigned tests, and no spec-accepted highest candidate required conversion.\n\nUseful synthesis checks: at dbfc6975 read SPEC.md 2988-3036 and SPEC_impl.md 2954-3010; constructor core.rs 6420-6480; conversion/sweep/notice ordering 7300-7400; old_terminals.rs 1-320 and 280-450. These establish the startup retirement and host-tab exclusion contracts relevant to c2, without investigating unrelated cleanup for independent defects. At dbfc6975 rechecked the actual simulated reboot fixture and its independent oracles, terminal-multihost.spec.ts 3553-3680, for c1. At 647f0227 checked terminal.js 4625-4770 and 5290-5385 (mount-local byte watermark state), grid-terminal.js 1480-1535 (actual product paste path), helpers/term.ts 206-290 and 365-425 (identified attachment readiness and received-grid text oracle). Searches located grid frame receipt separately from byte write callbacks. These sharpen c2/c3's test-responsibility and test-sensitivity conclusions. The paste receiver's Node/Python independent digests and same-socket/follow-up echo remain actual oracles, not inferred from correct production.\n\nNo unread assigned patch scope. No tests, builds, reproductions, helpers or checkout mutations. No new record was made for the caller's already-known retirement consequences. Next action: return this turn's delta; await caller's next synthesis/discovery instruction.\n\nTurn 3: discovery pass 1 completed after synthesizing all supplied interface records and the named parent/historical-test-oracles question. Read discovery-neighbours.json completely in bounded line packets 1-40,41-85,86-125,126-180,181-215,216-246; the initial oversized 1-180 read was clipped and was replaced by those complete reads. These neighbour records supplied context and novelty only, not source-read credit. No prohibited coverage sources read.\n\nDelta records: original c2 and c3 were each reopened as leads, then revised to confirmed findings under the same IDs. Their prior proposed drops are withdrawn, not silently erased. New verified findings this turn: c2 and c3 (existing IDs, newly confirmed historical test-only gaps). New unverified-after-investigation IDs: none. Remaining open lead IDs: none. c1 unchanged. No security/loss-of-work consequence was newly established; known retirement and duplicate-agent reports remain with their supplied neighbour provenance.\n\nResolved pending question: 647f0227 still explicitly adopts/serves prior old terminals (SPEC_impl.md 2290-2323,2948-2995), so loss of their useful tests cannot be refuted by later retirement, working production, or grid tests. c2 records exact lost whole-stream, observed browser watermark and paused-remount assertions; c3 records single-old-WebSocket-message acceptance, same-socket and post-send receiver evidence. Searches across retained e2e, Rust end-to-end, helm and supervisor sources found no equivalent old-path witness. Inspected terminal.spec.ts 535-590 (healthy host remount checks zero hook counts without a prior old-page pause), terminal.rs 1418-1468,1510-1653 (injected flow forwarding, marker/tracing, dynamic over-cap rejection), 530-580,875-945,1285-1355 (8 MiB old-socket contract and direct SupervisorClient bypass), complete terminal_backpressure.rs 1-99 (remaining static bound/drain helper), and parent terminal-flood.spec.ts 640-735,990-1092,1136-1200. These are concrete test-sensitivity checks, not execution or mutation results.\n\nSeparate discovery beyond these known candidate corrections: re-examined the assigned deletion's trailing hunks, surviving imports/hooks, raw unknown-session attach, dedicated paste receiver and retained control-key test boundaries; reviewed file evolution across the whole pinned range and resulting tip terminal-flood.spec.ts 1-160 only as attribution context. No additional distinct issue found. No newly deleted prompt/excerpt/tab-identity oracle occurs in this assigned patch, and no distinct route to neighbour-reported hidden-tab Delete or legacy-page JSON reinterpretation was supplied by the assigned changes. Did not broaden into those findings. All assigned patch material remains read; no unread scope. No runtime tests, reproductions, live-install actions or checkout changes.\n\nNext action: return only turn-3 deltas and discovery result; any substantive newly confirmed finding may require a later caller-directed discovery pass. Findings log is the durable complete record.\n\nTurn 4: separate discovery pass 2 completed. Read the updated discovery-neighbours.json (timestamp 2026-11-13T17:06:46.324Z) fully in bounded packets 1-40,41-80,81-120,121-160,161-200,201-240,241-285. New neighbour lifecycle/compatibility/readiness findings were used for novelty and scope boundaries; no duplicate was claimed and no parent drop/lowering accepted. No pending named interface questions.\n\nNew verified finding IDs: none. New unverified-after-investigation finding IDs: none. One substantive documentation lead l1 was immediately recorded, investigated and resolved under that ID to a source-refuted candidate. Remaining open lead IDs: none. c1/c2/c3 conclusions unchanged. Explicit discovery result: no new in-scope defect found in pass 2.\n\nChecks beyond known findings: re-examined resulting terminal-flood.spec.ts 1-60 and150-279 for standalone imports/hooks, unknown-session authentication, shared-session focus/liveness and retained control-key semantics; searched the retained e2e tree for all deleted helper names (no residual references); read device-auth.ts requireProductPageAuth contract/implementation (only the per-page context header is cleared; independent API fixture is unchanged); checked the entire one-line dbfc6975 terminal-multihost diff again for independent oracle loss. The removed helpers do not leave dangling calls, and the changed interruption assertion preserves its independent state/absence checks.\n\nl1 full-range attribution: read parent suite-terminals.ts 1-111, the 647f0227 config-removal diff, the f560058 terminal-flood comment correction, exclusive-base suite-terminals.ts1-80, base terminal-flood.spec.ts1290-1370 and base playwright.config.ts100-115. The base control-key case is untagged, while old-mode projects run only tagged cases of that file; its false xterm/retain-on-exit explanation was therefore already stale in the actual host-only test before the range. This refutes introduction by removing the alternate suite; the later grid wording fix does not establish an earlier in-range introduction. The candidate preserves the considered documentation consequence, source basis and proposed-drop basis for caller audit.\n\nAll assigned patch scope remains read. No runtime tests, reproductions, builds, helpers, live-install actions or checkout modifications. Findings.jsonl remains append-only. Next action: return turn-4 delta and await caller direction.\n"
+}

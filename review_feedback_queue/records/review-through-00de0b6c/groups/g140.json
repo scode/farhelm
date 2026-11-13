@@ -1,0 +1,783 @@
+{
+  "group": {
+    "id": "g140",
+    "domain": "rust-session-agent-regressions",
+    "purpose": "rust-session-agent-regressions: crates/farhelm/tests/e2e/replay_marker.rs, crates/farhelm/tests/e2e/supervisor_stop.rs, crates/farhelm/tests/e2e/session_rename.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g001",
+      "g005",
+      "g006",
+      "g007",
+      "g008",
+      "g009",
+      "g139",
+      "g141",
+      "g142",
+      "g143",
+      "g144",
+      "g145",
+      "g146"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00794-000.patch",
+        "ranges": [
+          [
+            1,
+            1066
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/replay_marker.rs",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,47467)",
+        "lines": 1066,
+        "bytes": 47549,
+        "start": 0,
+        "end": 47467,
+        "original": "[private-run]/prep/originals/00794.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00798-000.patch",
+        "ranges": [
+          [
+            1,
+            333
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/supervisor_stop.rs",
+        "commit": "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513",
+        "notes": "patch header; patch character offsets [0,17132)",
+        "lines": 333,
+        "bytes": 17132,
+        "start": 0,
+        "end": 17132,
+        "original": "[private-run]/prep/originals/00798.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00984-000.patch",
+        "ranges": [
+          [
+            1,
+            12
+          ]
+        ],
+        "original_path": "crates/farhelm/tests/e2e/session_rename.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,584)",
+        "lines": 12,
+        "bytes": 584,
+        "start": 0,
+        "end": 584,
+        "original": "[private-run]/prep/originals/00984.patch"
+      }
+    ],
+    "lines": 1411,
+    "bytes": 65265
+  },
+  "records": [
+    {
+      "key": "g140/f1",
+      "owner": "g140",
+      "id": "f1",
+      "domain": "rust-session-agent-regressions",
+      "purpose": "rust-session-agent-regressions: crates/farhelm/tests/e2e/replay_marker.rs, crates/farhelm/tests/e2e/supervisor_stop.rs, crates/farhelm/tests/e2e/session_rename.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "f1",
+            "state": "open",
+            "summary": "Supervisor-stop tests may retain a byte-only attach after switching to hosts",
+            "location": "crates/farhelm/tests/e2e/supervisor_stop.rs:148",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: the three stop-survival regressions may fail before sending their stop signal, leaving the intended host-survival behavior untested. Source basis: the patch removes --new-terminals tmux and asserts TerminalKind::Host after stop, but retains client.attach_live at lines 148-151. A pinned source search of host_terminals.rs shows a_host_agent_attaches_only_as_a_grid asserts bytes-only attach rejection. Missing premise: whether SupervisorClient::attach_live requests bytes or grids, and whether its return events suit the retained wait_for. Next checks: inspect that client method and the host-only attach contract and handler. Suggested bucket: other (test tooling); confidence: unresolved lead, source only; proposed_drop: false; possible_cover: none. Could-be-highest: no established security or loss-of-work route; impact currently confined to tests. No execution or reproduction performed."
+          }
+        },
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "f1",
+            "state": "open",
+            "summary": "Supervisor-stop attachment helper already negotiates grids",
+            "location": "crates/farhelm/tests/e2e/supervisor_stop.rs:148",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR of considered consequence: the migrated stop-survival tests could fail before stopping a supervisor if they retained a bytes-only attach. Source checks refute that premise: harness.rs:315-334 routes attach_live to attach_terminal_at_boundary, which at :361-372 explicitly passes ViewerStreams::BytesOrGrid and registers the grid channel; :397-403 sends keys as grid text on registered grid channels. Thus the bytes-only refusal pinned by host_terminals.rs:908-932 does not apply. Suggested bucket: other, tooling only. Confidence: confirmed refutation through source, not execution. proposed_drop: refuted by the pinned helper's explicit ViewerStreams::BytesOrGrid argument. possible_cover: none. Could-be-highest: no, the considered consequence was limited to regression tests failing setup. This closes lead f1 without reporting a defect."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "f1",
+            "state": "open",
+            "summary": "Stop-survival setup and probe support host terminals",
+            "location": "crates/farhelm/tests/e2e/supervisor_stop.rs:148",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR of considered consequence: the migrated stop-survival tests could fail setup or inspect the wrong stream by retaining bytes-only attachment helpers. Synthesis refutes the complete caller-chain premise: harness.rs:315-334 routes attach_live through :353-372, which passes ViewerStreams::BytesOrGrid and registers the stream's kind. :397-435 encodes send_keys as grid text for that registered channel. :2705-2716 decodes data through append_transcript and returns only at ReplayComplete, so supervisor_stop.rs:155-156 sends its unique before-stop input after the initial marker; wait_until at harness.rs:2588-2591 also decodes grid data rather than treating encoded rows as terminal text. The subsequent survival oracle is a different, intentionally post-supervisor path: supervisor_stop.rs:182-189 waits for process exit, :222-230 adopts the recorded host as Recovered, and :231-233 types a newly minted UUID line and requires echo:<that UUID>. host_restarts.rs:183-193 waits for InputFate::Written; host_terminals.rs:136-152 waits on the screen/status and times out if the expected text never appears. The fixture's basic handler (fake_agent.rs:1715-1717) produces the echo prefix itself, so PTY input echo or an old retained screen cannot satisfy this new unique probe. Suggested bucket: other, test tooling. Confidence: confirmed source refutation, no execution. proposed_drop: both attachment capability and the post-stop liveness oracle are compatible with the host-terminal contract. possible_cover: none searched. Could-be-highest: no established security or loss-of-work route from the considered test setup issue. This extends the original f1 refutation to the input, replay boundary, and survival-observation callers; it does not claim the surviving legacy raw replay suite is equivalent, which is separately recorded as finding f4."
+          }
+        }
+      ],
+      "latest": {
+        "line": 11,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "f1",
+          "state": "open",
+          "summary": "Stop-survival setup and probe support host terminals",
+          "location": "crates/farhelm/tests/e2e/supervisor_stop.rs:148",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR of considered consequence: the migrated stop-survival tests could fail setup or inspect the wrong stream by retaining bytes-only attachment helpers. Synthesis refutes the complete caller-chain premise: harness.rs:315-334 routes attach_live through :353-372, which passes ViewerStreams::BytesOrGrid and registers the stream's kind. :397-435 encodes send_keys as grid text for that registered channel. :2705-2716 decodes data through append_transcript and returns only at ReplayComplete, so supervisor_stop.rs:155-156 sends its unique before-stop input after the initial marker; wait_until at harness.rs:2588-2591 also decodes grid data rather than treating encoded rows as terminal text. The subsequent survival oracle is a different, intentionally post-supervisor path: supervisor_stop.rs:182-189 waits for process exit, :222-230 adopts the recorded host as Recovered, and :231-233 types a newly minted UUID line and requires echo:<that UUID>. host_restarts.rs:183-193 waits for InputFate::Written; host_terminals.rs:136-152 waits on the screen/status and times out if the expected text never appears. The fixture's basic handler (fake_agent.rs:1715-1717) produces the echo prefix itself, so PTY input echo or an old retained screen cannot satisfy this new unique probe. Suggested bucket: other, test tooling. Confidence: confirmed source refutation, no execution. proposed_drop: both attachment capability and the post-stop liveness oracle are compatible with the host-terminal contract. possible_cover: none searched. Could-be-highest: no established security or loss-of-work route from the considered test setup issue. This extends the original f1 refutation to the input, replay boundary, and survival-observation callers; it does not claim the surviving legacy raw replay suite is equivalent, which is separately recorded as finding f4."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g140/findings.jsonl",
+        "id": "f1",
+        "line": 11,
+        "disposition": "excluded",
+        "group": "stop-survival-test-grid-attachment-compatibility",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-089 after inspecting it. The retained helper requests grids, decodes their output and waits for replay completion. The post-stop probe asks the surviving agent for a new UUID response after the supervisor has exited. Source refutation of the hypothesized test setup and observation regression; no test execution claimed. Checked source/results: [\"647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:crates/farhelm/tests/e2e/harness.rs:315-372 uses ViewerStreams::BytesOrGrid and registers attachment kind; :397-438 sends GridInput::Text for grid channels; :2705-2735 decodes Data with append_transcript until ReplayComplete.\",\"647f0227:crates/farhelm/tests/e2e/supervisor_stop.rs:148-156 uses that helper, then :182-189 waits for successful supervisor exit before :222-233 adopts the host and requires echo:after-stop-<fresh UUID>.\",\"647f0227:crates/farhelm/tests/e2e/host_restarts.rs:183-193 requires InputFate::Written; host_terminals.rs:136-152 waits for actual screen text; farhelm-fixtures/src/fake_agent.rs:1715 supplies the echo: prefix. Old screen contents and PTY input echo cannot provide the fresh full answer. Source checks only.\"] Current coverage/results: {\"SPEC.md/SPEC_impl.md\":\"Terminal host/grid-stream contracts agree with grid attachment and a host retaining a dead program's screen; freshness must come from the new agent answer.\",\"TODO.md Planned\":\"Empty.\",\"plans/queue\":\"Searched stop-survival, supervisor_stop, raw-input/replay terms; no exact unresolved item. tmux-end-old-terminals and tooling plans are landed per plans/REPORTS.md:29,31.\",\"BUGS.md\":\"No matching case.\",\"INDEX.md and matching queue files\":\"Index read and stop/survival/grid-attachment terms searched; no exact case. Existing tab-survival observation item concerns a different oracle.\",\"TRIAGE_OUTCOMES.md\":\"No same trigger/consequence found.\",\"FILTER.md\":\"No match required; source refutes the premise.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Migrated stop-survival tests could fail setup or inspect the wrong stream because attach_live was bytes-only. Refutation does not establish parity of the separately deleted legacy replay or shutdown tests.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g140/f1",
+        "line": 11,
+        "disposition": "excluded",
+        "group": "stop-survival-test-grid-attachment-compatibility",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-089 after inspecting it. The retained helper requests grids, decodes their output and waits for replay completion. The post-stop probe asks the surviving agent for a new UUID response after the supervisor has exited. Source refutation of the hypothesized test setup and observation regression; no test execution claimed. Checked source/results: [\"647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:crates/farhelm/tests/e2e/harness.rs:315-372 uses ViewerStreams::BytesOrGrid and registers attachment kind; :397-438 sends GridInput::Text for grid channels; :2705-2735 decodes Data with append_transcript until ReplayComplete.\",\"647f0227:crates/farhelm/tests/e2e/supervisor_stop.rs:148-156 uses that helper, then :182-189 waits for successful supervisor exit before :222-233 adopts the host and requires echo:after-stop-<fresh UUID>.\",\"647f0227:crates/farhelm/tests/e2e/host_restarts.rs:183-193 requires InputFate::Written; host_terminals.rs:136-152 waits for actual screen text; farhelm-fixtures/src/fake_agent.rs:1715 supplies the echo: prefix. Old screen contents and PTY input echo cannot provide the fresh full answer. Source checks only.\"] Current coverage/results: {\"SPEC.md/SPEC_impl.md\":\"Terminal host/grid-stream contracts agree with grid attachment and a host retaining a dead program's screen; freshness must come from the new agent answer.\",\"TODO.md Planned\":\"Empty.\",\"plans/queue\":\"Searched stop-survival, supervisor_stop, raw-input/replay terms; no exact unresolved item. tmux-end-old-terminals and tooling plans are landed per plans/REPORTS.md:29,31.\",\"BUGS.md\":\"No matching case.\",\"INDEX.md and matching queue files\":\"Index read and stop/survival/grid-attachment terms searched; no exact case. Existing tab-survival observation item concerns a different oracle.\",\"TRIAGE_OUTCOMES.md\":\"No same trigger/consequence found.\",\"FILTER.md\":\"No match required; source refutes the premise.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Migrated stop-survival tests could fail setup or inspect the wrong stream because attach_live was bytes-only. Refutation does not establish parity of the separately deleted legacy replay or shutdown tests.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-089",
+          "key": "g140/f1",
+          "latest_line": 11,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "stop-survival-test-grid-attachment-compatibility",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The retained helper requests grids, decodes their output and waits for replay completion. The post-stop probe asks the surviving agent for a new UUID response after the supervisor has exited.",
+          "checks": [
+            "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:crates/farhelm/tests/e2e/harness.rs:315-372 uses ViewerStreams::BytesOrGrid and registers attachment kind; :397-438 sends GridInput::Text for grid channels; :2705-2735 decodes Data with append_transcript until ReplayComplete.",
+            "647f0227:crates/farhelm/tests/e2e/supervisor_stop.rs:148-156 uses that helper, then :182-189 waits for successful supervisor exit before :222-233 adopts the host and requires echo:after-stop-<fresh UUID>.",
+            "647f0227:crates/farhelm/tests/e2e/host_restarts.rs:183-193 requires InputFate::Written; host_terminals.rs:136-152 waits for actual screen text; farhelm-fixtures/src/fake_agent.rs:1715 supplies the echo: prefix. Old screen contents and PTY input echo cannot provide the fresh full answer. Source checks only."
+          ],
+          "coverage_checked": {
+            "SPEC.md/SPEC_impl.md": "Terminal host/grid-stream contracts agree with grid attachment and a host retaining a dead program's screen; freshness must come from the new agent answer.",
+            "TODO.md Planned": "Empty.",
+            "plans/queue": "Searched stop-survival, supervisor_stop, raw-input/replay terms; no exact unresolved item. tmux-end-old-terminals and tooling plans are landed per plans/REPORTS.md:29,31.",
+            "BUGS.md": "No matching case.",
+            "INDEX.md and matching queue files": "Index read and stop/survival/grid-attachment terms searched; no exact case. Existing tab-survival observation item concerns a different oracle.",
+            "TRIAGE_OUTCOMES.md": "No same trigger/consequence found.",
+            "FILTER.md": "No match required; source refutes the premise."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Migrated stop-survival tests could fail setup or inspect the wrong stream because attach_live was bytes-only. Refutation does not establish parity of the separately deleted legacy replay or shutdown tests.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation of the hypothesized test setup and observation regression; no test execution claimed."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "stop-survival-test-grid-attachment-compatibility",
+        "destination": null
+      }
+    },
+    {
+      "key": "g140/f2",
+      "owner": "g140",
+      "id": "f2",
+      "domain": "rust-session-agent-regressions",
+      "purpose": "rust-session-agent-regressions: crates/farhelm/tests/e2e/replay_marker.rs, crates/farhelm/tests/e2e/supervisor_stop.rs, crates/farhelm/tests/e2e/session_rename.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "f2",
+            "state": "open",
+            "summary": "Check cleanup of host processes intentionally surviving stop tests",
+            "location": "crates/farhelm/tests/e2e/supervisor_stop.rs:233",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: migrated stop tests intentionally leave the agent and its host alive, while deleting the old tmux guard; without replacement cleanup a test run could leak processes. Source basis: supervisor_stop.rs:88-234 has a farhelm_teststate::tempdir state directory, adopts the surviving host, and returns after checking echo without explicit host shutdown. Available contract: SPEC_impl.md:2826-2839 states that TestDir drop ends every host under an owned hosts directory and retains unconfirmed cleanup. Missing premise: whether the pinned farhelm-teststate implementation actually invokes that cleanup on this TestDir. Next check: inspect TestDir Drop and host cleanup traversal. Suggested bucket: other, tooling resources. Confidence: source lead. proposed_drop: false pending implementation check; possible_cover: none. Could-be-highest: no established security or loss-of-work consequence; suspected impact is owned test-process leakage. No execution performed."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "f2",
+            "state": "open",
+            "summary": "Owned test-directory drop cleans surviving hosts",
+            "location": "crates/farhelm/tests/e2e/supervisor_stop.rs:233",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR of considered consequence: the migrated stop tests intentionally leave hosts alive after checking survival and could leak their processes if the deleted tmux guard had no replacement. Source checks refute this: farhelm-teststate/src/lib.rs:794-817 calls end_hosts on the TestDir container before removing it; hosts.rs:56-59 sets traversal depth three, covering this test's d/hosts directory, and :107-139 collects and stops the sockets. The cleanup client sends Hello with takeover and Shutdown (hosts.rs:319-335), independent of the test's dropped runtime. Contract agrees: SPEC_impl.md:2826-2832 says Test harnesses end the hosts they leave behind through the dead-run sweep and every TestDir drop, retaining unconfirmed cleanup. Suggested bucket: other. Confidence: confirmed source refutation; no runtime execution. proposed_drop: explicit cleanup exists in the owned directory's Drop implementation. possible_cover: none. Could-be-highest: no; considered impact was confined to test resource leakage. This closes lead f2."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "f2",
+            "state": "open",
+            "summary": "Stop-test resource order preserves owned host cleanup",
+            "location": "crates/farhelm/tests/e2e/supervisor_stop.rs:233",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR of considered consequence: deleting the tmux guard while intentionally leaving a host and agent alive could leak test processes or remove their state too early. Synthesis confirms the owned cleanup, including order: supervisor_stop.rs:89 creates the state TestDir before command, child, client, stream, work directory and the post-stop HostTerminal. The child is explicitly waited and successful at :182-189 BEFORE :222-230 adopts that host, so a live supervisor cannot compete with this successful-path liveness probe. The later host handle and its probe locals drop before the state TestDir (reverse declaration order); HostTerminal runtime control-channel closure ends its task (hosts/terminal.rs:3015). No async join is required to make TestDir cleanup authoritative: farhelm-teststate/src/lib.rs:794-817 performs its own blocking host stop before removing the directory, hosts.rs:331-335 explicitly takes over and sends Shutdown, :350-362 waits for connection end, and :154-164 also requires the socket file to disappear. A delayed runtime close therefore cannot masquerade as successful cleanup. If the cleanup cannot establish this, TestDir retains the directory and releases its claim for a later sweep (:797-803), rather than silently deleting its evidence. Panic unwinding drops the later kill_on_drop child before the first-created state directory; no claim is made that such a child has been synchronously reaped, and the cleanup client does not depend on that claim. Contract: SPEC_impl.md:2826-2832 says every TestDir drop ends owned hosts and retains unconfirmed cleanup. Suggested bucket: other. Confidence: confirmed source refutation, not observed execution. proposed_drop: owned teardown remains present and waits for host shutdown independently of handle-drop scheduling. possible_cover: none searched; parent reports independent TestDir cleanup corroboration in g137/g138, used only as corroboration. Could-be-highest: no established security or loss-of-work route; original concern was test resource leakage. Material caveat: this does not assert cleanup always succeeds; retention on failure is intentional."
+          }
+        }
+      ],
+      "latest": {
+        "line": 9,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "f2",
+          "state": "open",
+          "summary": "Stop-test resource order preserves owned host cleanup",
+          "location": "crates/farhelm/tests/e2e/supervisor_stop.rs:233",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR of considered consequence: deleting the tmux guard while intentionally leaving a host and agent alive could leak test processes or remove their state too early. Synthesis confirms the owned cleanup, including order: supervisor_stop.rs:89 creates the state TestDir before command, child, client, stream, work directory and the post-stop HostTerminal. The child is explicitly waited and successful at :182-189 BEFORE :222-230 adopts that host, so a live supervisor cannot compete with this successful-path liveness probe. The later host handle and its probe locals drop before the state TestDir (reverse declaration order); HostTerminal runtime control-channel closure ends its task (hosts/terminal.rs:3015). No async join is required to make TestDir cleanup authoritative: farhelm-teststate/src/lib.rs:794-817 performs its own blocking host stop before removing the directory, hosts.rs:331-335 explicitly takes over and sends Shutdown, :350-362 waits for connection end, and :154-164 also requires the socket file to disappear. A delayed runtime close therefore cannot masquerade as successful cleanup. If the cleanup cannot establish this, TestDir retains the directory and releases its claim for a later sweep (:797-803), rather than silently deleting its evidence. Panic unwinding drops the later kill_on_drop child before the first-created state directory; no claim is made that such a child has been synchronously reaped, and the cleanup client does not depend on that claim. Contract: SPEC_impl.md:2826-2832 says every TestDir drop ends owned hosts and retains unconfirmed cleanup. Suggested bucket: other. Confidence: confirmed source refutation, not observed execution. proposed_drop: owned teardown remains present and waits for host shutdown independently of handle-drop scheduling. possible_cover: none searched; parent reports independent TestDir cleanup corroboration in g137/g138, used only as corroboration. Could-be-highest: no established security or loss-of-work route; original concern was test resource leakage. Material caveat: this does not assert cleanup always succeeds; retention on failure is intentional."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g140/findings.jsonl",
+        "id": "f2",
+        "line": 9,
+        "disposition": "excluded",
+        "group": "stop-survival-test-owned-host-cleanup",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-089 after inspecting it. Owned TestDir teardown independently stops the surviving hosts before deleting state, and retains state if shutdown cannot be confirmed. Removing the tmux guard did not remove teardown ownership. The missing-cleanup premise is source-refuted; retain the caveat that unconfirmed cleanup intentionally keeps evidence. Checked source/results: [\"647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:crates/farhelm/tests/e2e/supervisor_stop.rs:89 creates state before child/runtime locals; :182-189 reaps the supervisor before adoption at :222-230. Reverse local drop order releases later handles first.\",\"647f0227:crates/farhelm-teststate/src/lib.rs:794-817 invokes blocking end_hosts in TestDir::drop before directory removal, keeping the directory on unconfirmed cleanup.\",\"647f0227:crates/farhelm-teststate/src/hosts.rs:56-59 traverses depth three, including d/hosts; :107-164 stops sockets and requires socket disappearance; :319-362 sends takeover Hello plus Shutdown and waits for stream close. It does not depend on the dropped Tokio runtime.\",\"647f0227:crates/farhelm-supervisor/src/hosts/terminal.rs:3015 ends its task on control-channel closure. This is not a claim that panic-time kill_on_drop synchronously reaps the supervisor, nor that cleanup always succeeds.\"] Current coverage/results: {\"SPEC.md/SPEC_impl.md\":\"Current SPEC_impl.md:2590-2603 explicitly requires every owned TestDir drop to stop hosts and retain unconfirmed cleanup; source implements it.\",\"TODO.md Planned\":\"Empty.\",\"plans/queue\":\"No exact surviving-host cleanup omission found; terminal-removal/tooling plans are already landed.\",\"BUGS.md\":\"No matching case.\",\"INDEX.md and matching queue files\":\"Index read and stop-test/host-cleanup terms searched. Other concrete cleanup defects have different triggers; none covers an absent TestDir teardown premise here.\",\"TRIAGE_OUTCOMES.md\":\"No exact same case found.\",\"FILTER.md\":\"No filtering proposed.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Intentionally surviving test hosts could leak or their state could be removed too early after deletion of the old tmux guard. Considered harm was test-owned resources; no user-owned process loss was alleged.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g140/f2",
+        "line": 9,
+        "disposition": "excluded",
+        "group": "stop-survival-test-owned-host-cleanup",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-089 after inspecting it. Owned TestDir teardown independently stops the surviving hosts before deleting state, and retains state if shutdown cannot be confirmed. Removing the tmux guard did not remove teardown ownership. The missing-cleanup premise is source-refuted; retain the caveat that unconfirmed cleanup intentionally keeps evidence. Checked source/results: [\"647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:crates/farhelm/tests/e2e/supervisor_stop.rs:89 creates state before child/runtime locals; :182-189 reaps the supervisor before adoption at :222-230. Reverse local drop order releases later handles first.\",\"647f0227:crates/farhelm-teststate/src/lib.rs:794-817 invokes blocking end_hosts in TestDir::drop before directory removal, keeping the directory on unconfirmed cleanup.\",\"647f0227:crates/farhelm-teststate/src/hosts.rs:56-59 traverses depth three, including d/hosts; :107-164 stops sockets and requires socket disappearance; :319-362 sends takeover Hello plus Shutdown and waits for stream close. It does not depend on the dropped Tokio runtime.\",\"647f0227:crates/farhelm-supervisor/src/hosts/terminal.rs:3015 ends its task on control-channel closure. This is not a claim that panic-time kill_on_drop synchronously reaps the supervisor, nor that cleanup always succeeds.\"] Current coverage/results: {\"SPEC.md/SPEC_impl.md\":\"Current SPEC_impl.md:2590-2603 explicitly requires every owned TestDir drop to stop hosts and retain unconfirmed cleanup; source implements it.\",\"TODO.md Planned\":\"Empty.\",\"plans/queue\":\"No exact surviving-host cleanup omission found; terminal-removal/tooling plans are already landed.\",\"BUGS.md\":\"No matching case.\",\"INDEX.md and matching queue files\":\"Index read and stop-test/host-cleanup terms searched. Other concrete cleanup defects have different triggers; none covers an absent TestDir teardown premise here.\",\"TRIAGE_OUTCOMES.md\":\"No exact same case found.\",\"FILTER.md\":\"No filtering proposed.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Intentionally surviving test hosts could leak or their state could be removed too early after deletion of the old tmux guard. Considered harm was test-owned resources; no user-owned process loss was alleged.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-089",
+          "key": "g140/f2",
+          "latest_line": 9,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "stop-survival-test-owned-host-cleanup",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Owned TestDir teardown independently stops the surviving hosts before deleting state, and retains state if shutdown cannot be confirmed. Removing the tmux guard did not remove teardown ownership.",
+          "checks": [
+            "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:crates/farhelm/tests/e2e/supervisor_stop.rs:89 creates state before child/runtime locals; :182-189 reaps the supervisor before adoption at :222-230. Reverse local drop order releases later handles first.",
+            "647f0227:crates/farhelm-teststate/src/lib.rs:794-817 invokes blocking end_hosts in TestDir::drop before directory removal, keeping the directory on unconfirmed cleanup.",
+            "647f0227:crates/farhelm-teststate/src/hosts.rs:56-59 traverses depth three, including d/hosts; :107-164 stops sockets and requires socket disappearance; :319-362 sends takeover Hello plus Shutdown and waits for stream close. It does not depend on the dropped Tokio runtime.",
+            "647f0227:crates/farhelm-supervisor/src/hosts/terminal.rs:3015 ends its task on control-channel closure. This is not a claim that panic-time kill_on_drop synchronously reaps the supervisor, nor that cleanup always succeeds."
+          ],
+          "coverage_checked": {
+            "SPEC.md/SPEC_impl.md": "Current SPEC_impl.md:2590-2603 explicitly requires every owned TestDir drop to stop hosts and retain unconfirmed cleanup; source implements it.",
+            "TODO.md Planned": "Empty.",
+            "plans/queue": "No exact surviving-host cleanup omission found; terminal-removal/tooling plans are already landed.",
+            "BUGS.md": "No matching case.",
+            "INDEX.md and matching queue files": "Index read and stop-test/host-cleanup terms searched. Other concrete cleanup defects have different triggers; none covers an absent TestDir teardown premise here.",
+            "TRIAGE_OUTCOMES.md": "No exact same case found.",
+            "FILTER.md": "No filtering proposed."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Intentionally surviving test hosts could leak or their state could be removed too early after deletion of the old tmux guard. Considered harm was test-owned resources; no user-owned process loss was alleged.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "The missing-cleanup premise is source-refuted; retain the caveat that unconfirmed cleanup intentionally keeps evidence."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "stop-survival-test-owned-host-cleanup",
+        "destination": null
+      }
+    },
+    {
+      "key": "g140/f3",
+      "owner": "g140",
+      "id": "f3",
+      "domain": "rust-session-agent-regressions",
+      "purpose": "rust-session-agent-regressions: crates/farhelm/tests/e2e/replay_marker.rs, crates/farhelm/tests/e2e/supervisor_stop.rs, crates/farhelm/tests/e2e/session_rename.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "f3",
+            "state": "open",
+            "summary": "Removed rename-test import resolves through harness glob",
+            "location": "crates/farhelm/tests/e2e/session_rename.rs:16",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR of considered consequence: deleting the drain_for import could leave the active-attachment rename test uncompilable. Refutation: session_rename.rs:10 retains use crate::harness::*; pinned harness.rs:2067-2089 exports pub(crate) async fn drain_for with the exact arguments and Option<String> return used by session_rename.rs:591-595. The import removal therefore selects the harness helper through the existing glob; the call remains resolved. Suggested bucket: other. Confidence: confirmed by source, no build run. proposed_drop: no missing symbol or incompatible call signature. possible_cover: none. Could-be-highest: no; considered consequence was test compilation only. Caveat: this record assesses the assigned import deletion, not unrelated pre-existing helper behavior."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "f3",
+            "state": "open",
+            "summary": "Rename-test import removal preserves the same drain behavior",
+            "location": "crates/farhelm/tests/e2e/session_rename.rs:16",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR of considered consequence: removing the explicit drain_for import could break the rename test or change how it observes a live grid attachment. Synthesis confirms both symbol resolution and behavior preservation: session_rename.rs:10 imports harness::*; harness.rs:2067-2089 provides the compatible pub(crate) helper used at :591-595. Direct comparison with terminal_backpressure.rs:20-43 at this commit's parent shows identical implementation: same absolute deadline, raw Data append, ignored ReplayComplete, detach reason, closed result, and timeout result. Thus the import removal itself introduces no different grid/byte decoding, wait, or detach behavior. session_rename.rs:581-587 consumes initial replay before renaming and :596-597 sends fresh still-attached input after the drain; any broader concern about a raw grid transcript was already present in the helper selected before this patch, not introduced by the assigned import deletion. Suggested bucket: other. Confidence: confirmed source refutation; no build or runtime execution. proposed_drop: the helper remains in scope with the same behavior and call signature. possible_cover: none. Could-be-highest: no; the considered consequence concerned test compilation or observation. This extends f3 with an exact old/new helper comparison rather than relying on compatible signatures alone."
+          }
+        }
+      ],
+      "latest": {
+        "line": 12,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "f3",
+          "state": "open",
+          "summary": "Rename-test import removal preserves the same drain behavior",
+          "location": "crates/farhelm/tests/e2e/session_rename.rs:16",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR of considered consequence: removing the explicit drain_for import could break the rename test or change how it observes a live grid attachment. Synthesis confirms both symbol resolution and behavior preservation: session_rename.rs:10 imports harness::*; harness.rs:2067-2089 provides the compatible pub(crate) helper used at :591-595. Direct comparison with terminal_backpressure.rs:20-43 at this commit's parent shows identical implementation: same absolute deadline, raw Data append, ignored ReplayComplete, detach reason, closed result, and timeout result. Thus the import removal itself introduces no different grid/byte decoding, wait, or detach behavior. session_rename.rs:581-587 consumes initial replay before renaming and :596-597 sends fresh still-attached input after the drain; any broader concern about a raw grid transcript was already present in the helper selected before this patch, not introduced by the assigned import deletion. Suggested bucket: other. Confidence: confirmed source refutation; no build or runtime execution. proposed_drop: the helper remains in scope with the same behavior and call signature. possible_cover: none. Could-be-highest: no; the considered consequence concerned test compilation or observation. This extends f3 with an exact old/new helper comparison rather than relying on compatible signatures alone."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g140/findings.jsonl",
+        "id": "f3",
+        "line": 12,
+        "disposition": "excluded",
+        "group": "rename-test-drain-import-removal",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-089 after inspecting it. The existing glob imports a compatible helper with the same body as the previously selected helper. The assigned import deletion changes neither symbol resolution nor observation behavior. Refute only the regression attributed to the assigned import deletion. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333:crates/farhelm/tests/e2e/session_rename.rs:10 imports harness::*; :591-597 still calls drain_for then sends new input.\",\"1ed482dd:crates/farhelm/tests/e2e/harness.rs:2067-2089 and 1ed482dd^:crates/farhelm/tests/e2e/terminal_backpressure.rs:20-43 have identical deadline, raw Data append, ignored ReplayComplete, detach/close and timeout behavior. No build run.\"] Current coverage/results: {\"SPEC.md/SPEC_impl.md\":\"Searched rename/attachment/grid contracts; no rule makes this same-body import selection a behavior change.\",\"TODO.md Planned\":\"Empty.\",\"plans/queue\":\"No exact drain_for/import/rename-test issue found; tmux removal plan is landed.\",\"BUGS.md\":\"No matching case.\",\"INDEX.md and matching queue files\":\"Index read; import/helper and rename terms give no same-root item.\",\"TRIAGE_OUTCOMES.md\":\"No exact case found.\",\"FILTER.md\":\"No filtering proposed.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Missing drain_for import could break test compilation or change grid observation. Broader inherited raw-grid transcript issues were not resolved by this narrow same-body comparison and are not claimed out of range generally.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g140/f3",
+        "line": 12,
+        "disposition": "excluded",
+        "group": "rename-test-drain-import-removal",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-089 after inspecting it. The existing glob imports a compatible helper with the same body as the previously selected helper. The assigned import deletion changes neither symbol resolution nor observation behavior. Refute only the regression attributed to the assigned import deletion. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333:crates/farhelm/tests/e2e/session_rename.rs:10 imports harness::*; :591-597 still calls drain_for then sends new input.\",\"1ed482dd:crates/farhelm/tests/e2e/harness.rs:2067-2089 and 1ed482dd^:crates/farhelm/tests/e2e/terminal_backpressure.rs:20-43 have identical deadline, raw Data append, ignored ReplayComplete, detach/close and timeout behavior. No build run.\"] Current coverage/results: {\"SPEC.md/SPEC_impl.md\":\"Searched rename/attachment/grid contracts; no rule makes this same-body import selection a behavior change.\",\"TODO.md Planned\":\"Empty.\",\"plans/queue\":\"No exact drain_for/import/rename-test issue found; tmux removal plan is landed.\",\"BUGS.md\":\"No matching case.\",\"INDEX.md and matching queue files\":\"Index read; import/helper and rename terms give no same-root item.\",\"TRIAGE_OUTCOMES.md\":\"No exact case found.\",\"FILTER.md\":\"No filtering proposed.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Missing drain_for import could break test compilation or change grid observation. Broader inherited raw-grid transcript issues were not resolved by this narrow same-body comparison and are not claimed out of range generally.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-089",
+          "key": "g140/f3",
+          "latest_line": 12,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "rename-test-drain-import-removal",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The existing glob imports a compatible helper with the same body as the previously selected helper. The assigned import deletion changes neither symbol resolution nor observation behavior.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333:crates/farhelm/tests/e2e/session_rename.rs:10 imports harness::*; :591-597 still calls drain_for then sends new input.",
+            "1ed482dd:crates/farhelm/tests/e2e/harness.rs:2067-2089 and 1ed482dd^:crates/farhelm/tests/e2e/terminal_backpressure.rs:20-43 have identical deadline, raw Data append, ignored ReplayComplete, detach/close and timeout behavior. No build run."
+          ],
+          "coverage_checked": {
+            "SPEC.md/SPEC_impl.md": "Searched rename/attachment/grid contracts; no rule makes this same-body import selection a behavior change.",
+            "TODO.md Planned": "Empty.",
+            "plans/queue": "No exact drain_for/import/rename-test issue found; tmux removal plan is landed.",
+            "BUGS.md": "No matching case.",
+            "INDEX.md and matching queue files": "Index read; import/helper and rename terms give no same-root item.",
+            "TRIAGE_OUTCOMES.md": "No exact case found.",
+            "FILTER.md": "No filtering proposed."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Missing drain_for import could break test compilation or change grid observation. Broader inherited raw-grid transcript issues were not resolved by this narrow same-body comparison and are not claimed out of range generally.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Refute only the regression attributed to the assigned import deletion."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "rename-test-drain-import-removal",
+        "destination": null
+      }
+    },
+    {
+      "key": "g140/f4",
+      "owner": "g140",
+      "id": "f4",
+      "domain": "rust-session-agent-regressions",
+      "purpose": "rust-session-agent-regressions: crates/farhelm/tests/e2e/replay_marker.rs, crates/farhelm/tests/e2e/supervisor_stop.rs, crates/farhelm/tests/e2e/session_rename.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "f4",
+            "state": "open",
+            "summary": "Replay-marker suite removal follows the host-stream replacement",
+            "location": "crates/farhelm/tests/e2e/replay_marker.rs:1",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR of considered consequence: deleting all ten raw tmux replay-marker scenarios could leave the new terminal stream without its catch-up boundary or hide a regression. Source analysis: all deleted scenarios create tmux terminals via harness_tmux; the pinned contract SPEC_impl.md:2290-2314 requires every new terminal to be a host, while legacy tmux terminals remain supported (:2954-2988). The replacement host stream's contract differs: SPEC_impl.md:2767-2792 sends screen then history and ReplayComplete, and may end catch-up early on history-layout changes. grid_stream.rs:423-497 implements that order and :578-590 sends the channel-correlated marker; its tests.rs:153-168 rejects a second marker, :300-332 checks screen/history/marker ordering, :335-379 checks output during a multi-read catch-up, and :382-408 checks exit during catch-up. The old byte forwarder's marker remains in connection.rs:1627-1668, and those files are unchanged by this commit. main.rs no longer declares the deleted module. Suggested bucket: other, test coverage. Confidence: source analysis; no observed runtime behavior. proposed_drop: no concrete product or test failure established by this deletion; the replacement stream retains marker implementation and dedicated tests. This is not a claim that every retired real-tmux scenario has an equivalent legacy test. possible_cover: none (no coverage metadata searched). Could-be-highest: no established security or loss-of-work route from the test deletion itself. Legacy-specific coverage is narrower, but an un demonstrated regression is not reported as a defect."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "f4",
+            "state": "open",
+            "summary": "Recheck loss of required replay-marker test oracles",
+            "location": "crates/farhelm/tests/e2e/replay_marker.rs:1",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: removing the raw replay-marker suite may remove concrete regression checks for still-supported terminals, even if the unchanged implementation is correct today. Revision of the initial candidate: source correctness and host-stream replacement do not by themselves refute a test gap. The deleted suite explicitly checked non-default channel correlation, Attached-before-data ordering, exactly one marker after the last replay chunk, and no extra marker on tmux pause recovery. SPEC_impl.md:2954-2988 retains service of legacy tmux terminals, and connection.rs:1627-1668 retains the marker contract. The replacement GridStream Viewer hardcodes channel 1 (grid_stream/tests.rs:128,153-168) and tests ordering against the first history message (:326-331), so those checks alone do not replace every deleted oracle. Readily checkable missing premise: whether remaining raw protocol, byte-forwarder, or grid tests elsewhere retain the specific oracles; inspect direct tests/callers without coverage metadata. Suggested bucket: other, test quality. Confidence: open source lead, no execution. proposed_drop: false while coverage premise is investigated. possible_cover: host-terminals and grid-stream tests cover marker arrival and some stream ordering, not yet established equivalence. Could-be-highest: no established security or loss-of-work route from this test gap. Original suspected consequence (unprotected catch-up regression) is retained; no current product failure claimed."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f4",
+            "state": "open",
+            "summary": "Removing the replay suite loses the legacy replay-tail oracle",
+            "location": "crates/farhelm/tests/e2e/replay_marker.rs:571",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: Farhelm still serves existing tmux sessions, but this deletion removes their regression check that a terminal is revealed only after its complete retained replay. An early marker or duplicate marker on a deep legacy reattach can now pass the remaining marker tests. This is a confirmed test gap from source, not an observed product failure. Details: the deleted a_deep_scrollback_reattach_marks_only_after_the_last_replay_chunk (old replay_marker.rs:575-613; deletion packet lines 581-619) seeds 4,000 rows, requires the retained head and spam-line-4000 before the marker, asserts more than one 32-KiB chunk, and uses assert_marker_splits (old :422-460) to count exactly one marker after draining later frames. The concurrent-output scenario also checked replay/live separation. These contracts still apply to legacy terminals: SPEC_impl.md:2956-2958 says this section covers old terminals for as long as both kinds exist and the supervisor still serves them; connection.rs:1627-1645 describes the unchanged marker as after every replay byte and before any live byte. Replacement source correctness is not a test oracle. Actual remaining coverage was checked by a pinned git grep for ReplayComplete/replay_complete across supervisor source, e2e tests and helm source, then direct inspection: grid_stream/tests.rs:300-332 checks only marker position after the FIRST history message and later eventual convergence, while :335-379 verifies eventual multi-read convergence, on a HOST GridStream; neither exercises the legacy Forwarder nor fixes all history before the marker. handlers.rs:11034-11063 and :11475-11501 establish initial marker arrival on live legacy cat attachments (including channel 2), but do not seed or assert a multi-chunk replay tail. connection.rs:2294-2481 uses a small READY replay and pins markerless death recovery, not deep initial replay completion. Helm client.rs/terminal.rs ordering tests synthesize the marker and therefore test relay ordering rather than when the supervisor emits it. Source checks also show non-default correlation, grid Attached-before-data, and markerless death recovery retain other tests, so those are NOT asserted as wholly lost. Suggested fix: retain a focused legacy raw replay-tail/exactly-once regression using a test-owned tmux fixture, even though production no longer creates tmux terminals. Suggested bucket: other, regression coverage; confidence: confirmed through source/contract comparison. proposed_drop: false (revises the original candidate, whose source-correctness rationale did not settle coverage). possible_cover: none known for this exact oracle; no excluded metadata or queued findings searched. Could-be-highest: no established security or loss-of-work route; user-visible terminal replay regressions are the potential consequence, while the established defect is lost test coverage. Material caveat: no current runtime regression is claimed, no tests or reproductions were run, and obsolete same-pane/new-tmux creation mechanics need not be preserved."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f4",
+            "state": "open",
+            "summary": "Removing the replay suite loses the legacy replay-tail oracle",
+            "location": "crates/farhelm/tests/e2e/replay_marker.rs:576",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: Farhelm still serves existing tmux sessions, but this deletion removes their regression check that a terminal is revealed only after its complete retained replay. An early marker or duplicate marker on a deep legacy reattach is no longer rejected by that oracle. This is a confirmed test gap from source, not an observed product failure. Details: the deleted a_deep_scrollback_reattach_marks_only_after_the_last_replay_chunk (old replay_marker.rs:575-605, against the reviewed commit's parent) seeds 4,000 rows, requires the retained head and spam-line-4000 before the marker (:592-598), asserts more than one 32-KiB chunk (:600-604), and uses assert_marker_splits (:422-454) to count exactly one marker after draining later frames. The concurrent-output scenario also checked replay/live separation. Those contracts still apply to legacy terminals: SPEC_impl.md:2956-2958 says this section covers old terminals for as long as both kinds exist and the supervisor still serves them; connection.rs:1627-1645 describes the unchanged marker as after every replay byte and before any live byte. Actual remaining coverage was checked by pinned git grep for ReplayComplete/replay_complete across supervisor source, e2e tests and helm source, then direct source inspection. Grid-stream tests.rs:300-332 checks marker position after the FIRST history message and later eventual convergence; :335-379 checks eventual multi-read convergence. These use a host GridStream, not the legacy Forwarder. handlers.rs:11034-11063 and :11475-11501 establish marker arrival on small live legacy cat attachments (including channel 2), but do not seed or assert a multi-chunk replay tail. connection.rs:2294-2481 has a small READY initial replay and asserts markerless death recovery, not deep initial replay completion. Helm client.rs:7161-7208 and terminal.rs:1480-1504 synthesize the marker, so test relay ordering rather than the supervisor's emission boundary. Core tests/host_terminals.rs:3329-3354,3433-3451 retain a grid Attached-before-data check and non-default channel 2 arrival. Therefore non-default correlation, grid Attached-before-data, and markerless death recovery are NOT asserted as wholly lost. Source correctness alone does not refute this coverage loss. Suggested fix: retain a focused legacy raw replay-tail/exactly-once regression using a test-owned tmux fixture, even though production no longer creates tmux terminals. Suggested bucket: other, regression coverage; confidence: confirmed through source/contract comparison. proposed_drop: false, replacing the initial candidate's insufficient source-correctness rationale. possible_cover: none known for this exact oracle; no excluded metadata or queued findings searched. Could-be-highest: no established security or loss-of-work route; terminal replay regressions are the potential consequence, while the established defect is lost test coverage. Material caveats: no current product regression claimed and no runtime reproduction performed; obsolete same-pane/new-tmux creation mechanics need not be preserved. This revision corrects the deleted test's exact line range and confirms the scripted nature of the relay tests without changing the consequence."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "f4",
+          "state": "open",
+          "summary": "Removing the replay suite loses the legacy replay-tail oracle",
+          "location": "crates/farhelm/tests/e2e/replay_marker.rs:576",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: Farhelm still serves existing tmux sessions, but this deletion removes their regression check that a terminal is revealed only after its complete retained replay. An early marker or duplicate marker on a deep legacy reattach is no longer rejected by that oracle. This is a confirmed test gap from source, not an observed product failure. Details: the deleted a_deep_scrollback_reattach_marks_only_after_the_last_replay_chunk (old replay_marker.rs:575-605, against the reviewed commit's parent) seeds 4,000 rows, requires the retained head and spam-line-4000 before the marker (:592-598), asserts more than one 32-KiB chunk (:600-604), and uses assert_marker_splits (:422-454) to count exactly one marker after draining later frames. The concurrent-output scenario also checked replay/live separation. Those contracts still apply to legacy terminals: SPEC_impl.md:2956-2958 says this section covers old terminals for as long as both kinds exist and the supervisor still serves them; connection.rs:1627-1645 describes the unchanged marker as after every replay byte and before any live byte. Actual remaining coverage was checked by pinned git grep for ReplayComplete/replay_complete across supervisor source, e2e tests and helm source, then direct source inspection. Grid-stream tests.rs:300-332 checks marker position after the FIRST history message and later eventual convergence; :335-379 checks eventual multi-read convergence. These use a host GridStream, not the legacy Forwarder. handlers.rs:11034-11063 and :11475-11501 establish marker arrival on small live legacy cat attachments (including channel 2), but do not seed or assert a multi-chunk replay tail. connection.rs:2294-2481 has a small READY initial replay and asserts markerless death recovery, not deep initial replay completion. Helm client.rs:7161-7208 and terminal.rs:1480-1504 synthesize the marker, so test relay ordering rather than the supervisor's emission boundary. Core tests/host_terminals.rs:3329-3354,3433-3451 retain a grid Attached-before-data check and non-default channel 2 arrival. Therefore non-default correlation, grid Attached-before-data, and markerless death recovery are NOT asserted as wholly lost. Source correctness alone does not refute this coverage loss. Suggested fix: retain a focused legacy raw replay-tail/exactly-once regression using a test-owned tmux fixture, even though production no longer creates tmux terminals. Suggested bucket: other, regression coverage; confidence: confirmed through source/contract comparison. proposed_drop: false, replacing the initial candidate's insufficient source-correctness rationale. possible_cover: none known for this exact oracle; no excluded metadata or queued findings searched. Could-be-highest: no established security or loss-of-work route; terminal replay regressions are the potential consequence, while the established defect is lost test coverage. Material caveats: no current product regression claimed and no runtime reproduction performed; obsolete same-pane/new-tmux creation mechanics need not be preserved. This revision corrects the deleted test's exact line range and confirms the scripted nature of the relay tests without changing the consequence."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g140/findings.jsonl",
+        "id": "f4",
+        "line": 10,
+        "disposition": "rejected",
+        "group": "deleted-legacy-deep-replay-tail-oracle",
+        "reason": "Parent read full claims089.647f0227 removes deep4000row/>32KiB legacy replay-tail/exactly-one-marker test while existing legacyterminal service remains supported. Smaller marker/channel/host-grid convergence tests do not prove that exact legacy multi-chunk tail boundary; real intermediate coverage gap, preserve narrowed scope. dbfc6975 then retireslegacyterminals atstartup and1ed482 removesdriver beforetip, making a currentlegacyfixture repair obsolete. No residual host replay-oracle deficit demonstrated by this record; no runtimeoutputfailure/security/workloss. Historical finding and later substrate retirement remain explicit rather than retroactive source-refutation."
+      },
+      "accepted_parent_decision": {
+        "key": "g140/f4",
+        "line": 10,
+        "disposition": "rejected",
+        "group": "deleted-legacy-deep-replay-tail-oracle",
+        "bucket": "other",
+        "recording": "retired-in-range",
+        "needs_independent_drop_check": false,
+        "reason": "Parent read full claims089.647f0227 removes deep4000row/>32KiB legacy replay-tail/exactly-one-marker test while existing legacyterminal service remains supported. Smaller marker/channel/host-grid convergence tests do not prove that exact legacy multi-chunk tail boundary; real intermediate coverage gap, preserve narrowed scope. dbfc6975 then retireslegacyterminals atstartup and1ed482 removesdriver beforetip, making a currentlegacyfixture repair obsolete. No residual host replay-oracle deficit demonstrated by this record; no runtimeoutputfailure/security/workloss. Historical finding and later substrate retirement remain explicit rather than retroactive source-refutation."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-089",
+          "key": "g140/f4",
+          "latest_line": 10,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "deleted-legacy-deep-replay-tail-oracle",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Deletion removed a discriminating deep legacy replay-tail/exactly-once oracle while that terminal path was still supported. Later retirement removes the product path; preserve that historical scope rather than demanding legacy fixtures at current main.",
+          "checks": [
+            "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513^:crates/farhelm/tests/e2e/replay_marker.rs:575-605 seeds 4,000 rows and requires both retained head and spam-line-4000 before the marker, with more than 32 KiB before it. assert_marker_splits at :422-454 drains later frames and requires exactly one marker.",
+            "647f0227:SPEC_impl.md:2954-2988 still serves existing tmux terminals. connection.rs:1627-1668 documents the marker after every replay byte and before live output, once per attach.",
+            "647f0227:crates/farhelm-supervisor/src/service/grid_stream/tests.rs:300-332 asserts marker after the first history message and eventual convergence; :335-408 exercises eventual multi-read host-grid convergence. Those checks do not assert a legacy multi-chunk tail before its marker.",
+            "647f0227:service/handlers.rs:11034-11063,11475-11501 retain small legacy marker arrival, including channel 2. Non-default correlation, Attached-before-data and markerless recovery are not asserted wholly lost.",
+            "Later in-range dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:SPEC_impl.md:2956-2963 ends legacy terminals at startup; 1ed482dde220452e424973faf38a5e1318986333 removes the driver. This is historical lost coverage, not an extant final-tip legacy replay bug. No runtime observation."
+          ],
+          "coverage_checked": {
+            "SPEC.md/SPEC_impl.md": "Current SPEC.md:2998-3011 and SPEC_impl.md Grid streams retire legacy terminals and byte streams. They do not explicitly accept the intermediate supported-path coverage loss; they do make a current legacy-fixture repair obsolete.",
+            "TODO.md Planned": "Empty.",
+            "plans/queue": "tmux-end-old-terminals: Test footing permits tmux/byte-subject test deletion, but plans/REPORTS.md:29 records it landed. It is not an unlanded plan fixing this intermediate gap. No exact unlanded replacement oracle found.",
+            "BUGS.md": "No matching case.",
+            "INDEX.md and matching queue files": "Index read; replay-marker, replay-tail and deep-replay searches found no exact queue item. Existing recovery/reconnect items concern different production boundaries.",
+            "TRIAGE_OUTCOMES.md": "No exact deletion/oracle case found; shallow-pause flake decision is not this claim.",
+            "FILTER.md": "No complete filter matches test-oracle removal. No product failure or user-work loss established."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "No missing source premise for the bounded intermediate coverage loss. Current actionability needs the parent's recording judgment because later in-range retirement removed the tested substrate.",
+          "original_stronger_consequence": "Initial candidate proposed dropping all replay-suite loss because replacement implementation/tests exist. That rationale was withdrawn. Final claim is specifically deep legacy replay-tail/exactly-once regression protection, not no marker tests, not total ordering-coverage loss, and not a demonstrated replay failure.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Preserve the source-established historical finding and the later retirement qualification. Do not silently turn later product correctness or removal into refutation of the intermediate test defect."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "deleted-legacy-deep-replay-tail-oracle",
+        "destination": "trailing-deleted-legacy-deep-replay-tail-oracle.md"
+      }
+    },
+    {
+      "key": "g140/f5",
+      "owner": "g140",
+      "id": "f5",
+      "domain": "rust-session-agent-regressions",
+      "purpose": "rust-session-agent-regressions: crates/farhelm/tests/e2e/replay_marker.rs, crates/farhelm/tests/e2e/supervisor_stop.rs, crates/farhelm/tests/e2e/session_rename.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "f5",
+            "state": "open",
+            "summary": "Check retained oracle for legacy orderly-stop output acknowledgements",
+            "location": "crates/farhelm/tests/e2e/supervisor_stop.rs:204",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: the migrated stop-survival tests remove their observable proof that both legacy output-bearing tmux clients acknowledge no-output before closing; survival of a host terminal does not test that old-terminal shutdown boundary. Source basis: assigned supervisor_stop.rs patch removes no_output_recording_tmux, the post-STOP acknowledgement roster and the >=2-client assertion, while the pinned SPEC_impl.md:3145-3165 retains orderly legacy teardown and the rare abort concern. This is distinct from f4's replay-marker boundary and concerns regression validation only so far. Missing premise: whether retained tmux driver, attachment or supervisor tests independently assert acknowledgement-before-client-close for orderly process stop. Next check: search and inspect those exact teardown tests at the reviewed revision and later changes in the pinned range. Suggested bucket: other, potential test-oracle loss. Confidence: open source lead, no execution. proposed_drop: false pending checks. possible_cover: none known; neighbour context contains no equivalent stop-acknowledgement finding. Could-be-highest: no established security or loss-of-work route from this test removal; do not infer a current tmux crash from a missing test. No runtime test or reproduction performed."
+          }
+        },
+        {
+          "line": 14,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f5",
+            "state": "open",
+            "summary": "Stop-test migration removes the signal-to-legacy-client teardown oracle",
+            "location": "crates/farhelm/tests/e2e/supervisor_stop.rs:204",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: at this intermediate revision existing tmux sessions remain supported, but the three real supervisor-stop tests no longer check that stopping the supervisor safely quiets both output-bearing tmux clients before exit. The host-survival check exercises a different substrate, so an omission in the legacy signal-to-cleanup path can pass these tests. Established defect is lost end-to-end regression coverage, not a current crash or lost user work. Details: the assigned patch removes the --new-terminals tmux/--tmux-wrapper fixture, no_output_recording_tmux and the old supervisor_stop.rs:262-283 assertion that at least two distinct clients successfully acknowledge no-output after the STOP sentinel. The new :136-156 creates and attaches a host terminal, and :216-233 asserts Host kind and live agent echo after process exit. The remaining log/status checks (:182-202) establish entering the shared stop handler and no budget warning but cannot show the legacy forwarder and session sink crossed their output-disabling boundary. The intermediate contract still requires legacy service (SPEC_impl.md:2954-2988) and acknowledged no-output before closing output clients (:3134-3167). Actual surviving tests were inspected rather than inferred from source correctness: tmux/stream.rs:2724-2833 gates a directly invoked OutputStream shutdown before/after its acknowledgement and confirms client liveness then reap; this is valuable coverage of one driver method, but neither sends a process signal nor drives the supervisor's two-client roster. teardown.rs:4912-4995 tests stop waiting for fake sink leases/reapers, and :5005-5016 tests the attachment-lock budget; the fake sink at :4881-4898 has no tmux client or acknowledgement. handlers.rs:7863-7904 proves a racing attach's sink settles after refusal, but asserts no real process signal or distinct output-client acknowledgements. A pinned search for DisableOutputGate and disable_output_gate finds gate use only in the direct stream tests. These checks do not preserve the deleted whole-path oracle. core.rs:17353-17390 and teardown.rs:1571-1608 show the intended implementation still joins the orderly legacy cleanup, which is correct source but not replacement test evidence. Suggested fix at the reviewed revision: keep a focused signal-driven legacy fixture using a test-owned preexisting tmux session, alongside the host-survival cases, or provide equivalent integration assertions connecting real stop triggers to both legacy output clients. Suggested bucket: other (maintainer regression coverage); confidence: confirmed source/test-contract comparison, no execution. proposed_drop: false. possible_cover: none known; no excluded metadata or queue searched. Could-be-highest: no established security/user-work-loss route from test deletion; no current tmux abort claimed. Whole-range caveat: the following in-range commit dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 retires old terminals and 1ed482dde220452e424973faf38a5e1318986333 removes the driver. Thus this finding is specifically the supported-legacy intermediate revision, not a demand to retain legacy tests after retirement or a claim that final-tip host cleanup lacks tests. The later supervisor_stop.rs diff through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db changes only the separate startup-tether fixture; it does not restore this oracle before legacy removal. Original f5 lead is closed with these useful checks; no missing source premise remains for the bounded coverage-loss conclusion."
+          }
+        }
+      ],
+      "latest": {
+        "line": 14,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "f5",
+          "state": "open",
+          "summary": "Stop-test migration removes the signal-to-legacy-client teardown oracle",
+          "location": "crates/farhelm/tests/e2e/supervisor_stop.rs:204",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: at this intermediate revision existing tmux sessions remain supported, but the three real supervisor-stop tests no longer check that stopping the supervisor safely quiets both output-bearing tmux clients before exit. The host-survival check exercises a different substrate, so an omission in the legacy signal-to-cleanup path can pass these tests. Established defect is lost end-to-end regression coverage, not a current crash or lost user work. Details: the assigned patch removes the --new-terminals tmux/--tmux-wrapper fixture, no_output_recording_tmux and the old supervisor_stop.rs:262-283 assertion that at least two distinct clients successfully acknowledge no-output after the STOP sentinel. The new :136-156 creates and attaches a host terminal, and :216-233 asserts Host kind and live agent echo after process exit. The remaining log/status checks (:182-202) establish entering the shared stop handler and no budget warning but cannot show the legacy forwarder and session sink crossed their output-disabling boundary. The intermediate contract still requires legacy service (SPEC_impl.md:2954-2988) and acknowledged no-output before closing output clients (:3134-3167). Actual surviving tests were inspected rather than inferred from source correctness: tmux/stream.rs:2724-2833 gates a directly invoked OutputStream shutdown before/after its acknowledgement and confirms client liveness then reap; this is valuable coverage of one driver method, but neither sends a process signal nor drives the supervisor's two-client roster. teardown.rs:4912-4995 tests stop waiting for fake sink leases/reapers, and :5005-5016 tests the attachment-lock budget; the fake sink at :4881-4898 has no tmux client or acknowledgement. handlers.rs:7863-7904 proves a racing attach's sink settles after refusal, but asserts no real process signal or distinct output-client acknowledgements. A pinned search for DisableOutputGate and disable_output_gate finds gate use only in the direct stream tests. These checks do not preserve the deleted whole-path oracle. core.rs:17353-17390 and teardown.rs:1571-1608 show the intended implementation still joins the orderly legacy cleanup, which is correct source but not replacement test evidence. Suggested fix at the reviewed revision: keep a focused signal-driven legacy fixture using a test-owned preexisting tmux session, alongside the host-survival cases, or provide equivalent integration assertions connecting real stop triggers to both legacy output clients. Suggested bucket: other (maintainer regression coverage); confidence: confirmed source/test-contract comparison, no execution. proposed_drop: false. possible_cover: none known; no excluded metadata or queue searched. Could-be-highest: no established security/user-work-loss route from test deletion; no current tmux abort claimed. Whole-range caveat: the following in-range commit dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 retires old terminals and 1ed482dde220452e424973faf38a5e1318986333 removes the driver. Thus this finding is specifically the supported-legacy intermediate revision, not a demand to retain legacy tests after retirement or a claim that final-tip host cleanup lacks tests. The later supervisor_stop.rs diff through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db changes only the separate startup-tether fixture; it does not restore this oracle before legacy removal. Original f5 lead is closed with these useful checks; no missing source premise remains for the bounded coverage-loss conclusion."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g140/findings.jsonl",
+        "id": "f5",
+        "line": 14,
+        "disposition": "rejected",
+        "group": "deleted-signal-legacy-two-client-shutdown-oracle",
+        "reason": "Parent read full claims089.647f0227 converts stop-survival test tohostliveecho and drops realsupervisorSIGSTOP/atleasttwoacknowledgedno-output-client roster assertion while existing legacyservice stillrequires thatdiscipline. Direct drivergatedack and fakelease/reaper tests retain narroweroracles, not the samewholepath. Preserve intermediate losttestprotection, no currentabort orworkloss allegation. dbfc6975retireslegacy and1ed482 removesdriver bytip; no presentobsoletelegacyfixturefix queued. Distinct fromdeepreplaytail loss and currenthostcleanup behavior."
+      },
+      "accepted_parent_decision": {
+        "key": "g140/f5",
+        "line": 14,
+        "disposition": "rejected",
+        "group": "deleted-signal-legacy-two-client-shutdown-oracle",
+        "bucket": "other",
+        "recording": "retired-in-range",
+        "needs_independent_drop_check": false,
+        "reason": "Parent read full claims089.647f0227 converts stop-survival test tohostliveecho and drops realsupervisorSIGSTOP/atleasttwoacknowledgedno-output-client roster assertion while existing legacyservice stillrequires thatdiscipline. Direct drivergatedack and fakelease/reaper tests retain narroweroracles, not the samewholepath. Preserve intermediate losttestprotection, no currentabort orworkloss allegation. dbfc6975retireslegacy and1ed482 removesdriver bytip; no presentobsoletelegacyfixturefix queued. Distinct fromdeepreplaytail loss and currenthostcleanup behavior."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-089",
+          "key": "g140/f5",
+          "latest_line": 14,
+          "recommendation": "retain-verified",
+          "bucket": "other",
+          "underlying_key": "deleted-signal-legacy-two-client-shutdown-oracle",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Host-survival assertions replace an end-to-end legacy shutdown assertion while existing legacy terminals remain supported at the reviewed intermediate revision. Direct driver shutdown tests retain a useful narrower oracle. Later legacy retirement bounds the finding's lifetime.",
+          "checks": [
+            "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513^:crates/farhelm/tests/e2e/supervisor_stop.rs:262-283 reads successful no-output acknowledgements after STOP and requires at least two distinct clients. Reviewed :136-156 uses a host, and :216-233 checks Host kind plus fresh agent echo after exit.",
+            "647f0227:SPEC_impl.md:2954-2988 still serves legacy terminals; :3134-3167 preserves acknowledged no-output before client close, while explicitly declining further significant defenses without a modern tmux abort observation.",
+            "647f0227:crates/farhelm-supervisor/src/tmux/stream.rs:2724-2833 directly invokes shutdown, gates the acknowledgement and verifies client liveness/reap. It does not signal the supervisor or assert both clients in its roster.",
+            "647f0227:service/teardown.rs:4881-4898 uses a fake sink without a real tmux client; :4912-4995 checks lease/reaper completion and :5005-5016 the attachment-lock budget. Pinned DisableOutputGate search finds uses only in direct stream tests.",
+            "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 ends old terminals at startup and 1ed482dde220452e424973faf38a5e1318986333 removes the driver. The latest record correctly limits this to the earlier supported-legacy revision. No current abort or user-work-loss route is established and no execution occurred."
+          ],
+          "coverage_checked": {
+            "SPEC.md/SPEC_impl.md": "Current legacy retirement rules remove any need for current legacy shutdown fixtures. The intermediate no-output discipline was still specified, not explicitly waived; its rare-abort design limit does not itself waive existing whole-path test protection.",
+            "TODO.md Planned": "Empty.",
+            "plans/queue": "No exact unlanded whole-path stop-ack oracle work found. Terminal-removal/tooling plans are landed per plans/REPORTS.md:29,31; their test triage is contextual, not an unlanded fix.",
+            "BUGS.md": "No matching case.",
+            "INDEX.md and matching queue files": "Index read and no-output/signal/stop-survival terms searched; no exact item.",
+            "TRIAGE_OUTCOMES.md": "No same test-deletion case found.",
+            "FILTER.md": "No full filter applies to loss of this test oracle. Do not infer an actual server abort from its deletion."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "No missing premise for bounded intermediate oracle loss. Parent must preserve that later retirement makes a present-day legacy-fixture repair obsolete.",
+          "original_stronger_consequence": "Original lead was potential loss of orderly legacy output acknowledgements. Final consequence remains lost regression coverage; no current crash, user-work loss, final-tip host cleanup gap, or need to retain legacy tests after retirement is claimed.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Retain the historical source-established test gap separately from replay-marker loss; scope any queue wording to the supported intermediate revision."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "deleted-signal-legacy-two-client-shutdown-oracle",
+        "destination": "trailing-deleted-signal-legacy-two-client-shutdown-oracle.md"
+      }
+    },
+    {
+      "key": "g140/f6",
+      "owner": "g140",
+      "id": "f6",
+      "domain": "rust-session-agent-regressions",
+      "purpose": "rust-session-agent-regressions: crates/farhelm/tests/e2e/replay_marker.rs, crates/farhelm/tests/e2e/supervisor_stop.rs, crates/farhelm/tests/e2e/session_rename.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 15,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "f6",
+            "state": "open",
+            "summary": "Fresh quiet grid attachments retain a marker-without-output oracle",
+            "location": "crates/farhelm/tests/e2e/replay_marker.rs:793",
+            "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR of considered additional consequence: deleting the quiet/fresh replay tests could leave a host viewer hidden forever if its initial marker were incorrectly gated on a first live output byte. This possible coverage gap is refuted by an actual remaining grid test, not by implementation correctness. grid_stream/tests.rs:485-490 creates host_with(1000), starts a Viewer, and waits for viewer.converged(0) BEFORE :493-494 introduces any output. converged at :215-221 explicitly requires replay_complete_after.is_some(), so merely drawing an empty screen cannot satisfy setup. host_with at :53-64 adopts a Fresh TestHostSpec with only the scrollback option changed; TestHostSpec derives Default (hosts/terminal/test_host.rs:241-259), leaving journaled empty and exited None, and its Journal default at :536-551 has zero end and empty journal. Thus marker-gated-on-live-output would time out before this existing test ever sends its flood. Additional quiet setup checks exist at grid_stream/tests.rs:787-789,819-821,938-940. Suggested bucket: other (considered regression coverage); confidence: confirmed source refutation, no runtime execution. proposed_drop: the retained empty/quiet attach setup is itself a discriminating no-output marker oracle. possible_cover: exact source oracle named above, no prohibited coverage metadata searched. Could-be-highest: no, the considered defect was missing test protection without an established shipped failure or security/work-loss route. This does not change f4 or f5 and makes no claim that every removed real-tmux scenario has a host equivalent."
+          }
+        }
+      ],
+      "latest": {
+        "line": 15,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "f6",
+          "state": "open",
+          "summary": "Fresh quiet grid attachments retain a marker-without-output oracle",
+          "location": "crates/farhelm/tests/e2e/replay_marker.rs:793",
+          "detail": "Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR of considered additional consequence: deleting the quiet/fresh replay tests could leave a host viewer hidden forever if its initial marker were incorrectly gated on a first live output byte. This possible coverage gap is refuted by an actual remaining grid test, not by implementation correctness. grid_stream/tests.rs:485-490 creates host_with(1000), starts a Viewer, and waits for viewer.converged(0) BEFORE :493-494 introduces any output. converged at :215-221 explicitly requires replay_complete_after.is_some(), so merely drawing an empty screen cannot satisfy setup. host_with at :53-64 adopts a Fresh TestHostSpec with only the scrollback option changed; TestHostSpec derives Default (hosts/terminal/test_host.rs:241-259), leaving journaled empty and exited None, and its Journal default at :536-551 has zero end and empty journal. Thus marker-gated-on-live-output would time out before this existing test ever sends its flood. Additional quiet setup checks exist at grid_stream/tests.rs:787-789,819-821,938-940. Suggested bucket: other (considered regression coverage); confidence: confirmed source refutation, no runtime execution. proposed_drop: the retained empty/quiet attach setup is itself a discriminating no-output marker oracle. possible_cover: exact source oracle named above, no prohibited coverage metadata searched. Could-be-highest: no, the considered defect was missing test protection without an established shipped failure or security/work-loss route. This does not change f4 or f5 and makes no claim that every removed real-tmux scenario has a host equivalent."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g140/findings.jsonl",
+        "id": "f6",
+        "line": 15,
+        "disposition": "excluded",
+        "group": "quiet-grid-attachment-marker-oracle",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-089 after inspecting it. A retained test requires replay completion on an empty fresh host before it supplies any program output. A marker incorrectly waiting for the first live byte would fail that setup. Actual discriminating retained test refutes the alleged oracle absence; source-only conclusion. Checked source/results: [\"647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:crates/farhelm-supervisor/src/service/grid_stream/tests.rs:485-494 waits for viewer.converged(0) before test_host.output; :215-221 explicitly requires replay_complete_after.is_some().\",\"647f0227:grid_stream/tests.rs:53-64 uses fresh TestHostSpec::default with only options changed; hosts/terminal/test_host.rs:241-259 derives Default with empty journaled and no exit, and :536-551 starts its Journal empty at end zero. Merely drawing an empty screen cannot satisfy the marker condition.\"] Current coverage/results: {\"SPEC.md/SPEC_impl.md\":\"Current grid attach contract sends initial state/screen/history then ReplayComplete; no dependency on later live output.\",\"TODO.md Planned\":\"Empty.\",\"plans/queue\":\"No exact unresolved quiet-marker issue found; removal/tooling plans are landed.\",\"BUGS.md\":\"No matching case.\",\"INDEX.md and matching queue files\":\"Index read and marker/quiet-attach terms searched; no exact item.\",\"TRIAGE_OUTCOMES.md\":\"No matching case.\",\"FILTER.md\":\"No filtering proposed.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A missing quiet-attach oracle could permit a host viewer to wait forever for a first live byte before reveal. Refuted as a missing-test claim, without certifying every removed tmux replay scenario or changing f4/f5.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g140/f6",
+        "line": 15,
+        "disposition": "excluded",
+        "group": "quiet-grid-attachment-marker-oracle",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-089 after inspecting it. A retained test requires replay completion on an empty fresh host before it supplies any program output. A marker incorrectly waiting for the first live byte would fail that setup. Actual discriminating retained test refutes the alleged oracle absence; source-only conclusion. Checked source/results: [\"647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:crates/farhelm-supervisor/src/service/grid_stream/tests.rs:485-494 waits for viewer.converged(0) before test_host.output; :215-221 explicitly requires replay_complete_after.is_some().\",\"647f0227:grid_stream/tests.rs:53-64 uses fresh TestHostSpec::default with only options changed; hosts/terminal/test_host.rs:241-259 derives Default with empty journaled and no exit, and :536-551 starts its Journal empty at end zero. Merely drawing an empty screen cannot satisfy the marker condition.\"] Current coverage/results: {\"SPEC.md/SPEC_impl.md\":\"Current grid attach contract sends initial state/screen/history then ReplayComplete; no dependency on later live output.\",\"TODO.md Planned\":\"Empty.\",\"plans/queue\":\"No exact unresolved quiet-marker issue found; removal/tooling plans are landed.\",\"BUGS.md\":\"No matching case.\",\"INDEX.md and matching queue files\":\"Index read and marker/quiet-attach terms searched; no exact item.\",\"TRIAGE_OUTCOMES.md\":\"No matching case.\",\"FILTER.md\":\"No filtering proposed.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"A missing quiet-attach oracle could permit a host viewer to wait forever for a first live byte before reveal. Refuted as a missing-test claim, without certifying every removed tmux replay scenario or changing f4/f5.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-089",
+          "key": "g140/f6",
+          "latest_line": 15,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "quiet-grid-attachment-marker-oracle",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "A retained test requires replay completion on an empty fresh host before it supplies any program output. A marker incorrectly waiting for the first live byte would fail that setup.",
+          "checks": [
+            "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:crates/farhelm-supervisor/src/service/grid_stream/tests.rs:485-494 waits for viewer.converged(0) before test_host.output; :215-221 explicitly requires replay_complete_after.is_some().",
+            "647f0227:grid_stream/tests.rs:53-64 uses fresh TestHostSpec::default with only options changed; hosts/terminal/test_host.rs:241-259 derives Default with empty journaled and no exit, and :536-551 starts its Journal empty at end zero. Merely drawing an empty screen cannot satisfy the marker condition."
+          ],
+          "coverage_checked": {
+            "SPEC.md/SPEC_impl.md": "Current grid attach contract sends initial state/screen/history then ReplayComplete; no dependency on later live output.",
+            "TODO.md Planned": "Empty.",
+            "plans/queue": "No exact unresolved quiet-marker issue found; removal/tooling plans are landed.",
+            "BUGS.md": "No matching case.",
+            "INDEX.md and matching queue files": "Index read and marker/quiet-attach terms searched; no exact item.",
+            "TRIAGE_OUTCOMES.md": "No matching case.",
+            "FILTER.md": "No filtering proposed."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "A missing quiet-attach oracle could permit a host viewer to wait forever for a first live byte before reveal. Refuted as a missing-test claim, without certifying every removed tmux replay scenario or changing f4/f5.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Actual discriminating retained test refutes the alleged oracle absence; source-only conclusion."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "quiet-grid-attachment-marker-oracle",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete. Read all 1,411 assigned patch lines and the complete commits field.\n\nNo reportable findings. Recorded four candidates (f1–f4); no open leads. Updated findings.jsonl and progress.md. No tests or reproductions run."
+    },
+    {
+      "turn": 2,
+      "reply": "Synthesis complete. Revised f4 to a confirmed “other” finding: the deletion removes the deep legacy replay-tail/exactly-once oracle. No current product failure claimed.\n\nStrengthened f1–f3 refutations with caller-chain, teardown-order, and helper-equivalence checks. Recorded events 7–12 and updated progress.md.\n\nUnresolved leads: none."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 complete. Checked neighbouring records, stop-test changes, retained acknowledgement/teardown tests, rename callers, and later path history.\n\nNew verified: **f5**, a test-coverage gap in the intermediate legacy-support revision. No current product failure claimed.\n\nNew unverified IDs: none. Open leads: none. **Anything new found: yes.**\n\nRecorded events 13–14 and updated progress.md."
+    },
+    {
+      "turn": 4,
+      "reply": "Discovery pass 2 complete. Checked refreshed neighbours, quiet/fresh marker coverage, PTY ownership, and stop-probe waits. Recorded the refuted marker-coverage concern as candidate f6.\n\nNew verified IDs: none. New unverified IDs: none. Open leads: none.\n\nNothing new reportable found. Progress updated; no runtime execution."
+    }
+  ],
+  "progress": "Group: g140 — rust-session-agent-regressions\nTurn: initial review 1 complete; discovery passes: 0. Later synthesis remains the caller’s next phase.\nCoverage: all 1,411 assigned patch lines delivered through evidence read: replay_marker 1–1066, supervisor_stop 1–333, session_rename 1–12. Complete inventory commits field read; excluded metadata not read.\nContracts read at 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513: SPEC.md Terminal experience (2865–3206); SPEC_impl.md Terminal host (2015–2839), Terminal snapshots (2900–2953), Terminal substrate: private tmux server (2954–3307), Grid streams (3420–3512), Testing (8602–8670). Private pinned snapshots and context-manifest.json preserve these reads.\nSource checks: host-capable harness attach/input helpers; stop-test signal and survival flow; fake-agent echo; host adoption/screen API; TestDir Drop and host cleanup; grid catch-up implementation and tests; unchanged legacy marker implementation; rename import and surviving drain_for call at 1ed482dde220452e424973faf38a5e1318986333.\nInterface assumptions: host streams carry grids and retain ReplayComplete; legacy tmux is still served but not created. Host shutdown is not supervisor shutdown: owned TestDir cleanup ends intentionally surviving hosts after the survival assertion. Post-stop UUID echo distinguishes the running agent from terminal input echo and retained history.\nFindings: zero verified, zero unverified. Candidates appended: f1 (grid negotiation refutes attach failure), f2 (TestDir cleanup refutes leaked hosts), f3 (harness glob resolves removed import), f4 (no concrete defect established from tmux replay-test removal; legacy-specific coverage is narrower).\nOpen leads: none. Unread assigned scope: none. No tests, builds, runtime reproductions, checkout edits, or live-install actions.\nNext action: return to caller for later synthesis; do not perform a second pass inside this initial turn.\n\nTurn: later-turn synthesis 2 complete; discovery passes: 0.\nChanges this turn: revised f1, f2, f3 and f4 under their original IDs. f4 moved from candidate through lead to a confirmed finding in bucket other: deletion loses the legacy multi-chunk replay-tail/exactly-once test oracle. Its latest event has corrected parent-side references and limits the finding to lost test coverage, without claiming a current product failure. f1–f3 remain refuted candidates, with additional caller-chain, teardown-order, and identical-helper checks.\nCross-batch checks: host-capable attach → marker waiter → grid input → decoded text wait works together; post-stop adoption happens only after waiting for the supervisor to exit; the state TestDir is declared first and performs independent takeover/Shutdown/connection-end/socket-removal cleanup after later handles drop, retaining state on failure. The rename test selects the same drain implementation after import removal.\nReplay coverage synthesis: direct searches and source reads found remaining legacy marker-arrival and markerless death-recovery checks, plus grid channel-2 and Attached-before-data checks. These narrow f4: do not claim those checks wholly vanished. Host GridStream tests and scripted helm relay tests do not exercise a deep legacy Forwarder replay tail at the marker boundary. Correct current source is not a replacement for the removed regression oracle.\nNew verified IDs in this pass: f4 (other, test gap). New unverified IDs: none. Open lead IDs: none. Unread assigned scope: none. No runtime tests, reproductions, builds, checkout edits, or live-install actions.\nNext action: return the synthesis delta. A later discovery pass is still required if the caller continues the review protocol after the new finding.\n\nTurn: separate discovery 3 complete; discovery passes: 1.\nNeighbour context: discovery-neighbours.json read completely in bounded ranges 1–50, 51–100, 101–150 and 151–205 after an oversized first read was clipped. No named pending questions were supplied. Neighbour findings were used for novelty and interface context, not mandatory source credit or excluded coverage.\nDiscovery checks beyond known findings: reread the complete supervisor_stop patch in two chunks, inspected its removed acknowledgement roster and the live host probe, and rechecked the rename patch caller. Searched the pinned supervisor/e2e/script source for real no-output acknowledgements, DisableOutputGate use, supervisor output-shutdown callers and retained teardown tests. Direct reads checked the real driver gate test, fake sink/reaper stop tests, racing-attach stop test and current signal-to-cleanup implementation. Full-range path history and later supervisor_stop diff established that later changes retire/remove the legacy substrate rather than replace the removed signal-to-two-client oracle.\nNew result: f5 recorded immediately as a lead and then resolved to a confirmed finding in bucket other. It concerns the deleted real signal-to-legacy-output-client acknowledgement oracle at the intermediate supported-legacy revision. Driver-level acknowledgement tests remain; no claim is made that legacy shutdown is currently broken or that final-tip host-only tests should retain tmux support. This is distinct from known replay-tail finding f4 and from neighbour resource-lifetime findings.\nNew verified IDs this pass: f5. New unverified-after-investigation IDs: none. Open leads: none. Anything new found: yes, f5. Existing IDs were not lowered or dropped. Unread assigned scope: none. No runtime tests, reproductions, builds, checkout changes, live-install actions or prohibited coverage-source searches.\nNext action: return the discovery delta; the new substantive finding requires any further synthesis/discovery to occur in later turns requested by the caller.\n\nTurn: separate discovery 4 complete; discovery passes: 2.\nRefreshed interface context: read the complete updated discovery-neighbours.json (243 lines) in bounded ranges 1–50, 51–100, 101–145, 146–185 and 186–243. No named pending questions were supplied. New neighbour records concern other assigned paths and do not create an additional in-scope caller premise here; no scope expansion undertaken.\nNew search checks: compared removed quiet/fresh marker scenarios with actual grid sender tests and followed their setup through Viewer.converged, host_with, TestHostSpec defaults and the stand-in journal. A retained test waits for a marker on a fresh empty host before sending any output, so the considered extra no-live-output-marker gap is refuted by an actual discriminating oracle. Recorded that decision immediately as candidate f6. This does not revisit or dispose of earlier findings.\nAlso inspected the remaining ignored-hangup test and PTY descriptor ownership, the host attach smoke caller, the post-stop input-fate and screen-status waits, and HostConnection connect/reply deadlines used by adoption. Those checks found no additional issue in the assigned changes. The post-stop probe uses an owned newly adopted runtime and explicit bounded fate/screen waits; no runtime behavior was observed.\nNew verified IDs this pass: none. New unverified-after-investigation IDs: none. New considered/refuted IDs: f6. Open lead IDs: none. Anything new found: no reportable finding. Unread assigned scope: none. Existing findings and proposed-drop bases remain unchanged; no drops or lowerings applied.\nNo tests, reproductions, builds, checkout edits, live-install actions, or prohibited coverage-source searches. Next action: return this empty discovery result and await any later caller instruction.\n"
+}

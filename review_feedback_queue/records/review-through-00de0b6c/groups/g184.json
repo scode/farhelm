@@ -1,0 +1,696 @@
+{
+  "group": {
+    "id": "g184",
+    "domain": "terminal-emulation-contract",
+    "purpose": "terminal-emulation-contract: crates/farhelm-terminal-emulator/src/lib.rs, crates/farhelm-terminal-emulator/src/snapshot/mod.rs, crates/farhelm-terminal-emulator/src/snapshot/v1/mod.rs, crates/farhelm-terminal-emulator/src/snapshot/v1/paint.rs, crates/farhelm-terminal-emulator/tests/snapshot.rs, crates/farhelm-terminal-emulator/src/emulator.rs, crates/farhelm-terminal-emulator/src/modes.rs, crates/farhelm-terminal-emulator/src/queries.rs, crates/farhelm-terminal-emulator/src/screen.rs, crates/farhelm-terminal-emulator/tests/screen.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g001",
+      "g007",
+      "g008",
+      "g009",
+      "g079",
+      "g080",
+      "g081",
+      "g082",
+      "g083",
+      "g084",
+      "g013"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00960-000.patch",
+        "ranges": [
+          [
+            1,
+            16
+          ]
+        ],
+        "original_path": "crates/farhelm-terminal-emulator/src/lib.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,872)",
+        "lines": 16,
+        "bytes": 872,
+        "start": 0,
+        "end": 872,
+        "original": "[private-run]/prep/originals/00960.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00961-000.patch",
+        "ranges": [
+          [
+            1,
+            200
+          ]
+        ],
+        "original_path": "crates/farhelm-terminal-emulator/src/snapshot/mod.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,9056)",
+        "lines": 200,
+        "bytes": 9056,
+        "start": 0,
+        "end": 9056,
+        "original": "[private-run]/prep/originals/00961.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00962-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "crates/farhelm-terminal-emulator/src/snapshot/v1/mod.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,597)",
+        "lines": 13,
+        "bytes": 597,
+        "start": 0,
+        "end": 597,
+        "original": "[private-run]/prep/originals/00962.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00963-000.patch",
+        "ranges": [
+          [
+            1,
+            26
+          ]
+        ],
+        "original_path": "crates/farhelm-terminal-emulator/src/snapshot/v1/paint.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,1302)",
+        "lines": 26,
+        "bytes": 1302,
+        "start": 0,
+        "end": 1302,
+        "original": "[private-run]/prep/originals/00963.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00964-000.patch",
+        "ranges": [
+          [
+            1,
+            375
+          ]
+        ],
+        "original_path": "crates/farhelm-terminal-emulator/tests/snapshot.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,14247)",
+        "lines": 375,
+        "bytes": 14267,
+        "start": 0,
+        "end": 14247,
+        "original": "[private-run]/prep/originals/00964.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01552-000.patch",
+        "ranges": [
+          [
+            1,
+            21
+          ]
+        ],
+        "original_path": "crates/farhelm-terminal-emulator/src/emulator.rs",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,1230)",
+        "lines": 21,
+        "bytes": 1230,
+        "start": 0,
+        "end": 1230,
+        "original": "[private-run]/prep/originals/01552.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01553-000.patch",
+        "ranges": [
+          [
+            1,
+            12
+          ]
+        ],
+        "original_path": "crates/farhelm-terminal-emulator/src/lib.rs",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,695)",
+        "lines": 12,
+        "bytes": 695,
+        "start": 0,
+        "end": 695,
+        "original": "[private-run]/prep/originals/01553.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01554-000.patch",
+        "ranges": [
+          [
+            1,
+            15
+          ]
+        ],
+        "original_path": "crates/farhelm-terminal-emulator/src/modes.rs",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,872)",
+        "lines": 15,
+        "bytes": 872,
+        "start": 0,
+        "end": 872,
+        "original": "[private-run]/prep/originals/01554.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01555-000.patch",
+        "ranges": [
+          [
+            1,
+            50
+          ]
+        ],
+        "original_path": "crates/farhelm-terminal-emulator/src/queries.rs",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,2874)",
+        "lines": 50,
+        "bytes": 2874,
+        "start": 0,
+        "end": 2874,
+        "original": "[private-run]/prep/originals/01555.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01556-000.patch",
+        "ranges": [
+          [
+            1,
+            18
+          ]
+        ],
+        "original_path": "crates/farhelm-terminal-emulator/src/screen.rs",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,1052)",
+        "lines": 18,
+        "bytes": 1052,
+        "start": 0,
+        "end": 1052,
+        "original": "[private-run]/prep/originals/01556.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01557-000.patch",
+        "ranges": [
+          [
+            1,
+            25
+          ]
+        ],
+        "original_path": "crates/farhelm-terminal-emulator/tests/screen.rs",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,1293)",
+        "lines": 25,
+        "bytes": 1293,
+        "start": 0,
+        "end": 1293,
+        "original": "[private-run]/prep/originals/01557.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01558-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "crates/farhelm-terminal-emulator/tests/snapshot.rs",
+        "commit": "08399d092d20815ced6619c26df2391944ae2b4a",
+        "notes": "patch header; patch character offsets [0,725)",
+        "lines": 13,
+        "bytes": 725,
+        "start": 0,
+        "end": 725,
+        "original": "[private-run]/prep/originals/01558.patch"
+      }
+    ],
+    "lines": 784,
+    "bytes": 34835
+  },
+  "records": [
+    {
+      "key": "g184/f1",
+      "owner": "g184",
+      "id": "f1",
+      "domain": "terminal-emulation-contract",
+      "purpose": "terminal-emulation-contract: crates/farhelm-terminal-emulator/src/lib.rs, crates/farhelm-terminal-emulator/src/snapshot/mod.rs, crates/farhelm-terminal-emulator/src/snapshot/v1/mod.rs, crates/farhelm-terminal-emulator/src/snapshot/v1/paint.rs, crates/farhelm-terminal-emulator/tests/snapshot.rs, crates/farhelm-terminal-emulator/src/emulator.rs, crates/farhelm-terminal-emulator/src/modes.rs, crates/farhelm-terminal-emulator/src/queries.rs, crates/farhelm-terminal-emulator/src/screen.rs, crates/farhelm-terminal-emulator/tests/screen.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "f1",
+            "state": "open",
+            "summary": "Check whether removing tmux history seeds breaks retained restart history",
+            "location": "crates/farhelm-terminal-emulator/src/snapshot/mod.rs:638",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: removing the tmux history-seed API could leave a restarted older session without its prior scrollback if a supported restart path still promises or consumes it. Source basis: assigned patch 00961 removes history_seed_from_lines_until, seed_history_capacity, LinesSeed and LineStyles; patch 00964 removes their tests. The commit message says old tmux sessions are ended on startup and now restart into an empty host. Checks made: all assigned patches read; git grep at the reviewed commit finds no remaining references to the removed symbols in crates. Missing premise: the governing old-session shutdown/restart contract and replacement restart path have not yet been read. Next checks: pinned SPEC.md/SPEC_impl.md sections and pre/post restart callers. Suggested bucket: potentially highest for lost user-owned history, pending whether any retained-history guarantee or shipped route exists. Confidence: unresolved lead, not a validated finding. proposed_drop: false. possible_cover: commit message claims intentional empty restart; specification acceptance requires checking. Could-be-highest: yes. No execution or reproduction performed."
+          }
+        },
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f1",
+            "state": "open",
+            "summary": "Old tmux scrollback is no longer carried into Restart; specification accepts this",
+            "location": "crates/farhelm-terminal-emulator/src/snapshot/mod.rs:638",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Restart no longer carries an older tmux session's scrollback into a new terminal host. This could otherwise be lost user-owned terminal history, but the pinned product specification expressly accepts empty restarts for old terminals ended by this release. Source basis: patch 00961 removes history_seed_from_lines_until, seed_history_capacity, LinesSeed and LineStyles; patch 00964 removes tests confined to that API. git grep at the reviewed commit found no remaining references to the removed symbols in crates. SPEC_impl.md:2882-2930 says the startup ends the old server and reload treats every old-kind row as having no terminal. Exact acceptance, SPEC.md:1945-1947, Lifecycle operations: \"When the terminal no longer exists (the process that kept it ended, after a reboot, or an old terminal this release ended, see [Terminal experience](#terminal-experience)), Restart starts with an empty one.\" Exact retained-host contrast, SPEC_impl.md:2865-2867: \"Restart seeds the new host the same way, with a snapshot of the old terminal's history above a blank screen in default modes, read from the old host's emulator.\" Suggested bucket: highest if treated as an unaccepted loss of retained terminal history. Confidence: confirmed source/spec consequence; not observed at runtime. proposed_drop: the exact pinned specification acceptance quoted above; requires independent drop check because could-be-highest. possible_cover: that specification only; no queue or excluded coverage sources read. Could-be-highest: yes. Original suspicion preserved: removal could violate history retention if it also affects retained terminal-host seeds; remaining review must verify those APIs and callers survive. No execution or reproduction performed."
+          }
+        },
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f1",
+            "state": "open",
+            "summary": "Old tmux scrollback is no longer carried into Restart; specification accepts this",
+            "location": "crates/farhelm-terminal-emulator/src/snapshot/mod.rs:638",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Restart no longer carries an older tmux session’s scrollback into a new terminal host. This could otherwise lose user-owned terminal history, but the pinned product specification expressly accepts empty restarts for old terminals ended by this release. Source: patch 00961 removes only the plain-line/tmux seed API and patch 00964 removes its dedicated tests. A crates-wide git grep at this revision found no remaining references to those removed symbols. Retained host history remains supported by snapshot/mod.rs:513-570 (Emulator::history_seed/history_seed_until), service/core/host_restart.rs:401-490 (restart_seed reads old.history_seed and keeps the blob), and hosts/terminal.rs:2422-2451,3726-3768 (runtime Seed request encodes with emulator.history_seed_until). Thus the broader original suspicion that host history retention was removed is refuted by the surviving caller chain. Exact acceptance, SPEC.md:1945-1947, Lifecycle operations: When the terminal no longer exists (the process that kept it ended, after a reboot, or an old terminal this release ended, see [Terminal experience](#terminal-experience)), Restart starts with an empty one. SPEC.md:3015 states: After an update to this release, Restart, Clone and Replace start such a session in a new, empty terminal. SPEC_impl.md:2882-2930 specifies startup ending the old server and treating every old-kind row as having no terminal. Suggested bucket: highest if the old-history loss were unaccepted. Confidence: confirmed from source and specification; no runtime observation. proposed_drop: exact pinned specification acceptance quoted above, for independent drop checking. possible_cover: that specification only; excluded coverage sources were not read. Could-be-highest: yes. Original consequence preserved: removal abandons the old tmux history migration, while retained terminal-host history follows the unchanged seed path. No execution or reproduction performed."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f1",
+            "state": "open",
+            "summary": "Old tmux scrollback is no longer carried into Restart; specification accepts this",
+            "location": "crates/farhelm-terminal-emulator/src/snapshot/mod.rs:638",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: Restart no longer carries an older tmux session’s scrollback into a new terminal host. This could otherwise lose user-owned terminal history, but the pinned product specification expressly accepts empty restarts for old terminals ended by this release. Source: patch 00961 removes only the plain-line/tmux seed API and patch 00964 removes its dedicated tests. A crates-wide git grep at this revision found no remaining references to those removed symbols. Retained host history remains supported by snapshot/mod.rs:513-570 (Emulator::history_seed/history_seed_until), service/core/host_restart.rs:401-490 (restart_seed reads old.history_seed and keeps the blob), and hosts/terminal.rs:2422-2451,3726-3768 (runtime Seed request encodes with emulator.history_seed_until). Thus the broader original suspicion that host history retention was removed is refuted by the surviving caller chain. Exact acceptance, SPEC.md:1945-1947, Lifecycle operations: When the terminal no longer exists (the process that kept it ended, after a reboot, or an old terminal this release ended, see [Terminal experience](#terminal-experience)), Restart starts with an empty one. SPEC.md:3016 states: After an update to this release, Restart, Clone and Replace start such a session in a new, empty terminal. SPEC_impl.md:2882-2930 specifies startup ending the old server and treating every old-kind row as having no terminal. Suggested bucket: highest if the old-history loss were unaccepted. Confidence: confirmed from source and specification; no runtime observation. proposed_drop: exact pinned specification acceptance quoted above, for independent drop checking. possible_cover: that specification only; excluded coverage sources were not read. Could-be-highest: yes. Original consequence preserved: removal abandons the old tmux history migration, while retained terminal-host history follows the unchanged seed path. No execution or reproduction performed. This revision corrects the second SPEC.md citation to line 3016."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f1",
+            "state": "open",
+            "summary": "Old tmux scrollback retirement remains specification-accepted; host restart retention survives",
+            "location": "crates/farhelm-terminal-emulator/src/snapshot/mod.rs:638",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Original wording preserved: removing the tmux history-seed API could leave a restarted older session without its prior scrollback if a supported restart path still promises or consumes it. Also preserved: Restart no longer carries an older tmux session’s scrollback into a new terminal host; this could otherwise lose user-owned terminal history. This is the known retirement consequence, not a new discovery in synthesis. Exact proposed acceptance, SPEC.md:1945-1947: When the terminal no longer exists (the process that kept it ended, after a reboot, or an old terminal this release ended, see [Terminal experience](#terminal-experience)), Restart starts with an empty one. SPEC.md:3016: After an update to this release, Restart, Clone and Replace start such a session in a new, empty terminal. SPEC_impl.md:2882-2930 gives the startup retirement provenance. No proposed drop has been accepted. New source checks revisit the complete surviving replacement: core.rs:12340-12596 verifies/consents/stops and reaps the prior agent, reads restart_seed before generation claim, then moves the claim and owned seed into a supervisor-owned task; 12597-13038 carries it through relaunch, captures the existing tab strip, and calls relaunch_into_host. host_restart.rs:199-400 passes the owned blob into spawn_agent_in_host, publishes before ending the old host, and distinguishes published failure from rollback. host_launch.rs:405-525 carries it as ChildSpec.initial_snapshot. host_restart.rs:718-865 confirms cleanup before definitive failure and leaves unconfirmed cleanup ambiguous; core.rs:12846-12979 restores the old terminal only for definitive failure. Governing SPEC_impl.md:2345-2425 expressly describes these seed, publication, rollback and residual contracts. Retained history is encoded by the surviving snapshot/mod.rs:513-570 path; v1/paint.rs:400-437 paints only primary history above blank rows, resets pen/cursors and REP, and does not copy old modes/title. Distinct interactions checked: launch_artifacts.rs:42-77 quotes only the new runtime’s final visible screen, so seeded prior scrollback is not the launch excerpt; host_restart.rs:250-257 passes no initial prompt on Restart; core.rs:13016-13029 preserves the tab strip; terminals.rs:224-249 resolves a tab from the same session’s host_tabs cell independently of its agent terminal. None supplies a concrete new prompt/excerpt/tab identity or lost-history route caused by the assigned seed deletion. These checks do not generalize the retirement acceptance to update guidance, warning delivery, wrong-target signals or later Delete. No such distinct route originates in the assigned emulator edits. Suggested bucket: potentially highest for the preserved old-history loss consequence. Confidence: source/spec confirmed known consequence; host-retention extension is source-refuted, not executed. proposed_drop: exact pinned acceptance above, plus surviving host-path evidence, pending independent check. possible_cover: pinned specification only. Could-be-highest: yes. No open premise or runtime reproduction remains for this record."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f1",
+            "state": "open",
+            "summary": "Retirement consequence retained; prior seed-to-excerpt refutation requires narrowing",
+            "location": "crates/farhelm-terminal-emulator/src/snapshot/mod.rs:638",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Original consequence preserved: removing the tmux history-seed API could leave a restarted older session without its prior scrollback if a supported restart path still promises or consumes it. Known consequence remains loss of old tmux history, potentially highest if unaccepted. Exact proposed acceptance, SPEC.md:1945-1947: When the terminal no longer exists (the process that kept it ended, after a reboot, or an old terminal this release ended, see [Terminal experience](#terminal-experience)), Restart starts with an empty one. SPEC.md:3016: After an update to this release, Restart, Clone and Replace start such a session in a new, empty terminal. proposed_drop: this exact acceptance for the retirement consequence only, pending independent checking. possible_cover: pinned specification; new interface input g013/f2 supplied by caller is a separate known diagnostic-attribution finding. Could-be-highest: yes for preserved retirement/history consequence. Confidence: known retirement and retained-host seed chain are source-supported; no execution. New synthesis before discovery: g013/f2 now establishes that increasing the height of a history-seeded primary grid can promote prior history into its visible screen before a new login shell consumes its spec. It reports the subsequent failed-launch excerpt can quote those rows. This directly narrows my earlier f1 assertion that seeded prior scrollback is not the launch excerpt: blankness is established only when the seed is made, not after arbitrary later resize. I retract that blanket excerpt refutation pending my checks of the supplied exact source route. This does not undo the surviving host seed/format/test evidence or generalize the retirement acceptance to attribution. Next readily checkable premises: pinned alacritty height-growth semantics, runtime resize application, shell-readiness versus publication, and excerpt row filtering. This is known cross-group input, not a new independent discovery. No drop accepted and no runtime reproduction performed."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f1",
+            "state": "open",
+            "summary": "Retirement proposal retained; resized-seed excerpt counterexample verified",
+            "location": "crates/farhelm-terminal-emulator/src/snapshot/mod.rs:638",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Original wording and consequence retained: removing the tmux history-seed API could leave a restarted older session without its prior scrollback if a supported restart path still promises or consumes it. Known retirement consequence remains abandonment of old tmux scrollback, potentially highest if unaccepted. Exact proposed acceptance, SPEC.md:1945-1947: When the terminal no longer exists (the process that kept it ended, after a reboot, or an old terminal this release ended, see [Terminal experience](#terminal-experience)), Restart starts with an empty one. SPEC.md:3016: After an update to this release, Restart, Clone and Replace start such a session in a new, empty terminal. proposed_drop: this exact acceptance applies to retirement only, still pending independent checking. possible_cover: pinned specification for retirement; caller-supplied g013/f2 owns the distinct resized-seed launch-excerpt finding. Could-be-highest: yes for the original retirement consequence; the diagnostic-attribution counterexample has no established security or loss-of-work effect. Confidence: source/contract analysis only. Synthesis correction verified at this same revision: emulator.rs:224-226 delegates resize to Term; vendor/alacritty_terminal/src/term/mod.rs:756-758 resizes both grids; grid/resize.rs:25-28 and46-71 promotes up to the added height from primary history into visible rows. hosts/terminal.rs:2341-2353 queues valid sizes without checking launch-spec consumption,3872-3886 applies the journal resize and4063-4070 calls Emulator::resize. handlers.rs:1906-1912 resizes on attach and2058-2084 accepts owned-viewer resizes. host_launch.rs:579-645 waits for host start/adoption only, then tracks the pending spec; host_restart.rs:294-388 publishes this host without awaiting login-shell spec consumption. status.rs:625-653 invokes append_launch_excerpt for an ended unconsumed-spec launch; launch_artifacts.rs:59-77 reads that visible screen and96-102 selects its last five nonblank rows, including any promoted prior-run history that remains. Therefore my prior blanket assertion that seeded prior scrollback is not the launch excerpt is withdrawn: only the initial seed is blank. A larger viewer before a quiet login-shell failure can yield the misleading old-output excerpt g013/f2 reports. This corroborates a supplied known interface finding, not a new discovery or additional local bug ID. It does not invalidate the separate host-seed retention, frozen-format or surviving-test evidence. The retirement acceptance does not excuse diagnostic attribution. Original source-refuted claim and its correction remain in the append-only history. No readily checkable premise remains open for this interface correction. No drop accepted; no runtime test or reproduction performed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 12,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "f1",
+          "state": "open",
+          "summary": "Retirement proposal retained; resized-seed excerpt counterexample verified",
+          "location": "crates/farhelm-terminal-emulator/src/snapshot/mod.rs:638",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Original wording and consequence retained: removing the tmux history-seed API could leave a restarted older session without its prior scrollback if a supported restart path still promises or consumes it. Known retirement consequence remains abandonment of old tmux scrollback, potentially highest if unaccepted. Exact proposed acceptance, SPEC.md:1945-1947: When the terminal no longer exists (the process that kept it ended, after a reboot, or an old terminal this release ended, see [Terminal experience](#terminal-experience)), Restart starts with an empty one. SPEC.md:3016: After an update to this release, Restart, Clone and Replace start such a session in a new, empty terminal. proposed_drop: this exact acceptance applies to retirement only, still pending independent checking. possible_cover: pinned specification for retirement; caller-supplied g013/f2 owns the distinct resized-seed launch-excerpt finding. Could-be-highest: yes for the original retirement consequence; the diagnostic-attribution counterexample has no established security or loss-of-work effect. Confidence: source/contract analysis only. Synthesis correction verified at this same revision: emulator.rs:224-226 delegates resize to Term; vendor/alacritty_terminal/src/term/mod.rs:756-758 resizes both grids; grid/resize.rs:25-28 and46-71 promotes up to the added height from primary history into visible rows. hosts/terminal.rs:2341-2353 queues valid sizes without checking launch-spec consumption,3872-3886 applies the journal resize and4063-4070 calls Emulator::resize. handlers.rs:1906-1912 resizes on attach and2058-2084 accepts owned-viewer resizes. host_launch.rs:579-645 waits for host start/adoption only, then tracks the pending spec; host_restart.rs:294-388 publishes this host without awaiting login-shell spec consumption. status.rs:625-653 invokes append_launch_excerpt for an ended unconsumed-spec launch; launch_artifacts.rs:59-77 reads that visible screen and96-102 selects its last five nonblank rows, including any promoted prior-run history that remains. Therefore my prior blanket assertion that seeded prior scrollback is not the launch excerpt is withdrawn: only the initial seed is blank. A larger viewer before a quiet login-shell failure can yield the misleading old-output excerpt g013/f2 reports. This corroborates a supplied known interface finding, not a new discovery or additional local bug ID. It does not invalidate the separate host-seed retention, frozen-format or surviving-test evidence. The retirement acceptance does not excuse diagnostic attribution. Original source-refuted claim and its correction remain in the append-only history. No readily checkable premise remains open for this interface correction. No drop accepted; no runtime test or reproduction performed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g184/findings.jsonl",
+        "id": "f1",
+        "line": 12,
+        "disposition": "under-investigation",
+        "group": "g184-f1",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-115",
+          "key": "g184/f1",
+          "latest_line": 12,
+          "recommendation": "covered",
+          "bucket": "highest",
+          "underlying_key": "retired-tmux-restart-does-not-migrate-scrollback",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The old-tmux history retirement is real and explicitly accepted. The host-to-host history-retention extension is source-refuted. This proposed coverage applies only to retirement; it does not dismiss the distinct resized-seed excerpt defect supplied as g013/f2. Preserve the line-11 withdrawal and line-12 correction of the earlier blanket excerpt refutation.",
+          "checks": [
+            "Historical source checked at 1ed482dde220452e424973faf38a5e1318986333, within the review range. The snapshot/mod.rs diff deletes only history_seed_from_lines[_until], LinesSeed, LineStyles and seed_history_capacity; their only format-helper dependency is the deleted sgr_setting adapter. git grep at that hash returns no remaining crates references to the deleted symbols.",
+            "At that hash snapshot/mod.rs:513-570 still encodes primary history; hosts/terminal.rs:2422-2451 and 3726-3768 request and run history_seed_until; service/core/host_restart.rs:418-490 reads and retains the blob, :199-257 supplies it to spawn_agent_in_host; host_launch.rs:508-518 places it in ChildSpec.initial_snapshot. The removed tmux parser is not used by this chain.",
+            "The retirement acceptance is explicit both at the reviewed revision (SPEC.md:1945-1947 and 3003-3019; SPEC_impl.md:2882-2930) and current recording-time main (SPEC.md:2998-3010; SPEC_impl.md:2781-2821). Current Lifecycle operations also retains the host-to-host scrollback rule; retirement acceptance must not be generalized to surviving hosts.",
+            "The excerpt correction is source-supported at the same historical hash: vendor/alacritty_terminal/src/grid/resize.rs:25-28,46-71 pulls primary history into taller visible grids; term/mod.rs:756-758 resizes both grids. hosts/terminal.rs:2341-2353 admits sizes without a spec-consumption gate, :3872-3886 and :4063-4070 apply them. handlers.rs:1906-1912 and :2060-2084 supply viewer sizes. host_launch.rs:579-645 waits for host start/adoption then tracks pending launch artifacts; host_restart.rs:294-388 publishes without waiting for spec consumption. status.rs:624-653 appends the excerpt for the failed unconsumed-spec shape; launch_artifacts.rs:59-77,96-102 quotes the last nonblank visible rows. Thus initial blankness does not establish later output provenance. This is a conditional source conclusion, not a reproduced occurrence."
+          ],
+          "coverage_checked": [
+            "SPEC.md and SPEC_impl.md: exact retirement acceptance found; surviving host history is separately promised. Their safe-attribution rule does not accept quoting old output after resize.",
+            "TODO.md:25-27 Planned is empty. Near-term snapshot-performance and later startup-shutdown-removal entries do not cover either alleged loss or excerpt attribution.",
+            "plans/queue/INDEX.md has no unlanded plans. Searches of retained queue plan files found tmux-end-old-terminals.md:104-106 explicitly preserving host history while removing only the tmux seed, but that landed plan is context, not prospective coverage.",
+            "BUGS.md has only the unrelated local-SSH-helper install hang; no matching terminal-history or excerpt coverage.",
+            "review_feedback_queue/INDEX.md searched for tmux, scrollback, seeds, snapshots, excerpts and old-output attribution. host-restart-history-painter-omits-palette.md was read in full: it concerns retained history recoloring, a distinct omission, not loss of all host seeding. No exact existing retirement or resized-excerpt item was found.",
+            "Active TRIAGE_OUTCOMES.md searched for the actual terminal-history, seed, compatibility and excerpt claims. Snapshot/seed hits concern launcher state, not this trigger/consequence/scope. Archive not read.",
+            "FILTER.md read in full. No filter is the basis for retirement coverage. The excerpt's rare-diagnostic filter needs a separate decision for g013/f2; retirement acceptance does not decide it."
+          ],
+          "exact_cover_quotes": [
+            "Reviewed SPEC.md:1945-1947: When the terminal no longer exists (the process that kept it ended, after a reboot, or an old terminal this release ended, see [Terminal experience](#terminal-experience)), Restart starts with an empty one.",
+            "Reviewed SPEC.md:3016: After an update to this release, Restart, Clone and Replace start such a session in a new, empty terminal.",
+            "Current SPEC.md:3009-3010: Restart, Clone and Replace start such a session in a new, empty terminal."
+          ],
+          "missing_premise": "None for the retirement consequence or the surviving host-seed chain. Actual occurrence and frequency of the resized-seed login-shell-failure excerpt were not measured; source establishes the conditional route. g013/f2's own record and disposition were not supplied as this batch's input.",
+          "original_stronger_consequence": "Removing the tmux history-seed API could leave a restarted older session without prior scrollback if a supported path still promised or consumed it; this could lose user-owned terminal history. The broader suspicion that retained host seeds were removed was later refuted. Earlier synthesis also claimed seeded history could never reach a failed-launch excerpt; that blanket assertion was withdrawn and the resize counterexample verified.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Exact specification coverage for old-tmux history retirement only, plus source refutation of removal of the retained-host seed path. Keep the original potential user-work consequence in the independent drop register. Do not drop or lower g013/f2 through this disposition.",
+          "new_interface_evidence": "The supplied g013/f2 resize-to-excerpt route is corroborated by the historical source listed above. It is a distinct diagnostic-attribution issue, not an alias of tmux seed retirement; no additional defect search was performed."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retired-tmux-restart-does-not-migrate-scrollback",
+        "destination": "trailing-retired-tmux-restart-does-not-migrate-scrollback.md"
+      }
+    },
+    {
+      "key": "g184/f2",
+      "owner": "g184",
+      "id": "f2",
+      "domain": "terminal-emulation-contract",
+      "purpose": "terminal-emulation-contract: crates/farhelm-terminal-emulator/src/lib.rs, crates/farhelm-terminal-emulator/src/snapshot/mod.rs, crates/farhelm-terminal-emulator/src/snapshot/v1/mod.rs, crates/farhelm-terminal-emulator/src/snapshot/v1/paint.rs, crates/farhelm-terminal-emulator/tests/snapshot.rs, crates/farhelm-terminal-emulator/src/emulator.rs, crates/farhelm-terminal-emulator/src/modes.rs, crates/farhelm-terminal-emulator/src/queries.rs, crates/farhelm-terminal-emulator/src/screen.rs, crates/farhelm-terminal-emulator/tests/screen.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "f2",
+            "state": "open",
+            "summary": "Removing the tmux seed helpers does not change the v1 snapshot format",
+            "location": "crates/farhelm-terminal-emulator/src/snapshot/v1/paint.rs:743",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR considered: deleting an exported helper from the frozen v1 snapshot module might change saved terminal restoration or the bytes written by supported host snapshots. Source refutation: assigned patch 00963 deletes only sgr_setting, an owned-string adapter over pen_changes used by the removed plain-line seed builder; patch 00962 removes only its re-export. The surviving v1 encoder and decoder remain unchanged. snapshot/v1/mod.rs:246-269 still encodes retained host history through paint::paint_history, and snapshot/mod.rs:573-587 still dispatches version 1 blobs to v1::decode. v1/paint.rs:694-743 retains the actual frozen pen_changes implementation. A crates-wide grep at the reviewed revision found no surviving sgr_setting or removed plain-line seed API reference. Contract: SPEC_impl.md:2831-2838 requires every shipped snapshot format remain readable forever and format changes require a new version. The assigned deletion does not alter that format. Suggested bucket: other for the considered compatibility question; no established adverse consequence. Confidence: confirmed from source, not execution. proposed_drop: source refutation above. possible_cover: none. Could-be-highest: no established loss or security route; the hypothesized format regression is absent. No test or reproduction run."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f2",
+            "state": "open",
+            "summary": "Check frozen snapshot compatibility after deleting tmux-only SGR helpers",
+            "location": "crates/farhelm-terminal-emulator/src/snapshot/v1/paint.rs:743",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Original considered consequence, preserved verbatim: deleting an exported helper from the frozen v1 snapshot module might change saved terminal restoration or the bytes written by supported host snapshots. A real incompatibility could make retained terminal history unavailable, so this record is promoted from candidate to finding for the later independent check; absence of an established source route is the proposed refutation, not acceptance of a drop. TLDR: no such incompatibility was found by the initial source checks. Evidence retained: patch 00963 deletes only sgr_setting, an owned-string adapter over pen_changes used by the removed plain-line seed builder; 00962 removes only its re-export. The surviving v1 encoder and decoder are unchanged. snapshot/v1/mod.rs:246-269 still encodes host history through paint::paint_history; snapshot/mod.rs:573-587 still dispatches version 1 to v1::decode; v1/paint.rs:694-743 retains pen_changes. Crates-wide grep found no surviving sgr_setting or removed plain-line seed API references. Contract: SPEC_impl.md:2831-2838 says every shipped format stays readable forever. Suggested bucket: potentially highest if the original compatibility-loss premise held. Confidence: source-refuted compatibility concern; no runtime observation. proposed_drop: the helper and re-export deletions do not touch surviving format encoder/decoder paths, supported by the source references above; pending independent check. possible_cover: none. Could-be-highest: yes, preserving the original potential saved-state consequence even though its route is refuted. Further synthesis checks will revisit retained seed lifecycle and test sensitivity separately. No runtime test or reproduction performed."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "f2",
+            "state": "open",
+            "summary": "Frozen snapshot compatibility concern remains source-refuted, pending independent check",
+            "location": "crates/farhelm-terminal-emulator/src/snapshot/v1/paint.rs:743",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Original considered wording preserved verbatim: deleting an exported helper from the frozen v1 snapshot module might change saved terminal restoration or the bytes written by supported host snapshots. Potential consequence preserved: incompatible restoration could make user-owned retained terminal history unavailable. This record was promoted from candidate to finding in this synthesis turn so the later independent check receives that consequence even though the source route is refuted. TLDR: the assigned deletion removes the tmux-only sgr_setting string adapter and its re-export, not pen_changes, paint_history, container, decode, or any shipped wire field. Initial exact source evidence remains snapshot/v1/paint.rs:694-743 (pen_changes), snapshot/v1/mod.rs:246-269 (encode_history), snapshot/mod.rs:573-587 (v1 restore dispatch), and the assigned 00962/00963 patches. New interaction check: paint_history at v1/paint.rs:400-437 directly paints existing primary grid rows and resets blank-screen cursor/pen/REP; it never calls the retired adapter. New caller check: core.rs:12489-12493,13000-13029 and host_restart.rs:199-258 carry the host encoder’s blob into the new host via host_launch.rs:509-518 ChildSpec.initial_snapshot. New test-sensitivity check, independently of production correctness: snapshot_golden.rs:426-447 chooses both full and limited history_seed encodes; 576-628 compares restoration with committed state descriptions and current encoding with fixed blob bytes; 684-703 separately requires nonempty history, partial trimming, exact restored history count, trimmed mark, blank screen, empty title and bracketed paste off. Thus both encoding bytes and the seed’s observable contracts still have distinguishing assertions. The removed tests exclusively invoke removed plain-line APIs and do not supply the surviving golden compatibility checks; f4 records the separate test-responsibility assessment. Contract: SPEC_impl.md:2827-2879 requires every shipped snapshot format stay readable forever. Suggested bucket: potentially highest if the original compatibility-loss premise held. Confidence: source-refuted concern, with no execution-based assertion. proposed_drop: no surviving format or caller path depends on the deleted helper, and surviving tests still pin both sides of that compatibility boundary; pending independent check, not accepted here. possible_cover: none. Could-be-highest: yes, for the preserved hypothetical retained-history consequence. No open premise or reproduction remains for this record."
+          }
+        }
+      ],
+      "latest": {
+        "line": 10,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "f2",
+          "state": "open",
+          "summary": "Frozen snapshot compatibility concern remains source-refuted, pending independent check",
+          "location": "crates/farhelm-terminal-emulator/src/snapshot/v1/paint.rs:743",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Original considered wording preserved verbatim: deleting an exported helper from the frozen v1 snapshot module might change saved terminal restoration or the bytes written by supported host snapshots. Potential consequence preserved: incompatible restoration could make user-owned retained terminal history unavailable. This record was promoted from candidate to finding in this synthesis turn so the later independent check receives that consequence even though the source route is refuted. TLDR: the assigned deletion removes the tmux-only sgr_setting string adapter and its re-export, not pen_changes, paint_history, container, decode, or any shipped wire field. Initial exact source evidence remains snapshot/v1/paint.rs:694-743 (pen_changes), snapshot/v1/mod.rs:246-269 (encode_history), snapshot/mod.rs:573-587 (v1 restore dispatch), and the assigned 00962/00963 patches. New interaction check: paint_history at v1/paint.rs:400-437 directly paints existing primary grid rows and resets blank-screen cursor/pen/REP; it never calls the retired adapter. New caller check: core.rs:12489-12493,13000-13029 and host_restart.rs:199-258 carry the host encoder’s blob into the new host via host_launch.rs:509-518 ChildSpec.initial_snapshot. New test-sensitivity check, independently of production correctness: snapshot_golden.rs:426-447 chooses both full and limited history_seed encodes; 576-628 compares restoration with committed state descriptions and current encoding with fixed blob bytes; 684-703 separately requires nonempty history, partial trimming, exact restored history count, trimmed mark, blank screen, empty title and bracketed paste off. Thus both encoding bytes and the seed’s observable contracts still have distinguishing assertions. The removed tests exclusively invoke removed plain-line APIs and do not supply the surviving golden compatibility checks; f4 records the separate test-responsibility assessment. Contract: SPEC_impl.md:2827-2879 requires every shipped snapshot format stay readable forever. Suggested bucket: potentially highest if the original compatibility-loss premise held. Confidence: source-refuted concern, with no execution-based assertion. proposed_drop: no surviving format or caller path depends on the deleted helper, and surviving tests still pin both sides of that compatibility boundary; pending independent check, not accepted here. possible_cover: none. Could-be-highest: yes, for the preserved hypothetical retained-history consequence. No open premise or reproduction remains for this record."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g184/findings.jsonl",
+        "id": "f2",
+        "line": 10,
+        "disposition": "under-investigation",
+        "group": "g184-f2",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-115",
+          "key": "g184/f2",
+          "latest_line": 10,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "tmux-only-sgr-adapter-deletion-frozen-snapshot-compatibility-concern",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The actual deletion does not change the surviving version-1 encoder, decoder, wire fields or host-seed call chain. Preserve the promotion from candidate to finding and the hypothetical loss-of-retained-history consequence for independent checking; this is a proposed source refutation, not an accepted drop.",
+          "checks": [
+            "At reviewed 1ed482dde220452e424973faf38a5e1318986333 the complete snapshot/v1/mod.rs diff changes only the Content/sgr_setting re-export, and paint.rs deletes only sgr_setting, the string adapter used by the removed plain-line seed implementation. pen_changes remains at paint.rs:690-744. No surviving crates reference to sgr_setting was found.",
+            "At that hash snapshot/mod.rs:578-587 still dispatches version 1 to v1::decode. v1/mod.rs:242-268 encodes host history through paint_history; paint.rs:401-437 paints primary history directly and resets the blank screen, pen, cursors and REP. None uses the removed adapter.",
+            "At that hash snapshot_golden.rs:426-447 and 527-531 exercise full and limited host seeds; :576-628 compares fixed saved blobs with recorded restoration and current encoder bytes; :684-703 checks nonempty history, partial trimming, exact counts, blank screen, empty title and default bracketed-paste state. No test execution was performed."
+          ],
+          "coverage_checked": [
+            "Both specifications searched. Reviewed SPEC_impl.md:2827-2879 and current :2727-2779 require shipped formats to remain readable and preserve fixed golden fixtures; they do not accept format incompatibility. Current SPEC.md Lifecycle operations separately promises retained host history. These establish the contract, not a coverage-based dismissal.",
+            "TODO.md Planned is empty; plans/queue/INDEX.md has no unlanded plans. No targeted compatibility repair was found in retained plan-file searches.",
+            "BUGS.md and active TRIAGE_OUTCOMES.md: no exact matching compatibility issue or decision; archive not read.",
+            "Queue INDEX searched for frozen formats, snapshots, restoration, history and seeds. snapshot-comparison-ignores-link-grouping.md was read in full: its existing hyperlink oracle weakness is distinct and is not refuted by these surviving golden checks. host-restart-history-painter-omits-palette.md concerns recoloring, not this adapter deletion. No exact alias found among the named records or matching existing items.",
+            "FILTER.md has no matching boundary; no filter is proposed."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "The hypothesized path from deleting this tmux-only adapter to changing a surviving shipped snapshot byte stream is absent in the reviewed diff. Runtime compatibility was not tested and broad compatibility perfection is not claimed.",
+          "original_stronger_consequence": "Deleting an exported helper from the frozen v1 snapshot module might change saved terminal restoration or bytes written by supported host snapshots; incompatible restoration could make user-owned retained terminal history unavailable. Line 7 explicitly promoted the earlier candidate so this stronger concern receives independent checking.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Narrow source refutation of this deletion causing frozen-format incompatibility. Bucket other reflects no established adverse route; potential highest consequence remains attached for the independent drop/lowering check."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "tmux-only-sgr-adapter-deletion-frozen-snapshot-compatibility-concern",
+        "destination": "trailing-tmux-only-sgr-adapter-deletion-frozen-snapshot-compatibility-concern.md"
+      }
+    },
+    {
+      "key": "g184/f3",
+      "owner": "g184",
+      "id": "f3",
+      "domain": "terminal-emulation-contract",
+      "purpose": "terminal-emulation-contract: crates/farhelm-terminal-emulator/src/lib.rs, crates/farhelm-terminal-emulator/src/snapshot/mod.rs, crates/farhelm-terminal-emulator/src/snapshot/v1/mod.rs, crates/farhelm-terminal-emulator/src/snapshot/v1/paint.rs, crates/farhelm-terminal-emulator/tests/snapshot.rs, crates/farhelm-terminal-emulator/src/emulator.rs, crates/farhelm-terminal-emulator/src/modes.rs, crates/farhelm-terminal-emulator/src/queries.rs, crates/farhelm-terminal-emulator/src/screen.rs, crates/farhelm-terminal-emulator/tests/screen.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "f3",
+            "state": "open",
+            "summary": "Reworded emulator comments preserve the current contracts",
+            "location": "crates/farhelm-terminal-emulator/src/queries.rs:15",
+            "detail": "Reviewed commit: 08399d092d20815ced6619c26df2391944ae2b4a. TLDR considered: removing tmux-era explanations could misstate the terminal behavior or obscure the saved-state compatibility exception. No substantive mismatch found in the assigned edits. Source checks: queries.rs:15-21,72-80,169-176 still declares the same query table, terminator behavior and 16x32 assumed cell size; the governing SPEC_impl.md:2669-2726 states those policies. modes.rs:30-40 still gives SGR priority when 1005 and 1006 are both set, matching from_term_mode at 99-105. emulator.rs:278-295 keeps the current title contract and narrows the tmux comparison to old fixtures; tests/screen.rs:172-202 still tests literal #(evil), whitespace trimming and RIS title clearing. screen.rs:26-32 and tests/screen.rs:1-11 retain the capture-format compatibility explanation; supervisor agent_kind/screen_fixtures.rs:1-19 confirms pre-November fixtures were captured in tmux and all are repainted into the emulator. tests/snapshot.rs:356-366 now calls selector handling the live rule, which agrees with snapshot/v1/mod.rs:412-419,519 disabling it only during saved-stream replay and restoring it on return. lib.rs:1-9 describes all current terminals as host terminals, consistent with the pinned terminal-host contract. Suggested bucket: other; no established user-facing failure. Confidence: source-supported assessment, no test execution. proposed_drop: no source/contract mismatch found in this considered documentation concern. possible_cover: none. Could-be-highest: no established security or loss-of-work consequence in these prose-only edits. This is a rejected candidate, not an asserted bug."
+          }
+        }
+      ],
+      "latest": {
+        "line": 6,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "f3",
+          "state": "open",
+          "summary": "Reworded emulator comments preserve the current contracts",
+          "location": "crates/farhelm-terminal-emulator/src/queries.rs:15",
+          "detail": "Reviewed commit: 08399d092d20815ced6619c26df2391944ae2b4a. TLDR considered: removing tmux-era explanations could misstate the terminal behavior or obscure the saved-state compatibility exception. No substantive mismatch found in the assigned edits. Source checks: queries.rs:15-21,72-80,169-176 still declares the same query table, terminator behavior and 16x32 assumed cell size; the governing SPEC_impl.md:2669-2726 states those policies. modes.rs:30-40 still gives SGR priority when 1005 and 1006 are both set, matching from_term_mode at 99-105. emulator.rs:278-295 keeps the current title contract and narrows the tmux comparison to old fixtures; tests/screen.rs:172-202 still tests literal #(evil), whitespace trimming and RIS title clearing. screen.rs:26-32 and tests/screen.rs:1-11 retain the capture-format compatibility explanation; supervisor agent_kind/screen_fixtures.rs:1-19 confirms pre-November fixtures were captured in tmux and all are repainted into the emulator. tests/snapshot.rs:356-366 now calls selector handling the live rule, which agrees with snapshot/v1/mod.rs:412-419,519 disabling it only during saved-stream replay and restoring it on return. lib.rs:1-9 describes all current terminals as host terminals, consistent with the pinned terminal-host contract. Suggested bucket: other; no established user-facing failure. Confidence: source-supported assessment, no test execution. proposed_drop: no source/contract mismatch found in this considered documentation concern. possible_cover: none. Could-be-highest: no established security or loss-of-work consequence in these prose-only edits. This is a rejected candidate, not an asserted bug."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g184/findings.jsonl",
+        "id": "f3",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "emulator-tmux-rationale-rewording-contract-mismatch-concern",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-115 after inspecting it. The named comment edits preserve the observable query, encoding, title, fixture and saved-stream policies. This was a rejected prose candidate, not a demonstrated production defect; the separate supplied excerpt claim is not part of these edited comments. Source refutation of the narrowly named documentation concern; historical compatibility rationale and saved-stream exception remain explicit. Checked source/results: [\"Reviewed 08399d092d20815ced6619c26df2391944ae2b4a is within range. Its complete emulator diff rewords comments and one assertion message; no executable emulator behavior or test oracle changes.\",\"At that hash queries.rs:15-21,73-81,168-175 retains the query-table contract, matching color terminators and the 16x32 assumption, consistent with SPEC_impl.md:2669-2726. modes.rs:30-38 promises SGR priority; :94-99 implements SGR before UTF8.\",\"The diff retains the live title contract and describes tmux titles specifically as retained fixture evidence; supervisor agent_kind/screen_fixtures.rs:1-19 independently explains pre-November tmux captures and emulator repainting. screen.rs:26-33 and tests/screen.rs:1-12 preserve that compatibility explanation.\",\"At 1ed482dde220452e424973faf38a5e1318986333, v1/mod.rs:412-419 and :519 disables the changed width/REP rule for saved streams and restores the live rule on return. The 08399 snapshot-test wording change from new terminal to live rule accurately names this exception. No runtime observation is asserted.\"] Current coverage/results: [\"Both specifications searched and relevant current terminal-emulator and terminal-snapshot sections read; source wording agrees with the declared policies rather than relying on acceptance of a known mismatch.\",\"TODO.md Planned is empty; plans/queue/INDEX.md has no unlanded plans. Retained tmux-drop-from-docs.md:32-46 and tmux-end-old-terminals.md:193-197 preserve the same behavior while rewording historical rationale; they are context, not unlanded coverage.\",\"BUGS.md, queue INDEX and active TRIAGE_OUTCOMES.md searched for terminal query, mouse encoding, selectors, titles, saved-stream and tmux-history concerns. No exact matching defect/decision found. Existing snapshot test-oracle and palette items have different triggers and scope. Archive not read.\",\"FILTER.md read; no filter proposed.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing tmux-era explanations could misstate terminal behavior or obscure the saved-state compatibility exception. The record asserted no established security or loss-of-work route and remained a rejected candidate.\"; \"No substantive false statement or changed contract was identified in the actual comment edits. This does not certify unrelated comments or every test in the subsystem.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g184/f3",
+        "line": 6,
+        "disposition": "excluded",
+        "group": "emulator-tmux-rationale-rewording-contract-mismatch-concern",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-115 after inspecting it. The named comment edits preserve the observable query, encoding, title, fixture and saved-stream policies. This was a rejected prose candidate, not a demonstrated production defect; the separate supplied excerpt claim is not part of these edited comments. Source refutation of the narrowly named documentation concern; historical compatibility rationale and saved-stream exception remain explicit. Checked source/results: [\"Reviewed 08399d092d20815ced6619c26df2391944ae2b4a is within range. Its complete emulator diff rewords comments and one assertion message; no executable emulator behavior or test oracle changes.\",\"At that hash queries.rs:15-21,73-81,168-175 retains the query-table contract, matching color terminators and the 16x32 assumption, consistent with SPEC_impl.md:2669-2726. modes.rs:30-38 promises SGR priority; :94-99 implements SGR before UTF8.\",\"The diff retains the live title contract and describes tmux titles specifically as retained fixture evidence; supervisor agent_kind/screen_fixtures.rs:1-19 independently explains pre-November tmux captures and emulator repainting. screen.rs:26-33 and tests/screen.rs:1-12 preserve that compatibility explanation.\",\"At 1ed482dde220452e424973faf38a5e1318986333, v1/mod.rs:412-419 and :519 disables the changed width/REP rule for saved streams and restores the live rule on return. The 08399 snapshot-test wording change from new terminal to live rule accurately names this exception. No runtime observation is asserted.\"] Current coverage/results: [\"Both specifications searched and relevant current terminal-emulator and terminal-snapshot sections read; source wording agrees with the declared policies rather than relying on acceptance of a known mismatch.\",\"TODO.md Planned is empty; plans/queue/INDEX.md has no unlanded plans. Retained tmux-drop-from-docs.md:32-46 and tmux-end-old-terminals.md:193-197 preserve the same behavior while rewording historical rationale; they are context, not unlanded coverage.\",\"BUGS.md, queue INDEX and active TRIAGE_OUTCOMES.md searched for terminal query, mouse encoding, selectors, titles, saved-stream and tmux-history concerns. No exact matching defect/decision found. Existing snapshot test-oracle and palette items have different triggers and scope. Archive not read.\",\"FILTER.md read; no filter proposed.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing tmux-era explanations could misstate terminal behavior or obscure the saved-state compatibility exception. The record asserted no established security or loss-of-work route and remained a rejected candidate.\"; \"No substantive false statement or changed contract was identified in the actual comment edits. This does not certify unrelated comments or every test in the subsystem.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-115",
+          "key": "g184/f3",
+          "latest_line": 6,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "emulator-tmux-rationale-rewording-contract-mismatch-concern",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The named comment edits preserve the observable query, encoding, title, fixture and saved-stream policies. This was a rejected prose candidate, not a demonstrated production defect; the separate supplied excerpt claim is not part of these edited comments.",
+          "checks": [
+            "Reviewed 08399d092d20815ced6619c26df2391944ae2b4a is within range. Its complete emulator diff rewords comments and one assertion message; no executable emulator behavior or test oracle changes.",
+            "At that hash queries.rs:15-21,73-81,168-175 retains the query-table contract, matching color terminators and the 16x32 assumption, consistent with SPEC_impl.md:2669-2726. modes.rs:30-38 promises SGR priority; :94-99 implements SGR before UTF8.",
+            "The diff retains the live title contract and describes tmux titles specifically as retained fixture evidence; supervisor agent_kind/screen_fixtures.rs:1-19 independently explains pre-November tmux captures and emulator repainting. screen.rs:26-33 and tests/screen.rs:1-12 preserve that compatibility explanation.",
+            "At 1ed482dde220452e424973faf38a5e1318986333, v1/mod.rs:412-419 and :519 disables the changed width/REP rule for saved streams and restores the live rule on return. The 08399 snapshot-test wording change from new terminal to live rule accurately names this exception. No runtime observation is asserted."
+          ],
+          "coverage_checked": [
+            "Both specifications searched and relevant current terminal-emulator and terminal-snapshot sections read; source wording agrees with the declared policies rather than relying on acceptance of a known mismatch.",
+            "TODO.md Planned is empty; plans/queue/INDEX.md has no unlanded plans. Retained tmux-drop-from-docs.md:32-46 and tmux-end-old-terminals.md:193-197 preserve the same behavior while rewording historical rationale; they are context, not unlanded coverage.",
+            "BUGS.md, queue INDEX and active TRIAGE_OUTCOMES.md searched for terminal query, mouse encoding, selectors, titles, saved-stream and tmux-history concerns. No exact matching defect/decision found. Existing snapshot test-oracle and palette items have different triggers and scope. Archive not read.",
+            "FILTER.md read; no filter proposed."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No substantive false statement or changed contract was identified in the actual comment edits. This does not certify unrelated comments or every test in the subsystem.",
+          "original_stronger_consequence": "Removing tmux-era explanations could misstate terminal behavior or obscure the saved-state compatibility exception. The record asserted no established security or loss-of-work route and remained a rejected candidate.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation of the narrowly named documentation concern; historical compatibility rationale and saved-stream exception remain explicit."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "emulator-tmux-rationale-rewording-contract-mismatch-concern",
+        "destination": null
+      }
+    },
+    {
+      "key": "g184/f4",
+      "owner": "g184",
+      "id": "f4",
+      "domain": "terminal-emulation-contract",
+      "purpose": "terminal-emulation-contract: crates/farhelm-terminal-emulator/src/lib.rs, crates/farhelm-terminal-emulator/src/snapshot/mod.rs, crates/farhelm-terminal-emulator/src/snapshot/v1/mod.rs, crates/farhelm-terminal-emulator/src/snapshot/v1/paint.rs, crates/farhelm-terminal-emulator/tests/snapshot.rs, crates/farhelm-terminal-emulator/src/emulator.rs, crates/farhelm-terminal-emulator/src/modes.rs, crates/farhelm-terminal-emulator/src/queries.rs, crates/farhelm-terminal-emulator/src/screen.rs, crates/farhelm-terminal-emulator/tests/screen.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "f4",
+            "state": "open",
+            "summary": "Deleted tmux-seed tests do not remove the surviving host-seed assertions",
+            "location": "crates/farhelm-terminal-emulator/tests/snapshot.rs:1311",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR considered: deleting the plain-line seed tests might remove regression sensitivity for the history, style, trimming, cancellation or allocation-bound behavior still needed by host restarts. Source assessment addresses the tests themselves, not only correct production code. Assigned patch 00964 deletes tests that all invoke history_seed_from_lines[_until] or seed_history_capacity, which are removed APIs. Their tmux-specific responsibilities are per-line/carried styles, SO/SI interpretation, cut-before accounting, scratch-emulator preallocation and LinesSeed.history_lines reporting; none is used by retained host-to-host seeding. Surviving tests/snapshot.rs:1252-1311 compares each retained primary-history cell, including colors/styles/links, while asserting blank screen/default modes/title/cursors/REP; src/snapshot/mod.rs:835-882 sweeps every cancellation look at full and fitting limits and asserts restored-plus-dropped history accounting. snapshot_golden.rs:426-447,523-531,576-628,634-703 exercises both normal and limited host seeds, compares encoded bytes to fixed blobs and restored state to fixed descriptions, and independently asserts that limited seeds drop some but not all primary history, carry the exact remaining count, mark trimming, clear title and bracketed paste, and show a blank screen. tests/snapshot.rs:1314-1421 still asserts preallocation refusal and the thousand-row history allocation bound and exact retained counts, rather than relying on production correctness as evidence of test sensitivity. No claim is made that these tests cover every possible host-seed input. Contract: SPEC_impl.md Terminal snapshots, 2827-2879, requires immutable shipped formats and bounded history restoration, with host restart seeds. Suggested bucket: other for this considered test-sensitivity concern; no established regression. Confidence: source-supported, not observed execution. proposed_drop: the actual deleted tests address removed parsing/scratch-seed responsibilities, while the listed surviving assertions still distinguish the current host-seed mechanisms; pending caller judgment. possible_cover: none. Could-be-highest: no established security or lost-work route from the test deletion itself. No runtime test or reproduction performed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 8,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "f4",
+          "state": "open",
+          "summary": "Deleted tmux-seed tests do not remove the surviving host-seed assertions",
+          "location": "crates/farhelm-terminal-emulator/tests/snapshot.rs:1311",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR considered: deleting the plain-line seed tests might remove regression sensitivity for the history, style, trimming, cancellation or allocation-bound behavior still needed by host restarts. Source assessment addresses the tests themselves, not only correct production code. Assigned patch 00964 deletes tests that all invoke history_seed_from_lines[_until] or seed_history_capacity, which are removed APIs. Their tmux-specific responsibilities are per-line/carried styles, SO/SI interpretation, cut-before accounting, scratch-emulator preallocation and LinesSeed.history_lines reporting; none is used by retained host-to-host seeding. Surviving tests/snapshot.rs:1252-1311 compares each retained primary-history cell, including colors/styles/links, while asserting blank screen/default modes/title/cursors/REP; src/snapshot/mod.rs:835-882 sweeps every cancellation look at full and fitting limits and asserts restored-plus-dropped history accounting. snapshot_golden.rs:426-447,523-531,576-628,634-703 exercises both normal and limited host seeds, compares encoded bytes to fixed blobs and restored state to fixed descriptions, and independently asserts that limited seeds drop some but not all primary history, carry the exact remaining count, mark trimming, clear title and bracketed paste, and show a blank screen. tests/snapshot.rs:1314-1421 still asserts preallocation refusal and the thousand-row history allocation bound and exact retained counts, rather than relying on production correctness as evidence of test sensitivity. No claim is made that these tests cover every possible host-seed input. Contract: SPEC_impl.md Terminal snapshots, 2827-2879, requires immutable shipped formats and bounded history restoration, with host restart seeds. Suggested bucket: other for this considered test-sensitivity concern; no established regression. Confidence: source-supported, not observed execution. proposed_drop: the actual deleted tests address removed parsing/scratch-seed responsibilities, while the listed surviving assertions still distinguish the current host-seed mechanisms; pending caller judgment. possible_cover: none. Could-be-highest: no established security or lost-work route from the test deletion itself. No runtime test or reproduction performed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g184/findings.jsonl",
+        "id": "f4",
+        "line": 8,
+        "disposition": "under-investigation",
+        "group": "g184-f4",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-115",
+          "key": "g184/f4",
+          "latest_line": 8,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "deleted-tmux-line-seed-tests-remove-host-seed-sensitivity-concern",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The removed tests exercise deleted plain-line seed APIs and their parsing/scratch-allocation contracts. The named surviving host-seed assertions still distinguish retained cell content, blank/default state, trimming, cancellation and decoding bounds. This does not claim complete test coverage or refute existing, narrower oracle defects.",
+          "checks": [
+            "Read the complete tests/snapshot.rs deletion diff at reviewed 1ed482dde220452e424973faf38a5e1318986333. Removed tests all call history_seed_from_lines[_until] or seed_history_capacity: per-line/carried styles, SO/SI handling, cut-before accounting, scratch-grid capacity and LinesSeed.history_lines belong to those removed APIs.",
+            "Surviving tests/snapshot.rs:1252-1312 explicitly checks host-seed retained history cell by cell, no dropped history for its fixture, primary screen, blank visible frame, fresh modes/cursors, empty title and REP; :1317-1419 asserts restore rejection, allocation-step-aware retained counts and encoder restoration bounds.",
+            "snapshot/mod.rs:835-882 exercises cancellation at every observed look for full and fitting seed limits, checks exact cancellation counts and restored-plus-dropped history accounting. snapshot_golden.rs:426-447,527-531,576-628,684-703 preserves fixed-byte/fixed-state full and limited seed checks and direct feature assertions.",
+            "The surviving host path uses the old emulator directly, not the deleted parsing scratch emulator: snapshot/mod.rs:541-570 and hosts/terminal.rs:3726-3768. No execution, mutation testing or measured false-pass claim was made."
+          ],
+          "coverage_checked": [
+            "Both specifications searched. Reviewed SPEC_impl.md:2827-2879 and current :2727-2779 require frozen-format restoration, bounded decoding and host-history seeding. Those requirements remain test responsibilities; correct production code alone was not used to reject this test concern.",
+            "TODO.md Planned is empty; plans/queue/INDEX.md has no unlanded plans. Retained tmux-end-old-terminals.md:104-106 distinguishes removed tmux parsing from preserved host history, but is landed context.",
+            "BUGS.md and active TRIAGE_OUTCOMES.md: no exact deleted-line-seed-test decision or matching defect found. Archive not read.",
+            "Queue INDEX searched for snapshots, seed cancellation, history and frozen formats. Read snapshot-comparison-ignores-link-grouping.md and seed-cancellation-test-accepts-lost-emulator.md in full: they concern hyperlink identity comparison and a supervisor-level nested Result assertion, respectively. They are distinct existing test defects, not aliases or proof that these deleted plain-line tests were required. host-restart-history-painter-omits-palette.md is likewise a distinct production omission.",
+            "FILTER.md read; no filter proposed."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "No surviving host-specific responsibility was shown to lose its distinguishing assertion because these plain-line tests were deleted. Existing oracle imperfections remain separate. No universal completeness or runtime pass is asserted.",
+          "original_stronger_consequence": "Deleting plain-line seed tests might remove regression sensitivity for history, styles, trimming, cancellation or allocation bounds still needed by host restarts. The original record established no production loss route; potential missed history-loss regression remains preserved here as the reason for conservative independent checking.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Source refutation limited to this deletion removing the named host-seed responsibilities. Independent checking is conservative because the hypothesized missed regression concerns retained user history; it must not be read as dismissing queued test-oracle defects."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "deleted-tmux-line-seed-tests-remove-host-seed-sensitivity-concern",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial pass complete: all 12 assigned patches read, with no unread scope.\n\nRecorded f1 as a potentially highest concern with explicit specification acceptance and a proposed drop requiring independent checking. Recorded f2 and f3 as rejected candidates. No unresolved leads or confirmed actionable bugs.\n\nFindings and progress are saved in the assigned private artifacts. No runtime tests or reproductions were run."
+    },
+    {
+      "turn": 2,
+      "reply": "- Revised f1 with replacement lifecycle, rollback, excerpt, prompt and tab checks.\n- Promoted f2 to a finding, preserving its potential history-loss consequence for independent checking.\n- Added f4 documenting the deleted tests’ responsibilities and surviving distinguishing assertions.\n\nNo new bug found. Proposed drops remain pending independent review. Unresolved lead IDs: none. No runtime reproduction performed."
+    },
+    {
+      "turn": 3,
+      "reply": "Revised f1 to withdraw the blanket excerpt refutation after verifying g013/f2’s resize counterexample.\n\nDiscovery checks covered both assigned diffs, complete-range path history, removed-symbol references and surviving imports/callers. Nothing new was found.\n\nNew verified IDs: none. New unverified IDs: none. Open leads: none. No runtime tests or reproductions performed."
+    }
+  ],
+  "progress": "# g184 initial review\n\nState: assigned initial pass complete. Awaiting the caller's later synthesis or discovery turn.\nTurn type/count: initial / 1. Discovery passes: 0.\nScope: terminal-emulation-contract, commits 1ed482dde220452e424973faf38a5e1318986333 and 08399d092d20815ced6619c26df2391944ae2b4a.\n\nAll 12 assigned patches, 784 lines, were read through the absolute evidence command in 13 packets. Patch 00964 was split into 1-190 and 191-375; all others were read over their full assigned ranges. No assigned patch remains unread. Read the inventory's complete commits field only; excluded coverage metadata and coverage sources were not read.\n\nThe initial focus-report assumption was irrelevant to the actual patches and was discarded before investigation. The actual interfaces are the retired tmux-to-host seed builder, retained host-to-host restart seeds, frozen v1 snapshot encoding, and the screen/title/mode/query contracts described by the comment edits. The supervisor retains the host seed path: restart_seed -> HostTerminal::history_seed -> Control::Seed -> emulator.history_seed_until -> v1::encode_history. The removed plain-line builder served the tmux migration path, not this chain. The browser receives styled grid state, not the snapshot stream; snapshots are restored in the supervisor.\n\nDurable records: f1 began as a lead and was revised to a finding with a specification-based proposed_drop. It preserves the potentially highest consequence of abandoned old tmux history, with exact pinned acceptance text for the caller's independent drop check. f2 records the rejected concern that deleting the tmux-only SGR helper changes the frozen snapshot format. f3 records the rejected concern about contract drift in the reworded comments. There are no open unresolved leads. New verified bug IDs in this pass: none. New unverified bug IDs: none. Proposed-drop ID: f1. Rejected candidate IDs: f2, f3.\n\nPinned contract reads: 1ed482d SPEC.md 1884-2126 and 2855-3187, plus numbered 1941-1949 and 3010-3019 to verify citations; SPEC_impl.md 2767-2991. At 08399d0, SPEC_impl.md 2669-2779. Targeted searches located the relevant sections in both files. The comments-only second commit was judged against its own pinned contracts.\n\nPinned source context reads, beyond the mandatory patches:\n- 1ed482d snapshot/mod.rs 1-200, 480-650; snapshot/v1/mod.rs 1-130,240-280,404-437,503-526; snapshot/v1/paint.rs 1-100,175-235,650-780; tests/snapshot.rs 1170-1320,1440-1470.\n- 1ed482d supervisor service/core/host_restart.rs 1-110,160-250,401-496; hosts/terminal.rs 2422-2463,3712-3780. Its parent revision's host_restart.rs 715-891 established what the removed caller did; retired implementation was not searched for unrelated defects.\n- 08399d0 emulator lib.rs 1-160, queries.rs 1-220, screen.rs 1-235 (whole file is shorter), modes.rs 1-230 (whole file is shorter), emulator.rs 250-311, tests/snapshot.rs 330-440, tests/screen.rs 1-48,165-210, snapshot/v1/mod.rs 400-432,505-525; supervisor agent_kind/screen_fixtures.rs 1-155.\n\nBroad context searches and a broad specification diff produced clipped output. They were used only as navigation, not as completed evidence; the relevant governing sections were then read in bounded ranges above. All mandatory evidence packets arrived complete. No runtime test, build or reproduction was run; conclusions are from source and contract analysis. No checkout file was changed. Only this group's private artifacts were written.\n\nNext action: caller-directed later synthesis or discovery; do not treat this initial pass as the later-turn protocol. If resumed after compaction, reread brief.md and governing instructions, then this progress record and the append-only findings log.\n\nTurn 2 completed: later-turn synthesis / total turns 2. Discovery passes remain 0; this was the requested synthesis, not a discovery pass. All readily checkable premises from the initial records were resolved from pinned source. No new verified or unverified bug was found. No assigned material remains unread and no unresolved lead ID remains.\n\nDelta records: revised f1 with the complete retained-host lifecycle and the checked excerpt, prompt and tab interfaces; promoted f2 from candidate to finding and revised it with retained-host caller and actual golden-test assertions. Both preserve potential lost-history consequences and proposed drops for independent checking. Added f4 for the considered test-sensitivity question, with responsibility-specific surviving assertions. f3 is unchanged. No proposed drop is accepted in this review.\n\nNew bounded source context at 1ed482d: service/core.rs 12340-12596,12597-12845,12846-13065,13065-13158; core/host_restart.rs 199-400,700-865; core/host_launch.rs 398-545; service/launch_artifacts.rs 1-128; service/terminals.rs 1-260; emulator snapshot/v1/paint.rs 390-470; snapshot/mod.rs 835-885; tests/snapshot.rs 1314-1423; snapshot_golden.rs 418-450,523-543,576-628,634-708. Governing replacement lifecycle contract: SPEC_impl.md 2330-2445, including the complete Restarting a host agent bullet. Targeted searches located call sites and surviving tests; no excluded coverage source was read.\n\nInterface conclusions: seed ownership survives generation claim and new-host publication; a definitive failed start restores the old terminal, while ambiguous cleanup is distinguished. A retained history seed has a blank visible screen, and launch excerpts read only that visible screen after processed exit evidence. Restart passes no initial prompt. Tab lookup remains keyed by the session’s tab cell independently of the agent terminal. The assigned deletion supplies no concrete distinct route to misleading update-survival guidance, missing warnings, wrong-target termination, or later unconfirmed Delete; the known retirement/duplicate consequences are not counted as new discovery.\n\nTests were assessed by their fixture premises and distinguishing assertions, rather than inferring sensitivity from production correctness. The deleted tests exercise removed tmux parsing and scratch-seed responsibilities; surviving cell-level, cancellation, allocation-bound and golden-byte/state assertions retain their separate responsibilities. No runtime test, build, reproduction or mutation of checkout files occurred. Next: caller-directed later discovery or independent checking; reread the brief and governing instructions if compacted.\n\nTurn 3 completed: separate discovery pass / total turns 3; discovery-pass count 1. Read discovery-neighbours.json fully in ranges 1-120 and 121-165 before the new search. All supplied named interface records were considered for novelty; none was claimed as a new local finding.\n\nInterface synthesis delta: f1 was revised twice immediately as the g013/f2 counterexample was checked. The earlier blanket statement that a history seed cannot supply prior-run rows to a later launch excerpt is withdrawn. Initial blankness is not stable under height growth: alacritty promotes history into visible rows. Ordinary attach/viewer resize is admitted before login-shell spec consumption, and the subsequent final-screen excerpt filters blank rows rather than retaining launch provenance. This source-confirmed diagnostic issue remains g013/f2's provenance, not a new g184 ID. The known retirement consequence and exact proposed acceptance remain preserved under f1; no drop or lowering has been accepted.\n\nPinned interface checks at 1ed482d: vendor/alacritty_terminal/src/grid/resize.rs 1-103 and term/mod.rs 741-765; emulator.rs 205-232; supervisor hosts/terminal.rs 2327-2356,2355-2400,3860-3905,4059-4078; service/core/host_launch.rs 565-650; service/status.rs 615-660; service/handlers.rs 1892-1920,2058-2094. These resolve the resize, publication/readiness and attribution premises without execution. Earlier source reads of launch_artifacts.rs and the seed encoder supply the remaining cited row-filter/blank-seed mechanics.\n\nSeparate new search after that synthesis: re-read all assigned production deletions in the 1ed482d parent/child diff and all seven assigned files' 08399d0 comment/assertion-message hunks; checked the crate's Cargo.toml to establish its internal linked-library role; searched allowed source/docs at the pinned tip for every removed export/helper and found no surviving reference; checked surviving Instant, test-only FeedMode/Collected/Size imports and pen_changes call sites. Complete-range path history confirms that the assigned paths have only the two assigned commits in the pinned range, so no earlier in-range change was silently excluded when assessing attribution. Range numstat agrees with the assigned deletions and prose-only follow-up. No new source/contract mismatch or concrete distinct lead emerged. Existing f2/f3/f4 conclusions were not broadened into claims about post-resize provenance.\n\nResult: no new independent discovery. New verified IDs: none. New unverified-after-investigation IDs: none. Remaining open lead IDs: none. Revised existing ID: f1 only. No assigned scope remains unread. No runtime tests, builds, reproductions, live-install actions or checkout mutations occurred. Next action: caller-directed continuation or independent checking of the retained proposed drops.\n"
+}

@@ -1,0 +1,294 @@
+[
+  {
+    "key": "g144/c1",
+    "latest_line": 7,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "tmux-substrate-skip-selection-and-readiness",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The changed skip gate does not replace readiness evidence or skip dead-socket cleanup. No selection/readiness defect is established under the unchanged inherited environment.",
+    "checks": [
+      "d751ff1633bb479c7bf53920f2e4ea4ba932a1c2:crates/farhelm-teststate/src/tmux.rs:218-239 resolves tmux through the guard resolver and prints an explicit SKIPPED message.",
+      "Same revision lib.rs:1255-1307 gates only the real kill-server failure premise; reap and removal assertions run unconditionally. :1446-1509 asserts successful start, obtains a PID, establishes live socket/directory/process premises and waits for death after the sweep.",
+      "Same revision tmux/guard.rs:116-169 handles relative/empty PATH entries and absent PATH; its comment expressly excludes proof of future exec success and replacement resistance. 303a1264b7bd791e8f6f6de2c7bb6136c08e8bab:harness/tmux_guard.rs:24-74 independently starts and probes the real server. No runtime execution was performed."
+    ],
+    "coverage_checked": [
+      "SPEC.md Terminal experience and SPEC_impl.md Every terminal in a host/Testing describe host terminals and retained old-server tests; neither accepts a false readiness claim.",
+      "TODO.md Planned is empty. Exact-trigger searches of BUGS.md, active TRIAGE_OUTCOMES.md, INDEX.md and queue text found no matching item.",
+      "plans/queue/tmux-drop-from-tooling.md:35-45 expressly requires visible missing-tmux skips and gates providing tmux; plans/REPORTS.md:31 records that plan landed. Other unlanded plan matches do not address skip/readiness correctness."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No actual lookup divergence or false readiness path is shown. Executable replacement and a candidate that passes access checks but cannot exec remain possible generally; the test launch assertions fail those attempts rather than treating lookup as successful startup.",
+    "original_stronger_consequence": "Silently lost cleanup coverage or selecting a different executable from the fixture; never an established security, user-work-loss or catastrophic-tooling route.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Propose dropping only the named selection/readiness regression. Do not describe real-tmux coverage as executed or certify arbitrary PATH changes. No FILTER.md boundary is needed."
+  },
+  {
+    "key": "g144/c2",
+    "latest_line": 2,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "retired-flood-fixture-callers",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "No surviving invocation of the retired flood modes or tmux constructors was found at their removal. The host-backed final-history check survives.",
+    "checks": [
+      "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513: pinned git grep over crates/e2e/scripts found no FloodMemory, FloodRegion, Script::Flood, sync-output, harness_tmux, supervisor_process_tmux or tmux_supervisor_on callers. FloodGated remains at fake_agent.rs:306 and grid-flood.spec.ts:20.",
+      "Same revision e2e/tests/grid-flood.spec.ts:155-214 attaches the host/grid fixture, waits for readiness, and checks the exact full consecutive history tail. This is source evidence, not an executed pass or proof that the stopped-reader interval overlaps production."
+    ],
+    "coverage_checked": [
+      "SPEC.md Terminal experience and SPEC_impl.md Every terminal in a host/Testing require host-backed retained output, not the retired tmux-only fixture variants.",
+      "TODO.md Planned empty; BUGS.md and active ledger have no matching retired-invocation claim. INDEX.md and matching queue files stopped-reader-output-witness.md and host-flood-stall-window-claim.md concern overlap/timeout witnesses, not missing retired callers or final-tail deletion.",
+      "The tmux removal plans match the subsystem but are landed (plans/REPORTS.md:29-32); no unlanded exact-trigger plan coverage found."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No broken surviving caller or removed applicable host-history assertion is shown. This does not establish exhaustive old-driver replacement coverage.",
+    "original_stronger_consequence": "Surviving tests might fail to launch after deletion, or the host-terminal flood assertion might disappear.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutes the named compatibility/deletion concern. Keep the separate existing stopped-reader oracle finding; it is not cover for all flood-test behavior."
+  },
+  {
+    "key": "g144/c3",
+    "latest_line": 10,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "old-server-guard-loses-directory-in-consumed-restart",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The explicit server guard stays in the test caller while restart owns the directory. A restart failure before successor construction can delete the socket directory before that guard acquires shutdown authority. This is a conditional failure-path defect established by source, not an observed orphan.",
+    "checks": [
+      "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:old_terminals.rs:27-49 stores paths and a guard, not TestDir; :42 retains dead panes. :266,332-334 and :536,572-574 leave live-server ownership outside the consumed restart future.",
+      "Same revision harness.rs:1100-1104 can panic while retiring the predecessor; :1130-1137 moves state into the future before retirement and builds the successor only afterwards. Failure drops inner TestDir before outer OldServer.",
+      "Same revision farhelm-teststate/src/lib.rs:794-806 removes the directory if host cleanup succeeds, without stopping tmux. tmux/guard.rs:24-27 retains no socket peer; :79-96 reacquires authority at Drop. tmux.rs:242-244,290-297,367-368 refuses a missing parent and performs neither protocol shutdown nor fallback.",
+      "The original line-3 proposed drop is overturned by the later owner/restart analysis. The no-server fixture is not the live-server route; successful restart kills the server before this ordering matters. No tests or reproductions were run."
+    ],
+    "coverage_checked": [
+      "SPEC.md Terminal experience and SPEC_impl.md Ending the old private tmux server/Testing do not accept fixture directory removal before its guard. The guard's reviewed doc at :17-23 explicitly requires shutdown before the directory dies.",
+      "TODO.md Planned is empty; BUGS.md and active TRIAGE_OUTCOMES.md have no matching restart-owned-directory/old-server claim.",
+      "INDEX.md and queue searches found related terminal-host cleanup records, including mac-process-lookup-truncates-live-host-command.md and blocking-test-cleanup-prevents-async-listener-release.md, but their triggers and resource owners differ. No exact alias found.",
+      "plans/queue/tmux-drop-from-tooling.md keeps the old-server tests and dead-run sweep; plans/REPORTS.md records it landed. The later removal TODO is Mid term, not Planned; no unlanded plan fixes this owner lifetime. FILTER.md's rare diagnostics/safe-retry boundary excludes the persistent orphan-resource consequence."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No source premise remains for the conditional route. Actual retirement failure and successful host cleanup/directory deletion were not observed; the claim does not assert frequency or a reproduced leak.",
+    "original_stronger_consequence": "Removing generic guards could orphan a private fixture tmux server. The initial no-defect proposal was explicitly withdrawn; latest evidence establishes the narrower consumed-restart lifetime route. No shipped user-work-loss or catastrophic-tooling route was claimed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain a new other-priority finding for the conditional fixture resource leak. Explain the failure prerequisite and preserve the initial proposed-drop reversal."
+  },
+  {
+    "key": "g144/c4",
+    "latest_line": 6,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "raw-grid-drain-helper-current-caller-exposure",
+    "aliases": ["g145/l1"],
+    "target_queue_file": null,
+    "why": "The helper survives relocation, and inspected callers retain their bounded marker/detach uses. The removed xterm/tmux ceiling assertion no longer describes the supported path. This does not certify raw grid data as readable terminal text.",
+    "checks": [
+      "1ed482dde220452e424973faf38a5e1318986333^:terminal_backpressure.rs:13-43 and reviewed harness.rs:2060-2089 have the same helper contract and raw Data append. The old module's :45-65 names the xterm scrollback/tmux HISTORY_LIMIT invariant.",
+      "Reviewed session_lifecycle.rs:678-686,818-826; session_rename.rs:591-597; tab_lifecycle_edges.rs:271-289 drain for detach, then send fresh markers. terminal_tabs.rs:1366-1393 drains before absence checks for short plain markers. grid/binary.rs:120-152 retains each run's UTF-8 text; fake_agent.rs:1715 gives the whole echoed marker one style.",
+      "harness.rs:135-174 explicitly decodes grid transcripts elsewhere; drain_for does not. The broad readable-text promise is not established for arbitrary needles, framing, wraps or different styles. No runtime result is claimed."
+    ],
+    "coverage_checked": [
+      "SPEC.md Terminal experience and SPEC_impl.md Every terminal in a host/Ending the old private tmux server describe a host/grid path and no running tmux driver; they do not accept arbitrary binary-as-text assertions.",
+      "TODO.md Planned empty; BUGS.md and active ledger contain no exact relocation/ceiling claim. INDEX.md and grid-text-omits-blank-columns.md/grid-row-is-not-program-line.md concern decoded row gaps and completion, not this raw append or these current callers. They are related observer context, not exact cover.",
+      "Named g145/l1 is the same raw-drain root only. No unlanded exact plan found; tmux removal plans are landed per plans/REPORTS.md:29-32."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No current caller whose result is made wrong by raw grid framing is established. The generic limitation remains real and is not refuted merely by unchanged relocation.",
+    "original_stronger_consequence": "Deleting module registration might break shared-helper callers or remove an applicable history-retention invariant; later history preserved the possible binary-transcript wrong-assertion concern.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Propose dropping the named compatibility/removed-invariant concern, bounded to inspected callers. Reconcile g145/l1 under the same underlying key; do not turn this into universal transcript certification."
+  },
+  {
+    "key": "g144/l5",
+    "latest_line": 12,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "mouse-fixture-historical-panemodes-provenance",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The obsolete name is real, but this paragraph expressly locates the original coverage gap in a historical milestone. Its substantive detach/reattach subject survives. The named claim that it asserts a current PaneModes implementation is not established.",
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e:fake_agent.rs:2188-2194 says the branch had no coverage 'before this' and cites PLAN_M6_5.md. The same sentence already exists at exclusive base fake_agent.rs:2593-2599.",
+      "Pinned git grep at f560 finds PaneModes only in fake-agent comments (:46,:2191), so it is no longer a runtime type. e2e/tests/mouse-modes.spec.ts:263-345 still launches the fixture, checks reporting and begins genuine detach/reattach; this supports only the substantive mode-retention subject, not an imaginary surviving type. No execution."
+    ],
+    "coverage_checked": [
+      "Both specs were searched for PaneModes/mouse-mode retention; current SPEC_impl.md's terminal/input sections describe host-owned modes without that type. No spec acceptance of a false architecture pointer is inferred.",
+      "TODO.md Planned empty; no matching BUGS.md, active ledger or INDEX/queue item. No unlanded exact plan. tmux-drop-from-docs.md calls for stale-comment cleanup but is already landed per plans/REPORTS.md:32, so it cannot suppress a surviving defect as future coverage.",
+      "FILTER.md has no general stale-source-comment filter. This proposal rests on the actual historical wording, not filtering or rarity."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "An explicit false claim about today's runtime architecture is not shown. Readability would improve if the obsolete name were removed, but that alone does not establish the proposed substantive documentation defect.",
+    "original_stronger_consequence": "Maintainers might be taught that a retired PaneModes restoration branch is still the fixture's current implementation or subject. This was investigated and narrowed to historical nomenclature.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Propose dropping the named false-current-architecture interpretation. Preserve the obsolete-name observation as optional cleanup, without using correct production behavior to excuse a genuinely false doc claim."
+  },
+  {
+    "key": "g144/l6",
+    "latest_line": 14,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "flood-fixture-false-child-exit-terminal-lifetime-rationale",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The rewritten fixture comment falsely makes keeping terminal history depend on its program remaining alive. The specified and implemented terminal lifetime is longer than the program's. Current passing flood assertions would not refute this documentation defect.",
+    "checks": [
+      "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:fake_agent.rs:1899-1901 says process exit would end the terminal whose history is tested. Exclusive base :1949-1952 instead described a tmux-specific dead-pane placeholder, so the generalized host-lifetime claim is introduced in range.",
+      "Same revision SPEC.md:2907-2911 explicitly says stopped/exited terminals remain viewable because the terminal outlives the process. terminal-host/src/host.rs:454-486 records child exit and finishes its drain without ending the host.",
+      "Same revision grid-flood.spec.ts:155-214 launches the host-backed fixture and deletes its session only in finally. fake_agent.rs:1930-1932 returns normally after input; no fixture-specific terminal destruction is present. Inclusive tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:fake_agent.rs:1824-1826 retains the false rationale. No runtime test or reproduction."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:2888-2900 repeats the contrary terminal-outlives-process contract; SPEC_impl.md Terminal host/Testing supplies no exception for this fixture.",
+      "TODO.md Planned empty; BUGS.md and active ledger have no matching lifecycle-rationale claim. INDEX.md and stopped-reader-output-witness.md/host-flood-stall-window-claim.md concern overlap and timeout evidence, not the false child-exit explanation; no extension or exact alias found.",
+      "tmux-drop-from-docs.md:68-75,88-102 requires comment rationales in current terms but has already landed (plans/REPORTS.md:32). No unlanded plan supplies exact coverage. FILTER.md's diagnostic filter does not cover an ordinary false lifecycle explanation."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Future test authors could infer that fixture exit destroys retained terminal history. The record never alleged current history loss or a failing flood test.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain an other-priority source-comment finding. Remove the false lifecycle reason; retain the wait unless an actual test-specific reason for changing it is established. Do not revive the retired tmux explanation."
+  },
+  {
+    "key": "g145/c1",
+    "latest_line": 7,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "host-only-fixture-helper-caller-compatibility",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Deleted tmux helper entry points have no remaining test callers. The surviving migration test calls shared readiness only after Restart has established a host terminal.",
+    "checks": [
+      "Pinned git grep at 1ed482dde220452e424973faf38a5e1318986333 over crates/farhelm/tests found no tmux_query, kill_tmux_server_and_wait, pane_id_of or row_agent_host uses.",
+      "Same revision old_terminals.rs:25-115 has an independent explicit old-server fixture; :367-375 restarts the session, asserts its stored terminal is Host, then calls wait_for_agent_ready. The host-only restriction does not strand that supported caller.",
+      "The independently retained g144/c3 failure is about directory/guard ownership across consumed restart, not the readiness/identity/termination helper narrowing. No runtime observation."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md Every terminal in a host (:2160-2173 current) and Ending the old private tmux server (:2800 onward current) explicitly establish new hosts and terminal-less old rows; SPEC.md Terminal experience agrees. These contracts explain the narrowing, rather than accepting a stranded fixture caller.",
+      "TODO.md Planned empty; no exact BUGS.md, active ledger or indexed queue item. Unlanded-plan search found no exact helper-compatibility fix; matching tmux plans landed per plans/REPORTS.md:29-32. FILTER.md not used."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No still-tmux terminal being operated through a deleted/narrowed shared helper is shown. This does not assess independent correctness of production terminal retirement.",
+    "original_stronger_consequence": "A test might fail or fail to clean up a terminal it created when tmux-specific helpers disappear.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Propose dropping only the named helper/caller-compatibility concern. Do not merge away g144/c3's separately established cleanup owner lifetime."
+  },
+  {
+    "key": "g145/c2",
+    "latest_line": 2,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "tmux-guard-optional-trace-boundary-stale-evidence",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "An absent boundary means the capture contained no prior events. A present boundary excludes all prior iterations' events, so removing the explicit pre-Drop diagnostic does not admit stale evidence.",
+    "checks": [
+      "303a1264b7bd791e8f6f6de2c7bb6136c08e8bab:harness/tmux_guard.rs:64-82 independently probes has-session, then takes the last captured sequence if any. :115-139 requires subsequent live-session diagnostic events preceding the sole shutdown event; :141-149 independently probes server absence and counts shutdowns.",
+      "Same revision farhelm-testtrace/src/lib.rs:1363-1374 preserves event insertion order, and :1386-1414 assigns sequences and appends under the state lock. A prior retained event necessarily supplies a boundary. tmux/guard.rs:79-98 collects diagnostics before shutdown. No execution."
+    ],
+    "coverage_checked": [
+      "Both specifications searched for testing/trace/fixture behavior; no acceptance of stale evidence found. SPEC_impl.md Testing supports independent fixture evidence generally.",
+      "TODO.md Planned empty; no exact BUGS.md, active ledger, INDEX/queue or unlanded-plan match for this boundary predicate. Matching tmux tooling plan is landed. FILTER.md not used."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No stale-event route survives the boundary predicate. The unchanged final list-sessions failure is not a universal proof of server death; that broader existing limitation is outside this named change.",
+    "original_stronger_consequence": "The guard regression might pass on diagnostic events emitted before this iteration's Drop.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutes the introduced stale-boundary concern. Preserve the source-only and final-probe caveats."
+  },
+  {
+    "key": "g145/l1",
+    "latest_line": 6,
+    "recommendation": "retain-unverified",
+    "bucket": "other",
+    "underlying_key": "raw-grid-drain-helper-current-caller-exposure",
+    "aliases": ["g144/c4"],
+    "target_queue_file": null,
+    "why": "Raw binary grid payloads really enter the shared seen buffer. The relocation alone does not introduce that mismatch, and current-caller checks did not establish a wrong assertion. Retain the narrowly investigated uncertainty if the parent treats the general collector contract as a finding; do not record an established test failure.",
+    "checks": [
+      "1ed482dde220452e424973faf38a5e1318986333:harness.rs:2079 appends raw bytes, unlike :135-174's decoded text path. Parent terminal_backpressure.rs:20-43 is identical, so unchanged relocation is established.",
+      "The six reviewed callers at session_lifecycle.rs:678,818; session_rename.rs:592; tab_lifecycle_edges.rs:271; terminal_tabs.rs:1384-1385 were read. Four send fresh markers only after draining. The remaining two assert absence of short single-style/plain markers; grid/binary.rs:120-152 preserves each run's text and fake_agent.rs:1715 does not split the marker's style.",
+      "Source establishes the raw-transcript limitation, not a current wrong assertion, arbitrary-needle safety, decoded row semantics, or a runtime failure. The original stronger potential consequence remains conditional."
+    ],
+    "coverage_checked": [
+      "SPEC.md Terminal experience and SPEC_impl.md Every terminal in a host/Testing describe grid text helpers but do not expressly accept mixing binary control/frame data into a text collector.",
+      "TODO.md Planned empty; BUGS.md and active ledger have no exact matching claim. INDEX.md plus grid-text-omits-blank-columns.md and grid-row-is-not-program-line.md cover other decoded-row observer defects, not raw drain Data appends. They do not fully cover this root or establish its consequence.",
+      "g144/c4 is an exact alias for the raw-drain limitation, with an additional distinct removed-ceiling concern. No unlanded exact plan found; tmux plans landed per plans/REPORTS.md:29-32. FILTER.md has no applicable whole boundary."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A reachable current assertion whose result is invalidated by encoded payloads, plus attribution to another in-range change if claiming a regression rather than relocation. Unchanged implementation alone is not enough to refute the wider reviewed range.",
+    "original_stronger_consequence": "A later test assertion might falsely match or miss terminal text because seen contains binary framing, style-run boundaries or non-screen messages. The later candidate proposed dropping this as no demonstrated changed assertion; no security/user-work-loss consequence was alleged.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Recommend retaining the investigated uncertainty instead of broad refutation of the raw collector contract. Parent may keep one narrow record under the shared key; it must not assert a failing or falsely passing current test. The relocation/non-broken-caller part of g144/c4 remains source-refuted."
+  },
+  {
+    "key": "g145/c3",
+    "latest_line": 5,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "removed-tmux-timeout-floors-no-surviving-fields",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The three floored fields and their consumers are gone. Removing those floors cannot shorten an independent surviving timeout.",
+    "checks": [
+      "1ed482dde220452e424973faf38a5e1318986333:harness.rs diff removes only tmux_exchange/tmux_pane_list/sink_ready adjustments from floor_suite_timeouts and passes the caller's timeouts through.",
+      "Same revision service/core.rs:362-436 defines the remaining SupervisorTimeouts fields without those three fields. Pinned git grep across supervisor source found no tmux_exchange, tmux_pane_list or sink_ready references. No timing/load experiment."
+    ],
+    "coverage_checked": [
+      "SPEC.md Terminal experience and SPEC_impl.md Every terminal in a host/Ending the old private tmux server describe the retired running driver. No spec promise that all surviving host budgets tolerate every load is inferred.",
+      "TODO.md Planned empty; no exact BUGS.md, ledger, INDEX/queue or unlanded-plan match for removed floors. Landed tmux driver/tooling plans are historical context, not future cover. FILTER.md not used."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No surviving timeout modified by the removed function is shown. Sufficiency of unrelated host-specific budgets under arbitrary load was not assessed.",
+    "original_stronger_consequence": "Removing generous tmux floors might reintroduce maintainer-test failures under machine load.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source-refuted for the named budget shortening. Do not claim a measured reliability result."
+  },
+  {
+    "key": "g146/c1",
+    "latest_line": 1,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "retired-binary-counter-hexecho-fixture-callers",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "No remaining executable fixture invocation requires the removed Binary, Counter or Hexecho variants.",
+    "checks": [
+      "303a1264b7bd791e8f6f6de2c7bb6136c08e8bab: pinned searches over crates/farhelm-fixtures, crates/farhelm/tests, e2e, scripts and .github found no Script::Binary/Counter/Hexecho or matching fixture invocations. Remaining literal binary/counter matches are grid-transport labels, JSON properties or script metadata rather than fake-agent selections.",
+      "The retained fixture interface and current SPEC_impl.md Testing describe test-only prompt, mode, alternate-screen and relay fixtures; no surviving byte-stream fixture contract was found. No execution or replacement-terminal-host coverage certification."
+    ],
+    "coverage_checked": [
+      "Both specs searched for fake-agent, byte-clean, binary, counter and hexecho contracts. SPEC_impl.md:8171-8189 current describes the remaining test-only fixtures and separate real-host tests; no exact obligation to retain these unused modes.",
+      "TODO.md Planned empty; no exact BUGS.md, active ledger, INDEX/queue or unlanded-plan match. The tooling plan's fixture cleanup has landed per plans/REPORTS.md:31; it is not prospective cover. FILTER.md not used."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No residual executable caller or applicable surviving fixture contract requiring the variants was shown.",
+    "original_stronger_consequence": "Tests could fail to launch a removed fake-agent mode; no established route to user-owned work.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Propose dropping the named residual-caller concern. Keep it separate from g144/c2: the retired variants and removal commits differ."
+  },
+  {
+    "key": "g146/c2",
+    "latest_line": 6,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "tmux-diagnostic-printable-framing-target-forgery",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The changed format sanitizes writable text framing and the parser only admits bounded numeric pane IDs, then caps captures. No changed forgery or unbounded-target route is established by source.",
+    "checks": [
+      "d751ff1633bb479c7bf53920f2e4ea4ba932a1c2:tmux/diagnostics.rs:18-27 sets 8 KiB pane listing and four-capture bounds. :38-58 sanitizes ASCII controls and pipe in writable session/command/options/client fields; the other columns are server numeric fields.",
+      "Same revision :402-454 accepts only LF-complete ten-field records and 2-64-byte ASCII %digits IDs, deduplicates within the bounded prefix and owns at most four capture targets. Invalid rows make omitted count unknown without discarding other valid rows; incomplete/capped prefixes can still supply complete rows.",
+      "This is a source conclusion about the stated format/parser contract, not an execution of stock tmux substitution behavior or proof about arbitrary private-server cleanup. The inspected API performs read-only visible capture, not process signalling."
+    ],
+    "coverage_checked": [
+      "Both specs searched for diagnostic capture/target/sanitization and testing contracts; no exact acceptance of forged targets found. No product-wide security claim is inferred from a private test diagnostic API.",
+      "TODO.md Planned empty; no exact BUGS.md, active ledger, INDEX/queue or unlanded-plan match for printable diagnostic framing. Landed tooling cleanup is context only. FILTER.md is not the basis for dismissal."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No writable text column bypassing sanitization or accepted nonnumeric/unbounded target is shown. Stock tmux runtime compatibility was not independently executed or audited; the real-server test is intended coverage, not an observed pass.",
+    "original_stronger_consequence": "Pane-owned text might forge diagnostic capture targets or produce unbounded captures. The histories expressly distinguish this from arbitrary process signalling; the possible trust-boundary aspect is preserved for independent judgment.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Propose source refutation of this changed framing/target-bounds defect. Because writable text influencing capture targets could be interpreted as a trust-boundary concern, send this proposal through the independent drop check; this consultation does not authorize dropping it."
+  }
+]

@@ -1,0 +1,220 @@
+[
+  {
+    "key": "g104/l4",
+    "latest_line": 10,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "checkout-status-borrower-reload-keeps-origin-runtime",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The migrated borrower fixture reloads all rows while its supervisor still owns the live origin runtime. The reload wrapper supplies no adopted hosts, so discovery takes over that host and creates another runtime. This is a fixture ownership defect, not an observed assertion failure or product failure.",
+    "checks": [
+      "70bc66a9f285cc2a9984924f389834d118b7cfdc:crates/farhelm-supervisor/src/service/core.rs:41773-41799 creates the live origin and a separate borrower; 41857-41862 shuts down only the selected borrower; 41879-41900 reloads all rows and asserts only the borrower's outcome. The origin remains in sup.sessions.",
+      "Same revision core.rs:7957-7978 supplies adopted/tabs as empty maps and claims these tests have no hosts. core/host_handover.rs:672-790 skips supplied runtimes only, then scans and adopts the origin. hosts/client.rs:1277-1279 sends take_over:true; hosts/terminal.rs:3964-4040 reconnects while handles remain, subject to its instability limit. No implicit global reuse removes the ownership conflict.",
+      "Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:core.rs:41488-41530 uses tmux_supervisor for this test. The host migration introduces this particular competing-runtime setup; the wrapper's old comment itself is not claimed newly authored.",
+      "Pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:core.rs:36689-36798 retains the live origin, shuts down only the selected host, and reloads; 7379-7407 still supplies no adopted hosts. No runtime tests or reproductions ran."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md and SPEC_impl.md searched for borrower/reload/ownership. SPEC_impl.md:1948-1949 requires one owning connection and explains takeover; host reload preservation describes production behavior, not acceptance of this test conflict. No exact acceptance found.",
+      "Current TODO.md Planned bucket is empty (25-27). BUGS.md has only an SSH-helper provisioning hang, unrelated. plans/queue searched for the fixture and ownership trigger; tmux-end-old-terminals and tmux-drop-from-docs are already landed per plans/REPORTS.md:29,32, and provide no unlanded fix coverage.",
+      "INDEX.md and matching queue text searched for borrower/reload/competing runtime and exact test/helper names. No same-root item found. Existing readoption and runtime-drop items have different triggers. Active TRIAGE_OUTCOMES.md has no matching decision; archive not read.",
+      "FILTER.md read in full. This deterministic fixture ownership setup is not wholly a rare self-correcting product diagnostic/status consequence; no filter applies."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A dependency from origin contention to failure of the selected borrower's assertions remains unestablished. Do not call this a confirmed flake, wrong borrower classification, or production failure.",
+    "original_stronger_consequence": "Origin takeover might weaken reliability or make the reload fixture unrepresentative. History narrowed this to the source-established second-owner setup and stale wrapper assumption; no failing schedule was observed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain the concrete fixture lifetime conflict as other; preserve the unproved assertion-failure consequence as a caveat."
+  },
+  {
+    "key": "g105/c1",
+    "latest_line": 1,
+    "recommendation": "covered",
+    "bucket": "high",
+    "underlying_key": "legacy-tmux-interrupted-keyed-create-refusal",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The refusal is the behavior the implementation specification expressly requires. This disposition covers the refusal itself, not artifact cleanup, ownership settlement, or concurrent takeover safety.",
+    "checks": [
+      "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:core.rs:11226-11243 refuses the acquired tmux retry before allocation/spawn. 15866-15929 deletes/settles ordinary rows, rolls back still-Planned ownership, or retains allocated/unreadable checkout ownership as a visible refusal.",
+      "Current SPEC_impl.md:2178-2185 explicitly retains tmux kind through takeover, replays launched rows, and refuses an acquired retry because host launch would guess beyond the tmux evidence. This matches trigger, consequence, and scope. Source check only."
+    ],
+    "coverage_checked": [
+      "Both specifications searched for retried keyed creates, interrupted tmux rows, and refusal. Current SPEC_impl.md:2178-2185 is exact coverage; SPEC.md contains no competing promise to retry this legacy launch in a host.",
+      "TODO.md Planned is empty. BUGS.md unrelated. plans/queue tmux-end-old-terminals and tmux-drop-from-install describe this migration but have landed (REPORTS.md:29-30); no unlanded plan is needed as cover.",
+      "INDEX.md, matching queue text, and active TRIAGE_OUTCOMES.md searched for this exact retry refusal. No separate matching queued finding or decision found. launch-input-database-duplication-rationale-overstated.md concerns a distinct retention explanation. Archive not read.",
+      "FILTER.md supplies no necessary basis; explicit specification acceptance settles the bounded refusal claim."
+    ],
+    "exact_cover_quotes": [
+      {"source": "SPEC_impl.md:2180-2185", "quote": "A retried keyed create whose interrupted row is a tmux row (left by an older supervisor) keeps that kind through the store's takeover, so a row that turns out to have launched replays as itself; one the takeover claims is refused before anything starts and rolled back like a launch whose spec never landed, the refusal settled against its intent key: the evidence that allowed the retry was gathered for tmux, so starting it in a host instead would be a guess, and this supervisor creates no tmux terminal."}
+    ],
+    "missing_premise": null,
+    "original_stronger_consequence": "If unintended, refusing the interrupted create would prevent that create's retry recovery (high). Allocated checkout ownership is retained; this candidate alleges no lost work or security route.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Explicit SPEC_impl acceptance of this precise refusal. Keep l1's cleanup question separate."
+  },
+  {
+    "key": "g105/l1",
+    "latest_line": 10,
+    "recommendation": "covered",
+    "bucket": "other",
+    "underlying_key": "legacy-tmux-retry-refusal-private-launch-artifact-retention",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Immediate cleanup is bypassed, and retained ownership keeps a valid session credential. The established consequence is bounded private-file retention accepted by the leftover-files policy and local security boundary. The stronger claim that retained Error-row specs ordinarily survive successful writable restarts until Delete was expressly withdrawn and is source-refuted. This remains a proposed coverage disposition requiring independent review.",
+    "checks": [
+      "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:core.rs:11226-11243 returns through refusal before retry cleanup at 11708-11727. 15866-15929 removes/settles ordinary rows or preserves checkout ownership and exposes the refusal. 15659-15713 puts argv and session_token in a 0600 spec.",
+      "Same revision store.rs:4004-4059 retains session_token while settling Error; 4806-4831 authenticates solely against the row's token, without an outcome test. Retaining the row therefore does not revoke its credential. No unauthorized reader or cross-host delivery was demonstrated.",
+      "Same revision core.rs:7072-7080 independently cleans already-Error rows on writable reload. launch_artifacts.rs:299-339 permits cleanup for generation zero without a sentinel, and 491-504 removes spec/status/waypoint. Thus the directory sweep's current-generation preservation is not proof that an Error refusal survives successful restarts.",
+      "Pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:core.rs:14653-14717 preserves refusal branch structure; 6726-6732 preserves Error-row cleanup. Failed settlement can leave a pending row, with visible unresolved durability; no new ordinary accumulation route was established. No execution ran."
+    ],
+    "coverage_checked": [
+      "Current SPEC_impl.md Leftover files:92-97 explicitly accepts fixed bounded leftovers or cleanup by the next owning-process start. Legacy tmux attempts are a finite inherited set because new supervisors create no tmux terminals. SPEC_impl.md:4975-4985 separately accepts private current-generation input until Delete, but its duplication rationale has a queued correction; this proposal does not rely on the false claim that every prompt is already in the database.",
+      "Current SPEC.md:4901-4910 states the Unix-account/host boundary and denies same-account containment by session credentials. No source route beyond that boundary was established. SPEC_impl's keyed-retry refusal contract is exact for the refusal, not a claim that cleanup succeeded.",
+      "TODO.md Planned empty; BUGS.md unrelated; plans/queue searched for refusal/artifacts/credential retention. Landed tmux removal plans are not unlanded coverage.",
+      "INDEX.md and matching queue launch-input-database-duplication-rationale-overstated.md read. Its distinct defect is the claim of complete database duplication, with raw create-time prompts as the counterexample, not this bounded cleanup lifetime. Active TRIAGE_OUTCOMES.md:1721-1737 likewise calls for truthful wording without changing retention behavior. No exact separate item to extend or duplicate; archive not read.",
+      "FILTER.md read; no filter needed. No rare-condition filter is used to lower a proven security consequence."
+    ],
+    "exact_cover_quotes": [
+      {"source": "SPEC_impl.md:94-97", "quote": "Confirmed 2026-09-28: files left behind are not a leak, and need no extra cleanup machinery, when they are bounded by a fixed amount, grow only with a rare and explicit user action (such as switching the release download source), or are removed by the next attempt at the same operation or by the next start of the process that owns them. As with retained supervisor metadata, the line is accumulation without bound over time during ordinary operation."},
+      {"source": "SPEC.md:4903-4907", "quote": "The local security boundary is the Unix account on a particular host. Processes the user runs on the target host, including same-account processes that can reach Farhelm's terminal hosts (the processes that keep its terminals), are trusted by this threat model. Farhelm does not provide strong same-account isolation against deliberate interference with agents or those terminal hosts, and session credentials do not provide same-account containment."}
+    ],
+    "missing_premise": "A security consequence would need an unauthorized reader or transfer beyond private same-account state. Failed-settlement lifetime is not proof of a new unbounded accumulation route; no such route was established.",
+    "original_stronger_consequence": "Immediate cleanup of credential-bearing launch input is skipped; retaining checkout ownership retains valid authority. Earlier history claimed its spec could survive ordinary successful starts until Delete, then retracted that assertion after checking Error-row reload cleanup. Preserve that correction and the valid-token distinction; do not replace them with a claim that all credentials were revoked.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Exact bounded-retention acceptance and local security boundary, plus source refutation only of the stronger ordinary-restart lifetime claim. Parent independent drop check must assess credential-retention coverage and consequence narrowing."
+  },
+  {
+    "key": "g105/c2",
+    "latest_line": 4,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "removed-tmux-version-export-has-no-product-consumer",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Removing the exported version parser does not leave a surviving product driver without its guard. The driver was already gone, and this commit removes remote provisioning's final dependency.",
+    "checks": [
+      "500548b9253b07a26fd03119679184b69544e31d:lib.rs removes pub mod tmux. Its parent's tmux.rs:1-11 names remote provisioning as the last consumer and says startup retirement needs no tmux executable.",
+      "Pinned-revision git grep across crates for farhelm_supervisor::tmux, crate::tmux, mod tmux, TMUX_FLOOR and TmuxVersion finds only the independent farhelm-teststate tmux module and test harness; no surviving product consumer.",
+      "Current SPEC_impl.md Ending the old private tmux server:2783-2832 describes plain-socket/process-identity retirement, not running a tmux binary or parsing its version. No build or product execution was used as evidence."
+    ],
+    "coverage_checked": [
+      "Both specs searched for tmux requirements/version guard/startup retirement. They prescribe terminal hosts and executable-free old-server termination; the alleged remaining dependency contradicts that source shape.",
+      "TODO.md Planned empty, BUGS.md unrelated. plans/queue/tmux-drop-from-install.md criterion 7 removes the version-policy module with its last users; the plan is already landed per REPORTS.md:30, so it is context rather than unlanded-plan cover.",
+      "INDEX.md, matching queue terms, and active TRIAGE_OUTCOMES.md searched for removed tmux export/version guard. No matching item or decision found. Archive not read. FILTER.md supplies no necessary basis."
+    ],
+    "exact_cover_quotes": [
+      {"source": "SPEC_impl.md:2785-2788", "quote": "Ending the old terminals (`service::core::old_terminals`) is the one tmux-related step the running supervisor keeps, and works whether or not any tmux program exists."}
+    ],
+    "missing_premise": null,
+    "original_stronger_consequence": "Considered an integration/build risk or an unchecked remaining tmux driver after deleting its export. No security or user-work-loss route was asserted; old-terminal retirement correctness is outside this bounded export check.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutes a surviving consumer/driver dependency. Do not generalize this conclusion to independently assigned provisioning or old-terminal retirement behavior."
+  },
+  {
+    "key": "g105/l2",
+    "latest_line": 7,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "tab-settle-gate-bare-link-out-of-scope",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The public test-seam documentation retains a bare intra-doc link after the timing constant's import was removed. The source-level unresolved name is established; generated-page behavior and build diagnostics were not observed.",
+    "checks": [
+      "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:core.rs:78-82 no longer imports TAB_LAUNCH_SETTLE; its sole remaining occurrence is the bare link at 748. TabSettleGate remains public at 757 and publicly re-exported by service/mod.rs:133-140.",
+      "Same revision service/terminals.rs:47 defines the crate-private constant. A child module's own import cannot put it in core's lexical scope. Qualifying the path or using plain code text would address the unresolved reference, with private-target visibility considered separately.",
+      "Pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:core.rs:662 retains the sole bare reference and 671 the public alias. No rustdoc, build, CI-failure or warnings-as-errors observation is claimed."
+    ],
+    "coverage_checked": [
+      "SPEC.md and SPEC_impl.md searched for tab settle/test-seam/documentation references; no explicit acceptance of this unresolved link.",
+      "TODO.md Planned empty; BUGS.md unrelated; plans/queue searched for exact gate/constant/link. tmux-drop-from-docs discusses comment and dangling-reference audits but already landed per REPORTS.md:32; no unlanded exact fix coverage.",
+      "INDEX.md, queue text and active TRIAGE_OUTCOMES.md searched for TabSettleGate/TAB_LAUNCH_SETTLE/rustdoc link. No matching open item or decision. Archive not read.",
+      "FILTER.md does not cover this persistent developer-documentation reference defect merely because its impact is small. No rare runtime trigger is required."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "The exact rustdoc warning or rendered link appearance remains unobserved. No runtime consequence or ordinary-build failure is established.",
+    "original_stronger_consequence": "A broken link in generated developer documentation; earlier investigation did not assert a runtime failure. Keep the private-target and no-rustdoc-execution caveats.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain source-confirmed unresolved documentation reference as other, without upgrading it to an observed tool failure."
+  },
+  {
+    "key": "g105/l3",
+    "latest_line": 12,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "restart-definitive-comment-promises-no-external-effects",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The revised explanation teaches that definitive failure proves no external changes. A child can start before adoption fails and cleanup returns definitive, so that explanation is false. The product need not undo the child's effects; this is the comment's incorrect contract.",
+    "checks": [
+      "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:core.rs:3400-3413 says definitive failure changed nothing outside this process. Its immediate parent at 3506-3533 limited the prior statement to tmux and separately described host restoration; the assigned rewrite introduces this generalized external-state claim.",
+      "Same revision host_launch.rs:576-623 can finish StartingHost successfully and then fail HostTerminal::adopt as Gone/Unavailable. hosts/spawn.rs:222-224 defines readiness as socket bound and child started. host_restart.rs:481-489 routes Host failure to unwind; 1170-1219 can end the host, remove artifacts, sweep, then return definitive. Its 1197-1200 comment explicitly allows a child that ran briefly.",
+      "Restoring the prior terminal at core.rs:13528 neither reverses prior child writes nor proves their absence. Pinned tip core.rs:3239-3253 keeps the same false sentence. No actual external effect or runtime failure was observed."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md Lifecycle operations:1944-1950 and SPEC_impl.md Restarting a host agent:2307-2315 describe ending a failed replacement and restoring the old terminal. Neither promises transaction-like rollback of external effects.",
+      "TODO.md Planned empty; BUGS.md unrelated; plans/queue searched for definitive/external effects/rollback comments. tmux-drop-from-docs has landed (REPORTS.md:32), and its generic audit is not an unlanded fix.",
+      "INDEX.md and matching restart-unwind-omits-tree-sweep-failure.md read in full. That item concerns the specification's exhaustive ambiguous-cleanup condition and host-record reachability, not the new claim that a started replacement made no external changes. This is neither an exact alias nor full coverage. Active TRIAGE_OUTCOMES.md has no matching external-effects decision; archive not read.",
+      "FILTER.md has no full match: a persistent false implementation explanation is not merely a rare runtime diagnostic/status glitch."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": null,
+    "original_stronger_consequence": "Initially suspected an overpromise that definitive Restart failure left all external state unchanged. Source establishes the false maintenance contract, not a requirement to undo program effects, a production rollback defect, or security/user-work loss caused by the comment.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain the newly broadened false comment as other; keep it distinct from the existing unwind-spec omission."
+  },
+  {
+    "key": "g106/c1",
+    "latest_line": 15,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "tmux-excerpt-fence-removal-does-not-suppress-host-excerpts",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The assigned fence removal cannot suppress host excerpts: the host branch returns before reading the tmux fence. This narrowly refutes that removal hypothesis. It does not refute the separately reported history-resize contamination or inaccurate blank-screen provenance rationale.",
+    "checks": [
+      "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:launch_artifacts.rs:78-95 quotes host.screen_tail after processed exit evidence, then returns; 101-115 reads launch_excerpt only in the tmux branch. core.rs:13603-13642 routes every assigned relaunch through relaunch_into_host and host_restart.rs:443-465 through spawn_agent_in_host.",
+      "Same revision vendor/alacritty_terminal/src/grid/resize.rs:25-28 invokes grow_lines; 46-71 brings up to min(history_size, added_lines) history rows into the visible grid. Thus processed exit proves final-output ordering, not that every visible row belongs to this run. The earlier blank-screen rationale was too broad.",
+      "git diff from exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a to reviewed 647f0227 for launch_artifacts.rs, grid/resize.rs and terminal-emulator/src/snapshot/v1/mod.rs is empty. The quote branch and promotion mechanism predate the whole range; no runtime observation was made."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md Terminal experience:2888-2894 requires safe attribution, so it does not accept contamination. SPEC_impl.md Launch failure classification describes final exit evidence and blank initial screen, which does not refute later promotion. Neither is needed to dismiss the narrowly refuted suppression mechanism.",
+      "TODO.md Planned empty; BUGS.md unrelated; plans/queue searched for excerpt/fence/prior-run screen. Landed removal and docs plans are not unlanded coverage.",
+      "INDEX.md, matching queue text and active TRIAGE_OUTCOMES.md searched for launch_excerpt, inherited/prior-run excerpt and resize contamination. No exact suppression item found. The supplied history identifies g100/c1 and g013/f2 as other owners of contamination/later wording; those are not available named claims in this batch and are not adjudicated here. Archive not read.",
+      "FILTER.md read. No filter is needed for source refutation, and no filter is proposed for the separate inherited contamination claim."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No missing premise remains for the fence-removal suppression hypothesis. The full resize-contamination sequence is received evidence from g100/c1; this consultation confirms promotion and preexistence, not a runtime occurrence or its full independent route.",
+    "original_stronger_consequence": "Missing launch-failure output after removing launch_excerpt was considered and refuted. The temporary reopening withdrew the overly broad claim that a blank initial screen or processed exit proves previous-run text cannot appear. The inherited contamination concern remains with g100/c1/g013/f2 and is not dismissed here.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Narrow source refutation of fence-removal suppression only. Preserve distinct inherited contamination and later in-range documentation claims for their owners."
+  },
+  {
+    "key": "g106/c2",
+    "latest_line": 8,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "restart-tmux-removal-preserves-returned-ambiguity-delete-guard",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The assigned restart integration preserves returned Ambiguous state and its guarded-Delete refusal. That narrowly refutes loss of this guard due to the removal. The older Warn scope policy is real counterevidence to a blanket cleanup guarantee and must remain with its owner; it is not disproved by the Result mapping.",
+    "checks": [
+      "647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513:core.rs:13402-13409 excludes Published replacements from restoration; 13470-13530 retains Launching/no terminal for Ambiguous; 3414-3416 returns no prior terminal. 5467-5473 recognizes terminal-less Launching; 13969-13981 refuses guarded Delete, and handlers.rs:1328-1347 checks under the lifecycle claim before teardown.",
+      "Same revision host_restart.rs:1170-1219 returns Ambiguous on failed host end or actual Err from reap_process_tree. It removes the host record before the sweep, so not every ambiguous case retains both host records. 526-559 publishes the replacement as Launching on confirmation-write failure and returns Published.",
+      "sweep.rs:1539-1557 maps scope failure plus successful portable sweep to Ok under Warn; host_restart.rs:1207 passes Warn. sweep.rs:1380-1389 says a failed named scope can retain a scrubbed daemon invisible to the sweep. Therefore definitive does not prove every named scope was confirmed gone.",
+      "Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a already contains the same Warn-to-Ok branch and host_restart.rs:1177-1226 caller/result mapping. Base-to-reviewed host_restart diff changes comments, container argument and excerpt fields, not that unwind behavior. Base-to-tip sweep diff leaves this policy branch unchanged. The inherited policy is outside this range; source refutation is only for the assigned returned-ambiguity regression. No execution ran."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md Lifecycle operations:2060-2125 binds destructive consent and requires confirmation of named scopes; it does not broadly accept Warn-to-Ok cleanup. Its coincident-fault exception must not be applied without the entire trigger. Current SPEC_impl.md:2307-2315 incompletely describes ambiguity; it is not proof that host-end failure is the only ambiguous case.",
+      "TODO.md Planned is empty. Maybe later: Require a systemd user manager, including failed-create rollback, is outside Planned and is not exact coverage of failed Restart replacement unwind. BUGS.md unrelated.",
+      "plans/queue searched for unconfirmed scopes/restart rollback; user-tmux-jobs-outlive-cleanup has landed (REPORTS.md:12) and covers intentionally migrated user tmux jobs, not this named-scope policy. No unlanded exact fix found.",
+      "INDEX.md and restart-unwind-omits-tree-sweep-failure.md read in full: it already records the narrower specification omission about actual sweep Err and removed host records, not a new runtime guard regression or the Warn policy. Active TRIAGE_OUTCOMES.md searched for the same consent/ambiguity/scope route; no exact decision found. Archive not read.",
+      "FILTER.md read. No filter is proposed: potential unconsented destruction is outside ordinary diagnostic/status filters. The supplied g099/l1 owns the inherited scope-policy concern; its record was not supplied for independent adjudication or alias determination here."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A newly introduced route from this assigned integration to unconsented loss of replacement/descendant work is not established. A failed named scope hidden by Warn is a separate inherited policy; any eventual unconsented-Delete route needs its complete source sequence. The false blanket cleanup rationale cannot stand in for that sequence.",
+    "original_stronger_consequence": "A replacement or its descendants might remain alive while the session appears ended, permitting Delete to stop user work without required consent (potential highest). Earlier broad claims that uncertain cleanup always leaves no terminal, only successful cleanup reaches definitive, and every ambiguous result retains both records were corrected. Narrowly preserve actual Err-to-Ambiguous protection; do not drop the inherited Warn policy or its possible highest consequence.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Independent drop check required for the narrowly stated integration refutation and any lowering out of highest. Base-to-tip evidence places the Warn policy outside this review range; the parent must preserve g099/l1's separate adjudication rather than treat this as a whole-safety clearance."
+  }
+]

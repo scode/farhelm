@@ -1,0 +1,1357 @@
+{
+  "group": {
+    "id": "g032",
+    "domain": "gui-shell-integration",
+    "purpose": "gui-shell-integration: crates/farhelm-ui/src/lib.rs, crates/farhelm-ui/src/desktop.rs, crates/farhelm-ui/src/api.rs, crates/farhelm-ui/src/api/environments.rs, crates/farhelm-ui/src/icons.rs, crates/farhelm-ui/src/ops.rs, crates/farhelm-ui/src/status.rs, crates/farhelm-ui/src/app_bar.rs, crates/farhelm-ui/src/desktop/appearance_smoke.rs, crates/farhelm-ui/src/keyboard_shortcuts.rs, crates/farhelm-ui/src/list.rs; phases complete small per-commit changes",
+    "interfaces": [
+      "g001",
+      "g005",
+      "g007",
+      "g008",
+      "g009",
+      "g010",
+      "g011",
+      "g012",
+      "g033",
+      "g034",
+      "g196",
+      "g128"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00039-000.patch",
+        "ranges": [
+          [
+            1,
+            15
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/lib.rs",
+        "commit": "06d4b68f3a9e913f47cd426fedee5946a4eed77b",
+        "notes": "patch header; patch character offsets [0,752)",
+        "lines": 15,
+        "bytes": 752,
+        "start": 0,
+        "end": 752,
+        "original": "[private-run]/prep/originals/00039.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00078-000.patch",
+        "ranges": [
+          [
+            1,
+            20
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/desktop.rs",
+        "commit": "d77a8b5b09a4c6c86dd1e22d51cf904c9e209fc8",
+        "notes": "patch header; patch character offsets [0,759)",
+        "lines": 20,
+        "bytes": 759,
+        "start": 0,
+        "end": 759,
+        "original": "[private-run]/prep/originals/00078.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00164-000.patch",
+        "ranges": [
+          [
+            1,
+            124
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/lib.rs",
+        "commit": "04ffdbb35773cef36e73eb798c005ddbeb9a9de6",
+        "notes": "patch header; patch character offsets [0,4933)",
+        "lines": 124,
+        "bytes": 4933,
+        "start": 0,
+        "end": 4933,
+        "original": "[private-run]/prep/originals/00164.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00227-000.patch",
+        "ranges": [
+          [
+            1,
+            43
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/api.rs",
+        "commit": "350a4b33b6d4476f4a78e43cea124bc2b828f462",
+        "notes": "patch header; patch character offsets [0,2295)",
+        "lines": 43,
+        "bytes": 2295,
+        "start": 0,
+        "end": 2295,
+        "original": "[private-run]/prep/originals/00227.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00228-000.patch",
+        "ranges": [
+          [
+            1,
+            120
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/api/environments.rs",
+        "commit": "350a4b33b6d4476f4a78e43cea124bc2b828f462",
+        "notes": "patch header; patch character offsets [0,4738)",
+        "lines": 120,
+        "bytes": 4738,
+        "start": 0,
+        "end": 4738,
+        "original": "[private-run]/prep/originals/00228.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00231-000.patch",
+        "ranges": [
+          [
+            1,
+            22
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/desktop.rs",
+        "commit": "350a4b33b6d4476f4a78e43cea124bc2b828f462",
+        "notes": "patch header; patch character offsets [0,713)",
+        "lines": 22,
+        "bytes": 713,
+        "start": 0,
+        "end": 713,
+        "original": "[private-run]/prep/originals/00231.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00237-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/icons.rs",
+        "commit": "350a4b33b6d4476f4a78e43cea124bc2b828f462",
+        "notes": "patch header; patch character offsets [0,799)",
+        "lines": 13,
+        "bytes": 799,
+        "start": 0,
+        "end": 799,
+        "original": "[private-run]/prep/originals/00237.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00239-000.patch",
+        "ranges": [
+          [
+            1,
+            105
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/lib.rs",
+        "commit": "350a4b33b6d4476f4a78e43cea124bc2b828f462",
+        "notes": "patch header; patch character offsets [0,4352)",
+        "lines": 105,
+        "bytes": 4354,
+        "start": 0,
+        "end": 4352,
+        "original": "[private-run]/prep/originals/00239.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00313-000.patch",
+        "ranges": [
+          [
+            1,
+            35
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/lib.rs",
+        "commit": "04d85f0c98a9b635709d00b056719a0baa7fd3fc",
+        "notes": "patch header; patch character offsets [0,1543)",
+        "lines": 35,
+        "bytes": 1545,
+        "start": 0,
+        "end": 1543,
+        "original": "[private-run]/prep/originals/00313.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00517-000.patch",
+        "ranges": [
+          [
+            1,
+            151
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/ops.rs",
+        "commit": "1d24c6af0b6fdbbec854623ff53f90281b8271ab",
+        "notes": "patch header; patch character offsets [0,6533)",
+        "lines": 151,
+        "bytes": 6533,
+        "start": 0,
+        "end": 6533,
+        "original": "[private-run]/prep/originals/00517.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00534-000.patch",
+        "ranges": [
+          [
+            1,
+            426
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/api.rs",
+        "commit": "ba7cc0264028eebb39647deb1d25b055e6886935",
+        "notes": "patch header; patch character offsets [0,18351)",
+        "lines": 426,
+        "bytes": 18351,
+        "start": 0,
+        "end": 18351,
+        "original": "[private-run]/prep/originals/00534.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00573-000.patch",
+        "ranges": [
+          [
+            1,
+            22
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/ops.rs",
+        "commit": "b3d6b3eff6b7508e0b1fb6ec5b5cde31d27ebabe",
+        "notes": "patch header; patch character offsets [0,886)",
+        "lines": 22,
+        "bytes": 886,
+        "start": 0,
+        "end": 886,
+        "original": "[private-run]/prep/originals/00573.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00687-000.patch",
+        "ranges": [
+          [
+            1,
+            12
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/api.rs",
+        "commit": "47f33bbdbd5ff4a6e437e97a800f9083be43096e",
+        "notes": "patch header; patch character offsets [0,625)",
+        "lines": 12,
+        "bytes": 625,
+        "start": 0,
+        "end": 625,
+        "original": "[private-run]/prep/originals/00687.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00702-000.patch",
+        "ranges": [
+          [
+            1,
+            23
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/api.rs",
+        "commit": "222bf6253bcd168db04bcbb1df20180c88306998",
+        "notes": "patch header; patch character offsets [0,1053)",
+        "lines": 23,
+        "bytes": 1053,
+        "start": 0,
+        "end": 1053,
+        "original": "[private-run]/prep/originals/00702.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00706-000.patch",
+        "ranges": [
+          [
+            1,
+            16
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/lib.rs",
+        "commit": "222bf6253bcd168db04bcbb1df20180c88306998",
+        "notes": "patch header; patch character offsets [0,857)",
+        "lines": 16,
+        "bytes": 861,
+        "start": 0,
+        "end": 857,
+        "original": "[private-run]/prep/originals/00706.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00709-000.patch",
+        "ranges": [
+          [
+            1,
+            23
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/api.rs",
+        "commit": "2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa",
+        "notes": "patch header; patch character offsets [0,1271)",
+        "lines": 23,
+        "bytes": 1271,
+        "start": 0,
+        "end": 1271,
+        "original": "[private-run]/prep/originals/00709.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00712-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/icons.rs",
+        "commit": "2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa",
+        "notes": "patch header; patch character offsets [0,926)",
+        "lines": 13,
+        "bytes": 926,
+        "start": 0,
+        "end": 926,
+        "original": "[private-run]/prep/originals/00712.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00877-000.patch",
+        "ranges": [
+          [
+            1,
+            34
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/status.rs",
+        "commit": "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4",
+        "notes": "patch header; patch character offsets [0,1975)",
+        "lines": 34,
+        "bytes": 1985,
+        "start": 0,
+        "end": 1975,
+        "original": "[private-run]/prep/originals/00877.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/00966-000.patch",
+        "ranges": [
+          [
+            1,
+            17
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/desktop.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "patch header; patch character offsets [0,1098)",
+        "lines": 17,
+        "bytes": 1102,
+        "start": 0,
+        "end": 1098,
+        "original": "[private-run]/prep/originals/00966.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01104-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/app_bar.rs",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,691)",
+        "lines": 13,
+        "bytes": 691,
+        "start": 0,
+        "end": 691,
+        "original": "[private-run]/prep/originals/01104.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01106-000.patch",
+        "ranges": [
+          [
+            1,
+            48
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/desktop/appearance_smoke.rs",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,2919)",
+        "lines": 48,
+        "bytes": 2919,
+        "start": 0,
+        "end": 2919,
+        "original": "[private-run]/prep/originals/01106.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01107-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/keyboard_shortcuts.rs",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,831)",
+        "lines": 13,
+        "bytes": 831,
+        "start": 0,
+        "end": 831,
+        "original": "[private-run]/prep/originals/01107.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01109-000.patch",
+        "ranges": [
+          [
+            1,
+            11
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/list.rs",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,484)",
+        "lines": 11,
+        "bytes": 484,
+        "start": 0,
+        "end": 484,
+        "original": "[private-run]/prep/originals/01109.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01116-000.patch",
+        "ranges": [
+          [
+            1,
+            22
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/ops.rs",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,886)",
+        "lines": 22,
+        "bytes": 886,
+        "start": 0,
+        "end": 886,
+        "original": "[private-run]/prep/originals/01116.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01240-000.patch",
+        "ranges": [
+          [
+            1,
+            32
+          ]
+        ],
+        "original_path": "crates/farhelm-ui/src/lib.rs",
+        "commit": "17a3fe858c5511a24b7403af15dd41c93bf69fd7",
+        "notes": "patch header; patch character offsets [0,1889)",
+        "lines": 32,
+        "bytes": 1897,
+        "start": 0,
+        "end": 1889,
+        "original": "[private-run]/prep/originals/01240.patch"
+      }
+    ],
+    "lines": 1373,
+    "bytes": 62189
+  },
+  "records": [
+    {
+      "key": "g032/l1",
+      "owner": "g032",
+      "id": "l1",
+      "domain": "gui-shell-integration",
+      "purpose": "gui-shell-integration: crates/farhelm-ui/src/lib.rs, crates/farhelm-ui/src/desktop.rs, crates/farhelm-ui/src/api.rs, crates/farhelm-ui/src/api/environments.rs, crates/farhelm-ui/src/icons.rs, crates/farhelm-ui/src/ops.rs, crates/farhelm-ui/src/status.rs, crates/farhelm-ui/src/app_bar.rs, crates/farhelm-ui/src/desktop/appearance_smoke.rs, crates/farhelm-ui/src/keyboard_shortcuts.rs, crates/farhelm-ui/src/list.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Wake busy requests may exceed the shared wait budget",
+            "location": "crates/farhelm-ui/src/api.rs:5720",
+            "detail": "Reviewed commit: ba7cc0264028eebb39647deb1d25b055e6886935. TLDR: a launch waiting for a busy host may remain pending longer than its stated 60-second wait. Source basis: resume_host_connected awaits post_lifecycle outside WakeBudget::within; post_lifecycle has a 150-second timeout, whereas only an accepted Resume is intended to be excluded from WAKE_WAIT. Busy refusal time is counted only after the request returns. Suggested bucket: other pending contract and shipped busy-route analysis; could-be-highest: no established security or loss-of-work route. Confidence: unresolved lead, not yet investigated. proposed_drop: false. possible_cover: none. Next checks: read the complete recorded Tensorlake-host lifecycle specification and helm busy-header routes to establish whether a busy response can stall and what timing contract is promised. No execution or reproduction performed."
+          }
+        },
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Busy request timing does not establish an actionable wake defect",
+            "location": "crates/farhelm-ui/src/api.rs:5716",
+            "detail": "Reviewed commit: ba7cc0264028eebb39647deb1d25b055e6886935. TLDR: considered whether a launch waiting for a busy host can remain pending beyond its stated 60-second waiting allowance. Details: api.rs:5716–5764 sends Resume outside WakeBudget::within, excludes elapsed time only on success, and includes busy-refusal elapsed time when the next budgeted fetch runs. environment/lifecycle.rs:27–34 uses try_host_provision_lock for immediate HostBusy rather than awaiting the holder; change_with_manager:54–81 reads the binding before dispatch. SPEC_impl.md, Tensorlake hosts, lines 7114–7125 says: \"All its waiting, busy refusals included, shares one 60-second budget that only the accepted Resume request does not spend, so a slow resume is never cut off.\" A request in flight can be the accepted slow Resume, so enforcing the remaining wait as its deadline would violate the explicit latter guarantee. No shipped route that deliberately waits behind busy ownership was found; ordinary delivery latency or a stalled local binding read is bounded by the existing request timeout and is not evidence of a separate busy-wait regression. Suggested bucket: other if an actual avoidable overrun route is established. Could-be-highest: no; no security or loss-of-work consequence identified. Confidence: confirmed source-based non-report decision, not observed runtime behavior. proposed_drop: source refutation of queued busy waiting plus the explicit never-cut-off accepted Resume constraint above; possible_cover: none. Original suspected consequence remains a possible delayed refusal under transport delay, but no actionable implementation defect is established. No tests or reproductions run."
+          }
+        }
+      ],
+      "latest": {
+        "line": 2,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l1",
+          "state": "open",
+          "summary": "Busy request timing does not establish an actionable wake defect",
+          "location": "crates/farhelm-ui/src/api.rs:5716",
+          "detail": "Reviewed commit: ba7cc0264028eebb39647deb1d25b055e6886935. TLDR: considered whether a launch waiting for a busy host can remain pending beyond its stated 60-second waiting allowance. Details: api.rs:5716–5764 sends Resume outside WakeBudget::within, excludes elapsed time only on success, and includes busy-refusal elapsed time when the next budgeted fetch runs. environment/lifecycle.rs:27–34 uses try_host_provision_lock for immediate HostBusy rather than awaiting the holder; change_with_manager:54–81 reads the binding before dispatch. SPEC_impl.md, Tensorlake hosts, lines 7114–7125 says: \"All its waiting, busy refusals included, shares one 60-second budget that only the accepted Resume request does not spend, so a slow resume is never cut off.\" A request in flight can be the accepted slow Resume, so enforcing the remaining wait as its deadline would violate the explicit latter guarantee. No shipped route that deliberately waits behind busy ownership was found; ordinary delivery latency or a stalled local binding read is bounded by the existing request timeout and is not evidence of a separate busy-wait regression. Suggested bucket: other if an actual avoidable overrun route is established. Could-be-highest: no; no security or loss-of-work consequence identified. Confidence: confirmed source-based non-report decision, not observed runtime behavior. proposed_drop: source refutation of queued busy waiting plus the explicit never-cut-off accepted Resume constraint above; possible_cover: none. Original suspected consequence remains a possible delayed refusal under transport delay, but no actionable implementation defect is established. No tests or reproductions run."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g032/findings.jsonl",
+        "id": "l1",
+        "line": 2,
+        "disposition": "excluded",
+        "group": "wake-budget-unaccepted-resume-request-latency",
+        "reason": "Parent read the complete original candidate and claims-019. Resume is deliberately awaited outside the remaining wake budget because a potentially accepted slow Resume must not be cut off; success excludes that elapsed time and a busy response is charged by the next budgeted operation. Reviewedba7cc026 environment/lifecycle.rs:27-34 uses try_host_provision_lock, so the suspected queued wait behind busy ownership is absent. Registry/transport latency can still delay a refusal, and neither parent nor owner claims a mathematical proof that all refusals finish within60seconds. The consultant's suggested investigated retention relies on an unspecified avoidable delay, not a concrete shipped producer or unperformed source check. Parent accepts the owner's narrower rejection after checking the required acceptance constraint and actual lock admission. A distinct, concrete avoidable nonaccepted-delay route would need its own evidence; no proof of absence for every network schedule is required. No security or work-loss consequence was alleged. Current coverage sources were checked in claims-019; no filter or blanket acceptance of broken deadlines is inferred."
+      },
+      "accepted_parent_decision": {
+        "key": "g032/l1",
+        "line": 2,
+        "disposition": "excluded",
+        "group": "wake-budget-unaccepted-resume-request-latency",
+        "bucket": "other",
+        "recording": "refuted-narrow-queued-busy-wait",
+        "needs_independent_drop_check": false,
+        "reason": "Parent read the complete original candidate and claims-019. Resume is deliberately awaited outside the remaining wake budget because a potentially accepted slow Resume must not be cut off; success excludes that elapsed time and a busy response is charged by the next budgeted operation. Reviewedba7cc026 environment/lifecycle.rs:27-34 uses try_host_provision_lock, so the suspected queued wait behind busy ownership is absent. Registry/transport latency can still delay a refusal, and neither parent nor owner claims a mathematical proof that all refusals finish within60seconds. The consultant's suggested investigated retention relies on an unspecified avoidable delay, not a concrete shipped producer or unperformed source check. Parent accepts the owner's narrower rejection after checking the required acceptance constraint and actual lock admission. A distinct, concrete avoidable nonaccepted-delay route would need its own evidence; no proof of absence for every network schedule is required. No security or work-loss consequence was alleged. Current coverage sources were checked in claims-019; no filter or blanket acceptance of broken deadlines is inferred."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-019",
+          "key": "g032/l1",
+          "latest_line": 2,
+          "recommendation": "retain-unverified",
+          "bucket": "other",
+          "underlying_key": "wake-budget-unaccepted-resume-request-latency",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The alleged queued busy wait is refuted, but the broad timing suspicion is not mathematically refuted: an in-flight request remains outside the wait deadline until its result identifies it. Preserve this as investigated uncertainty if recording it; no shipped avoidable overrun beyond ordinary request/transport delay was established.",
+          "checks": [
+            "At ba7cc0264028eebb39647deb1d25b055e6886935, crates/farhelm-ui/src/api.rs:5724-5734 awaits post_lifecycle outside WakeBudget::within; only success excludes elapsed time. Lines 5736-5754 subsequently charge fetch and sleep against the shared budget.",
+            "At that revision, crates/farhelm-helm/src/environment/lifecycle.rs:28-34 uses try_host_provision_lock and returns HostBusy immediately; change_with_manager:51-69 reads the registry and dispatches the provider. This does not queue behind the busy owner.",
+            "SPEC_impl.md:6731-6742 requires both one shared 60-second waiting budget and never cutting off an accepted slow Resume. Source supports the latter constraint; it does not prove every nonaccepted network request finishes within the former. No execution performed."
+          ],
+          "coverage_checked": {
+            "specifications": "Searched SPEC.md and SPEC_impl.md for wake, busy refusal and budgets; current SPEC_impl.md:6731-6742 is the governing contract, not acceptance of an avoidable overrun.",
+            "TODO_Planned": "TODO.md:23-25 has an empty Planned bucket. Near-term and plan-decision wake wording is not exact Planned coverage.",
+            "plans_queue": "sandbox-suspend-overlap.md:78-81 requires bounded busy waiting without cutting off an accepted Resume; wake-launch-stuck.md:52-68 covers a separate post-wake page-observation wait. Both are landed per plans/REPORTS.md:23,27, not unlanded repair coverage.",
+            "BUGS": "Read BUGS.md; its local SSH transfer-helper hang is a different trigger and scope.",
+            "queue": "Searched and read INDEX.md; no exact wake busy-request latency item. Similar lifecycle polling timeout items concern different provider phases.",
+            "active_triage": "Searched TRIAGE_OUTCOMES.md for wake, busy, Resume and budgets; no matching decision.",
+            "filter": "No filter applied: the premise needed to identify a distinct defect remains missing."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "A shipped avoidable delay of a request that ultimately refuses busy, beyond ordinary transport or registry-read latency, sufficient to violate the waiting allowance. Actual incidence is unmeasured.",
+          "original_stronger_consequence": "A launch waiting for a busy host may remain pending beyond its stated 60-second allowance; the request timeout is longer. No security or work-loss route was claimed.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "The latest non-report decision validly rejects deliberate queueing behind the busy lock. It should not be recorded as proof that delayed refusal cannot exceed 60 seconds."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "wake-budget-unaccepted-resume-request-latency",
+        "destination": null
+      }
+    },
+    {
+      "key": "g032/c2",
+      "owner": "g032",
+      "id": "c2",
+      "domain": "gui-shell-integration",
+      "purpose": "gui-shell-integration: crates/farhelm-ui/src/lib.rs, crates/farhelm-ui/src/desktop.rs, crates/farhelm-ui/src/api.rs, crates/farhelm-ui/src/api/environments.rs, crates/farhelm-ui/src/icons.rs, crates/farhelm-ui/src/ops.rs, crates/farhelm-ui/src/status.rs, crates/farhelm-ui/src/app_bar.rs, crates/farhelm-ui/src/desktop/appearance_smoke.rs, crates/farhelm-ui/src/keyboard_shortcuts.rs, crates/farhelm-ui/src/list.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Container leftover Delete retains its drawn target",
+            "location": "crates/farhelm-ui/src/api/environments.rs:76",
+            "detail": "Reviewed commit: 350a4b33b6d4476f4a78e43cea124bc2b828f462. TLDR: checked whether refreshing the leftover list can redirect a confirmed permanent container deletion to a different container. Details: containers_settings.rs:129–165 renders confirm.current(), clones that shown token into the answer closure, consumes confirm.take(&shown), and synchronously calls delete_container_leftover(&base, shown.key()). api/environments.rs:76–99 copies the bound row into its URL or place/id payload before returning an owned future. It does not reread the current catalog or current confirmation. SPEC_impl.md GUI: Dioxus, Answers bind to what was drawn: \"A handler for something the user answered or confirmed acts on what the render that drew the control showed, never on state it reads when it runs.\" The source follows that contract. Suggested bucket: highest if retargeted destructive consent were established; could-be-highest: yes, permanent files/process loss beyond confirmed scope would qualify, but this route is refuted by the captured shown key/token. Confidence: confirmed source analysis. proposed_drop: target-rebinding suspicion refuted by the shown snapshot and token consumption above, not accepted harmful behavior. possible_cover: none. No runtime behavior observed or reproduction performed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 3,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Container leftover Delete retains its drawn target",
+          "location": "crates/farhelm-ui/src/api/environments.rs:76",
+          "detail": "Reviewed commit: 350a4b33b6d4476f4a78e43cea124bc2b828f462. TLDR: checked whether refreshing the leftover list can redirect a confirmed permanent container deletion to a different container. Details: containers_settings.rs:129–165 renders confirm.current(), clones that shown token into the answer closure, consumes confirm.take(&shown), and synchronously calls delete_container_leftover(&base, shown.key()). api/environments.rs:76–99 copies the bound row into its URL or place/id payload before returning an owned future. It does not reread the current catalog or current confirmation. SPEC_impl.md GUI: Dioxus, Answers bind to what was drawn: \"A handler for something the user answered or confirmed acts on what the render that drew the control showed, never on state it reads when it runs.\" The source follows that contract. Suggested bucket: highest if retargeted destructive consent were established; could-be-highest: yes, permanent files/process loss beyond confirmed scope would qualify, but this route is refuted by the captured shown key/token. Confidence: confirmed source analysis. proposed_drop: target-rebinding suspicion refuted by the shown snapshot and token consumption above, not accepted harmful behavior. possible_cover: none. No runtime behavior observed or reproduction performed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g032/findings.jsonl",
+        "id": "c2",
+        "line": 3,
+        "disposition": "under-investigation",
+        "group": "g032-c2",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-019",
+          "key": "g032/c2",
+          "latest_line": 3,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "container-leftover-delete-rendered-target-binding",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The proposed destructive retargeting does not occur on this route: the answered render supplies both the opening token and the copied deletion target. This is a proposed source refutation requiring independent checking because the original hypothesis concerned destructive consent.",
+          "checks": [
+            "At 350a4b33b6d4476f4a78e43cea124bc2b828f462, crates/farhelm-ui/src/containers_settings.rs:128-165 draws confirm.current(), clones shown into the closure, requires confirm.take(&shown), then synchronously constructs delete_container_leftover(&base, shown.key()).",
+            "At that revision, crates/farhelm-ui/src/api/environments.rs:76-99 chooses the URL from row.host or serializes the captured row.place/row.id before returning an owned future. It does not reread the catalog or confirmation after awaiting.",
+            "Current SPEC_impl.md:1069-1090 requires answers to bind to what was drawn. The inspected source follows that target/opening contract. No execution performed."
+          ],
+          "coverage_checked": {
+            "specifications": "Searched both specifications for leftover deletion, confirmation and target binding; SPEC.md:4838-4848,4888-4890 requires confirmed whole-container cleanup, and SPEC_impl.md:6046-6050 defines its ownership path. These do not accept wrong-target deletion.",
+            "TODO_Planned": "Empty at TODO.md:23-25.",
+            "plans_queue": "Search found podman-environments and tmux-related plans, but no unlanded work covering this hypothetical rebinding. Podman work is landed per plans/REPORTS.md:21.",
+            "BUGS": "Read BUGS.md; no matching trigger/consequence.",
+            "queue": "INDEX.md has no exact container leftover confirmation-retargeting item; orphan ownership-lock wording is a different contract.",
+            "active_triage": "Searched TRIAGE_OUTCOMES.md for container/orphan deletion and rendered target; no exact decision.",
+            "filter": "No filter used; proposed disposition rests on captured target and token."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "A refreshed leftover list might redirect a confirmed permanent deletion to a different container, losing its files, processes and unpushed work. Source refutes that target-switch mechanism.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Refute only the named live-catalog/confirmation rebinding suspicion. This does not certify all container-deletion ownership behavior."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-019.json",
+          "key": "g032/c2",
+          "proposal": "claim-checks/claims-019/result.json",
+          "parent_proposal": "source-refuted-leftover-delete-live-target-rebinding",
+          "final_independent_gate": "required-before-highest-drop",
+          "reason": "Parent read full019 drawn confirm.current cloned into handler, exact confirm.take(&shown) then synchronous APIconstruct URL/body from capturedrow before ownedfuture. No latercatalog/questionread. Refutes named refreshedleftoverlist wrongcontainerpermanentdelete only, notallownershipdeletion. Preserve original files/process/unpushedwork loss hypothesis for fresh sourcecheck."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "container-leftover-delete-rendered-target-binding",
+        "destination": null
+      }
+    },
+    {
+      "key": "g032/l3",
+      "owner": "g032",
+      "id": "l3",
+      "domain": "gui-shell-integration",
+      "purpose": "gui-shell-integration: crates/farhelm-ui/src/lib.rs, crates/farhelm-ui/src/desktop.rs, crates/farhelm-ui/src/api.rs, crates/farhelm-ui/src/api/environments.rs, crates/farhelm-ui/src/icons.rs, crates/farhelm-ui/src/ops.rs, crates/farhelm-ui/src/status.rs, crates/farhelm-ui/src/app_bar.rs, crates/farhelm-ui/src/desktop/appearance_smoke.rs, crates/farhelm-ui/src/keyboard_shortcuts.rs, crates/farhelm-ui/src/list.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l3",
+            "state": "open",
+            "summary": "Container cleanup may block unrelated GUI HTTP reads",
+            "location": "crates/farhelm-ui/src/api/environments.rs:92",
+            "detail": "Reviewed commit: 350a4b33b6d4476f4a78e43cea124bc2b828f462. TLDR: deleting an interrupted container may make unrelated session and host requests wait for its whole removal. Source basis: delete_container_leftover uses send_save for either DELETE /api/hosts/{host} or DELETE /api/container-orphans. The module claims to register writes before dismissal; GUI: Dioxus explicitly excludes host mutations from configuration-save tickets because remote work must not hold every read. Suggested bucket: high if a slow whole-host removal actually holds a shared ticket and delays normal interaction; could-be-highest: not established, no loss-of-work/security route identified. Confidence: unresolved lead. proposed_drop: false. possible_cover: none. Next checks: inspect send_save/send_read/send ticket ownership at this recorded revision and removal ownership and duration; distinguish synchronous lifetime registration from HTTP ordering and verify an ordinary unrelated GUI path consumes that ticket. No reproduction or runtime test performed."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l3",
+            "state": "open",
+            "summary": "Container leftover deletion stalls unrelated GUI requests",
+            "location": "crates/farhelm-ui/src/api/environments.rs:92",
+            "detail": "Reviewed commit: 350a4b33b6d4476f4a78e43cea124bc2b828f462. TLDR: while deleting an interrupted container in Settings, the same Farhelm page makes unrelated host/session reads and actions wait for that container's remote cleanup. Closing Settings does not release the wait. A slow cleanup can therefore leave host/session displays stale and make unrelated operations time out with a misleading configuration-save error. Details: api/environments.rs:76–92 routes a row-backed leftover to DELETE /api/hosts/{host}, otherwise DELETE /api/container-orphans, but invokes send_save(request). api.rs:2259–2268 registers a process-wide CONFIGURATION_SAVES ticket synchronously and holds it until the request returns. api.rs:2461–2506 makes send/send_read snapshot and await every such ticket before dispatch, consuming their own timeout. api/save_order.rs:27–65 and 89–108 establish that the ticket blocks captured requests until drop and reports \"Request timed out waiting for earlier configuration saves\" on their deadlines. Ordinary fetch_hosts uses send_read at api.rs:4603–4605 and fetch_session uses send at 3611–3613. The shipping UI reaches this path from ContainersSettings' confirmed Delete, containers_settings.rs:157–181, on spawn_forever, so closing Settings cancels neither the delete nor its ticket. The row-backed request waits through hosts.rs:1477–1500's connection hold, shared-connection release and provider.destroy before finishing. The contract deliberately excludes exactly this: SPEC_impl.md GUI: Dioxus, lines 334–340: \"host mutations can wait on remote operations and must not hold every read behind them.\" This is a remote host mutation, not a configuration change later session reads depend on. Use the ordinary send path while retaining synchronous request construction and spawn_forever ownership; request lifetime and configuration ordering are separate. Suggested bucket: high, material UX degradation on a slow or stalled cleanup, affecting unrelated hosts in the same client. Confidence: confirmed by source/contract analysis; no runtime execution. proposed_drop: false. possible_cover: none. Caveats: terminals, event-feed sockets and page-side JavaScript calls bypass this Rust funnel and keep running; other clients are unaffected. The cleanup's request timeout eventually drops the barrier. No established security or loss-of-work route, so not highest. Original lead l3 is resolved to this finding."
+          }
+        },
+        {
+          "line": 9,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l3",
+            "state": "open",
+            "summary": "Container leftover deletion stalls unrelated GUI requests",
+            "location": "crates/farhelm-ui/src/api/environments.rs:92",
+            "detail": "Reviewed commit: 350a4b33b6d4476f4a78e43cea124bc2b828f462. TLDR: while deleting an interrupted container in Settings, the same Farhelm page makes unrelated host/session reads and actions wait for that container's remote cleanup. Closing Settings does not release the wait. A slow cleanup can leave host/session displays stale and make unrelated operations time out with a misleading configuration-save error. Details: api/environments.rs:76–92 routes a row-backed leftover to DELETE /api/hosts/{host}, otherwise DELETE /api/container-orphans, but invokes send_save(request). api.rs:2259–2268 registers a process-wide CONFIGURATION_SAVES ticket synchronously and holds it until the request returns. api.rs:2461–2506 makes send/send_read snapshot and await every such ticket before dispatch, consuming their own timeout. api/save_order.rs:27–65 and 89–108 establish that the ticket blocks captured requests until drop and reports \"Request timed out waiting for earlier configuration saves\" on their deadlines. Ordinary fetch_hosts uses send_read at api.rs:4603–4605 and fetch_session uses send at 3611–3613. The normal request budget is 60 seconds (api.rs:2127) and the shared idempotent read budget is 10 seconds (2137 onward). The shipping UI reaches this path from ContainersSettings' confirmed Delete, containers_settings.rs:157–181, on spawn_forever, so closing Settings cancels neither the delete nor its ticket. The row-backed request waits through hosts.rs:1477–1500's connection hold, shared-connection release and provider.destroy before finishing. The Podman destroy implementation at environment/podman.rs:1294–1338 calls remove_container; that method at 400–414 performs remote inspect, owned podman rm --force, and absence verification, with a 30-second per-command budget (COMMAND at line 25). It is therefore real remote cleanup with a useful failure window longer than unrelated reads' budgets, not a local admission-only save. The contract deliberately excludes exactly this: SPEC_impl.md GUI: Dioxus, lines 334–340: \"host mutations can wait on remote operations and must not hold every read behind them.\" This is a remote host mutation, not a configuration change later session reads depend on. Use the ordinary send path while retaining synchronous request construction and spawn_forever ownership; request lifetime and configuration ordering are separate. Suggested bucket: high, material UX degradation on a slow or stalled cleanup, affecting unrelated hosts in the same client. Confidence: confirmed by source/contract analysis; no runtime execution. proposed_drop: false. possible_cover: none. Caveats: terminals, event-feed sockets and page-side JavaScript calls bypass this Rust funnel and keep running; other clients are unaffected. The cleanup's request timeout eventually drops the barrier. No established security or loss-of-work route, so not highest. Follow-up checks: git diff from this commit through inclusive 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db for api/environments.rs is empty, so the offending code persists at the review endpoint. Original lead l3 is resolved to this finding; this revision adds the confirmed remote command budgets and endpoint persistence."
+          }
+        },
+        {
+          "line": 11,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l3",
+            "state": "open",
+            "summary": "Container leftover deletion stalls unrelated GUI requests",
+            "location": "crates/farhelm-ui/src/api/environments.rs:91",
+            "detail": "Reviewed commit: 350a4b33b6d4476f4a78e43cea124bc2b828f462. TLDR: deleting an interrupted container in Settings holds unrelated host/session reads and actions in the same client behind remote cleanup, even after Settings closes. A slow cleanup leaves displays stale and can make unrelated requests fail as waiting for configuration saves. Synthesis recheck: the actual Settings caller is containers_settings.rs:155–176. It consumes the rendered confirmation, sets local busy, constructs delete_container_leftover synchronously at :165, then drives the returned future with dioxus::core::spawn_forever at :166–167. Its mounted flag is checked only AFTER sending.await returns (:168–174), to suppress component-owned completion paint. Thus cancellation safety is supplied by spawn_forever, not configuration-save ordering. api/environments.rs:80–91 chooses the row-backed whole-host DELETE or the unregistered orphan DELETE and calls send_save at :91 (correcting the earlier off-by-one primary location). api.rs:2259–2267 independently registers CONFIGURATION_SAVES and holds its ticket through response headers or request failure; it bypasses preceding-save waits for this mutation. Ordinary send/send_read reach send_inner_ordered with dependent=true (:2461–2489), snapshot preceding tickets before their first await, and await them before HTTP dispatch (:2491–2507). fetch_hosts is an unrelated concrete consumer at :4603–4605; fetch_session also uses send at :3611–3613. api/save_order.rs:27–65 releases waiters only on ticket drop; :89–108 charges the wait to each request deadline and reports \"Request timed out waiting for earlier configuration saves\". READ_TIMEOUT is 10 seconds (:2167), versus the cleanup's REQUEST_TIMEOUT of 60 seconds (:2127). The helm whole-host handler awaits hosts.rs:1477–1500's connection hold, release and provider.destroy; Podman destroy at environment/podman.rs:1294–1338 reaches remove_container (:400–414), which runs remote inspect, rm --force and absence verification with 30-second command budgets (:25). This is remote execution, not admission-only acknowledgment. SPEC_impl.md GUI: Dioxus, :334–340 explicitly says \"host mutations can wait on remote operations and must not hold every read behind them.\" Owning the existing future in spawn_forever while using send rather than send_save preserves deletion after dismissal without making it a global configuration prerequisite. Suggested bucket: high, material unrelated-client interaction degradation under slow cleanup. Confidence: confirmed source/contract route, not execution. proposed_drop: false. possible_cover: none. Caveats preserved: this affects the initiating client's Rust HTTP funnel, not other clients, already-dispatched requests, terminal sockets, the event feed or page-side JavaScript HTTP. The request deadline eventually drops the barrier; the server still owns admitted deletion. No established highest/security or work-loss route. git diff from reviewed commit to inclusive 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db for api/environments.rs is empty. No tests, builds or reproductions run. This revision distinguishes cancellation lifetime from configuration ordering and confirms the precise caller rather than changing the finding's consequence."
+          }
+        }
+      ],
+      "latest": {
+        "line": 11,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l3",
+          "state": "open",
+          "summary": "Container leftover deletion stalls unrelated GUI requests",
+          "location": "crates/farhelm-ui/src/api/environments.rs:91",
+          "detail": "Reviewed commit: 350a4b33b6d4476f4a78e43cea124bc2b828f462. TLDR: deleting an interrupted container in Settings holds unrelated host/session reads and actions in the same client behind remote cleanup, even after Settings closes. A slow cleanup leaves displays stale and can make unrelated requests fail as waiting for configuration saves. Synthesis recheck: the actual Settings caller is containers_settings.rs:155–176. It consumes the rendered confirmation, sets local busy, constructs delete_container_leftover synchronously at :165, then drives the returned future with dioxus::core::spawn_forever at :166–167. Its mounted flag is checked only AFTER sending.await returns (:168–174), to suppress component-owned completion paint. Thus cancellation safety is supplied by spawn_forever, not configuration-save ordering. api/environments.rs:80–91 chooses the row-backed whole-host DELETE or the unregistered orphan DELETE and calls send_save at :91 (correcting the earlier off-by-one primary location). api.rs:2259–2267 independently registers CONFIGURATION_SAVES and holds its ticket through response headers or request failure; it bypasses preceding-save waits for this mutation. Ordinary send/send_read reach send_inner_ordered with dependent=true (:2461–2489), snapshot preceding tickets before their first await, and await them before HTTP dispatch (:2491–2507). fetch_hosts is an unrelated concrete consumer at :4603–4605; fetch_session also uses send at :3611–3613. api/save_order.rs:27–65 releases waiters only on ticket drop; :89–108 charges the wait to each request deadline and reports \"Request timed out waiting for earlier configuration saves\". READ_TIMEOUT is 10 seconds (:2167), versus the cleanup's REQUEST_TIMEOUT of 60 seconds (:2127). The helm whole-host handler awaits hosts.rs:1477–1500's connection hold, release and provider.destroy; Podman destroy at environment/podman.rs:1294–1338 reaches remove_container (:400–414), which runs remote inspect, rm --force and absence verification with 30-second command budgets (:25). This is remote execution, not admission-only acknowledgment. SPEC_impl.md GUI: Dioxus, :334–340 explicitly says \"host mutations can wait on remote operations and must not hold every read behind them.\" Owning the existing future in spawn_forever while using send rather than send_save preserves deletion after dismissal without making it a global configuration prerequisite. Suggested bucket: high, material unrelated-client interaction degradation under slow cleanup. Confidence: confirmed source/contract route, not execution. proposed_drop: false. possible_cover: none. Caveats preserved: this affects the initiating client's Rust HTTP funnel, not other clients, already-dispatched requests, terminal sockets, the event feed or page-side JavaScript HTTP. The request deadline eventually drops the barrier; the server still owns admitted deletion. No established highest/security or work-loss route. git diff from reviewed commit to inclusive 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db for api/environments.rs is empty. No tests, builds or reproductions run. This revision distinguishes cancellation lifetime from configuration ordering and confirms the precise caller rather than changing the finding's consequence."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g032/findings.jsonl",
+        "id": "l3",
+        "line": 11,
+        "disposition": "verified",
+        "group": "container-leftover-delete-registers-global-configuration-save",
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-019 after inspecting it. Source establishes a remote cleanup operation holding the initiating client's configuration-save barrier, delaying unrelated reads and actions until cleanup answers or its client deadline expires. This is broader than a harmless diagnostic delay and contradicts the explicit host-mutation exclusion. Record high for material same-client interaction degradation. Retain the limited scope and eventual ticket release; use ordinary send while keeping the existing owned future. Checked source/results: [\"At 350a4b33b6d4476f4a78e43cea124bc2b828f462, api/environments.rs:80-91 selects whole-host or orphan DELETE then calls send_save. api.rs:2259-2267 registers CONFIGURATION_SAVES synchronously and holds its ticket through the response future.\",\"At that revision, api.rs:2488-2507 captures preceding tickets and awaits them before HTTP dispatch; api/save_order.rs:47-65,69-82 releases readers only on ticket drop, and :89-108 charges that wait to their deadline with the configuration-save timeout diagnostic. fetch_hosts at api.rs:4603-4605 is a concrete unrelated consumer. READ_TIMEOUT at :2167 is 10 seconds, REQUEST_TIMEOUT at :2127 is 60 seconds.\",\"containers_settings.rs:155-176 constructs the request at :165 and runs it in spawn_forever at :166-167. mounted is checked only after sending.await, so closing Settings does not release the ticket. This separates request lifetime from save ordering.\",\"farhelm-helm/src/hosts.rs:1470-1500 awaits connection withdrawal and provider.destroy. environment/podman.rs:1294-1335 reaches remove_container:400-414, including inspect, remote rm --force and absence verification; COMMAND at :25 is 30 seconds. The endpoint performs remote work rather than returning an admission receipt.\",\"git diff from that revision through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db for api/environments.rs was empty. This is a conditional slow-cleanup source route, not an observed outage. Other clients, already-dispatched requests, terminal/event sockets and page JavaScript HTTP are outside its scope.\"] Current coverage/results: {\"specifications\":\"Searched both specifications for container leftovers and save ordering. SPEC_impl.md:327-341 explicitly excludes host mutations from tickets and names bypasses; SPEC.md:4888-4890 promises retryable leftover cleanup, not global client blockage.\",\"TODO_Planned\":\"Empty at TODO.md:23-25. The broader near-term infallible-GUI-transport proposal is neither Planned nor an exact remedy for wrongly classifying a remote mutation as a save.\",\"plans_queue\":\"Searched save ticket/order, leftover delete and host mutation terms; no unlanded plan removes this cause. Podman and nonblocking-session-action plans concern broader landed work.\",\"BUGS\":\"Read BUGS.md; its provisioning transfer-helper hang is unrelated and does not cover blocking the GUI funnel behind a container delete.\",\"queue\":\"INDEX.md searched and read; no exact alias. orphan-cleanup-promises-unheld-provisioning-lock concerns server ownership-lock documentation, not this client-side barrier.\",\"active_triage\":\"Searched TRIAGE_OUTCOMES.md for container, save ordering, tickets and remote host mutation; no exact decision.\",\"filter\":\"No full match: remote slowness need not be a rare fault, and the consequence includes unrelated host/session interaction degradation in the initiating client.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Unrelated host/session requests stall or time out while container cleanup runs, even after Settings closes. No established security or user-work-loss route.\"; \"No missing source premise for the conditional barrier. Cleanup latency and frequency have not been measured.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g032/l3",
+        "line": 11,
+        "disposition": "verified",
+        "group": "container-leftover-delete-registers-global-configuration-save",
+        "bucket": "high",
+        "recording": "retain-verified",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named retain-verified proposal from claims-019 after inspecting it. Source establishes a remote cleanup operation holding the initiating client's configuration-save barrier, delaying unrelated reads and actions until cleanup answers or its client deadline expires. This is broader than a harmless diagnostic delay and contradicts the explicit host-mutation exclusion. Record high for material same-client interaction degradation. Retain the limited scope and eventual ticket release; use ordinary send while keeping the existing owned future. Checked source/results: [\"At 350a4b33b6d4476f4a78e43cea124bc2b828f462, api/environments.rs:80-91 selects whole-host or orphan DELETE then calls send_save. api.rs:2259-2267 registers CONFIGURATION_SAVES synchronously and holds its ticket through the response future.\",\"At that revision, api.rs:2488-2507 captures preceding tickets and awaits them before HTTP dispatch; api/save_order.rs:47-65,69-82 releases readers only on ticket drop, and :89-108 charges that wait to their deadline with the configuration-save timeout diagnostic. fetch_hosts at api.rs:4603-4605 is a concrete unrelated consumer. READ_TIMEOUT at :2167 is 10 seconds, REQUEST_TIMEOUT at :2127 is 60 seconds.\",\"containers_settings.rs:155-176 constructs the request at :165 and runs it in spawn_forever at :166-167. mounted is checked only after sending.await, so closing Settings does not release the ticket. This separates request lifetime from save ordering.\",\"farhelm-helm/src/hosts.rs:1470-1500 awaits connection withdrawal and provider.destroy. environment/podman.rs:1294-1335 reaches remove_container:400-414, including inspect, remote rm --force and absence verification; COMMAND at :25 is 30 seconds. The endpoint performs remote work rather than returning an admission receipt.\",\"git diff from that revision through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db for api/environments.rs was empty. This is a conditional slow-cleanup source route, not an observed outage. Other clients, already-dispatched requests, terminal/event sockets and page JavaScript HTTP are outside its scope.\"] Current coverage/results: {\"specifications\":\"Searched both specifications for container leftovers and save ordering. SPEC_impl.md:327-341 explicitly excludes host mutations from tickets and names bypasses; SPEC.md:4888-4890 promises retryable leftover cleanup, not global client blockage.\",\"TODO_Planned\":\"Empty at TODO.md:23-25. The broader near-term infallible-GUI-transport proposal is neither Planned nor an exact remedy for wrongly classifying a remote mutation as a save.\",\"plans_queue\":\"Searched save ticket/order, leftover delete and host mutation terms; no unlanded plan removes this cause. Podman and nonblocking-session-action plans concern broader landed work.\",\"BUGS\":\"Read BUGS.md; its provisioning transfer-helper hang is unrelated and does not cover blocking the GUI funnel behind a container delete.\",\"queue\":\"INDEX.md searched and read; no exact alias. orphan-cleanup-promises-unheld-provisioning-lock concerns server ownership-lock documentation, not this client-side barrier.\",\"active_triage\":\"Searched TRIAGE_OUTCOMES.md for container, save ordering, tickets and remote host mutation; no exact decision.\",\"filter\":\"No full match: remote slowness need not be a rare fault, and the consequence includes unrelated host/session interaction degradation in the initiating client.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Unrelated host/session requests stall or time out while container cleanup runs, even after Settings closes. No established security or user-work-loss route.\"; \"No missing source premise for the conditional barrier. Cleanup latency and frequency have not been measured.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-019",
+          "key": "g032/l3",
+          "latest_line": 11,
+          "recommendation": "retain-verified",
+          "bucket": "high",
+          "underlying_key": "container-leftover-delete-registers-global-configuration-save",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Source establishes a remote cleanup operation holding the initiating client's configuration-save barrier, delaying unrelated reads and actions until cleanup answers or its client deadline expires. This is broader than a harmless diagnostic delay and contradicts the explicit host-mutation exclusion.",
+          "checks": [
+            "At 350a4b33b6d4476f4a78e43cea124bc2b828f462, api/environments.rs:80-91 selects whole-host or orphan DELETE then calls send_save. api.rs:2259-2267 registers CONFIGURATION_SAVES synchronously and holds its ticket through the response future.",
+            "At that revision, api.rs:2488-2507 captures preceding tickets and awaits them before HTTP dispatch; api/save_order.rs:47-65,69-82 releases readers only on ticket drop, and :89-108 charges that wait to their deadline with the configuration-save timeout diagnostic. fetch_hosts at api.rs:4603-4605 is a concrete unrelated consumer. READ_TIMEOUT at :2167 is 10 seconds, REQUEST_TIMEOUT at :2127 is 60 seconds.",
+            "containers_settings.rs:155-176 constructs the request at :165 and runs it in spawn_forever at :166-167. mounted is checked only after sending.await, so closing Settings does not release the ticket. This separates request lifetime from save ordering.",
+            "farhelm-helm/src/hosts.rs:1470-1500 awaits connection withdrawal and provider.destroy. environment/podman.rs:1294-1335 reaches remove_container:400-414, including inspect, remote rm --force and absence verification; COMMAND at :25 is 30 seconds. The endpoint performs remote work rather than returning an admission receipt.",
+            "git diff from that revision through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db for api/environments.rs was empty. This is a conditional slow-cleanup source route, not an observed outage. Other clients, already-dispatched requests, terminal/event sockets and page JavaScript HTTP are outside its scope."
+          ],
+          "coverage_checked": {
+            "specifications": "Searched both specifications for container leftovers and save ordering. SPEC_impl.md:327-341 explicitly excludes host mutations from tickets and names bypasses; SPEC.md:4888-4890 promises retryable leftover cleanup, not global client blockage.",
+            "TODO_Planned": "Empty at TODO.md:23-25. The broader near-term infallible-GUI-transport proposal is neither Planned nor an exact remedy for wrongly classifying a remote mutation as a save.",
+            "plans_queue": "Searched save ticket/order, leftover delete and host mutation terms; no unlanded plan removes this cause. Podman and nonblocking-session-action plans concern broader landed work.",
+            "BUGS": "Read BUGS.md; its provisioning transfer-helper hang is unrelated and does not cover blocking the GUI funnel behind a container delete.",
+            "queue": "INDEX.md searched and read; no exact alias. orphan-cleanup-promises-unheld-provisioning-lock concerns server ownership-lock documentation, not this client-side barrier.",
+            "active_triage": "Searched TRIAGE_OUTCOMES.md for container, save ordering, tickets and remote host mutation; no exact decision.",
+            "filter": "No full match: remote slowness need not be a rare fault, and the consequence includes unrelated host/session interaction degradation in the initiating client."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": "No missing source premise for the conditional barrier. Cleanup latency and frequency have not been measured.",
+          "original_stronger_consequence": "Unrelated host/session requests stall or time out while container cleanup runs, even after Settings closes. No established security or user-work-loss route.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Record high for material same-client interaction degradation. Retain the limited scope and eventual ticket release; use ordinary send while keeping the existing owned future."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Source-confirmed by an existing parent decision; not runtime reproduced",
+        "deduplication_key": "container-leftover-delete-registers-global-configuration-save",
+        "destination": "trailing-container-leftover-delete-registers-global-configuration-save.md"
+      }
+    },
+    {
+      "key": "g032/c4",
+      "owner": "g032",
+      "id": "c4",
+      "domain": "gui-shell-integration",
+      "purpose": "gui-shell-integration: crates/farhelm-ui/src/lib.rs, crates/farhelm-ui/src/desktop.rs, crates/farhelm-ui/src/api.rs, crates/farhelm-ui/src/api/environments.rs, crates/farhelm-ui/src/icons.rs, crates/farhelm-ui/src/ops.rs, crates/farhelm-ui/src/status.rs, crates/farhelm-ui/src/app_bar.rs, crates/farhelm-ui/src/desktop/appearance_smoke.rs, crates/farhelm-ui/src/keyboard_shortcuts.rs, crates/farhelm-ui/src/list.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c4",
+            "state": "open",
+            "summary": "Removing the restart listing floor preserves the remaining status contract",
+            "location": "crates/farhelm-ui/src/ops.rs:166",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: considered whether deleting ReadGate::latest_started lets an old session-list reply retire a successful Restart too early and leave the session unavailable. Details: ops.rs removes the generation accessor alongside removal of terminal-kind outcomes; list.rs no longer exports RestartOutcome. The replacement session_ops.rs:44–104 stores only restart_succeeded and read_confirms_run accepts stale or non-Interrupted rows. Its surrounding contract explains that the retained success now stands in only for Interrupted status, not a terminal-kind mismatch. A pre-Restart listing for an interrupted session still says Interrupted, so does not retire it; for a non-Interrupted old status there is no card suppression to preserve. This follows the terminal-kind removal rather than leaving the previous consumer without its fence. Suggested bucket: high if the stated unavailable-session consequence were established. Could-be-highest: no, this considered route affects presentation/availability rather than processes or persistent work. Confidence: confirmed source-based non-report decision. proposed_drop: source refutation by the narrower replacement predicate and purpose in session_ops.rs:44–104, rather than specification acceptance of harmful behavior. possible_cover: none. No runtime execution or reproduction performed."
+          }
+        },
+        {
+          "line": 10,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "c4",
+            "state": "open",
+            "summary": "Rechecking missed stale-list retirement route against supplied duplicate evidence",
+            "location": "crates/farhelm-ui/src/ops.rs:166",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: the earlier blanket refutation missed that stale=true alone can retire Restart success, even for Interrupted, before the mounted view consumes it. Original consequence preserved: temporarily wrong interrupted recovery surface and unavailable terminal until fresh detail, not process or work loss. The caller supplied g037/f3 latest line 10 and g038/l1 latest line 11; both source-check the old stale listing -> pending release -> shared success retirement -> deferred observer route. g036/l1 latest line 7 distinguishes a newer eligible listing route already possible with the old floor. Those exact records have now been read. My earlier narrow observation applies only to a nonstale Interrupted listing; it does not refute stale Interrupted. Suggested bucket: other per the supplied narrowed consequence; could-be-highest: no established security/loss-of-work route. Confidence: lead pending direct recheck of retirement, mounted current and surface predicates; source evidence supplied by caller, not observed execution. proposed_drop: false while reconciling. possible_cover: supplied g037/f3 and g038/l1 for the stale pre-Restart route; g036/l1 for the separate eligible-listing route. Next: direct source checks at f560058d, then close under c4 as finding/duplicate or a precisely scoped candidate. No new discovery is being performed."
+          }
+        },
+        {
+          "line": 12,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "c4",
+            "state": "open",
+            "summary": "A stale pre-Restart listing can retire success before terminal admission",
+            "location": "crates/farhelm-ui/src/ops.rs:169",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: after a successful Restart of an interrupted session, an old sidebar response can leave the open view on its interrupted card without a terminal until a live detail read completes. Synthesis verdict: duplicate of caller-supplied g037/f3 latest line 10 and g038/l1 latest line 11; revise my earlier candidate rather than retain its blanket refutation. Original consequence preserved and bounded: temporary wrong recovery surface/blocked terminal access; no permanent failure or destructive consequence established. Direct rechecks: session_ops.rs:79–80 accepts stale=true regardless of Interrupted; :91–107 allows retirement once pending is empty, and :215–225 clears restart_succeeded. list/view.rs:3416–3419 publishes successful completion, requests a refresh and releases the pending row operation without a listing fence. Its request_listing at :2473–2474 goes through reader::request_read, whose :644–660 single-flight path can leave the earlier read in progress. commit_listing at :1945–1953 applies normal ReadGate admission then :1985 retires success. ops.rs:182–187 rejects only generations older than the last applied result, not ones older than Restart. aggregate.rs:547 captures host state before awaited cached_slice at :578; row_of at :357 derives stale from that snapshot, so a captured outage response may arrive after reconnection and successful Restart. A mounted SessionView retains independent current (:605); selection following updates title and requests detail (:1243–1262), not its status. If retirement happens before the deferred observer at :549–564, restart_revision still increments mount_generation, but erased success cannot set relaunched=true. terminal_absence (:3701–3707) then remains Interrupted for the old mounted nonstale current, keep_terminal_surface (:3714–3722) is false, and terminal_specs (:1709–1710) emits an empty set. A generation increment alone is not a terminal. Connected detail normally heals this; this finding does not claim that fresh connected detail serves cached Interrupted, nor that the numerical completion revision is lost. Supplied records independently source-check pinned Dioxus 0.7.10 task-before-effect scheduling; my direct checks confirm there is no source ordering/fence in these caller paths that requires observation or fresh detail before retirement. This is a conditional source interleaving, never observed execution. Contract: SPEC_impl.md GUI: Dioxus :1134–1140 requires Restart completion reattachment and observation by a mounted view. Narrow surviving part of my old refutation: a NONSTALE Interrupted row fails read_confirms_run and cannot by itself retire this success. That fact does not apply to stale=true. Cross-batch boundary: g036/l1 latest line 7 at b3d6b3eff6b7508e0b1fb6ec5b5cde31d27ebabe uses a NEWER eligible listing above the old restart_listing_floor and can lose the then-existing terminal-kind override too. Restoring the floor addresses the pre-completion stale-evidence trigger here but not that eligible-listing/deferred-observer route; do not collapse their fixes solely because both can show the interrupted card. Suggested bucket: other, matching the established temporary surface consequence. Could-be-highest: no established security or work-loss route. Confidence: likely, with the precise timing premise that stale pre-Restart sidebar evidence is admitted after pending clears and before the mounted observer or live detail supplies the new run. proposed_drop: false for the defect; parent should mark this record duplicate of g037/f3/g038/l1. possible_cover: those caller-supplied records only, plus related but distinct g036/l1 as above; no queue coverage search. No unresolved source premise for the conditional mechanism, incidence unmeasured. No tests, builds or reproductions run. Lead revision c4 is closed to this finding."
+          }
+        }
+      ],
+      "latest": {
+        "line": 12,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "c4",
+          "state": "open",
+          "summary": "A stale pre-Restart listing can retire success before terminal admission",
+          "location": "crates/farhelm-ui/src/ops.rs:169",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: after a successful Restart of an interrupted session, an old sidebar response can leave the open view on its interrupted card without a terminal until a live detail read completes. Synthesis verdict: duplicate of caller-supplied g037/f3 latest line 10 and g038/l1 latest line 11; revise my earlier candidate rather than retain its blanket refutation. Original consequence preserved and bounded: temporary wrong recovery surface/blocked terminal access; no permanent failure or destructive consequence established. Direct rechecks: session_ops.rs:79–80 accepts stale=true regardless of Interrupted; :91–107 allows retirement once pending is empty, and :215–225 clears restart_succeeded. list/view.rs:3416–3419 publishes successful completion, requests a refresh and releases the pending row operation without a listing fence. Its request_listing at :2473–2474 goes through reader::request_read, whose :644–660 single-flight path can leave the earlier read in progress. commit_listing at :1945–1953 applies normal ReadGate admission then :1985 retires success. ops.rs:182–187 rejects only generations older than the last applied result, not ones older than Restart. aggregate.rs:547 captures host state before awaited cached_slice at :578; row_of at :357 derives stale from that snapshot, so a captured outage response may arrive after reconnection and successful Restart. A mounted SessionView retains independent current (:605); selection following updates title and requests detail (:1243–1262), not its status. If retirement happens before the deferred observer at :549–564, restart_revision still increments mount_generation, but erased success cannot set relaunched=true. terminal_absence (:3701–3707) then remains Interrupted for the old mounted nonstale current, keep_terminal_surface (:3714–3722) is false, and terminal_specs (:1709–1710) emits an empty set. A generation increment alone is not a terminal. Connected detail normally heals this; this finding does not claim that fresh connected detail serves cached Interrupted, nor that the numerical completion revision is lost. Supplied records independently source-check pinned Dioxus 0.7.10 task-before-effect scheduling; my direct checks confirm there is no source ordering/fence in these caller paths that requires observation or fresh detail before retirement. This is a conditional source interleaving, never observed execution. Contract: SPEC_impl.md GUI: Dioxus :1134–1140 requires Restart completion reattachment and observation by a mounted view. Narrow surviving part of my old refutation: a NONSTALE Interrupted row fails read_confirms_run and cannot by itself retire this success. That fact does not apply to stale=true. Cross-batch boundary: g036/l1 latest line 7 at b3d6b3eff6b7508e0b1fb6ec5b5cde31d27ebabe uses a NEWER eligible listing above the old restart_listing_floor and can lose the then-existing terminal-kind override too. Restoring the floor addresses the pre-completion stale-evidence trigger here but not that eligible-listing/deferred-observer route; do not collapse their fixes solely because both can show the interrupted card. Suggested bucket: other, matching the established temporary surface consequence. Could-be-highest: no established security or work-loss route. Confidence: likely, with the precise timing premise that stale pre-Restart sidebar evidence is admitted after pending clears and before the mounted observer or live detail supplies the new run. proposed_drop: false for the defect; parent should mark this record duplicate of g037/f3/g038/l1. possible_cover: those caller-supplied records only, plus related but distinct g036/l1 as above; no queue coverage search. No unresolved source premise for the conditional mechanism, incidence unmeasured. No tests, builds or reproductions run. Lead revision c4 is closed to this finding."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g032/findings.jsonl",
+        "id": "c4",
+        "line": 12,
+        "disposition": "rejected",
+        "group": "restart-success-retired-by-precompletion-stale-listing",
+        "reason": "Parent explicitly accepted named filtered proposal from claims-019 after inspecting it. The revised conditional mechanism is supported; the original blanket refutation was wrong for stale Interrupted rows. The surviving consequence is a temporary interrupted card and absent terminal until fresh detail, within the rare self-correcting display filter. Cross-batch duplicate claims are reported in the history but were not independently compared here. Proposed filter only for the bounded temporary presentation consequence. If another batch establishes a lasting or destructive consequence, this basis no longer covers it. Reconcile the underlying key with the supplied cross-batch owners without merging the separate eligible-listing route. Checked source/results: [\"At f560058da19e02716e6f943883a9508b447aff4e, session_ops.rs:79-80 accepts session.stale regardless of Interrupted; :91-107 allows retirement once pending clears; :215-225 clears restart_succeeded.\",\"At that revision list/view.rs:3416-3419 publishes Restart completion, requests refresh and releases pending. commit_listing:1945-1953 applies normal admission then :1985 retires success. ops.rs:182-187 checks last-applied generation, with no Restart-completion floor. aggregate.rs:547 captures host snapshots before awaited cached_slice at :578.\",\"session_view.rs:549-564 increments mount generation but sets relaunched only while restart_succeeded remains true. terminal_absence:3701-3707 and keep_terminal_surface:3714-3722 can therefore keep the prior mounted nonstale Interrupted view on its card. The conditional ordering is before its completion observer or a live detail read; no runtime schedule was observed.\",\"The history's earlier nonstale-Interrupted argument remains valid only for that narrower input. A stale Interrupted row bypasses it. No permanent failure, lost Resume offer, process termination or user-work loss was established.\"] Current coverage/results: {\"specifications\":\"Searched both specifications for Restart completion, reattachment and listings; SPEC_impl.md:1134-1140 requires mounted completion observation and reattachment, rather than accepting premature retirement.\",\"TODO_Planned\":\"Empty at TODO.md:23-25.\",\"plans_queue\":\"Read session-action-leftovers.md's goal, criteria, decisions and proposals: its listing-retirement work is landed (plans/REPORTS.md:24). It does not supply unlanded repair coverage. Its accepted second-reboot residual differs from this stale pre-completion reply.\",\"BUGS\":\"Read BUGS.md; no matching item.\",\"queue\":\"Read review_feedback_queue/retained-restart-hides-reboot-card.md in full. It concerns retaining optimism through a second reboot without any eligible observation, the opposite retirement direction; not an exact alias or extension. No other matching INDEX entry.\",\"active_triage\":\"Searched TRIAGE_OUTCOMES.md for Restart outcomes, stale listings and retirement; no exact decision.\",\"filter\":\"FILTER.md:25-43, Rare, self-correcting glitches and imprecise diagnostics: narrow asynchronous ordering; whole established consequence is briefly wrong recovery presentation healed by the next fresh detail. None of that filter's exclusions is established.\"} Exact cited cover: [\"FILTER.md, Rare, self-correcting glitches and imprecise diagnostics: 'a display that is briefly wrong and corrects itself on the next refresh, retry or reconnect, or when the user leaves the view'\"] Original stronger consequence and missing premise remain preserved: \"Initially suspected high impact: an old listing could retire successful Restart too early and leave the session unavailable. The latest record bounds this to temporary blocked terminal access until fresh detail; no process or work-loss consequence was claimed.\"; \"Incidence and exact task/effect ordering were not observed. The supplied histories name g037/f3 and g038/l1 as aliases, but those records are outside this batch and were not opened. g036/l1 is explicitly a distinct newer-eligible-listing route.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g032/c4",
+        "line": 12,
+        "disposition": "rejected",
+        "group": "restart-success-retired-by-precompletion-stale-listing",
+        "bucket": "other",
+        "recording": "filtered",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named filtered proposal from claims-019 after inspecting it. The revised conditional mechanism is supported; the original blanket refutation was wrong for stale Interrupted rows. The surviving consequence is a temporary interrupted card and absent terminal until fresh detail, within the rare self-correcting display filter. Cross-batch duplicate claims are reported in the history but were not independently compared here. Proposed filter only for the bounded temporary presentation consequence. If another batch establishes a lasting or destructive consequence, this basis no longer covers it. Reconcile the underlying key with the supplied cross-batch owners without merging the separate eligible-listing route. Checked source/results: [\"At f560058da19e02716e6f943883a9508b447aff4e, session_ops.rs:79-80 accepts session.stale regardless of Interrupted; :91-107 allows retirement once pending clears; :215-225 clears restart_succeeded.\",\"At that revision list/view.rs:3416-3419 publishes Restart completion, requests refresh and releases pending. commit_listing:1945-1953 applies normal admission then :1985 retires success. ops.rs:182-187 checks last-applied generation, with no Restart-completion floor. aggregate.rs:547 captures host snapshots before awaited cached_slice at :578.\",\"session_view.rs:549-564 increments mount generation but sets relaunched only while restart_succeeded remains true. terminal_absence:3701-3707 and keep_terminal_surface:3714-3722 can therefore keep the prior mounted nonstale Interrupted view on its card. The conditional ordering is before its completion observer or a live detail read; no runtime schedule was observed.\",\"The history's earlier nonstale-Interrupted argument remains valid only for that narrower input. A stale Interrupted row bypasses it. No permanent failure, lost Resume offer, process termination or user-work loss was established.\"] Current coverage/results: {\"specifications\":\"Searched both specifications for Restart completion, reattachment and listings; SPEC_impl.md:1134-1140 requires mounted completion observation and reattachment, rather than accepting premature retirement.\",\"TODO_Planned\":\"Empty at TODO.md:23-25.\",\"plans_queue\":\"Read session-action-leftovers.md's goal, criteria, decisions and proposals: its listing-retirement work is landed (plans/REPORTS.md:24). It does not supply unlanded repair coverage. Its accepted second-reboot residual differs from this stale pre-completion reply.\",\"BUGS\":\"Read BUGS.md; no matching item.\",\"queue\":\"Read review_feedback_queue/retained-restart-hides-reboot-card.md in full. It concerns retaining optimism through a second reboot without any eligible observation, the opposite retirement direction; not an exact alias or extension. No other matching INDEX entry.\",\"active_triage\":\"Searched TRIAGE_OUTCOMES.md for Restart outcomes, stale listings and retirement; no exact decision.\",\"filter\":\"FILTER.md:25-43, Rare, self-correcting glitches and imprecise diagnostics: narrow asynchronous ordering; whole established consequence is briefly wrong recovery presentation healed by the next fresh detail. None of that filter's exclusions is established.\"} Exact cited cover: [\"FILTER.md, Rare, self-correcting glitches and imprecise diagnostics: 'a display that is briefly wrong and corrects itself on the next refresh, retry or reconnect, or when the user leaves the view'\"] Original stronger consequence and missing premise remain preserved: \"Initially suspected high impact: an old listing could retire successful Restart too early and leave the session unavailable. The latest record bounds this to temporary blocked terminal access until fresh detail; no process or work-loss consequence was claimed.\"; \"Incidence and exact task/effect ordering were not observed. The supplied histories name g037/f3 and g038/l1 as aliases, but those records are outside this batch and were not opened. g036/l1 is explicitly a distinct newer-eligible-listing route.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-019",
+          "key": "g032/c4",
+          "latest_line": 12,
+          "recommendation": "filtered",
+          "bucket": "other",
+          "underlying_key": "restart-success-retired-by-precompletion-stale-listing",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The revised conditional mechanism is supported; the original blanket refutation was wrong for stale Interrupted rows. The surviving consequence is a temporary interrupted card and absent terminal until fresh detail, within the rare self-correcting display filter. Cross-batch duplicate claims are reported in the history but were not independently compared here.",
+          "checks": [
+            "At f560058da19e02716e6f943883a9508b447aff4e, session_ops.rs:79-80 accepts session.stale regardless of Interrupted; :91-107 allows retirement once pending clears; :215-225 clears restart_succeeded.",
+            "At that revision list/view.rs:3416-3419 publishes Restart completion, requests refresh and releases pending. commit_listing:1945-1953 applies normal admission then :1985 retires success. ops.rs:182-187 checks last-applied generation, with no Restart-completion floor. aggregate.rs:547 captures host snapshots before awaited cached_slice at :578.",
+            "session_view.rs:549-564 increments mount generation but sets relaunched only while restart_succeeded remains true. terminal_absence:3701-3707 and keep_terminal_surface:3714-3722 can therefore keep the prior mounted nonstale Interrupted view on its card. The conditional ordering is before its completion observer or a live detail read; no runtime schedule was observed.",
+            "The history's earlier nonstale-Interrupted argument remains valid only for that narrower input. A stale Interrupted row bypasses it. No permanent failure, lost Resume offer, process termination or user-work loss was established."
+          ],
+          "coverage_checked": {
+            "specifications": "Searched both specifications for Restart completion, reattachment and listings; SPEC_impl.md:1134-1140 requires mounted completion observation and reattachment, rather than accepting premature retirement.",
+            "TODO_Planned": "Empty at TODO.md:23-25.",
+            "plans_queue": "Read session-action-leftovers.md's goal, criteria, decisions and proposals: its listing-retirement work is landed (plans/REPORTS.md:24). It does not supply unlanded repair coverage. Its accepted second-reboot residual differs from this stale pre-completion reply.",
+            "BUGS": "Read BUGS.md; no matching item.",
+            "queue": "Read review_feedback_queue/retained-restart-hides-reboot-card.md in full. It concerns retaining optimism through a second reboot without any eligible observation, the opposite retirement direction; not an exact alias or extension. No other matching INDEX entry.",
+            "active_triage": "Searched TRIAGE_OUTCOMES.md for Restart outcomes, stale listings and retirement; no exact decision.",
+            "filter": "FILTER.md:25-43, Rare, self-correcting glitches and imprecise diagnostics: narrow asynchronous ordering; whole established consequence is briefly wrong recovery presentation healed by the next fresh detail. None of that filter's exclusions is established."
+          },
+          "exact_cover_quotes": [
+            "FILTER.md, Rare, self-correcting glitches and imprecise diagnostics: 'a display that is briefly wrong and corrects itself on the next refresh, retry or reconnect, or when the user leaves the view'"
+          ],
+          "missing_premise": "Incidence and exact task/effect ordering were not observed. The supplied histories name g037/f3 and g038/l1 as aliases, but those records are outside this batch and were not opened. g036/l1 is explicitly a distinct newer-eligible-listing route.",
+          "original_stronger_consequence": "Initially suspected high impact: an old listing could retire successful Restart too early and leave the session unavailable. The latest record bounds this to temporary blocked terminal access until fresh detail; no process or work-loss consequence was claimed.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Proposed filter only for the bounded temporary presentation consequence. If another batch establishes a lasting or destructive consequence, this basis no longer covers it. Reconcile the underlying key with the supplied cross-batch owners without merging the separate eligible-listing route."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "high",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "restart-success-retired-by-precompletion-stale-listing",
+        "destination": "trailing-restart-success-retired-by-precompletion-stale-listing.md"
+      }
+    },
+    {
+      "key": "g032/l5",
+      "owner": "g032",
+      "id": "l5",
+      "domain": "gui-shell-integration",
+      "purpose": "gui-shell-integration: crates/farhelm-ui/src/lib.rs, crates/farhelm-ui/src/desktop.rs, crates/farhelm-ui/src/api.rs, crates/farhelm-ui/src/api/environments.rs, crates/farhelm-ui/src/icons.rs, crates/farhelm-ui/src/ops.rs, crates/farhelm-ui/src/status.rs, crates/farhelm-ui/src/app_bar.rs, crates/farhelm-ui/src/desktop/appearance_smoke.rs, crates/farhelm-ui/src/keyboard_shortcuts.rs, crates/farhelm-ui/src/list.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l5",
+            "state": "open",
+            "summary": "Interrupted restart copy may overstate successful update cleanup",
+            "location": "crates/farhelm-ui/src/status.rs:634",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR: the new Restart consequence says an update left nothing to stop, while the old-terminal retirement contract allows failed cleanup to leave an agent running. Source basis: status.rs changes Interrupted to \"Interrupted by a host reboot or a Farhelm update — nothing left to stop; restart it:\". SPEC_impl.md Terminal substrate states failed termination still converts old sessions and accepts starting a second agent; it also leaves some process sweeps for Restart/Delete. Suggested bucket: pending source checks; could-be-highest: potentially, if this confirmation authorizes killing a surviving agent despite promising none remains. Confidence: unresolved lead. proposed_drop: false. possible_cover: none. Next checks: inspect Restart's cleanup for Interrupted rows and whether such rows actually render this consequence/ask confirmation at the recorded revision; determine any exact specification acceptance. No reproduction or runtime test performed."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l5",
+            "state": "open",
+            "summary": "Interrupted restart says nothing remains although retirement can leave survivors",
+            "location": "crates/farhelm-ui/src/status.rs:634",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR: after an update failed to end every old-terminal process, Restart can kill surviving work although its consequence text says there is nothing left to stop. Details: status.rs:633–635 expands Interrupted's wording to include a Farhelm update while retaining \"nothing left to stop\". session_view.rs:199–201 asks only for Running, but an already-open Restart prompt renders current shown.status at 2595, so a question can remain through an update's Interrupted report; its answer derives stop consent from restart_prompt_stops_agent, false for Interrupted (status.rs:651–652). core.rs:12980–13013 still reaps the prior run's scope and descendants when there is no live pane. The retirement contract explicitly permits surviving processes while committing Interrupted and leaves a timed-out sweep for Restart/Delete, so the consequence sentence overstates the evidence. Could-be-highest: yes, surviving agent/process work can be terminated beyond the sentence that says none exists. Suggested bucket: highest pending independent assessment of the specification acceptance; no execution evidence, source-supported route only. Confidence: confirmed source and contract mismatch in the copy, with an explicitly accepted lifecycle omission. proposed_drop: the authoritative specification intentionally accepts the remaining cleanup on Restart. Exact text, SPEC_impl.md, Terminal substrate: private tmux server (recorded revision, paragraph beginning \"Ending the old terminals\"): \"A sweep that runs out of time leaves the rest for the session's Restart or Delete: the conversion commits regardless.\" It also states: \"A failure anywhere is logged and never fatal (the maintainer chose to start anyway and treat old sessions as ended, accepting that a Restart could then start a second agent beside one still running)\". These accept surviving-work cleanup/uncertainty; parent must independently judge whether they also cover this newly broadened consequence wording. possible_cover: none. Caveats: ordinary Interrupted clicks bypass the question; the consequence text is shown only when a Running question was already open and later renders Interrupted. The update itself was already intended to terminate old terminals, so whether the survivor is work the subsequent click must separately authorize is a material disposition question. No reproductions or runtime tests run. Lead l5 is resolved; retain as proposed_drop for the required independent check, not as an uninvestigated suspicion."
+          }
+        },
+        {
+          "line": 13,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l5",
+            "state": "open",
+            "summary": "Interrupted restart promises nothing remains before reaping surviving work",
+            "location": "crates/farhelm-ui/src/status.rs:634",
+            "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR: a Restart question left open while an update retires old terminals can tell the user there is nothing left to stop, then kill processes that survived the update. Synthesis verdict: retain the misleading-confirmation finding; withdraw the earlier proposed_drop inference. Acceptance of imperfect startup cleanup does not accept a later destructive answer describing a smaller consequence than it performs. Original potentially highest consequence preserved: surviving user-owned process work can be terminated beyond this displayed confirmation. Suggested bucket: highest. Confidence: confirmed source/contract conditional route, incidence unmeasured and no execution performed. Rendered authority: only Running initially opens the header question (session_view.rs:199–200, :2255–2264), but the open ConfirmSlot remains until an answer/Cancel/Escape; current status is not its opening key. A later render takes its same token at :2043 and draws restart_consequence(&shown.status) at :2594–2595. Interrupted now says \"Interrupted by a host reboot or a Farhelm update — nothing left to stop; restart it:\" (status.rs:634–635). This render derives restart_prompt_stops=false via :650–651 and session_view.rs:2008. Its captured answer consumes the rendered token at :2612 and calls confirm_restart(false) at :2621. It therefore authorizes restarting under the explicit assertion of no remaining process teardown. The button's generic tooltip at :2600 still says stop the running agent; that conflicts with, rather than repairs, the consequence sentence designated as the confirmation's substantive warning. Ordinary Interrupted clicks bypass a question; this misleading-confirmation route specifically requires a Running question already open, then the update/reconnected detail renders Interrupted before the answer. Cancellation/navigation which removes that view ends this route; it is not assumed to survive unmount. Actual teardown: startup conversion treats live old-kind rows as TerminalEnded (core.rs:7097–7114) with no terminal. OldTerminals::sweep runs recorded per-agent scopes, warns on failure rather than refusing conversion (old_terminals.rs:283–318), and its one startup deadline can expire with processes remaining. Restart probes entry.terminal; None becomes no live pane (core.rs:12845–12889). Both consent checks call refuse_unconsented_stop with alive=false (:12906, :12957), and that helper refuses only when alive && !stop_if_running && Running (:3784–3797). It does not guard surviving scope work. The no-pane path still calls reap_process_tree on ScopeUnits::recorded(entry.scope.clone()), outstanding roots and SweepTarget::AgentOnly (:12985–13010) before the new launch. Thus a startup sweep that ran out of its shared budget can leave an old agent/descendant for the later ordinary Restart sweep to kill despite false stop consent. This is shipped cleanup selection, not an inference from a stale display alone or a hypothetical second click. Exact acceptance preserved for independent adjudication: SPEC_impl.md, Terminal substrate: private tmux server, :2994–2995 says \"A sweep that runs out of time leaves the rest for the session's Restart or Delete: the conversion commits regardless.\" At :2998–3000: \"A failure anywhere is logged and never fatal (the maintainer chose to start anyway and treat old sessions as ended, accepting that a Restart could then start a second agent beside one still running)\". Those statements expressly permit the leftover-work premise and later cleanup. They do not say a confirmation may claim there is nothing to stop while performing it. SPEC_impl.md GUI: Dioxus, Answers bind to what was drawn (:1071 onward) says a confirmed handler acts on what the answered render showed, and source comments at session_view.rs:2000–2008 and status.rs:641–649 likewise say the rendered prompt bounds stop consent. Suggested correction: describe retained process cleanup honestly for update-interrupted sessions (or conservatively for Interrupted generally), preserving the accepted retirement behavior. proposed_drop: false; the exact previous proposed_drop basis remains quoted above and was reconsidered rather than erased. possible_cover: none. Caveats: the update itself intended to end these old terminals; that explains why startup cleanup is allowed but supplies no explicit acceptance of misleading later confirmation text. The sweep touches prior agent work, not terminal tabs. No persistent-file deletion or unrelated-process selection is asserted. No tests, builds, runtime observation or reproduction performed. All readily checkable routing, confirmation, guard and sweep premises were checked; actual incidence remains unmeasured."
+          }
+        }
+      ],
+      "latest": {
+        "line": 13,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l5",
+          "state": "open",
+          "summary": "Interrupted restart promises nothing remains before reaping surviving work",
+          "location": "crates/farhelm-ui/src/status.rs:634",
+          "detail": "Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR: a Restart question left open while an update retires old terminals can tell the user there is nothing left to stop, then kill processes that survived the update. Synthesis verdict: retain the misleading-confirmation finding; withdraw the earlier proposed_drop inference. Acceptance of imperfect startup cleanup does not accept a later destructive answer describing a smaller consequence than it performs. Original potentially highest consequence preserved: surviving user-owned process work can be terminated beyond this displayed confirmation. Suggested bucket: highest. Confidence: confirmed source/contract conditional route, incidence unmeasured and no execution performed. Rendered authority: only Running initially opens the header question (session_view.rs:199–200, :2255–2264), but the open ConfirmSlot remains until an answer/Cancel/Escape; current status is not its opening key. A later render takes its same token at :2043 and draws restart_consequence(&shown.status) at :2594–2595. Interrupted now says \"Interrupted by a host reboot or a Farhelm update — nothing left to stop; restart it:\" (status.rs:634–635). This render derives restart_prompt_stops=false via :650–651 and session_view.rs:2008. Its captured answer consumes the rendered token at :2612 and calls confirm_restart(false) at :2621. It therefore authorizes restarting under the explicit assertion of no remaining process teardown. The button's generic tooltip at :2600 still says stop the running agent; that conflicts with, rather than repairs, the consequence sentence designated as the confirmation's substantive warning. Ordinary Interrupted clicks bypass a question; this misleading-confirmation route specifically requires a Running question already open, then the update/reconnected detail renders Interrupted before the answer. Cancellation/navigation which removes that view ends this route; it is not assumed to survive unmount. Actual teardown: startup conversion treats live old-kind rows as TerminalEnded (core.rs:7097–7114) with no terminal. OldTerminals::sweep runs recorded per-agent scopes, warns on failure rather than refusing conversion (old_terminals.rs:283–318), and its one startup deadline can expire with processes remaining. Restart probes entry.terminal; None becomes no live pane (core.rs:12845–12889). Both consent checks call refuse_unconsented_stop with alive=false (:12906, :12957), and that helper refuses only when alive && !stop_if_running && Running (:3784–3797). It does not guard surviving scope work. The no-pane path still calls reap_process_tree on ScopeUnits::recorded(entry.scope.clone()), outstanding roots and SweepTarget::AgentOnly (:12985–13010) before the new launch. Thus a startup sweep that ran out of its shared budget can leave an old agent/descendant for the later ordinary Restart sweep to kill despite false stop consent. This is shipped cleanup selection, not an inference from a stale display alone or a hypothetical second click. Exact acceptance preserved for independent adjudication: SPEC_impl.md, Terminal substrate: private tmux server, :2994–2995 says \"A sweep that runs out of time leaves the rest for the session's Restart or Delete: the conversion commits regardless.\" At :2998–3000: \"A failure anywhere is logged and never fatal (the maintainer chose to start anyway and treat old sessions as ended, accepting that a Restart could then start a second agent beside one still running)\". Those statements expressly permit the leftover-work premise and later cleanup. They do not say a confirmation may claim there is nothing to stop while performing it. SPEC_impl.md GUI: Dioxus, Answers bind to what was drawn (:1071 onward) says a confirmed handler acts on what the answered render showed, and source comments at session_view.rs:2000–2008 and status.rs:641–649 likewise say the rendered prompt bounds stop consent. Suggested correction: describe retained process cleanup honestly for update-interrupted sessions (or conservatively for Interrupted generally), preserving the accepted retirement behavior. proposed_drop: false; the exact previous proposed_drop basis remains quoted above and was reconsidered rather than erased. possible_cover: none. Caveats: the update itself intended to end these old terminals; that explains why startup cleanup is allowed but supplies no explicit acceptance of misleading later confirmation text. The sweep touches prior agent work, not terminal tabs. No persistent-file deletion or unrelated-process selection is asserted. No tests, builds, runtime observation or reproduction performed. All readily checkable routing, confirmation, guard and sweep premises were checked; actual incidence remains unmeasured."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g032/findings.jsonl",
+        "id": "l5",
+        "line": 13,
+        "disposition": "under-investigation",
+        "group": "g032-l5",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-019",
+          "key": "g032/l5",
+          "latest_line": 13,
+          "recommendation": "filtered",
+          "bucket": "highest",
+          "underlying_key": "update-interrupted-restart-confirmation-denies-survivor-cleanup",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Source supports the misleading-confirmation route and loss of surviving agent work. The specification's cleanup acceptance does not itself accept misleading later consent. A separate proposed omission basis is the exact older-release-plus-rare-condition filter, which expressly includes work loss in affected sessions. This requires the parent's independent drop check; no drop is authorized here.",
+          "checks": [
+            "At dbfc69751215dbf15e1d31d5bed73c3754c4ebc4, session_view.rs:199-200 opens a question only for Running; :2255-2264 stores a ConfirmSlot<()> opening. The retained question's render uses current shown.status at :2594-2595 and captured restart_prompt_stops at :2008/:2621.",
+            "status.rs:634-635 says a reboot or Farhelm update left 'nothing left to stop'; :641-651 documents rendered stop consent and returns false for Interrupted. session_view.rs:2612 consumes the drawn opening before sending that false consent. The generic stop-running-agent tooltip at :2600 conflicts with the consequence sentence rather than removing its false assertion.",
+            "At that revision old_terminals.rs:283-318 sweeps recorded old-agent scopes using Warn, and :350-357 times out without refusing conversion. core.rs:12906/:12957 guards only alive_pane; refuse_unconsented_stop:3784-3797 requires alive && Running. The no-pane Restart path at :12985-13010 reaps the recorded prior scope and agent-only descendants before relaunch, including survivors a timed-out startup sweep did not reach.",
+            "This needs an already-open Running question that stays mounted, an update of old-terminal state, incomplete startup cleanup, a later Interrupted render and its answer. Ordinary Interrupted clicks bypass the question; unmount/cancel ends this route. Only prior agent work is claimed, not tabs, unrelated processes or persistent-file deletion. No execution or incidence measurement."
+          ],
+          "coverage_checked": {
+            "specifications": "Searched both specifications for old terminal ending, Restart, survivors and confirmation. SPEC.md:2997-3010 and SPEC_impl.md:2781-2823 accept cleanup failure and later cleanup/duplicate agents; SPEC_impl.md:1069-1090 binds destructive answers to drawn consequences. Cleanup acceptance does not explicitly cover the false consequence sentence.",
+            "TODO_Planned": "Empty at TODO.md:23-25. Eventual removal of startup shutdown is outside Planned and has an undecided release boundary.",
+            "plans_queue": "tmux-end-old-terminals.md describes the accepted startup conversion but is landed per plans/REPORTS.md:29. No unlanded plan found that repairs the warning. Sandbox confirmation guards concern different frozen/suspended state.",
+            "BUGS": "Read BUGS.md; no matching accepted bug.",
+            "queue": "INDEX.md has no exact misleading update-interrupted Restart consequence item. Container tab-close copy and generic confirmation items have different scope.",
+            "active_triage": "Searched TRIAGE_OUTCOMES.md for old terminal cleanup, survivor Restart and consequence wording; no exact active decision.",
+            "filter": "FILTER.md:136-158, Upgrades from older releases combined with another rare condition: old tmux session/process state must survive into the upgrade, plus startup cleanup failure and the unusual retained-question sequence. The only established harm stays in those affected sessions. No broken installation/database or separate security/trust-boundary consequence is established."
+          },
+          "exact_cover_quotes": [
+            "FILTER.md, Upgrades from older releases combined with another rare condition: 'state an older release wrote, a session or agent that kept running through the upgrade' plus 'a narrow timing window, a crash or fault at a specific point, or an unusual sequence of user or agent actions'.",
+            "The same filter: 'Unlike the filters above, this one also covers losing user-owned work within the affected sessions, such as resuming the wrong conversation.'",
+            "SPEC_impl.md:2814-2816: 'A sweep that runs out of time leaves the rest for the session's Restart or Delete: the conversion commits regardless.' This accepts the survivor/cleanup premise, not the misleading confirmation."
+          ],
+          "missing_premise": "Actual incidence is unmeasured. Independent adjudication must confirm the upgrade filter's full boundary, including whether the deceptive consent has any distinct security/trust consequence beyond affected-session work loss.",
+          "original_stronger_consequence": "A retained Restart question can say nothing remains to stop, then terminate surviving user-owned agent/process work. The earlier proposed spec-acceptance drop was withdrawn at line 13; preserve that withdrawal. The full established consequence remains highest if retained.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Do not reinstate the withdrawn claim that imperfect cleanup acceptance authorizes misleading confirmation. Independently check the separate upgrade filter. If its security boundary is unclear, retain highest."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-019.json",
+          "key": "g032/l5",
+          "proposal": "claim-checks/claims-019/result.json",
+          "parent_proposal": "upgrade-plus-rare-filter-pending-security-boundary",
+          "final_independent_gate": "required-before-highest-filter-drop",
+          "reason": "Full019 confirms retained Running Restartquestion survivesoldterminalupdate/incompletecleanup then Interrupted consequence says nothinglefttostop while later Restart sweeps survivingprioragentwork. Generictooltipdoesnotrepairfalseconsent. ParentreadactualSPEColdcleanup passage and fullFILTER: imperfectcleanup/secondagent acceptance does NOTaccept misleadinglaterwarning; originalspecdropwithdrawalpreserved. Separatefilter mayfullymatcholderstate+failedcleanup+unusualretainedquestion/affectedagent-onlyworkloss; excludesunrelatedfiles/tabs,brokeninstall,DBcorruption,security/trustboundary. Freshchecker mustsettlewhetherdeceptiveconsent addsseparate trustboundary; ambiguityretains highest. Neverloweronrarityalone."
+        }
+      ],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "update-interrupted-restart-confirmation-denies-survivor-cleanup",
+        "destination": "trailing-update-interrupted-restart-confirmation-denies-survivor-cleanup.md"
+      }
+    },
+    {
+      "key": "g032/l6",
+      "owner": "g032",
+      "id": "l6",
+      "domain": "gui-shell-integration",
+      "purpose": "gui-shell-integration: crates/farhelm-ui/src/lib.rs, crates/farhelm-ui/src/desktop.rs, crates/farhelm-ui/src/api.rs, crates/farhelm-ui/src/api/environments.rs, crates/farhelm-ui/src/icons.rs, crates/farhelm-ui/src/ops.rs, crates/farhelm-ui/src/status.rs, crates/farhelm-ui/src/app_bar.rs, crates/farhelm-ui/src/desktop/appearance_smoke.rs, crates/farhelm-ui/src/keyboard_shortcuts.rs, crates/farhelm-ui/src/list.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 14,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l6",
+            "state": "open",
+            "summary": "Check whether the old GUI interlocks block the supplied JSON-input route",
+            "location": "crates/farhelm-ui/src/api.rs:2522",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e, specifically its parent UI left mounted across the update. TLDR: caller-supplied g196/l1 describes literal pasted JSON being reinterpreted as grid terminal input, including control bytes, on a fresh unknown-kind old-page xterm surface; this may run unintended commands and lose work. This is supplied cross-group synthesis, not a new independent discovery. Source basis from the exact discovery-neighbours record: missing terminal kind defaults None, old mount selects xterm, missing stream notice chooses raw bytes, whole paste becomes one binary message and the updated input decoder can accept a valid GridInput Text. Required assigned-group check: whether note_build/App skew handling, terminal capability, frozen or modal isolation actually prevents that old surface from mounting or sending input before any paste. Suggested bucket if route survives: highest/security or loss of work. Could-be-highest: yes, literal document content can become unintended program input. Confidence: unresolved lead; own App/API interlock source checks pending. proposed_drop: false; original potentially applicable acceptance retained from g196: SPEC_impl.md Grid streams says \"A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working\" and \"Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy\"; these do not by themselves establish acceptance of successful instruction reinterpretation. possible_cover: supplied g196/l1 latest line10 owns this underlying concern. No payload construction, runtime test or reproduction performed. Next checks: old App build-skew render/withdrawal and API response admission plus terminal sync/backendCapability/inputFrozen paths. All original consequence and acceptance questions remain explicit."
+          }
+        },
+        {
+          "line": 15,
+          "event": {
+            "version": 1,
+            "kind": "finding",
+            "id": "l6",
+            "state": "open",
+            "summary": "Old-page GUI interlocks do not block the supplied JSON paste reinterpretation",
+            "location": "crates/farhelm-ui/src/api.rs:2522",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e; old loaded UI examined at its parent. TLDR: an old browser page can remain interactive through the grid-only update, mount xterm for a missing terminal kind and send literal pasted JSON as raw bytes that the new supervisor can decode as an input instruction. Original potentially highest consequence preserved from supplied g196/l1: document string escapes may become actual Enter/control input outside paste wrapping, running unintended commands and losing user work. Synthesis result: duplicate/supporting interface record for g196/l1 latest supplied line10, not an independent discovery. Required App/API interlock checks were completed and do not refute the fresh unknown-kind interactive-surface premise. Source: old api.rs:2522 calls skew::note_build for its side effect but returns successful resp unchanged at :2549; only authentication refusals have their separate error branch. old skew.rs:30–35 explicitly excludes blocking/render refusal/automatic reload; BuildSkewNotice at :287–293 is an ordinary PeerLine, not a modal. old lib.rs:2042–2098 uses skew only to show that notice and prioritize it over TokenPrompt, then retains the PreferencesGate/authenticated tree; it does not inert or unmount SessionView. old session_view.rs:1867–1881 maps mismatch to unattended reconnect/heartbeat policy, not an input veto. terminal.js:1593–1595 returns manual-only for revoked capability; :1632–1638 cancels in-flight recovery attempts, not all live islands; :3284–3301 refuses unavailable or unattended mounts while explicit opening/reclaim remain allowed; :3414–3436 deliberately permits reclaim and :3460–3465 manual reconnect. No backendCapability/inputFrozen global check exists in these parent paths. Source-established current-host ordinary path: missing agent_terminal decodes None in old lib.rs:520–521; agent_spec_kind preserves it at session_view.rs:3839–3849 and :1809 puts it in the mount spec; terminal.js:4650–4665 builds xterm for non-host, including null. spec.unavailable comes from session.stale, and the terminal DOM's inert mark is only shown.stale (session_view.rs:3167,3231), not skew; modal isolation applies only when an actual modal is present. A connected ordinary host with no modal therefore satisfies these gates. old terminal.js:4628–4634 installs paste through term.paste; :2232–2235 sanitizes pasted text but has no skew check; :4158–4159 sends raw encoded text whenever the socket is OPEN. Missing stream notice settles bytes at :5887–5915, while the updated helm no longer emits that notice. g196 source-checks whole-message paste dispatch, fresh xterm unbracketed default, unchanged browser-message relay and the new GridInput Text decoding/encoding; this record adds the assigned App/API/global-admission checks, without constructing a payload or independently reproducing that lower-layer result. Suggested bucket: highest/security or loss of work if retained. Could-be-highest: yes. Confidence: likely conditional route, not runtime observed; premise is the old page opening/reclaiming a connected unknown-kind terminal and pasting a small valid Text-shaped JSON document while the old surface remains unbracketed. Ordinary keystrokes usually detach instead, and an xterm surface whose program enabled bracketed paste can prevent this particular route. Exact proposed_drop basis preserved for independent review: SPEC_impl.md Grid streams :3022–3027 says \"A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working\" and \"Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy\". The full paragraph expressly discusses misdrawing and malformed-input attachment failure, not successful instruction reinterpretation; no drop or lowering is accepted here. possible_cover: supplied g196/l1 owns the same underlying defect; parent should treat l6 as duplicate/interface support. No additional readily checkable App/API/isolation premise remains; incidence and clipboard payload occurrence are unmeasured. No runtime test, payload construction, reproduction or live-install action. Lead l6 is resolved to this retained supporting finding before beginning the separate new search."
+          }
+        }
+      ],
+      "latest": {
+        "line": 15,
+        "event": {
+          "version": 1,
+          "kind": "finding",
+          "id": "l6",
+          "state": "open",
+          "summary": "Old-page GUI interlocks do not block the supplied JSON paste reinterpretation",
+          "location": "crates/farhelm-ui/src/api.rs:2522",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e; old loaded UI examined at its parent. TLDR: an old browser page can remain interactive through the grid-only update, mount xterm for a missing terminal kind and send literal pasted JSON as raw bytes that the new supervisor can decode as an input instruction. Original potentially highest consequence preserved from supplied g196/l1: document string escapes may become actual Enter/control input outside paste wrapping, running unintended commands and losing user work. Synthesis result: duplicate/supporting interface record for g196/l1 latest supplied line10, not an independent discovery. Required App/API interlock checks were completed and do not refute the fresh unknown-kind interactive-surface premise. Source: old api.rs:2522 calls skew::note_build for its side effect but returns successful resp unchanged at :2549; only authentication refusals have their separate error branch. old skew.rs:30–35 explicitly excludes blocking/render refusal/automatic reload; BuildSkewNotice at :287–293 is an ordinary PeerLine, not a modal. old lib.rs:2042–2098 uses skew only to show that notice and prioritize it over TokenPrompt, then retains the PreferencesGate/authenticated tree; it does not inert or unmount SessionView. old session_view.rs:1867–1881 maps mismatch to unattended reconnect/heartbeat policy, not an input veto. terminal.js:1593–1595 returns manual-only for revoked capability; :1632–1638 cancels in-flight recovery attempts, not all live islands; :3284–3301 refuses unavailable or unattended mounts while explicit opening/reclaim remain allowed; :3414–3436 deliberately permits reclaim and :3460–3465 manual reconnect. No backendCapability/inputFrozen global check exists in these parent paths. Source-established current-host ordinary path: missing agent_terminal decodes None in old lib.rs:520–521; agent_spec_kind preserves it at session_view.rs:3839–3849 and :1809 puts it in the mount spec; terminal.js:4650–4665 builds xterm for non-host, including null. spec.unavailable comes from session.stale, and the terminal DOM's inert mark is only shown.stale (session_view.rs:3167,3231), not skew; modal isolation applies only when an actual modal is present. A connected ordinary host with no modal therefore satisfies these gates. old terminal.js:4628–4634 installs paste through term.paste; :2232–2235 sanitizes pasted text but has no skew check; :4158–4159 sends raw encoded text whenever the socket is OPEN. Missing stream notice settles bytes at :5887–5915, while the updated helm no longer emits that notice. g196 source-checks whole-message paste dispatch, fresh xterm unbracketed default, unchanged browser-message relay and the new GridInput Text decoding/encoding; this record adds the assigned App/API/global-admission checks, without constructing a payload or independently reproducing that lower-layer result. Suggested bucket: highest/security or loss of work if retained. Could-be-highest: yes. Confidence: likely conditional route, not runtime observed; premise is the old page opening/reclaiming a connected unknown-kind terminal and pasting a small valid Text-shaped JSON document while the old surface remains unbracketed. Ordinary keystrokes usually detach instead, and an xterm surface whose program enabled bracketed paste can prevent this particular route. Exact proposed_drop basis preserved for independent review: SPEC_impl.md Grid streams :3022–3027 says \"A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working\" and \"Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy\". The full paragraph expressly discusses misdrawing and malformed-input attachment failure, not successful instruction reinterpretation; no drop or lowering is accepted here. possible_cover: supplied g196/l1 owns the same underlying defect; parent should treat l6 as duplicate/interface support. No additional readily checkable App/API/isolation premise remains; incidence and clipboard payload occurrence are unmeasured. No runtime test, payload construction, reproduction or live-install action. Lead l6 is resolved to this retained supporting finding before beginning the separate new search."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g032/findings.jsonl",
+        "id": "l6",
+        "line": 15,
+        "disposition": "under-investigation",
+        "group": "g032-l6",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-019",
+          "key": "g032/l6",
+          "latest_line": 15,
+          "recommendation": "retain-unverified",
+          "bucket": "highest",
+          "underlying_key": "legacy-xterm-raw-paste-decoded-as-grid-input",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The assigned UI/API interlocks do not block the old-page premise. Retain the possible successful data-to-input reinterpretation and its work-loss/security consequence for reconciliation with its supplied owner g196/l1. This batch did not read that owner's record and therefore does not independently authorize cross-batch deduplication.",
+          "checks": [
+            "At f560058da19e02716e6f943883a9508b447aff4e parent, skew.rs:30-35 explicitly declines blocking, render refusal and automatic reload. BuildSkewNotice:287-293 is a PeerLine. lib.rs:2042-2098 keeps the authenticated PreferencesGate tree while showing skew; api.rs:2522 notes skew and :2549 still returns successful responses.",
+            "At that parent lib.rs:520-521 defaults missing agent_terminal to None; session_view.rs:3839-3849 preserves it in agent_spec_kind; terminal.js:4650-4665 builds xterm for unknown kind. terminal.js:5887-5915 treats a missing notice as bytes, and :4158-4159 sends text as raw encoded bytes on the open socket.",
+            "At f560058da19e02716e6f943883a9508b447aff4e, farhelm-proto/src/grid.rs:1650-1655 parses the whole frame as GridInput JSON and :1686-1693 bounds Text size rather than refusing control characters. farhelm-supervisor/src/grid_input.rs:175 encodes Text as data.as_bytes().to_vec(). This supports interpretation of valid Text-shaped raw content after JSON string decoding.",
+            "No payload was constructed or executed. The complete paste-dispatch and unbracketed-surface premises remain supplied from g196, not independently reproduced here. Ordinary keystrokes generally detach; bracketed paste can prevent the particular Text route."
+          ],
+          "coverage_checked": {
+            "specifications": "Searched both specifications for old pages, terminal kinds, raw bytes, paste and malformed input. SPEC_impl.md:2943-2955 expressly accepts old-page misdrawing and malformed-input attachment failure; it does not explicitly accept successful reinterpretation as instructions. SPEC_impl.md:1859-1865 distinguishes structured input from terminal bytes.",
+            "TODO_Planned": "Empty at TODO.md:23-25. The near-term infallible-GUI-transport proposal is not Planned or exact coverage of protocol interpretation.",
+            "plans_queue": "tmux-end-old-terminals.md's removal is landed per plans/REPORTS.md:29. No unlanded input-compatibility repair found. environment-agent-operations.md's unknown card-kind refusal addresses approval cards, not terminal paste frames.",
+            "BUGS": "Read BUGS.md; no matching acceptance.",
+            "queue": "INDEX.md has no exact raw-paste/GridInput confusion item. Other stale-page or terminal input concerns have different triggers and consequences.",
+            "active_triage": "Searched TRIAGE_OUTCOMES.md for old page, JSON paste, grid input and stream notice; no exact active decision.",
+            "filter": "The upgrade filter is possible only if this has no security/trust-boundary consequence. Successful reinterpretation of literal document escapes into terminal control instructions raises exactly that unresolved boundary; unclear matches do not justify omission. No filter applied."
+          },
+          "exact_cover_quotes": [
+            "Potential cover, not accepted: SPEC_impl.md:2950 says 'A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.'",
+            "The same paragraph specifies 'what is typed into it ends the attachment as malformed input' and concludes 'a reload is the whole remedy'; successful decoded instructions are not expressly named."
+          ],
+          "missing_premise": "Independently comparing the supplied g196/l1 record and completing its whole-message, unbracketed-paste chain is outside this batch's assigned interface check. Clipboard occurrence and runtime incidence are unmeasured.",
+          "original_stronger_consequence": "An old page's literal pasted JSON can become actual Enter/control input outside paste wrapping, execute unintended commands and lose user-owned work. Preserve both the security interpretation and all old-page/bracketed-paste caveats.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Retain highest while the successful-interpretation and upgrade-filter security boundary are reconciled. Do not treat reload-only compatibility wording as acceptance of every possible old-page consequence.",
+          "new_interface_evidence": "Direct source checks confirm the supplied owner's App/API premise: build skew is a notice, successful responses remain usable, missing kind mounts xterm, and raw Text-shaped input is structurally accepted and encoded as decoded bytes. Send this supporting interface evidence to g196 without commissioning new discovery."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-019.json",
+          "key": "g032/l6",
+          "proposal": "claim-checks/claims-019/result.json",
+          "parent_proposal": "retain-highest-pending-canonical196-reconciliation",
+          "final_independent_gate": "required-for-any-original-drop-or-lowering-not-for-retention",
+          "reason": "Full019 directlyconfirmsoldpage/App/APIpremises: skewnoticeleavesauthPreferencesGatetree, successfulresponsesremain, missingkindmountsxterm, rawwholeTextJSONparseanddecodedbytesallowed. Successfulinstructionreinterpretationdistinctfromexplicitlyacceptedmalformeddetach/misdrawing. Preservebracketedpastecaveat/unbracketedsurfacewholemessagechainfrom196, no payload/runtime/frequencyclaim. Alreadyretainedsame196rawJSONfamilyand017supportingfindingmustreconcilefullcanonicalbeforeexactalias; no broadreloadcoverorupgradefilterwhilepossibletrustboundaryunsettled. Sourceinterfacesalreadyreviewedsynthesizedearlier; compareactualhistoricaldeliverybeforereopeningagain."
+        }
+      ],
+      "collection": {
+        "retain": true,
+        "clearly_refuted_candidate": false,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "highest",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "legacy-xterm-raw-paste-decoded-as-grid-input",
+        "destination": "trailing-legacy-xterm-raw-paste-decoded-as-grid-input.md"
+      }
+    },
+    {
+      "key": "g032/c7",
+      "owner": "g032",
+      "id": "c7",
+      "domain": "gui-shell-integration",
+      "purpose": "gui-shell-integration: crates/farhelm-ui/src/lib.rs, crates/farhelm-ui/src/desktop.rs, crates/farhelm-ui/src/api.rs, crates/farhelm-ui/src/api/environments.rs, crates/farhelm-ui/src/icons.rs, crates/farhelm-ui/src/ops.rs, crates/farhelm-ui/src/status.rs, crates/farhelm-ui/src/app_bar.rs, crates/farhelm-ui/src/desktop/appearance_smoke.rs, crates/farhelm-ui/src/keyboard_shortcuts.rs, crates/farhelm-ui/src/list.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 16,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c7",
+            "state": "open",
+            "summary": "Removed terminal-kind smoke metadata does not leave an unverified stream oracle",
+            "location": "crates/farhelm-ui/src/desktop/appearance_smoke.rs:283",
+            "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: checked whether removing xtermMounted and evidence.terminalKind silently weakens the native appearance/input smoke or breaks an external evidence consumer. The changed smoke still requires the actual requested session's island.grid, an OPEN WebSocket and revealed replay (:283–292), pins the same grid/socket attachment (:293–296), and establishes actual input focus (:298–300) before input/measurement. These are active grid-substrate assertions rather than merely assuming the production replacement works. Removal of a historical xterm transient-insertion watcher has no remaining implementation alternative to distinguish after the same commit removes the xterm renderer/assets. A targeted pinned grep across scripts and desktop source found no remaining terminalKind/xtermMounted evidence consumer; the surviving record is terminalRoundtrip at :345. Suggested bucket if broken: other, maintainer test evidence. Could-be-highest: no security or user-work-loss route identified. Confidence: confirmed source-based non-report decision, not executed validation. proposed_drop: the considered test-oracle/consumer concern is refuted by the retained actual grid/socket/replay/focus assertions and absence of a remaining named consumer, not merely by production correctness. possible_cover: none. No tests, builds or reproductions run; no new defect established."
+          }
+        }
+      ],
+      "latest": {
+        "line": 16,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c7",
+          "state": "open",
+          "summary": "Removed terminal-kind smoke metadata does not leave an unverified stream oracle",
+          "location": "crates/farhelm-ui/src/desktop/appearance_smoke.rs:283",
+          "detail": "Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: checked whether removing xtermMounted and evidence.terminalKind silently weakens the native appearance/input smoke or breaks an external evidence consumer. The changed smoke still requires the actual requested session's island.grid, an OPEN WebSocket and revealed replay (:283–292), pins the same grid/socket attachment (:293–296), and establishes actual input focus (:298–300) before input/measurement. These are active grid-substrate assertions rather than merely assuming the production replacement works. Removal of a historical xterm transient-insertion watcher has no remaining implementation alternative to distinguish after the same commit removes the xterm renderer/assets. A targeted pinned grep across scripts and desktop source found no remaining terminalKind/xtermMounted evidence consumer; the surviving record is terminalRoundtrip at :345. Suggested bucket if broken: other, maintainer test evidence. Could-be-highest: no security or user-work-loss route identified. Confidence: confirmed source-based non-report decision, not executed validation. proposed_drop: the considered test-oracle/consumer concern is refuted by the retained actual grid/socket/replay/focus assertions and absence of a remaining named consumer, not merely by production correctness. possible_cover: none. No tests, builds or reproductions run; no new defect established."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g032/findings.jsonl",
+        "id": "c7",
+        "line": 16,
+        "disposition": "excluded",
+        "group": "removed-terminal-kind-smoke-evidence-consumer",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-019 after inspecting it. The considered test-oracle omission is refuted by active grid, socket, replay and focus assertions on the requested session, and no remaining named evidence consumer was found. This conclusion is about the smoke's source oracle, not an inference from production correctness. Refute the named missing-oracle/consumer hypothesis using retained assertions and the pinned consumer search. This does not certify physical native keyboard coverage. Checked source/results: [\"At f560058da19e02716e6f943883a9508b447aff4e, desktop/appearance_smoke.rs:283-292 requires the requested session's grid, OPEN WebSocket and replay reveal; :293-300 pins that exact attachment and establishes input focus.\",\"At :325-348 the smoke calls grid.paste, sends encoded grid text Enter, checks exact 512-line burst order and subsequent input, and records terminalRoundtrip. Removing historical xterm insertion/kind metadata does not remove these active substrate checks.\",\"Pinned git grep for terminalKind and xtermMounted across scripts and crates/farhelm-ui/src/desktop returned no matches. No tests or builds were run.\"] Current coverage/results: {\"specifications\":\"Searched both specifications for appearance smoke, terminal kind and grid input; current grid-only widget contract in SPEC_impl.md:1838-1865 does not require the removed metadata fields.\",\"TODO_Planned\":\"Empty at TODO.md:23-25.\",\"plans_queue\":\"tmux-drop-from-tooling.md:72-88 addresses stale terminal-kind tooling and conflicting appearance-smoke documentation; landed per plans/REPORTS.md:31. No unlanded exact evidence-consumer repair found or needed for the named hypothesis.\",\"BUGS\":\"Read BUGS.md; no matching maintainer-smoke issue.\",\"queue\":\"INDEX.md has other smoke-fixture concerns but no exact removed terminalKind/xtermMounted evidence consumer.\",\"active_triage\":\"Searched TRIAGE_OUTCOMES.md for appearance smoke and removed kind metadata; no exact decision.\",\"filter\":\"No filter needed; source refutation.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing xtermMounted and evidence.terminalKind might weaken the native smoke oracle or break an evidence consumer. Maintainer-test evidence only; no security or user-work-loss route identified.\"; null."
+      },
+      "accepted_parent_decision": {
+        "key": "g032/c7",
+        "line": 16,
+        "disposition": "excluded",
+        "group": "removed-terminal-kind-smoke-evidence-consumer",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-019 after inspecting it. The considered test-oracle omission is refuted by active grid, socket, replay and focus assertions on the requested session, and no remaining named evidence consumer was found. This conclusion is about the smoke's source oracle, not an inference from production correctness. Refute the named missing-oracle/consumer hypothesis using retained assertions and the pinned consumer search. This does not certify physical native keyboard coverage. Checked source/results: [\"At f560058da19e02716e6f943883a9508b447aff4e, desktop/appearance_smoke.rs:283-292 requires the requested session's grid, OPEN WebSocket and replay reveal; :293-300 pins that exact attachment and establishes input focus.\",\"At :325-348 the smoke calls grid.paste, sends encoded grid text Enter, checks exact 512-line burst order and subsequent input, and records terminalRoundtrip. Removing historical xterm insertion/kind metadata does not remove these active substrate checks.\",\"Pinned git grep for terminalKind and xtermMounted across scripts and crates/farhelm-ui/src/desktop returned no matches. No tests or builds were run.\"] Current coverage/results: {\"specifications\":\"Searched both specifications for appearance smoke, terminal kind and grid input; current grid-only widget contract in SPEC_impl.md:1838-1865 does not require the removed metadata fields.\",\"TODO_Planned\":\"Empty at TODO.md:23-25.\",\"plans_queue\":\"tmux-drop-from-tooling.md:72-88 addresses stale terminal-kind tooling and conflicting appearance-smoke documentation; landed per plans/REPORTS.md:31. No unlanded exact evidence-consumer repair found or needed for the named hypothesis.\",\"BUGS\":\"Read BUGS.md; no matching maintainer-smoke issue.\",\"queue\":\"INDEX.md has other smoke-fixture concerns but no exact removed terminalKind/xtermMounted evidence consumer.\",\"active_triage\":\"Searched TRIAGE_OUTCOMES.md for appearance smoke and removed kind metadata; no exact decision.\",\"filter\":\"No filter needed; source refutation.\"} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing xtermMounted and evidence.terminalKind might weaken the native smoke oracle or break an evidence consumer. Maintainer-test evidence only; no security or user-work-loss route identified.\"; null."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-019",
+          "key": "g032/c7",
+          "latest_line": 16,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "removed-terminal-kind-smoke-evidence-consumer",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The considered test-oracle omission is refuted by active grid, socket, replay and focus assertions on the requested session, and no remaining named evidence consumer was found. This conclusion is about the smoke's source oracle, not an inference from production correctness.",
+          "checks": [
+            "At f560058da19e02716e6f943883a9508b447aff4e, desktop/appearance_smoke.rs:283-292 requires the requested session's grid, OPEN WebSocket and replay reveal; :293-300 pins that exact attachment and establishes input focus.",
+            "At :325-348 the smoke calls grid.paste, sends encoded grid text Enter, checks exact 512-line burst order and subsequent input, and records terminalRoundtrip. Removing historical xterm insertion/kind metadata does not remove these active substrate checks.",
+            "Pinned git grep for terminalKind and xtermMounted across scripts and crates/farhelm-ui/src/desktop returned no matches. No tests or builds were run."
+          ],
+          "coverage_checked": {
+            "specifications": "Searched both specifications for appearance smoke, terminal kind and grid input; current grid-only widget contract in SPEC_impl.md:1838-1865 does not require the removed metadata fields.",
+            "TODO_Planned": "Empty at TODO.md:23-25.",
+            "plans_queue": "tmux-drop-from-tooling.md:72-88 addresses stale terminal-kind tooling and conflicting appearance-smoke documentation; landed per plans/REPORTS.md:31. No unlanded exact evidence-consumer repair found or needed for the named hypothesis.",
+            "BUGS": "Read BUGS.md; no matching maintainer-smoke issue.",
+            "queue": "INDEX.md has other smoke-fixture concerns but no exact removed terminalKind/xtermMounted evidence consumer.",
+            "active_triage": "Searched TRIAGE_OUTCOMES.md for appearance smoke and removed kind metadata; no exact decision.",
+            "filter": "No filter needed; source refutation."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Removing xtermMounted and evidence.terminalKind might weaken the native smoke oracle or break an evidence consumer. Maintainer-test evidence only; no security or user-work-loss route identified.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Refute the named missing-oracle/consumer hypothesis using retained assertions and the pinned consumer search. This does not certify physical native keyboard coverage."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "removed-terminal-kind-smoke-evidence-consumer",
+        "destination": null
+      }
+    },
+    {
+      "key": "g032/c8",
+      "owner": "g032",
+      "id": "c8",
+      "domain": "gui-shell-integration",
+      "purpose": "gui-shell-integration: crates/farhelm-ui/src/lib.rs, crates/farhelm-ui/src/desktop.rs, crates/farhelm-ui/src/api.rs, crates/farhelm-ui/src/api/environments.rs, crates/farhelm-ui/src/icons.rs, crates/farhelm-ui/src/ops.rs, crates/farhelm-ui/src/status.rs, crates/farhelm-ui/src/app_bar.rs, crates/farhelm-ui/src/desktop/appearance_smoke.rs, crates/farhelm-ui/src/keyboard_shortcuts.rs, crates/farhelm-ui/src/list.rs; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 17,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c8",
+            "state": "open",
+            "summary": "Environment history keeps a decodable diagnostic host after deletion",
+            "location": "crates/farhelm-ui/src/api.rs:135",
+            "detail": "Reviewed commit: 350a4b33b6d4476f4a78e43cea124bc2b828f462. TLDR: checked whether reusable environment history becomes unreadable after its original disposable host is deleted because the new UI DTO still requires host: HostId. Pinned store/environment_history.rs:107–144 reads origin_host_id as HostId and decode_entry at :152–169 always emits that integer together with target: Some(...), canonical_cwd: None, cwd: ~ and creation_seq; sessions.rs:4468–4473 serializes those entries directly. The history intentionally retains the diagnostic old id without requiring the deleted host to exist. The new UI target field is defaulted for older replies and matches that serialization. Its caller draft.rs:1994–2021 bypasses installation-bound ordinary-history admission for target-bearing entries and selects the captured environment target, rather than reusing that diagnostic host as launch authority. Therefore deletion does not create a null-host decode mismatch or silently retarget a fresh launch. Suggested bucket if established: high for broken recent setups, but none established. Could-be-highest: no established security or work-loss route; a wrong-host launch was considered but refuted by target-based admission. Confidence: confirmed source analysis. proposed_drop: source refutation above, not specification acceptance of harmful behavior. possible_cover: none. No tests, builds or reproductions run; no new defect established."
+          }
+        }
+      ],
+      "latest": {
+        "line": 17,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c8",
+          "state": "open",
+          "summary": "Environment history keeps a decodable diagnostic host after deletion",
+          "location": "crates/farhelm-ui/src/api.rs:135",
+          "detail": "Reviewed commit: 350a4b33b6d4476f4a78e43cea124bc2b828f462. TLDR: checked whether reusable environment history becomes unreadable after its original disposable host is deleted because the new UI DTO still requires host: HostId. Pinned store/environment_history.rs:107–144 reads origin_host_id as HostId and decode_entry at :152–169 always emits that integer together with target: Some(...), canonical_cwd: None, cwd: ~ and creation_seq; sessions.rs:4468–4473 serializes those entries directly. The history intentionally retains the diagnostic old id without requiring the deleted host to exist. The new UI target field is defaulted for older replies and matches that serialization. Its caller draft.rs:1994–2021 bypasses installation-bound ordinary-history admission for target-bearing entries and selects the captured environment target, rather than reusing that diagnostic host as launch authority. Therefore deletion does not create a null-host decode mismatch or silently retarget a fresh launch. Suggested bucket if established: high for broken recent setups, but none established. Could-be-highest: no established security or work-loss route; a wrong-host launch was considered but refuted by target-based admission. Confidence: confirmed source analysis. proposed_drop: source refutation above, not specification acceptance of harmful behavior. possible_cover: none. No tests, builds or reproductions run; no new defect established."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g032/findings.jsonl",
+        "id": "c8",
+        "line": 17,
+        "disposition": "under-investigation",
+        "group": "g032-c8",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-019",
+          "key": "g032/c8",
+          "latest_line": 17,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "environment-history-deleted-origin-host-decode-authority",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Deleting the original disposable host does not turn its diagnostic history id into null, and the reusable target, rather than that origin id, supplies new-launch authority. The claimed decode/retargeting route is source-refuted.",
+          "checks": [
+            "At 350a4b33b6d4476f4a78e43cea124bc2b828f462, farhelm-helm/src/store/environment_history.rs:107-144 reads origin_host_id as HostId without a host-row join. decode_entry:152-169 emits that integer and target: Some(...), canonical_cwd: None, cwd '~' and creation sequence.",
+            "At that revision list/create_form/draft.rs:1994-2009 bypasses ordinary-host admission for target-bearing entries and :2015-2021 promotes environment history then selects entry.target. The old host id is not reused as the ordinary destination authority.",
+            "Current SPEC.md:4873-4876 says recent setups survive environment deletion and create fresh environments; SPEC_impl.md:6014-6023 separates recipe/place intent from installed-host identity. Source supports that contract. No runtime validation performed."
+          ],
+          "coverage_checked": {
+            "specifications": "Searched both specifications for reusable environment history, diagnostic host and recent setups after Delete; governing sections read at SPEC.md:4873-4876 and SPEC_impl.md:6014-6023. They require reuse, not acceptance of failed decode or silent retargeting.",
+            "TODO_Planned": "Empty at TODO.md:23-25. Near-term sandbox conveniences reflect older feature scope, not exact current decode failure coverage.",
+            "plans_queue": "Podman reusable history work is landed per plans/REPORTS.md:21; no unlanded repair matching the suspected missing-host decode route found.",
+            "BUGS": "Read BUGS.md; no matching history failure.",
+            "queue": "INDEX.md history identity/provenance items concern ordinary-host installation changes; none covers this deleted-origin environment-history claim.",
+            "active_triage": "Searched TRIAGE_OUTCOMES.md for environment history, origin host and recent setups deletion; no exact active decision.",
+            "filter": "No filter used; source refutation."
+          },
+          "exact_cover_quotes": [],
+          "missing_premise": null,
+          "original_stronger_consequence": "Reusable recent setups might stop decoding after disposable-host deletion; wrong-host launch was also considered and refuted by target-based admission. No concrete harmful wrong-host launch was established.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Independent check should preserve and judge the earlier wrong-host concern as well as the decode hypothesis; this batch does not authorize a destructive-target drop."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-019.json",
+          "key": "g032/c8",
+          "proposal": "claim-checks/claims-019/result.json",
+          "parent_proposal": "source-refuted-deleted-environment-origin-decode-retarget",
+          "final_independent_gate": "required-for-original-wrong-host-hypothesis",
+          "reason": "Full019 originhostID retainedinteger/nohostjoin, targetSome/cwdhome/creationseqdecode; target-bearingdraftbypassesordinaryhostadmissionandselectsrecipe/placeintent. Refutes NULL/decodefailure/wronghostfromdeleteddiagnosticoriginonly. Originalpossiblewronghostconsequencekeptforfreshchecker; no authorityassertionbasedsolelyspecintendedreuse andnootherhistorybugsrefuted."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "environment-history-deleted-origin-host-decode-authority",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review is blocked: the mandatory evidence command rejected the manifest with `Invalid source range`. No patch coverage is certified.\n\n`progress.md` records the failure and unread scope. `findings.jsonl` remains empty.\n\nThe helper’s `tooling.md` requires approval before manual inspection. A question is pending to correct the private manifest ranges or authorize manual inspection."
+    },
+    {
+      "turn": 2,
+      "reply": "Initial pass complete: all 25 mandatory patch parts read; no unread assigned scope.\n\nRecorded in `findings.jsonl`:\n\n- `l3`: confirmed high-impact GUI request blocking during container cleanup.\n- `l5`: potential highest concern, proposed for dropping under explicit specification acceptance; needs independent judgment.\n- Candidates `l1`, `c2`, `c4`; no open leads.\n\n`progress.md` updated. Source analysis only; no tests or reproductions run."
+    },
+    {
+      "turn": 3,
+      "reply": "- `l3` reaffirmed: deletion ownership comes from `spawn_forever`; configuration-save ordering separately blocks unrelated requests.\n- `c4` revised to a duplicate finding of `g037/f3` and `g038/l1`; narrowed the prior refutation.\n- `l5` retained as highest; removed proposed drop. Startup-cleanup acceptance does not authorize misleading confirmation text.\n\nLog updated through line 13. Unresolved leads: none."
+    },
+    {
+      "turn": 4,
+      "reply": "Discovery pass complete. Checked guard lifetimes, DTO/API contracts, Trash epochs, smoke-test oracles and stale-page interlocks.\n\n- New distinct findings: none.\n- `l6`: supporting duplicate of supplied `g196/l1`; GUI interlocks do not block its conditional route.\n- New unverified findings: none.\n- Open leads: none.\n\nRecorded candidates `c7` and `c8`; log updated through line 17. No tests or reproductions run."
+    }
+  ],
+  "progress": "Group: g032 gui-shell-integration\nState: initial review blocked at mandatory evidence delivery, turn 1.\nRead: complete brief.md; complete inventory.json commits field only; injected root instructions including End sentinel; skillette trigger table; machine instructions; Priority buckets; What goes in a feedback file; evidence tooling.md; scode-voice and script guidance. Located specification headings and read the final pinned GUI answer-binding context (SPEC_impl.md 1030–1110); governing complete sections remain outstanding.\nFailure: the exact assigned evidence read for 00039-000.patch 1 16 returned PERSISTENT_REVIEW_TOOL_FAILED: Invalid source range. No coverage is certified by this invocation. The assigned manifest was inspected unchanged; its first range is [1,16], while wc -l reports 15 for that patch. The helper validates all manifest ranges before reading. No source patch was delivered, and no alternative read has been substituted.\nPending authorization: asynchronous question asks whether to correct private manifest ranges to actual source counts or use manual evidence inspection. Original manifest and sources remain unchanged.\nInterface assumptions: verify GUI API payloads against helm routes and rendered-action identity against GUI specification at each recorded revision.\nNext action: resolve manifest delivery failure, then read all assigned evidence packets, complete governing specification sections, and source callers.\nTurn type/count: initial/1. Discovery passes: 0.\nNew verified IDs: none. New unverified IDs: none. Open leads: none. findings.jsonl exists and remains empty; the tooling failure is not a code finding.\nUnread scope: all 25 assigned patch parts (1398 assigned lines); complete governing specification sections at affected recorded revisions; relevant caller context. Initial review pass is incomplete.\n\nCoverage repair / initial review continuation, turn 2: reread corrected brief fully; parent repaired endpoints without changing snapshot bytes/hashes. Existing empty findings log verified. Reading corrected mandatory ranges now. Discovery-pass count remains 0.\n\nInitial review completed, turn 2 (coverage repair continuation).\nCoverage: all 25 corrected mandatory patch sources, 1373 lines, delivered through 27 separate evidence read calls (00534 split 1–180, 181–350, 351–426). No omitted/unread assigned patch material. Complete inventory commits field was read in turn 1; excluded inventory metadata and prohibited queue/coverage sources were not read. No runtime tests, builds or reproductions were run; source-only pass as assigned. No checkout files were changed.\nContracts/context: read complete GUI: Dioxus at ba7cc026 (177–1503), including Answers bind to what was drawn and operation/funnel ownership; complete applicable Container sessions and Retired containerized sessions at 350a4b33/04d85f0c; Disposable environments/provider, place, recipe, leftovers and ownership contracts at 350a4b33 and host/provider decisions at 04ffdbb3; complete Archived-checkout trash at 06d4b68f (continued through notice_error ending before Runtime state); complete Tensorlake hosts at ba7cc026 (7029–7159); Environment Delete and the seal at 222bf625; complete Status at dbfc6975; old-terminal retirement contract at dbfc6975 and complete replacement Terminal substrate section at 17a3fe85. Exploratory broad specification diff commands were clipped; their output was not treated as complete reading and the relevant governing sections/paragraphs were subsequently read from bounded pinned snapshots.\nInterface checks: new environment API paths, payloads and response ownership against helm host routes; container deletion's rendered ConfirmSlot target binding; send_save/send/send_read and shared ticket lifetimes; Podman cleanup command budget and endpoint persistence; launch target assignment and guard-drop lifetime; shared restart-generation consumers before and after terminal-kind removal; HostPhase serde projection and helm field presence; retired-container classifier; native appearance smoke's retained actual socket/replay/focus checks; absence of tmux_probe/tmux_preflight/FARHELM_TMUX references in UI source at 17a3fe85.\nNew verified IDs: l3 (high, shared configuration-save barrier incorrectly captures remote container cleanup); l5 (potential highest copy/consent concern, explicitly proposed_drop based on exact accepted retirement specification, retained for parent's independent judgment).\nNew unverified-after-investigation IDs: none. Open leads: none. Non-report candidates: l1 (busy timing route refuted/accepted request-duration constraint), c2 (bound destructive target), c4 (narrowed retained Restart status contract). Durable log has 9 events through line 9, with 2 current findings and 3 candidates; original lead events remain append-only.\nInterface assumptions remaining for parent: l5 requires independent judgment of whether the intentional accepted cleanup-on-Restart rule covers the broadened consequence wording. l3 affects only the initiating client's Rust HTTP funnel; terminal/feed/page-JS paths and other clients bypass it. Parent owns coverage audit and queue deduplication; no coverage sources were searched.\nNext action: return for parent's later synthesis turn; do not treat this continuation as synthesis or discovery. Turn type/count: initial coverage repair/2. Discovery-pass count: 0. Unread assigned scope: none.\n\nTurn 3: later-turn synthesis started. Supplied g037/f3 line10, g038/l1 line11 and g036/l1 line7 read. c4 reopened as a lead to correct the missed stale=true route. Rechecking l3 caller/ownership versus ordering and l5 displayed consent versus actual cleanup. No new discovery requested or undertaken; initial audited delivery remains complete.\n\nTurn 3 synthesis completed; no new discovery pass performed.\nDelta events appended after prior offset 9: line10 c4 lead revision; line11 l3 finding revision; line12 c4 finding revision (duplicate of supplied g037/f3 and g038/l1); line13 l5 finding revision. Latest log offset: 13. One malformed private event JSON write was rejected before append; event was immediately rewritten validly and successfully recorded as line13. Existing log history was preserved.\nl3: directly rechecked actual Settings confirmation caller, its synchronous future construction, spawn_forever ownership and mounted-only completion guard. Configuration-save ticket is independent of lifetime ownership and demonstrably blocks later send/send_read dispatch. Corrected primary location to environments.rs:91; retain high, source-confirmed.\nc4: withdrew blanket no-race refutation. stale=true passes read_confirms_run even for Interrupted and can retire successful knowledge after pending release, before deferred observer. Directly checked aggregation snapshot/await, ReadGate admission, shared retirement, independent mounted current, observer's relaunched gate, terminal surface predicate and connected live detail. Record is a duplicate of supplied stale pre-completion evidence findings. Original narrow refutation survives only for nonstale Interrupted. g036/l1's newer age-eligible listing/observer route remains a distinct trigger/fix boundary; restoring the old floor does not settle it. Retained conditional timing confidence and normal live-detail healing; no cached connected-detail or lost numerical revision claim.\nl5: rechecked rendered consequence, token and false stop consent; no-pane Restart bypasses working-pane consent refusal yet sweeps the prior agent scope. Startup shared sweep can stop before reaching converted rows; reload retains same recorded scope (core.rs:7338,7437). Acceptance of that startup omission/later cleanup is quoted exactly in the revised record, but supplies no acceptance of saying nothing remains in a destructive confirmation. proposed_drop changed to false; retain original potentially highest process-work consequence. Scope limited to a previously opened Running question that remains mounted through update/reconnected Interrupted detail; no routine Interrupted question or surviving unmount assumed.\nRemaining interface assumptions: source-permitted schedules/incidence have not been executed; l5 acceptance disposition remains parent's judgment, with full exact cited text retained. No unresolved source leads remain. Open lead IDs: none. No unverified-after-investigation additions. No tests/builds/reproductions; no checkout changes. All initial mandatory delivery remains audited/complete; unread assigned scope: none.\nNext action: return synthesis delta to caller. Turn type/count: synthesis/3. Discovery-pass count: 0. Newly discovered IDs this pass: none. Reconciled/revised IDs: l3,c4,l5.\n\nTurn 4 discovery started; discovery-pass count 1. Reused full own history through log line13. Read discovery-neighbours.json completely in bounded 1–60,61–120,121–181 chunks after the first oversized preview clipped. Supplied g196/l1 stale-page JSON reinterpretation question requires App/API/capability/isolation synthesis before the new search. No mandatory source delivery is outstanding. No runtime tests/reproductions/live-install actions.\n\nTurn 4 discovery completed; discovery-pass count 1. Result: no new distinct issue found beyond known/supplied findings.\nCross-group synthesis before new search: l6 appended as lead line14 then supporting duplicate finding line15 for caller-supplied g196/l1. Direct parent-UI App/API/skew source shows a banner, not a modal/interlock; successful response still returns; automatic recovery is revoked but explicit opening/reclaim/manual reconnect remains. Connected/nonstale unknown-kind mount and OPEN-socket paste path remain available. Scoped searches found no backendCapability/inputFrozen global veto in these paths. Full original potentially highest JSON reinterpretation consequence and exact reload-only acceptance remain in l6; no drop/lowering accepted. This is additional interface validation for a known supplied finding, not a new discovery.\nNew-search checks/results: re-examined OpGuard target ownership and synchronous assignment, retained wake/preview guard transfer/cancellation and live Suspend/Resume target checks at 1d24c6a; no extra ownership gap established. Rechecked environment history DTO against real origin-host/target JSON and target-bearing draft admission at 350a4b33; retained origin id remains integer after removal, no null decode or wrong-host route (candidate c8 line17). Rechecked new API GET/POST/DELETE path/method/payload agreement, background probe admission and explicit refresh surface reader, successful deletion reply fallback and retry-delete caller. Rechecked Host trash_epoch sender and keyed per-host consumer, defaulted fixture fields and HostPhase projection. Re-read complete-range small diffs for app_bar/keyboard_shortcuts/list/icons to distinguish intermediate changes and final state. Rechecked appearance-smoke removal against actual remaining grid/socket/replay/focus assertions and its shell consumer's terminalRoundtrip/burstLines oracle, not just production correctness (candidate c7 line16); no separate test-oracle or documentation issue established. No independent new source finding identified.\nDurable delta from offset13: 14 l6 lead, 15 l6 finding duplicate/interface support, 16 c7 candidate, 17 c8 candidate. Latest offset17. New verified independent discovery IDs: none. New source-supported interface record: l6 (likely full conditional route; its requested interlock sub-premise confirmed). New unverified-after-investigation IDs: none. Remaining open lead IDs: none. No runtime tests, builds, payload construction, reproductions or live-install actions; no checkout changes. No prohibited coverage source searched. Unread assigned scope: none; audited initial delivery unchanged.\nNext action: return discovery delta. Turn type/count: discovery/4. Discovery-pass count: 1. Explicit result: nothing new found in the separate search beyond the supplied known interface concern.\n"
+}

@@ -1,0 +1,84 @@
+# Report-discard contract does not match gone host terminals
+
+Reviewed commit: 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db
+
+## TLDR
+
+Unverified collection: Report-discard contract does not match gone host terminals
+
+## Details
+
+Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes after the pinned tip.
+
+Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket does not approve any proposed lowering.
+
+Contributing records: `g016/l2`, `g129/l2`.
+
+### g016/l2
+
+Confidence: Source-confirmed by an existing parent decision; not runtime reproduced.
+
+Latest reviewer record, event 6 (finding, open):
+
+Reviewed commit: f96dd4363d97dc7e07dea5b8947c96be6bf912e8
+
+## TLDR
+The implementation specification says pending conversation reports are discarded when their terminal no longer exists. Host terminals retain the launch anchor after disappearing, allowing a valid report to be admitted; a missing terminal object instead produces a retryable error. Following the inaccurate contract in a future change could discard a final conversation report and leave Restart pointing at older state. This is a documentation defect, not an established current runtime regression or observed loss of conversation.
+
+## Details
+Changed-source attribution: f96dd4363d97dc7e07dea5b8947c96be6bf912e8, SPEC_impl.md:4644–4645, the added lines in the hunk beginning @@ -4687,30 +4637,31 @@. The parent text at :4693–4694 said 'whose pane no longer exists'; this commit changes that subject to 'whose terminal no longer exists' while changing the surrounding attribution model to terminal-host roots. The unchanged host behavior does not support that generalized assertion. A path-limited diff of this commit against its parent confirms hosts/terminal.rs, service/core.rs, service/report_files.rs and procs.rs have no changes in this commit. The implementation behavior is therefore pre-existing at this documentation revision; the finding concerns the rewritten contract, not introducing or fixing those runtime paths.
+
+At this revision, crates/farhelm-supervisor/src/hosts/terminal.rs:864–881 keeps the child pid/start anchor for Liveness::Gone as well as Running and Exited. Its comment explicitly retains it so a report written before exit may still be applied. HostTerminal::anchor at :2548–2550 exposes it. service/core.rs:15776–15802 obtains the current-generation host anchor and returns Internal if the terminal object or readable anchor is absent. service/report_files.rs:320–324 passes an available anchor to procs::anchor_chain; procs.rs:547–580 validates the report's recorded pid/start and chain integrity without requiring terminal liveness. A valid final report can therefore pass after the host is gone. With no terminal object, report_files.rs:247–265 maps Internal to Retry. The drain has no additional terminal-gone discard condition. Admission still applies every vendor proof and generation check: host disappearance does not guarantee acceptance, only that disappearance itself is not the claimed rejection rule.
+
+Correct the wording to distinguish an ancestry mismatch from a vanished terminal, describe the retained post-exit anchor, and describe missing/unreadable current-generation host state as retryable. The earlier hypothesis about discarding a final report is a possible future maintenance consequence, not an observed shipped loss.
+
+Synthesis revision under original ID l2: parent supplied cross-group match g129/l2 for the same documentation assertion. Retain both g016/l2 and g129/l2 with their original review provenance; consolidate them as one defect, not a new discovery. g016 provenance is the full commit above; g129's independent reviewed hash was not supplied in this turn and is not inferred.
+
+Suggested bucket: other, internal documentation accuracy. Confidence: confirmed by source and changed-source analysis. proposed_drop: false. possible_cover: g129/l2, parent-provided cross-group duplicate; no coverage-source search. Could-be-highest: no established shipped security or loss-of-work route. No runtime tests or reproductions run.
+
+Further synthesis checks: numbered source confirms the changed assertion is precisely SPEC_impl.md:4644–4645 (location corrected from the initial hunk-level :4643). report_files.rs:253–261 is the exact Internal-to-Retry branch. Cleanup callers intentionally use different evidence: hosts/terminal.rs:737–797 revalidates current process identity for lifecycle sweep roots, while :872–881 retains historical identity for report attribution. Restart probes its current terminal and derives a live sweep root at service/core.rs:12335–12360; therefore keeping a historical report anchor does not itself authorize signalling a dead or reused process. This interaction adds no separate finding and does not change c1.
+
+Final readily checkable premises settled: hosts/terminal.rs:4013–4023 changes only status.liveness on a transition to Gone, retaining child_pid and child_start for the historical report anchor. This differs from HostTerminal::gone (:1982–1984), a fresh placeholder built with no prior child fields; the finding does not assume every Gone handle has an anchor. service/capture.rs:108–112 sends every published session entry to apply_report_files without filtering out Gone terminals; report_files.rs:129–170 finds reports by session identity, not terminal liveness. report_files.rs:523–535 puts Retry files back, so the missing-runtime outcome is retention, not an indirect discard. These checks close the runtime-route and caller-filter premises using source only. No new defect discovered in synthesis; g129/l2 remains the parent-reported duplicate with its own provenance.
+
+
+Returned proposal (claims-007, event 6): **retain-verified**, suggested bucket **other**.
+
+The changed specification makes terminal disappearance a discard condition, while source deliberately retains historical attribution and retries missing/unreadable terminal state. Retain the documentation defect, with no claim of a shipped discard or wrong-conversation regression. The g129 alias is parent-reported in this record's history, not independently checked here.
+
+Original stronger consequence: Earlier finding text said following the new contract could discard a final conversation report and leave Restart pointing at older state. Every revision qualifies this as a possible future maintenance mistake, not observed or established shipped loss. Preserve both counterexamples: Gone with retained anchor may pass; absent/unreadable current-generation terminal retries.
+
+Unresolved premise or limitation: No missing premise for the documentation mismatch. A future maintainer discarding a final report and causing stale Restart selection is hypothetical; no shipped loss of conversation or wrong Resume was established.
+
+Proposed basis: Retain one source-confirmed internal-contract defect, other priority. Reconcile parent-reported g129/l2 under the same underlying key without erasing either provenance; no independent duplicate drop is proposed by this consultation.
+
+Existing parent disposition (event 6): verified. Parent explicitly accepted named retain-verified proposal from claims-007 after inspecting it. The changed specification makes terminal disappearance a discard condition, while source deliberately retains historical attribution and retries missing/unreadable terminal state. Retain the documentation defect, with no claim of a shipped discard or wrong-conversation regression. The g129 alias is parent-reported in this record's history, not independently checked here. Retain one source-confirmed internal-contract defect, other priority. Reconcile parent-reported g129/l2 under the same underlying key without erasing either provenance; no independent duplicate drop is proposed by this consultation. Checked source/results: ["f96dd4363d97dc7e07dea5b8947c96be6bf912e8:SPEC_impl.md:4644-4645 says a report 'whose terminal no longer exists' fails and is discarded; parent :4693-4694 said 'whose pane no longer exists'. git log -S over the complete assigned range attributes the terminal wording to f96dd436. The runtime source files named below are unchanged by that documentation commit.","Pinned crates/farhelm-supervisor/src/hosts/terminal.rs:863-881 retains child pid/start for Running, Exited and Gone, but not unreadable state. :4013-4023 changes liveness without clearing those historical fields; :2548-2550 exposes the anchor. This does not assume a fresh Gone placeholder has a prior anchor.","service/core.rs:15776-15793 returns the current-generation host anchor, or Internal for no terminal/unreadable anchor. service/report_files.rs:310-324 applies recorded ancestry to it; procs.rs:547-582 checks recorded pid/start and chain integrity without requiring current liveness. Vendor proof and generation admission remain required.","service/capture.rs:108-112 passes all published entries to the drain; report_files.rs:129-166 finds reports by session identity without filtering Gone. :253-261 maps Internal to Retry; :528-533 puts it back, so retention is not indirect discard.","Historical report attribution does not confer kill authority: hosts/terminal.rs:737-799 rechecks live process identity for lifecycle roots; service/core.rs:12337-12356 probes and obtains the current live sweep root for Restart. No runtime test or report-admission reproduction ran."] Current coverage/results: ["Current SPEC_impl.md:4619-4664 retains the contradiction; :2148-2149 correctly describes waiting for publication but does not repair gone-host wording. SPEC.md:3520-3559,3585-3608 governs explicit reported identity and ancestry/pins; it does not accept inaccurate implementation documentation.","TODO.md Planned and plans/queue/INDEX.md are empty. tmux-drop-from-docs is already landed (plans/REPORTS.md:32), not future repair coverage. BUGS.md is unrelated.","Searched INDEX.md, matching queue files and active TRIAGE_OUTCOMES.md for report discard, gone terminal, retained anchor and final-report scope. claude-plan-abort-removes-established-report-pin.md concerns pin reset on failed Restart and a missing nested producer, not this false universal statement. No exact cover or useful extension found. FILTER.md's runtime diagnostics/status filters do not cover this persistent specification contradiction."] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: "Earlier finding text said following the new contract could discard a final conversation report and leave Restart pointing at older state. Every revision qualifies this as a possible future maintenance mistake, not observed or established shipped loss. Preserve both counterexamples: Gone with retained anchor may pass; absent/unreadable current-generation terminal retries."; "No missing premise for the documentation mismatch. A future maintainer discarding a final report and causing stale Restart selection is hypothetical; no shipped loss of conversation or wrong Resume was established.".
+
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g016 record](records/review-through-00de0b6c/groups/g016.json). Record ID: `l2`.
+
+### g129/l2
+
+Confidence: Unverified collection; recording proposals and any disagreement remain unresolved.
+
+Latest reviewer record, event 11 (finding, open):
+
+Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Correlated spec change: f96dd4363d97dc7e07dea5b8947c96be6bf912e8. Synthesis verified through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db.
+TLDR: The changed documentation incorrectly promises that a waiting conversation report is discarded when its terminal host is gone. Existing code can retry it or still admit a valid final report using retained child-process evidence.
+Details: At 1ed482d, report_files.rs:43-56 changes the earlier tmux-specific explanation into claims that a gone terminal host is definitive and a report whose terminal is gone is discarded. core.rs:15826-15853 instead returns Internal for a same-generation published entry without a terminal or usable child anchor, and report_files.rs:252-261 retries Internal. hosts/terminal.rs:872-881 permits Gone to retain a TerminalAnchor when child_pid > 1. The anchor carries its saved start identity when one was recorded; a child already exited on adoption can have pid-only evidence. The parent revision already has this host behavior (core.rs:17044-17066). This is introduced inaccurate prose, not a new runtime regression. Original suspected consequence was indefinite retries after permanent host loss; that behavior is pre-existing, and no automatic credential or user-owned-work harm follows from the demonstrated route.
+Cross-group reconciliation: preserve g129/l2 for the source-comment change at 1ed482d and g016/l2 for the implementation-spec change at f96dd4363d97dc7e07dea5b8947c96be6bf912e8. The latter changes ‘whose pane no longer exists’ to ‘whose terminal no longer exists’ in SPEC_impl.md, Report files, lines 4644-4645. It repeats the same inaccurate generalization, so these are one documentation defect with two changed-source locations, not a new discovery. The g016 ID/provenance was supplied by the parent; no queue or coverage source was searched.
+Later repair check: git diff of report_files.rs from 1ed482d through pinned tip is empty; lines 43-56 remain verbatim. The f96dd4-to-tip SPEC_impl diff changes only unrelated setup prose; lines 4644-4645 remain. At tip, core.rs:15775-15792 still returns Internal for missing terminal/anchor; report_files.rs:253-261 still retries it. hosts/terminal.rs:872-881 still anchors Gone, and :2549 exposes that anchor. report_files.rs:322-324 passes the anchor to procs.rs:547-582, which checks recorded pid/start and chain shape without requiring live host evidence. Thus there is no repair through the pinned tip.
+Suggested bucket: other (documentation/contract correctness). could-be-highest: no established security or loss-of-work route; retained reports alone establish no such harm. Confidence: confirmed by source, parent comparison, callers and pinned-tip checks; no runtime execution or reproduction performed. proposed_drop: false; no parent drop accepted. possible_cover: g016/l2, supplied by parent, for consolidation while retaining both provenance records. Suggested fix: describe retained child anchors and retryable absence accurately in both source comments and implementation spec; an intentional runtime rejection change would be separate work. No missing premise or open investigation remains for this finding.
+
+Returned proposal (claims-082, event 11): **retain-verified**, suggested bucket **other**.
+
+The introduced source explanation promises definitive discard after host loss, but missing anchors produce retryable Internal and Gone handles can retain child anchors. This is a documentation defect; no new runtime regression is established.
+
+Original stronger consequence: The first lead suspected indefinite retries after permanent host loss. That path is supported conditionally by missing terminal/Internal/Retry but already exists before this range's prose change. No automatic credential or user-owned-work harm is established. The record preserves parent-supplied g016/l2 provenance for the equivalent SPEC_impl change; that other record was not supplied here, so exact alias consolidation remains the parent's check.
+
+Unresolved premise or limitation: No missing premise stated in this returned proposal.
+
+Proposed basis: Retain introduced source/spec documentation contradiction, with the pre-existing runtime caveat and retained-anchor qualification. FILTER.md does not cover persistent inaccurate lifecycle documentation; a rare diagnostic trigger alone is insufficient.
+
+Existing parent disposition (event 11): duplicate. Parent read complete claims082 and prior canonical g016/l2/claims007. Same new terminal-gone definitive-discard promise at1ed482 report_files43-56 andf96dd436SPEC_impl4644-4645 contradicts missing-anchor Internal→Retry and Gone retained-child historical admission. Join retained source/spec documentation root, with distinct introductioncommits and both counterexamples retained. Runtime retry/retainedanchor behavior predatesrange; no new runtime lostconversation or wrongResume claim. No exact currentcover/filter found; persistent false source/spec contract retainedother.
+
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g129 record](records/review-through-00de0b6c/groups/g129.json). Record ID: `l2`.
+

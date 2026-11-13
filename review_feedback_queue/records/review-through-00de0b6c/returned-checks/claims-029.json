@@ -1,0 +1,318 @@
+[
+  {
+    "key": "g045/c4",
+    "latest_line": 10,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "provisioning.e2e-retired-needs-tmux-producer",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The removed fixture field has no remaining repository producer at the reviewed revision. The proposed stale producer/schema mismatch is source-refuted within that scope.",
+    "checks": [
+      "500548b9253b07a26fd03119679184b69544e31d, provisioning/e2e.rs:53-71: deny_unknown_fields remains and needs_tmux is absent.",
+      "git grep needs_tmux at 500548b9253b07a26fd03119679184b69544e31d over e2e and crates/farhelm-helm/src/provisioning returned no matches (exit 1).",
+      "Same revision, e2e.rs:204-233,486-495: fail_action compares the action label and remove_file reports remove-bundled-tmux. No runtime execution."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md remote setup and SPEC_impl.md Provisioning explicitly use no tmux payload; this supports removal rather than accepting a broken fixture.",
+      "Current TODO.md Planned is empty; plans/queue/INDEX.md has no unlanded plans. tmux-drop-from-install is reported landed in plans/REPORTS.md.",
+      "BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md searched for needs_tmux, payload/preflight and provisioning fixture triggers; no exact item. FILTER.md has no applicable whole-boundary match."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "External E2E control files were not checked; no external compatibility guarantee is established by this claim.",
+    "original_stronger_consequence": "Removing a deny_unknown_fields member might make browser provisioning fixtures fail to deserialize. No security or user-work consequence was alleged.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Source refutation restricted to repository fixture producers at the reviewed revision."
+  },
+  {
+    "key": "g045/c5",
+    "latest_line": 11,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "provisioning.retired-supervisor-tmux-unit-pinning",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The deleted assertion pins an executable the new supervisor no longer runs. Its removal does not establish a substrate-shadowing regression.",
+    "checks": [
+      "17a3fe858c5511a24b7403af15dd41c93bf69fd7, crates/farhelm-helm/src/units.rs:62-72: SupervisorUnitInputs contains farhelm and state_dir; its contract says the supervisor ignores inherited FARHELM_TMUX.",
+      "Same revision, units/farhelm-supervisor.service.in: no FARHELM_TMUX, tmux path or --tmux argument.",
+      "Current SPEC_impl.md:7996-8001 explicitly says the supervisor runs no tmux and ignores the old environment line. Source conclusion only."
+    ],
+    "coverage_checked": [
+      "Both specifications' setup/provisioning paragraphs accept the retired dependency and unit contract, not broken running sessions.",
+      "TODO.md Planned and unlanded plan index are empty. BUGS.md, queue INDEX and active ledger searches for FARHELM_TMUX, unit pinning and tmux/provisioning found no exact remaining concern. The tmux removal plans are landed.",
+      "FILTER.md does not independently dispose of a broken-session or work-loss route."
+    ],
+    "exact_cover_quotes": [
+      {"source": "SPEC_impl.md:7996-8001", "quote": "The supervisor runs no tmux. The supervisor unit, whether provisioning or `farhelm helm setup` renders it, names no tmux and puts no tmux directory on `PATH`"}
+    ],
+    "missing_premise": "A current supervisor dependency on the selected tmux executable is absent. Inherited tmux used by user commands is a separate concern and is not dismissed here.",
+    "original_stronger_consequence": "Deleting the pinning test could restore running-supervisor substrate shadowing and possibly stopped/lost sessions. No such route is established; retain that hypothetical for independent dismissal review.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "The specific tested dependency is retired. This does not adjudicate user-initiated tmux or legacy orphan lifetimes."
+  },
+  {
+    "key": "g045/l3",
+    "latest_line": 18,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "provisioning.shared-environment-preparation-progress",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The ordinary sandbox launcher can select source selection throughout real preparation, hiding the preparation explanation. The shared plan also replaces specified recipe/place labels with generic labels. This is presentation, not a failed launch.",
+    "checks": [
+      "56659839785691f76da3af5d8f51b511cff4ba8b, provisioning/tensorlake_add.rs:57-81,419-439,515-546: preparation inserts Running index 1 while index 0 remains Running until ensure_prepared returns; index 0 has no explanation.",
+      "Same revision, tensorlake/hosts.rs:218-226: an ordinary stale/missing prepared snapshot calls needed before awaited preparation. environment/podman.rs:994-1022 has the corresponding provider callback.",
+      "Same revision, sessions/sandbox.rs:81-105, UI api/sandbox_sessions.rs:81-103 and list/create_form.rs:5922-5936: admission headers reach the pending launch before final completion.",
+      "Same revision, UI list/create_form.rs:3348-3365 selects the first Running step; launch_progress.rs:68-75,104-106,151-164 renders that selected name/detail. UI provisioning.rs:878-892 independently selects the first Running step. The expanded rail retains the later explanation.",
+      "Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a tensorlake_add.rs:932-969 retires source selection before preparation; endpoint 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db tensorlake_add.rs:515-546 and UI create_form.rs:3467-3478 retain the overlap.",
+      "At reviewed 566 commit SPEC.md:1457-1463,4749-4753 requires recipe/provider/place names and preparation explanation. Current SPEC.md:1473-1478,4818-4823 retains that contract. No runtime observation."
+    ],
+    "coverage_checked": [
+      "Both specifications searched for preparation, named launch progress, first-launch and first-running. SPEC_impl.md prepared-snapshot and sandbox-session sections explain the shared task; they do not accept hidden or generic launch stages.",
+      "TODO.md Planned empty; plans/queue/INDEX.md empty. The matching sandbox-sessions and podman-environments plans are already landed (plans/REPORTS.md), so their requirements are not unlanded fix coverage.",
+      "BUGS.md, queue INDEX and active TRIAGE_OUTCOMES.md searched for preparation progress, source selection, first-running and launch-progress wording: no exact item. The queued quick-launch preparation-refusal item concerns a failed prerequisite read, not this running stage.",
+      "FILTER.md rare self-correcting diagnostic/display filter does not fully match: ordinary first/stale preparation is a normal trigger, although display requires preparation to last through polling."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "None for the conditional sandbox source route. Occurrence and visible duration are unmeasured. The container launcher was introduced later at 350a4b33b6d4476f4a78e43cea124bc2b828f462; do not claim it already existed at 566.",
+    "original_stronger_consequence": "Earlier lead suspected generic Prepare snapshot/Create the environment wording. Later records establish first-running selection as well, while explicitly allowing the expanded rail to show preparation. No security, work loss or failed creation was alleged.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Record the source-confirmed progress mismatch, preserving normal cache-skip, polling-duration and expanded-rail caveats."
+  },
+  {
+    "key": "g045/c6",
+    "latest_line": 19,
+    "recommendation": "out-of-range",
+    "bucket": "other",
+    "underlying_key": "provisioning.finished-task-handle-published-after-host-purge",
+    "aliases": ["review_feedback_queue/finished-task-handle-published-after-host-purge.md"],
+    "target_queue_file": "review_feedback_queue/finished-task-handle-published-after-host-purge.md",
+    "why": "Spawn-before-registration and failure-cleanup ownership already exist at the exclusive range base. The existing queue item explicitly covers that failed initial sandbox producer. No new extension is established by extraction alone.",
+    "checks": [
+      "Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a, provisioning/tensorlake_add.rs:605-613 spawns execution before inserting its task handle.",
+      "Endpoint 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, same path:472-487 retains the same ordering in shared session launch.",
+      "Existing queue file's Failed initial sandbox launch adds another producer section expressly describes the base-era tensorlake_add.rs:605-613 race and stale bookkeeping, with no established live-resource escape. No scheduling experiment."
+    ],
+    "coverage_checked": [
+      "SPEC.md/SPEC_impl.md launch ownership and progress sections do not explicitly accept stale task bookkeeping.",
+      "TODO.md Planned and unlanded plan index empty. BUGS.md and active ledger contain no matching disposition.",
+      "INDEX.md:903-904 points to finished-task-handle-published-after-host-purge.md; its complete file was read and matches trigger, consequence and failed-initial-launch scope. FILTER.md is unnecessary; durable bookkeeping does not fit transient-display filtering."
+    ],
+    "exact_cover_quotes": [
+      {"source": "review_feedback_queue/finished-task-handle-published-after-host-purge.md, Failed initial sandbox launch adds another producer", "quote": "A child on another worker can finish failed-launch cleanup while the parent is descheduled before insertion."},
+      {"source": "same section", "quote": "The consequence is stale map/handle bookkeeping until restart, with no established credential retention, live process, billed-resource leak or availability failure."}
+    ],
+    "missing_premise": "A new scheduling/ownership change relative to the range base is not shown. This does not prove the inherited pattern correct.",
+    "original_stronger_consequence": "A fast failed launch could leave a completed task handle after its host was forgotten. No live orphan or loss of user work was claimed.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Pre-range unchanged root, additionally exactly covered by the existing item. Do not create a second item or expand its consequences."
+  },
+  {
+    "key": "g045/c7",
+    "latest_line": 21,
+    "recommendation": "out-of-range",
+    "bucket": "other",
+    "underlying_key": "provisioning.concurrent-payload-barrier-overstates-observation-order",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The questionable test explanation and ungated internal observation already exist at the exclusive base. Removing the payload-kind argument does not make that explanation newly false.",
+    "checks": [
+      "6e423e30068b62c6cfa276c6d720ee35bb70387a provisioning.rs:15811-15889 and 500548b9253b07a26fd03119679184b69544e31d:15063-15141 have the same docstring, barrier position, two tasks and final assertions; the call loses only PayloadKind::Farhelm.",
+      "500548b9253b07a26fd03119679184b69544e31d provisioning/payloads.rs:251-274 checks/creates the extracted directory synchronously before extraction. The whole-range payloads.rs diff preserves that pre-extraction sequence for Farhelm.",
+      "A barrier before path does not force both internal absent observations. This is a source statement about test sensitivity, not an executed schedule or production cache failure."
+    ],
+    "coverage_checked": [
+      "Both specifications searched for payload preparation/materialization and concurrent first use: no explicit acceptance of the inaccurate test explanation.",
+      "TODO.md Planned empty; unlanded plan index empty. BUGS.md, queue INDEX and active ledger searches for concurrent payload, extraction barrier and first-use ordering found no matching item or decision.",
+      "FILTER.md does not supply a boundary for this test-comment defect; attribution alone is the proposed disposition."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No introduced or newly invalidated test contract within this range. The inherited comment's accuracy is not certified.",
+    "original_stronger_consequence": "Potentially inaccurate proof that both calls observe absence before directory creation. No runtime cache defect, security or work-loss route was alleged.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Exact promise and fixture predate the complete review range, not merely the immediate patch."
+  },
+  {
+    "key": "g046/f1",
+    "latest_line": 10,
+    "recommendation": "covered",
+    "bucket": "other",
+    "underlying_key": "provisioning.legacy-private-tmux-orphan-after-offline-uninstall",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Source establishes the legacy orphan-survival residual, including removal of the registered host and binary while those processes remain. Both specifications explicitly accept exactly that residual. This is only a proposed coverage disposition, requiring independent drop and consequence review.",
+    "checks": [
+      "500548b9253b07a26fd03119679184b69544e31d provisioning/service.rs:2834-2844 passes no tmux program/socket to stop and subsequently permits directory removal.",
+      "Same revision backend.rs:3303-3340 skips stopping inactive/failed units, stops terminal hosts when hosts exists, and has no private tmux command. An already detached legacy server is outside those operations.",
+      "Same revision service.rs:2666-2685 returns on stop failure; only RemoveBundledTmux at :2778-2785 degrades backend failure. This does not establish a further failed-stop removal route.",
+      "Reviewed SPEC.md:211-220 and current SPEC.md same uninstall paragraph accept the residual. Current SPEC_impl.md:7811-7838 also names startup ending failure followed by supervisor stop. No runtime observation of process survival or control-group behavior."
+    ],
+    "coverage_checked": [
+      "Exact SPEC.md and SPEC_impl.md coverage read; quotations below. The original possible highest consequence remains preserved for independent checking.",
+      "TODO.md Planned and unlanded plan index empty. Relevant tmux-drop-from-install plan is landed; coverage relies on accepted specifications, not that plan.",
+      "BUGS.md, queue INDEX and active ledger searched for offline/legacy tmux uninstall, detached private server and stop cleanup: no additional exact queued item or current decision. No archive read.",
+      "FILTER.md older-upgrade filter is not the basis: no separate rare condition or security-free scope should be inferred from legacy state alone."
+    ],
+    "exact_cover_quotes": [
+      {"source": "SPEC.md:214-217 at 500548b9253b07a26fd03119679184b69544e31d; retained current uninstall paragraph", "quote": "Uninstall has no tmux step of its own: stopping the supervisor's service ends whatever still runs under it, an earlier release's private tmux server included, but one that outlived a supervisor stopped before uninstall (on a host never updated to a release that ends it at startup, say) keeps running, which the maintainer accepted on 2026-11-11."},
+      {"source": "SPEC_impl.md:7824-7827 current", "quote": "Uninstall has no tmux step: a private tmux server that outlived a supervisor stopped before uninstall (a host never updated to a release that ends it at startup, or one whose startup ending failed and whose supervisor was later stopped) keeps running. The maintainer accepted that residual on 2026-11-11 when the step was removed."}
+    ],
+    "missing_premise": "Additional loss of user work or security harm outside accepted process survival has not been established. No Add-over-answering-supervisor route follows from this acceptance.",
+    "original_stronger_consequence": "Latest record deliberately keeps highest pending independent determination because cleanup retirement concerns processes/work; earlier other classifications were explicitly not accepted lowerings. Legacy processes can remain after host and binary removal. Preserve all of that for the independent check.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Exact specification acceptance for this residual only. Other is the bucket suggested by the established leftover-process consequence, not an accepted lowering of the preserved possible highest concern."
+  },
+  {
+    "key": "g046/l1",
+    "latest_line": 3,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "provisioning.outer-degraded-warning-summary-aggregation",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The nonzero-offset executor's shipped callers do not supply already-degraded outer steps, so the suspected lost outer warning is missing its required producer and is source-refuted for the described path.",
+    "checks": [
+      "git grep execute_actions at 500548b9253b07a26fd03119679184b69544e31d across helm/src finds only service.rs:2634 (offset zero), the definition and tensorlake_add.rs:1592.",
+      "Same revision tensorlake_add.rs:1137-1203,1272-1432,1516-1592 reaches inner execution after Completed/Skipped outer phases. Informational home/delivery notices are explicitly Completed at :1523 and :1579-1584.",
+      "The Degraded conversions at :614-619 and :1475-1491 are attachment paths that return/finish rather than enter execute_actions. service.rs:2655-2693 aggregates inner action warnings. Source analysis only."
+    ],
+    "coverage_checked": [
+      "SPEC.md setup warning/progress and SPEC_impl.md provisioning/sandbox preparation paragraphs searched; no acceptance of missing an actual earlier warning.",
+      "TODO.md Planned and unlanded plan index empty. BUGS.md, queue INDEX and active ledger searches for degraded/outer warning summaries and multi-phase provisioning found no exact coverage.",
+      "FILTER.md is not needed and ordinary lost warnings would not become rare merely from having multiple phases."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "A shipped caller with an already-degraded outer step is absent; no such premise remains demonstrated.",
+    "original_stronger_consequence": "A multi-phase setup might omit an earlier warning in its final summary. Summary visibility only; no security or user-work consequence was alleged.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Concrete caller/status analysis refutes the necessary producer."
+  },
+  {
+    "key": "g046/c1",
+    "latest_line": 4,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "provisioning.single-payload-preflight-retired-set-test",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The retired test's second missing payload no longer exists. The remaining required payload is resolved and staged before any host mutation, refuting the asserted missing-payload partial-setup route.",
+    "checks": [
+      "500548b9253b07a26fd03119679184b69544e31d provisioning/plan.rs:799-810 uploads and installs the same target Farhelm binary; the macOS branch begins afterward.",
+      "Same revision installation.rs:13-44 resolves/stages the plan's one payload from its first upload/install action.",
+      "Same revision service.rs:2641-2653 returns on preparation failure before the action loop at :2660. Source conclusion; no runtime or release-cache audit."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md Provisioning:7736-7744 explicitly calls Farhelm the one payload a host gets; SPEC.md setup no longer installs tmux. Neither accepts mutating before missing-payload failure.",
+      "TODO.md Planned and unlanded plan index empty; BUGS.md, queue INDEX and active ledger searches for payload preflight/required set/partial provisioning found no exact remaining item.",
+      "FILTER.md does not dispose of partial host mutation; refutation relies on ordering and payload arity."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No second required payload and no mutation before resolving the remaining one are shown. Release-cache publication internals remain outside this check.",
+    "original_stronger_consequence": "Deleting complete-required-set preflight coverage might let a missing payload leave a partially changed host. No concrete user-work loss was alleged or established.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "The removed two-payload scenario is retired; the one-payload handoff retains pre-mutation preparation."
+  },
+  {
+    "key": "g046/c2",
+    "latest_line": 6,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "provisioning.bundled-tmux-cleanup-shared-binary-target",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The cleanup target comes from the private library directory, independently of the registered binary's shared directory. The claimed deletion of the user's adjacent tmux is source-refuted for this route.",
+    "checks": [
+      "500548b9253b07a26fd03119679184b69544e31d provisioning/plan.rs:722-740,867-869 separates lib_dir and registered binary override and removes lib_dir/tmux.",
+      "Same revision plan.rs:1161-1168 explicitly preserves the pre-0.18 shared copy. service.rs:2778-2785 passes the frozen action path unchanged.",
+      "Same revision backend.rs:3362-3408 uses unlink/rm -f without following the final symlink or recursively removing a directory. provisioning.rs:1065-1132 tests separate binary/private directories. Its false historical docstring is retained separately as g046/l2. No execution."
+    ],
+    "coverage_checked": [
+      "SPEC.md:182-189 explicitly excludes the shared-folder copy; SPEC_impl.md:8003-8020 says the target is the private lib directory, never beside a registered binary elsewhere.",
+      "TODO.md Planned and unlanded plan index empty. BUGS.md, queue INDEX and active ledger searched for shared binary/tmux removal and legacy ownership; no exact item. The adjacent uninstall-layout findings concern different containment/identity routes.",
+      "FILTER.md has no basis to omit deleting a user's executable; proposed disposition is concrete source refutation."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No shipped control derives the tmux removal target from the registered binary directory. Malicious/concurrent parent-directory substitution is not this allegation and is not adjudicated.",
+    "original_stronger_consequence": "Update could remove the user's tmux executable beside Farhelm in a shared directory; that would be highest if established.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Frozen private-path construction refutes the stated ordinary shared-binary route, without broadening to other path replacement concerns."
+  },
+  {
+    "key": "g046/c3",
+    "latest_line": 8,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "provisioning.add-removes-tmux-under-answering-supervisor",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "Initial discovery and confirmation both adopt answering supervisors without executing Add. The ordinary Add-over-answering-supervisor premise is source-refuted.",
+    "checks": [
+      "500548b9253b07a26fd03119679184b69544e31d service.rs:835-932 adopts compatible and skewed answers; Add planning occurs only on Absent.",
+      "Same revision service.rs:2238-2249 probes original and planned coordinates; :2251-2311 maps answering supervisors to UseAsIs and only absence to Execute. :2215-2220 dispatches UseAsIs without installation.",
+      "Same revision backend.rs:2648-2652 requires positive-absence exit, empty stdout and remote command-start evidence. A bad or stalled hello is not sufficient absence. Source checks only."
+    ],
+    "coverage_checked": [
+      "SPEC.md:103-106 and SPEC_impl.md:7739-7744 require discovery-first adoption. The orphan-uninstall acceptance does not cover mutation of an answering supervisor.",
+      "TODO.md Planned and unlanded plan index empty. BUGS.md, queue INDEX and active ledger searched for Add/answering supervisor and bundled cleanup; no exact queued concern. The automatic-update replacement-installation item is a different operation/root.",
+      "FILTER.md is not a basis for dismissing possible user-work harm."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No ordinary shipped Add path executes over an answering supervisor. An external start after confirmation is a separate unestablished race; this check does not resolve it.",
+    "original_stronger_consequence": "Add might remove private tmux beneath an old running supervisor, breaking terminal operations and possibly affecting user work/security. Latest record preserves high for the original operation concern and possible highest rather than accepting a lowering.",
+    "needs_independent_drop_check": true,
+    "proposed_basis": "Discovery and confirmation branch refutation for the stated ordinary route only. Other reflects no established harmful consequence after that refutation; independent checking must approve any dismissal or lowering."
+  },
+  {
+    "key": "g046/c4",
+    "latest_line": 9,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "provisioning.uninstall-test-retains-live-terminal-host-stop",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The changed test still establishes a live owned terminal host, stops it, waits for exit and checks cleanup/retries. Removed tmux arguments do not remove those assertions.",
+    "checks": [
+      "500548b9253b07a26fd03119679184b69544e31d provisioning.rs:8773-8857: guard precedes spawn; :8810-8816 requires one live fixture host; :8826-8838 invokes stop, waits for exit and requires socket/hosts removal; :8839-8855 checks retries including absent binary.",
+      "The test explicitly early-returns with SKIPPED when debug_farhelm is absent (:8774-8778), so this is preserved source coverage, not a claim that it ran.",
+      "No conclusion about the broader integration fixture's pre-update readiness or planted-failure sensitivity follows from this narrower test. No execution."
+    ],
+    "coverage_checked": [
+      "SPEC.md uninstall and SPEC_impl.md:7822-7838 require ending terminal hosts and preserving retry when that cannot be confirmed; they do not excuse missing test assertions.",
+      "TODO.md Planned and unlanded plan index empty. BUGS.md, queue INDEX and active ledger searches for uninstall/live-host test premises found mac-uninstall-test-lacks-live-host-premise.md, whose index explicitly concerns the native Mac test rather than this Linux scripted test; not exact coverage.",
+      "FILTER.md is unnecessary; this is source refutation of the specific lost-assertion concern, not filtering a production orphan."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No missing live-host/exit assertion is shown in this test. Broader integration-fixture readiness and failure coverage remain separate and unresolved by this check.",
+    "original_stronger_consequence": "Removing tmux fixture arguments could accidentally remove proof that uninstall ends persistent terminal hosts. Maintainer test coverage only; no established security/user-work-loss route.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retained owned-fixture liveness, exit and cleanup assertions refute the stated test deletion claim."
+  },
+  {
+    "key": "g046/l2",
+    "latest_line": 13,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "provisioning.cleanup-test-misstates-pre-0.18-tmux-ownership",
+    "aliases": [],
+    "target_queue_file": null,
+    "why": "The changed test comment makes false historical ownership claims. The specification and nearby plan comment acknowledge that releases before 0.18.0 installed the shared copy. Correct runtime targeting does not refute the documentation defect.",
+    "checks": [
+      "500548b9253b07a26fd03119679184b69544e31d provisioning.rs:1068-1076 says the adjacent tmux is the user's own, not Farhelm's, and earlier releases always installed privately. The fixture at :1079-1132 only constructs a plan and supplies no historical ownership evidence.",
+      "Same revision plan.rs:1161-1167 limits the private guarantee to releases since 0.18.0 and explicitly says earlier releases put theirs beside the binary.",
+      "Same revision SPEC.md:185-187 expressly acknowledges a pre-0.18.0 update's shared-folder copy that may be user-owned; current SPEC.md retains that statement.",
+      "Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a provisioning.rs:1099-1106 acknowledges Farhelm installed the shared copy. Endpoint 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:1068-1076 retains the new false statements. Source-confirmed introduction and persistence; no runtime claim."
+    ],
+    "coverage_checked": [
+      "Both specifications searched/read around shared tmux/private path and release history. They explain the correct preservation boundary; neither accepts the false test explanation.",
+      "TODO.md Planned and unlanded plan index empty. tmux-drop-from-docs and tmux-drop-from-install are landed, so their broad comment-sweep language is not unlanded fix coverage.",
+      "BUGS.md, queue INDEX and active ledger searched for legacy tmux ownership, pre-0.18 history and shared-binary comments; no exact item or decision. This is separate from runtime c2 and accepted orphan f1.",
+      "FILTER.md has no complete match for ordinary incorrect source documentation; no rare trigger or security/data-loss guidance is involved."
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "None for the documentation inconsistency. No runtime deletion or dangerous instruction is alleged: the comment still says to preserve the shared file.",
+    "original_stronger_consequence": "The lead suspected maintainers would learn the wrong legacy ownership/layout; later records verify that same documentation defect. It does not allege loss of the user's executable or broaden c2's refuted route.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain the introduced historical explanation error. Correct wording should distinguish releases since 0.18.0 and uncertain ownership of an older shared-folder copy."
+  }
+]

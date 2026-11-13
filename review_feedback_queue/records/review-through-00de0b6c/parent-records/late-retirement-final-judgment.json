@@ -1,0 +1,3 @@
+[
+  {"id":"g042","turn":5,"offset":13,"state":"complete","verdict":"complete-final-empty-discovery","discovery":{"new_verified":[],"new_unverified_after_investigation":[],"empty":true},"reason":"Read complete reply/event13 and complete199line audit. Separate discovery checked pinned legacy decoder, positive retired witness, menu/readiness/provider predicates and range history; newc6 is a bounded refuted fixture-shape suspicion, not a new reportable defect. No new verified/investigated finding or open lead. Final search follows last useful cleanup-reporting input and synthesis."}
+]

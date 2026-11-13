@@ -1,0 +1,180 @@
+[
+  {
+    "key": "g024/l5",
+    "latest_line": 37,
+    "recommendation": "retain-verified",
+    "bucket": "other",
+    "underlying_key": "helm-manager/stopped-idle-local-arc-blocks-direct-drop",
+    "aliases": ["g022/f3", "g026/f8", "g027/l8", "g067/l4"],
+    "alias_scope": "Exact underlying ownership defect for those four supporting records. g023/f2 corroborates this defect only in its appended interface discussion; its original hold-release candidate is independent and must remain separately accounted for.",
+    "target_queue_file": null,
+    "why": "The named strong manager local survives the idle await when the automatic-start condition short-circuits. That prevents the destructor implementing direct-drop cleanup from running immediately. Two persistent Stopped actors with staggered waits can keep a reference available for successive upgrades. Normal serving and REST restart explicitly shut the manager down and remain protected.",
+    "checks": [
+      {"source": "g024/findings.jsonl:31,32,33,35,36,37", "result": "Read all six own-ID events. The history progresses from an unresolved ownership lead to a source-confirmed conditional direct-drop finding, then adds named corroboration. It does not claim a reproduced leak, unconditional single-actor leak, ordinary graceful-shutdown hang, security consequence, or user-work loss."},
+      {"source": "56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/manager.rs:3838-3893; 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:same:4050-4102", "result": "The named Option<Arc> at original 3845 / tip 4054 is borrowed for the place gate. Its only move occurs after both !attempted and gate. False earlier operands skip that move, leaving the initialized local in the block containing the select loop. The already-attempted branch is independently sufficient to skip the move even if the place is connected."},
+      {"source": "https://doc.rust-lang.org/reference/destructors.html#scopes-of-local-variables; https://doc.rust-lang.org/reference/expressions/if-expr.html#chains-of-conditions", "result": "Read the primary language rules: a named let local has its containing block's drop scope; condition chains skip later operands after false. Last borrow use does not destroy an owned Arc early. These are language/source conclusions, not runtime observations."},
+      {"source": "56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/manager.rs:1075-1162,3067-3145,7421-7435,11929-11976", "result": "Actor handles own cancellation and connection publication resources; the manager documents Weak actor ownership to allow map destruction. Drop calls shutdown, which drains the map, retires clients and cancels actors. The direct-drop regression really drops manager without shutdown and expects closure/no further dials, but creates only an ordinary SSH host. Fixture has no Drop override. This supports an API/resource-lifetime defect, not a separate new test-oracle finding."},
+      {"source": "56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/manager.rs:4185-4219; environment/podman.rs:148-236,1237-1276; environment/podman_probe.rs:143-165,338-378,409-415; access.rs:64-94", "result": "The route requires normally admitted environment rows with remote_farhelm and remote_state_dir, plus confirmed owned container IDs. Provider inspection can return Stopped through direct local place commands using a usable current-route probe, without a manager-connected place supervisor. A local place suffices; no SSH-sharing assumption is needed. Two admitted stopped containers can use that same ordinary place. Status completion while another actor holds its idle reference permits reacquisition; no fleet-wide release barrier is present in the independent actor control shape."},
+      {"source": "00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:crates/farhelm-helm/src/lib.rs:2568-2592; rest_harness.rs:1007-1016; manager.rs:3298-3350", "result": "Every serving-select outcome reaches shutdown_and_wait. REST restart calls shutdown before drop. Explicit shutdown aborts the idle futures regardless of their strong locals. These callers refute an ordinary graceful-shutdown-hang interpretation, which the named history explicitly excludes."},
+      {"source": "56659839785691f76da3af5d8f51b511cff4ba8b parent-to-commit manager.rs diff; exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a targeted source search; original-to-tip manager.rs diff hunks", "result": "The in-range 566 commit adds self_ref, the actor's Weak manager, StoppedEpisode and this entire Stopped local/conditional-move/wait arm. Exclusive-base search finds none of that machinery. Later manager changes do not touch its scope. The endpoint still contains the same arm."},
+      {"source": "00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db..24bc058066fd57848e788b465719b0e6da2f98f7 diffs for manager.rs, environment/lifecycle.rs, environment/podman.rs, environment/podman_probe.rs", "result": "Manager, lifecycle and probe files have no later difference at recording-time main. The only Podman difference moves the private preparation script temporary from /tmp to /var/tmp, outside status/route/lifetime behavior. No current repair was found."}
+    ],
+    "coverage_checked": [
+      {"source": "SPEC.md, Container sessions:4806-4899", "result": "The full section specifies ordinary registered local/SSH places, stopped containers and one automatic start when connected. It does not accept manager self-retention after direct drop. Its direct-command cleanup model is consistent with a disconnected container supervisor remaining manageable."},
+      {"source": "SPEC_impl.md, host-actor/cadence paragraphs:5327-5390; Disposable environments and Environment rows and provider state:5929-5982; Tensorlake lifecycle:6704-6724; serving teardown:6806-6810", "result": "Independent actors, 45-second reprobes, Stopped/one-start/failure behavior and explicit serving cancellation are specified. None accepts idle manager ownership beyond release. Historical 566 SPEC_impl:5810-5855 and6434-6460 has the same relevant contract. Correct explicit serving teardown is a scope exclusion, not coverage of the direct-drop defect."},
+      {"source": "TODO.md, Planned:25-26", "result": "Empty. No planned-item cover."},
+      {"source": "plans/queue", "result": "Searched direct-drop, manager, actor, Weak/strong reference, stopped retention and lifecycle hold/release terms. Read matching Podman provider/state and sandbox-suspend-overlap goal/criteria context. Those plans concern environment integration or host-scoped overlap/busy recovery, not this unused idle Arc or direct-drop cleanup. No unlanded plan states work removing this cause."},
+      {"source": "BUGS.md", "result": "Read the complete accepted-bug file. Its only bug concerns provisioning transfer output held open by a local SSH helper; trigger, consequence and scope differ."},
+      {"source": "review_feedback_queue/INDEX.md and matching queue files", "result": "Targeted lifetime/manager/actor/hold/shutdown search found no exact item. Read retired-connection-leaves-suspend-progress-stuck.md, successful-suspend-flashes-connecting.md and shutdown-wait-test-does-not-witness-waiting.md. They concern a completed retired actor's display, transient suspension display, and a supervisor test oracle respectively. None covers manager retention on direct drop."},
+      {"source": "TRIAGE_OUTCOMES.md", "result": "Searched the actual lifetime/hold/shutdown claims; read the matching shutdown-wait test decision. It concerns a different supervisor wait oracle. No same-trigger/consequence/scope decision found. Archive not read."},
+      {"source": "review_feedback_queue/FILTER.md", "result": "Read in full. No entire filter matches: retained manager/tasks/connections are not solely a self-correcting display, safe retry or diagnostic; no hung user manager, upgrade, harness, human sub-second action, or other specifically filtered trigger is required. Rarity alone does not filter this resource-lifetime defect."}
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No missing source premise for the conditional resource-lifetime claim. Runtime incidence, duration and frequency were not measured. Indefinite retention requires at least two persistently Stopped actors whose ordinary waits/status completions overlap; one idle actor alone only establishes delay until its arm ends. No established route to secret exposure, user-process loss or other user-owned-work loss.",
+    "original_stronger_consequence": "From the first event: two staggered stopped actors could keep the manager and its other connections alive after external release; one actor was explicitly insufficient for an unconditional permanent leak. Later events establish that same conditional indefinite retention. The normal desktop/standalone graceful-shutdown hang is expressly identified as unsupported and not claimed; there is no earlier highest-bucket claim or withdrawal in this named history.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Retain one source-confirmed other-bucket finding under canonical g024/l5, carrying all limits and supporting provenance. No exact cover/filter found. Consolidate only the four same-root supporting IDs, not g023/f2's original hold-release concern. This is a recording proposal, not a parent decision or independent drop-gate verdict."
+  },
+  {
+    "key": "g022/f3",
+    "latest_line": 10,
+    "recommendation": "duplicate",
+    "bucket": "other",
+    "underlying_key": "helm-manager/stopped-idle-local-arc-blocks-direct-drop",
+    "aliases": ["g024/l5", "g026/f8", "g027/l8", "g067/l4"],
+    "alias_scope": "Exact same-root corroboration of canonical g024/l5, including the two-actor condition and explicit-shutdown exclusion. No independent residual defect.",
+    "target_queue_file": null,
+    "why": "This record independently agrees with the canonical idle-local ownership defect. Preserve its source checks as provenance for g024/l5 rather than create a second queue entry.",
+    "checks": [
+      {"source": "g022/findings.jsonl:8-10", "result": "Read every f3 event. Initial lead becomes a source-confirmed fallback-cleanup delay, then independently verifies repeated-Stopped/provider routing, two-actor overlap, introduction and endpoint persistence. It never claims observed incidence or an unconditional permanent single-actor leak."},
+      {"source": "56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/manager.rs:1075-1162,3067-3145,3838-3893,4185-4219,7425-7430,11929-11976; tip manager.rs:4050-4102", "result": "Own source reads confirm named Arc retention when !attempted or gate short-circuits, Drop-dependent cancellation/map ownership, admitted-row prerequisite and an actual ordinary-host direct-drop fixture. The tip retains the same faulty arm. The parent-to-566 diff introduces the ownership route; exclusive-base targeted search is empty."},
+      {"source": "566:environment/podman.rs:148-236,1237-1276; environment/podman_probe.rs:143-165,338-378,409-415; access.rs:64-94; tip lib.rs:2568-2592 and rest_harness.rs:1007-1016", "result": "Direct local status works independently of a connected place supervisor, supporting repeated Stopped with gate false for admitted containers. Explicit serving shutdown and REST restart cancel actors before drop. Recording-time main leaves relevant code unchanged. These independently support the canonical narrow consequence and exclusions."},
+      {"source": "Rust Reference local-variable drop scopes and condition chains", "result": "Read official primary rules. The named local remains owned until its containing block ends when the later let-move is skipped. No runtime test or reproduction was performed."}
+    ],
+    "coverage_checked": [
+      {"source": "SPEC.md Container sessions; SPEC_impl.md actor/cadence, Disposable environments/provider state, Tensorlake lifecycle and serving teardown", "result": "Governing current and original contracts specify independent probes, one stopped-container start and explicit serving teardown; they do not accept direct-drop self-retention. Explicit-shutdown correctness narrows scope only."},
+      {"source": "TODO.md Planned; plans/queue; BUGS.md", "result": "Planned is empty. Targeted claim searches and matching environment/overlap plan context provide no stated repair for idle strong ownership. The accepted SSH-transfer-helper hang is distinct."},
+      {"source": "review_feedback_queue/INDEX.md and matching retired-connection, successful-suspend and shutdown-wait test entries; TRIAGE_OUTCOMES.md", "result": "No exact existing queue/decision cover. Matching entries and the shutdown-test decision have different triggers/consequences. Archive not read."},
+      {"source": "review_feedback_queue/FILTER.md", "result": "No entire filter matches resource retention on direct drop. This is consolidated solely with named g024/l5, not filtered or dismissed as correct."}
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "None for the conditional source claim. Runtime incidence/frequency unmeasured; indefinite retention needs overlapping persistent stopped actors. Normal explicit shutdown, single-actor indefinite retention, security and user-work loss remain excluded.",
+    "original_stronger_consequence": "The original lead preserved conditional prevention of fallback cleanup; later records confirm it for overlapping actors while keeping one-actor cleanup delay separate. No highest consequence or withdrawal appears.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Exact named same-root alias; retain all substance under g024/l5. This proposes deduplication without rejecting or lowering the canonical defect."
+  },
+  {
+    "key": "g023/f2",
+    "latest_line": 13,
+    "recommendation": "refuted",
+    "bucket": "other",
+    "underlying_key": "helm-lifecycle/hold-release-after-operation-error",
+    "aliases": [],
+    "alias_scope": "Partial scope only: later f2 prose corroborates g024/l5's distinct manager-lifetime defect. The original independent stranded-hold-on-error candidate is not an exact alias and remains represented by this entry.",
+    "target_queue_file": null,
+    "why": "The original candidate asks whether the extracted lifecycle helper can strand its own connection hold on transition/record failure. The helper captures those errors before its release decision, and a hold it takes publishes a non-connected state, causing release. That refutation does not answer or refute idle manager Arc retention.",
+    "checks": [
+      {"source": "g023/findings.jsonl:4,10,12,13", "result": "Read all four f2 events. Every event preserves the original source-refuted hold-release candidate. Events12-13 append corroboration of g024/l5 but explicitly call it distinct. No original identity, availability consequence or proposed-drop basis may be erased during consolidation."},
+      {"source": "56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/environment/lifecycle.rs:47-98; manager.rs:1604-1662", "result": "perform takes the initial Suspend/disconnected-Resume hold; its async result captures transition and record errors; successful real Resume withdraws an old connection even if initially connected. hold_connection atomically publishes the supplied non-connected lifecycle state and sets hold. The final non-connected/Suspend branch clears hold and nudges via release_hold. A repeated connected Running Resume takes no hold to strand. This source refutes the specific error-escape path."},
+      {"source": "566:tensorlake/lifecycle.rs:53-128; environment/podman.rs:641-719; manager.rs:3218-3228,3862-3871", "result": "Providers validate lock, binding, account/ownership before perform. Tensorlake attribution recording occurs inside perform's captured result; Podman record returns None without bypassing release. Automatic starts use a separately spawned owned task, whose JoinHandle can detach. Current explicit REST handlers use run_owned; request cancellation is not a property guaranteed by perform alone."},
+      {"source": "566..tip environment/lifecycle.rs diff; tip..24bc058066fd57848e788b465719b0e6da2f98f7 diff", "result": "The later in-range lifecycle change adds typed busy-lock admission before holds and leaves perform unchanged. No later recording-main lifecycle change. Busy refusal cannot strand a hold it never took."},
+      {"source": "566:manager.rs:3838-3893,3137-3145; tip manager.rs:4050-4102; lib.rs:2568-2592", "result": "Independently confirms the appended idle Arc analysis and explicit-shutdown exclusion. This separate lifetime finding is retained under g024/l5, not dropped by the helper refutation. Nearby retired-actor display defects are likewise outside this narrow error-release conclusion."}
+    ],
+    "coverage_checked": [
+      {"source": "SPEC_impl.md Tensorlake hosts:6704-6724; historical 566 Tensorlake/lifecycle contract; SPEC.md Container sessions:4851-4865", "result": "The contract requires owned explicit operations, failure release, and repeated connected Running Resume preservation. perform's scoped error handling meets the considered release contract. This is source refutation, not a specification acceptance of stranded holds."},
+      {"source": "SPEC.md and SPEC_impl.md current direct-drop/actor/Stopped searches", "result": "No rule turns the distinct idle-manager issue into acceptable behavior. The direct-drop corroboration is carried into canonical g024/l5."},
+      {"source": "TODO.md Planned; plans/queue", "result": "Planned is empty. Read sandbox-suspend-overlap goal/research/criteria: host-scoped overlap and busy wake retry do not establish an error path bypassing release or cover a hypothetical stranded hold. Podman/sandbox plan context has no applicable hold-release defect acceptance."},
+      {"source": "BUGS.md; queue INDEX and retired-connection-leaves-suspend-progress-stuck.md, successful-suspend-flashes-connecting.md; TRIAGE_OUTCOMES.md", "result": "No exact same-trigger/consequence/scope cover for this candidate. Retired-connection entry concerns a dead receiver failing to republish settled display after a released hold, not a hold remaining set; the flash entry concerns active retry display. The SSH-helper accepted bug and supervisor shutdown-test decision are distinct. Archive not read."},
+      {"source": "review_feedback_queue/FILTER.md", "result": "No filter is needed or proposed. The candidate is source-refuted at its exact transition/record-error boundary; appended lifetime substance remains retained separately."}
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "The original suspected failure needs an error path that bypasses release after taking a hold; none exists in the named transition/record-error flow. This does not prove arbitrary cancellation of perform itself safe, all retired-actor display behavior correct, or all manager lifetimes correct.",
+    "original_stronger_consequence": "Original candidate: Suspend/Resume extraction might leave a host permanently disconnected by stranding a connection hold. Suggested high if established, availability only; no loss of work or security route claimed. All later events preserve that source-refuted candidate and separately corroborate other-bucket idle manager retention.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Refute only the original helper error-release candidate using its captured-result and hold/publication/release flow. Preserve f2 as a separate accounting item and cite its appended source corroboration in g024/l5. No highest consequence was found in this named history; this is not the final independent drop check."
+  },
+  {
+    "key": "g026/f8",
+    "latest_line": 24,
+    "recommendation": "duplicate",
+    "bucket": "other",
+    "underlying_key": "helm-manager/stopped-idle-local-arc-blocks-direct-drop",
+    "aliases": ["g024/l5", "g022/f3", "g027/l8", "g067/l4"],
+    "alias_scope": "Exact underlying defect; this record supplies a later-patch persistence/finisher interaction check rather than a new production root.",
+    "target_queue_file": null,
+    "why": "The two assigned later manager patches do not repair the idle local's ownership or wait scope. Its source-confirmed direct-drop consequence belongs in the canonical finding.",
+    "checks": [
+      {"source": "g026/findings.jsonl:22-24", "result": "Read all f8 events. Lead becomes an explicitly duplicate-only candidate after confirming the original source, later patches, direct-drop fixture, explicit callers and finisher boundary. It preserves canonical consequence/exclusions and does not claim an accepted parent drop."},
+      {"source": "47f33bbdbd5ff4a6e437e97a800f9083be43096e parent-to-commit manager.rs diff; f560058da19e02716e6f943883a9508b447aff4e parent-to-commit manager.rs diff", "result": "Read both exact patches. First forwards/destructures sealed and updates a scripted list reply. Second removes two obsolete SessionInfo fixture fields. Neither touches the original Stopped block or drop scope."},
+      {"source": "566:manager.rs:1075-1162,3067-3145,3838-3893,11929-11976; tip manager.rs:4050-4102,3298-3350; sessions/sandbox.rs:339-361", "result": "Own source confirms idle conditional-move retention, destructor-dependent cancellation and ordinary-host-only direct-drop regression. Finisher owns AppState and processes sealed resources; it neither narrows this idle local's scope nor releases it for ordinary unsealed Stopped actors. No separate claim about total finisher lifetime is made."},
+      {"source": "566:environment/podman.rs:148-236,1237-1276; podman_probe.rs:143-165,338-378,409-415; manager.rs:4185-4219; tip lib.rs:2568-2592 and rest_harness.rs:1007-1016", "result": "The admitted-container direct-local-status premise is supported independently of manager place connection. Normal explicit serving and REST teardown remain protected. Original-to-tip arm comparison and recording-main diffs show no repair."}
+    ],
+    "coverage_checked": [
+      {"source": "SPEC.md Container sessions; SPEC_impl.md actor/cadence, Disposable environments/provider state, lifecycle and serving teardown", "result": "No acceptance of idle self-retention; explicit shutdown contract limits the caller scope and does not cover the fallback defect."},
+      {"source": "TODO.md Planned; plans/queue; BUGS.md", "result": "Planned empty. Actual claim searches and matching environment/overlap plan context supply no stated repair. Accepted SSH transfer-helper hang is different."},
+      {"source": "review_feedback_queue/INDEX.md and matching retired-connection/suspend/shutdown-test items; TRIAGE_OUTCOMES.md", "result": "No exact existing item/decision. Matching sections concern different state/display/test boundaries; archive not read."},
+      {"source": "review_feedback_queue/FILTER.md", "result": "No full filter match. Resource retention after direct drop is outside self-correcting display/diagnostic boundaries. Consolidation is only with named g024/l5."}
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "None for this source persistence/interface conclusion. Runtime incidence remains unmeasured, indefinite retention requires overlapping persistent stopped actors, and no normal graceful-shutdown/security/user-work-loss route is established.",
+    "original_stronger_consequence": "From the first f8 event: one idle stopped actor delays documented direct-drop cleanup; multiple actors may retain the manager indefinitely through staggered reprobes. Explicit graceful shutdown protected, resource-only impact. Final candidate preserves this scope and proposes duplicate attribution only.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Consolidate this exact same-root interface record into canonical g024/l5, preserving its independent persistence checks. No correctness rejection, consequence lowering or accepted parent drop."
+  },
+  {
+    "key": "g027/l8",
+    "latest_line": 23,
+    "recommendation": "duplicate",
+    "bucket": "other",
+    "underlying_key": "helm-manager/stopped-idle-local-arc-blocks-direct-drop",
+    "aliases": ["g024/l5", "g022/f3", "g026/f8", "g067/l4"],
+    "alias_scope": "Exact same-root corroboration, with a later deletion/withdrawal interaction check. No independent residual defect.",
+    "target_queue_file": null,
+    "why": "Global withdrawal cancels idle actors when explicitly called; direct manager release cannot reach that fallback while the actors retain strong references. Selected-host deletion/holds do not automatically run merely because the external manager owner disappears.",
+    "checks": [
+      {"source": "g027/findings.jsonl:20-23", "result": "Read all l8 events. They preserve the canonical one-actor delay/two-actor conditional continuation, then resolve the later withdrawal/deletion interaction as duplicate-only corroboration. No stronger harm or runtime observation is introduced."},
+      {"source": "566:manager.rs:1075-1162,3067-3145,3838-3893; tip manager.rs:3243-3350,4050-4102", "result": "Own reads confirm named local retention and destructor dependence. stop_actor removes only the chosen host; shutdown/withdraw_actors explicitly drains and cancels the map. Losing an external Arc is not one of those explicit calls. The later code leaves the Stopped arm intact."},
+      {"source": "566:environment/podman.rs:148-236,1237-1276; podman_probe.rs:338-378,409-415; manager.rs:4185-4219; tip sessions/sandbox.rs:339-361", "result": "An admitted ordinary unsealed stopped container can be inspected directly while its place supervisor is disconnected, so this route requires no Delete or seal. Sealed-environment finishing supplies no implicit release of ordinary stopped-actor locals."},
+      {"source": "tip lib.rs:2568-2592; rest_harness.rs:1007-1016; original manager.rs:7425-7430,11929-11976; original-to-tip and recording-main diffs", "result": "Explicit serving/REST teardown remains protective, and the direct-drop contract is exercised only for an ordinary host by the existing fixture. In-range introduction and unchanged endpoint/recording-main ownership shape are confirmed. Official Rust drop-scope/short-circuit rules were read directly. No runtime action."}
+    ],
+    "coverage_checked": [
+      {"source": "SPEC.md Container sessions; SPEC_impl.md actor/cadence, Disposable environments/provider state, lifecycle and serving teardown", "result": "Ordinary Stopped and explicit teardown behavior are specified; direct-drop manager retention is not accepted. Actual Delete/hold wakeups cover selected operations, not dropping an unsealed fleet manager."},
+      {"source": "TODO.md Planned; plans/queue; BUGS.md", "result": "Planned empty; targeted lifetime/hold/manager searches and matching environment/overlap plan sections reveal no unlanded work stating a repair. The accepted SSH transfer-helper hang is unrelated."},
+      {"source": "queue INDEX plus matching retired-connection/suspend/shutdown-test entries; TRIAGE_OUTCOMES.md", "result": "No exact existing cover/decision; matching sections concern different triggers and consequences. Archive not read."},
+      {"source": "review_feedback_queue/FILTER.md", "result": "No entire filter matches. A persistent resource-lifetime consequence is not covered just because its caller boundary is narrow."}
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "None for the conditional ownership/withdrawal claim. Runtime occurrence/frequency not measured. Indefinite retention needs two persistent overlapping stopped actors; explicit shutdown/runtime cancellation releases them. No security/user-process/user-work loss established.",
+    "original_stronger_consequence": "Original l8 already limits the supplied claim to direct-drop resource retention, one-actor delay and overlapping-actor indefinite continuation, with explicit shutdown protected. Final duplicate candidate retains that scope; it is not a withdrawal of the canonical defect.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Merge exact same-root corroboration into g024/l5 with the later deletion/withdrawal checks preserved. No rejection or lowering of the retained production finding."
+  },
+  {
+    "key": "g067/l4",
+    "latest_line": 20,
+    "recommendation": "duplicate",
+    "bucket": "other",
+    "underlying_key": "helm-manager/stopped-idle-local-arc-blocks-direct-drop",
+    "aliases": ["g024/l5", "g022/f3", "g026/f8", "g027/l8"],
+    "alias_scope": "Same underlying lifetime defect, with narrower provider-route corroboration rather than independent novelty. Preserve its admitted-installation prerequisite in the canonical entry.",
+    "target_queue_file": null,
+    "why": "The provider can report Stopped using direct local commands independently of the place's Farhelm connection. That establishes a concrete gate-false route for the canonical manager-lifetime defect; it is not a second defect to queue.",
+    "checks": [
+      {"source": "g067/findings.jsonl:18-20", "result": "Read every l4 event. Unresolved route lead becomes confirmed provider evidence, then adds admitted-row and endpoint checks. It expressly retains the separate already-attempted branch, conditional overlap consequence and explicit-shutdown exclusion."},
+      {"source": "566:environment/podman.rs:148-236,1237-1276; environment/podman_probe.rs:143-165,338-378,409-415; access.rs:64-94", "result": "Own source confirms canonical-ID/ownership inspection maps exited/stopped/created to Stopped. Route resolution reads registry/current base route and cached successful probe. SystemPlaceCommands lowers BaseRoute directly. Local command execution requires no manager supervisor status; SharedConnection::Supervisor is an SSH sharing policy, not connected-supervisor admission. Local place suffices without SSH assumptions."},
+      {"source": "566:manager.rs:4185-4219,3838-3893; tip manager.rs:4050-4102", "result": "Initial unadmitted environments are refused before provider status if either install coordinate is absent. The supported claim uses normally provisioned rows retaining both. Provider status precedes the place gate; the local Arc is retained on gate false. The endpoint has the same local/condition/wait shape."},
+      {"source": "566:manager.rs:1075-1162,3067-3145,11929-11976; tip lib.rs:2568-2592 and rest_harness.rs:1007-1016; original-to-tip/recording-main diffs", "result": "Own reads confirm Drop-dependent cleanup, a genuine ordinary-host direct-drop fixture and explicit serving/REST cancellation. No later relevant repair found. Source permits staggered idle actors to keep one reference available across each other's probes; language rules confirm the named local's ownership survives the idle await. No execution or incidence measurement."}
+    ],
+    "coverage_checked": [
+      {"source": "SPEC.md Container sessions; SPEC_impl.md Disposable environments/provider state, one-route, actor/cadence, lifecycle and serving teardown", "result": "Ordinary local places and directly inspectable stopped containers support the premise. One automatic start and explicit serving cancellation do not accept idle manager retention on direct drop."},
+      {"source": "TODO.md Planned; plans/queue; BUGS.md", "result": "Planned empty. Targeted lifetime/provider/hold searches and matching Podman/overlap plan context reveal no exact stated repair or acceptance. Known SSH transfer-output hang is distinct."},
+      {"source": "review_feedback_queue/INDEX.md and matching retired-connection/suspend/shutdown-test entries; TRIAGE_OUTCOMES.md", "result": "No exact existing queue item or active decision for this trigger/consequence/scope. Matching items concern different mechanisms; archive not read."},
+      {"source": "review_feedback_queue/FILTER.md", "result": "No full filter boundary matches resource retention on this direct-drop route. Not dependent on a hung user manager, older-release upgrade, non-first-class harness or human sub-second action."}
+    ],
+    "exact_cover_quotes": [],
+    "missing_premise": "No missing source premise for the direct-local provider route or conditional lifetime result. Requires admitted install coordinates, owned existing stopped containers and usable Podman/current route. Runtime incidence and overlap frequency remain unmeasured; no security or user-owned-work consequence established.",
+    "original_stronger_consequence": "Original l4 carries g024's one-actor delay and conditional overlapping-actor retention of tasks/connections, resource-only other impact. Later events strengthen that same premise rather than lower it. Normal explicit graceful teardown remains protected throughout.",
+    "needs_independent_drop_check": false,
+    "proposed_basis": "Consolidate supporting provider-route evidence into canonical g024/l5. Keep the normally admitted-row and direct-local-place qualifications. This is alias attribution, not correctness rejection, consequence lowering or an independent drop decision."
+  }
+]

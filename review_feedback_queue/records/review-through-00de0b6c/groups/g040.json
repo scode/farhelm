@@ -1,0 +1,600 @@
+{
+  "group": {
+    "id": "g040",
+    "domain": "browser-gui-regressions",
+    "purpose": "browser-gui-regressions: e2e/tests/appearance.spec.ts, e2e/tests/keyboard-shortcuts.spec.ts, e2e/tests/quick-switcher.spec.ts, e2e/tests/real-agent.spec.ts, e2e/tests/replace.spec.ts, e2e/tests/restart-replace-progress.spec.ts, e2e/tests/session-action-shortcuts.spec.ts, e2e/tests/sidebar-resize.spec.ts, e2e/tests/sidebar.spec.ts, e2e/tests/tooltip-coverage.spec.ts, e2e/tests/welcome.spec.ts, e2e/tests/notifications.spec.ts; phases complete small per-commit changes",
+    "interfaces": [
+      "g002",
+      "g009",
+      "g010",
+      "g011",
+      "g039",
+      "g091",
+      "g092"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/01143-000.patch",
+        "ranges": [
+          [
+            1,
+            48
+          ]
+        ],
+        "original_path": "e2e/tests/appearance.spec.ts",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,3462)",
+        "lines": 48,
+        "bytes": 3462,
+        "start": 0,
+        "end": 3462,
+        "original": "[private-run]/prep/originals/01143.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01156-000.patch",
+        "ranges": [
+          [
+            1,
+            12
+          ]
+        ],
+        "original_path": "e2e/tests/keyboard-shortcuts.spec.ts",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,634)",
+        "lines": 12,
+        "bytes": 634,
+        "start": 0,
+        "end": 634,
+        "original": "[private-run]/prep/originals/01156.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01158-000.patch",
+        "ranges": [
+          [
+            1,
+            22
+          ]
+        ],
+        "original_path": "e2e/tests/quick-switcher.spec.ts",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,1412)",
+        "lines": 22,
+        "bytes": 1412,
+        "start": 0,
+        "end": 1412,
+        "original": "[private-run]/prep/originals/01158.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01159-000.patch",
+        "ranges": [
+          [
+            1,
+            31
+          ]
+        ],
+        "original_path": "e2e/tests/real-agent.spec.ts",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,1910)",
+        "lines": 31,
+        "bytes": 1910,
+        "start": 0,
+        "end": 1910,
+        "original": "[private-run]/prep/originals/01159.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01160-000.patch",
+        "ranges": [
+          [
+            1,
+            56
+          ]
+        ],
+        "original_path": "e2e/tests/replace.spec.ts",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,3392)",
+        "lines": 56,
+        "bytes": 3404,
+        "start": 0,
+        "end": 3392,
+        "original": "[private-run]/prep/originals/01160.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01161-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "e2e/tests/restart-replace-progress.spec.ts",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,638)",
+        "lines": 13,
+        "bytes": 638,
+        "start": 0,
+        "end": 638,
+        "original": "[private-run]/prep/originals/01161.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01162-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "e2e/tests/session-action-shortcuts.spec.ts",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,840)",
+        "lines": 13,
+        "bytes": 840,
+        "start": 0,
+        "end": 840,
+        "original": "[private-run]/prep/originals/01162.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01163-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "e2e/tests/sidebar-resize.spec.ts",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,804)",
+        "lines": 13,
+        "bytes": 804,
+        "start": 0,
+        "end": 804,
+        "original": "[private-run]/prep/originals/01163.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01164-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "e2e/tests/sidebar.spec.ts",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,620)",
+        "lines": 13,
+        "bytes": 620,
+        "start": 0,
+        "end": 620,
+        "original": "[private-run]/prep/originals/01164.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01181-000.patch",
+        "ranges": [
+          [
+            1,
+            22
+          ]
+        ],
+        "original_path": "e2e/tests/tooltip-coverage.spec.ts",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,1399)",
+        "lines": 22,
+        "bytes": 1399,
+        "start": 0,
+        "end": 1399,
+        "original": "[private-run]/prep/originals/01181.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01182-000.patch",
+        "ranges": [
+          [
+            1,
+            21
+          ]
+        ],
+        "original_path": "e2e/tests/welcome.spec.ts",
+        "commit": "f560058da19e02716e6f943883a9508b447aff4e",
+        "notes": "patch header; patch character offsets [0,1157)",
+        "lines": 21,
+        "bytes": 1157,
+        "start": 0,
+        "end": 1157,
+        "original": "[private-run]/prep/originals/01182.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01510-000.patch",
+        "ranges": [
+          [
+            1,
+            22
+          ]
+        ],
+        "original_path": "e2e/tests/notifications.spec.ts",
+        "commit": "61e632323dbc6b4a35ed27bf5b9833102ffd5a4e",
+        "notes": "patch header; patch character offsets [0,1339)",
+        "lines": 22,
+        "bytes": 1339,
+        "start": 0,
+        "end": 1339,
+        "original": "[private-run]/prep/originals/01510.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01511-000.patch",
+        "ranges": [
+          [
+            1,
+            19
+          ]
+        ],
+        "original_path": "e2e/tests/replace.spec.ts",
+        "commit": "61e632323dbc6b4a35ed27bf5b9833102ffd5a4e",
+        "notes": "patch header; patch character offsets [0,1133)",
+        "lines": 19,
+        "bytes": 1141,
+        "start": 0,
+        "end": 1133,
+        "original": "[private-run]/prep/originals/01511.patch"
+      },
+      {
+        "path": "[private-run]/prep/parts/01512-000.patch",
+        "ranges": [
+          [
+            1,
+            13
+          ]
+        ],
+        "original_path": "e2e/tests/sidebar.spec.ts",
+        "commit": "61e632323dbc6b4a35ed27bf5b9833102ffd5a4e",
+        "notes": "patch header; patch character offsets [0,681)",
+        "lines": 13,
+        "bytes": 683,
+        "start": 0,
+        "end": 681,
+        "original": "[private-run]/prep/originals/01512.patch"
+      }
+    ],
+    "lines": 318,
+    "bytes": 19443
+  },
+  "records": [
+    {
+      "key": "g040/c1",
+      "owner": "g040",
+      "id": "c1",
+      "domain": "browser-gui-regressions",
+      "purpose": "browser-gui-regressions: e2e/tests/appearance.spec.ts, e2e/tests/keyboard-shortcuts.spec.ts, e2e/tests/quick-switcher.spec.ts, e2e/tests/real-agent.spec.ts, e2e/tests/replace.spec.ts, e2e/tests/restart-replace-progress.spec.ts, e2e/tests/session-action-shortcuts.spec.ts, e2e/tests/sidebar-resize.spec.ts, e2e/tests/sidebar.spec.ts, e2e/tests/tooltip-coverage.spec.ts, e2e/tests/welcome.spec.ts, e2e/tests/notifications.spec.ts; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removed fixture option and welcome watcher match the retired terminal path",
+            "location": "e2e/tests/restart-replace-progress.spec.ts:14; e2e/tests/welcome.spec.ts:60",
+            "detail": "# Removed fixture option and welcome watcher match the retired terminal path\n\nReviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\n\nConsidered whether removing the fabricated-session exception and second-client watcher makes browser coverage fail or silently accepts the wrong terminal. Source refutes this concern for the assigned changes.\n\n## Details\n\nThe same commit removes fabricatedTerminals, the automatic hostPremise fixture, its observeContext registration and the entire helpers/host-premise.ts module (git diff of those helpers inspected). helpers/evidence.ts:18-65 defines the replacement fixture without that option. restart-replace-progress.spec.ts:23-77 still creates an explicitly fabricated source for lifecycle progress and never needs the retired watch's absent-session exception. welcome.spec.ts:60-74 creates an authentication-only second client and checks shared welcome_seen behavior; it no longer imports or calls a deleted module. SPEC_impl.md, Terminal widget: the grid island, says: \"Every terminal runs in a terminal host ... so the browser draws a grid stream with its own grid client\" and Testing says: \"Its stacks create new terminals, as shipped supervisors do.\" Removal of dual-renderer premise plumbing matches that contract. Reviewed only removal implications, not independent defects in retired implementation.\n\nSuggested bucket: other if it were a defect; confidence: confirmed source refutation; proposed_drop: source refutation, synchronized helper API removal and grid-only contract above; possible_cover: none. Could-be-highest: no; this concern is confined to test setup and coverage, with no established security or user-work-loss route. No execution or reproduction performed."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c1",
+            "state": "open",
+            "summary": "Removed fixture option and welcome watcher match the retired terminal path",
+            "location": "e2e/tests/restart-replace-progress.spec.ts:14; e2e/tests/welcome.spec.ts:60",
+            "detail": "# Removed fixture option and welcome watcher match the retired terminal path\n\nReviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\n\nConsidered whether removing the fabricated-session exception and second-client watcher makes browser coverage fail or silently accepts the wrong terminal. Source refutes this concern for the assigned changes.\n\n## Details\n\nThe same commit removes fabricatedTerminals, the automatic hostPremise fixture, its observeContext registration and the entire helpers/host-premise.ts module (git diff of those helpers inspected). helpers/evidence.ts:18-65 defines the replacement fixture without that option. restart-replace-progress.spec.ts:23-77 still creates an explicitly fabricated source for lifecycle progress and never needs the retired watch's absent-session exception. welcome.spec.ts:60-74 creates an authentication-only second client and checks shared welcome_seen behavior; it no longer imports or calls a deleted module. SPEC_impl.md, Terminal widget: the grid island, says: \"Every terminal runs in a terminal host ... so the browser draws a grid stream with its own grid client\" and Testing says: \"Its stacks create new terminals, as shipped supervisors do.\" Removal of dual-renderer premise plumbing matches that contract. Reviewed only removal implications, not independent defects in retired implementation.\n\nSuggested bucket: other if it were a defect; confidence: confirmed source refutation; proposed_drop: source refutation, synchronized helper API removal and grid-only contract above; possible_cover: none. Could-be-highest: no; this concern is confined to test setup and coverage, with no established security or user-work-loss route. No execution or reproduction performed.\n\n## Synthesis revision (turn 2)\n\nThe original suspected consequence (fixture failure or silently accepting the wrong terminal) is unchanged; this remains a proposed source refutation, not a parent-accepted drop. Checked the cleanup and held-request callers at f560058da19e02716e6f943883a9508b447aff4e: restart-replace-progress.spec.ts:93-110 holds only the mutation using drainedRoute, and every test's finally releases its gate before awaiting stop (including the remaining :263-378 tests read this turn). helpers/route-gate.ts:10-15 releases one promise; helpers/drained-route.ts:19-43 stops admission, drains its own in-flight work and removes its handler. helpers/terminal-suite.ts:202-215 then waits for any remaining listing/detail route work before page/request disposal. The deleted hostPremise watch had no ownership of these route gates. The fabricated source intentionally lacks a real terminal: openSource's state/card/toolbar and held POST are its test premises, not live/revealed terminal input. Source checks therefore show no teardown dependency on the deleted option/watch. welcome.spec.ts:60-74 explicitly closes its caller-owned second context in finally, and its only asserted property there is shared welcome suppression, not terminal readiness. No additional missing premise remains for these narrow deletion implications; this does not claim that a terminal actually revealed in that second client. No execution performed."
+          }
+        }
+      ],
+      "latest": {
+        "line": 4,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c1",
+          "state": "open",
+          "summary": "Removed fixture option and welcome watcher match the retired terminal path",
+          "location": "e2e/tests/restart-replace-progress.spec.ts:14; e2e/tests/welcome.spec.ts:60",
+          "detail": "# Removed fixture option and welcome watcher match the retired terminal path\n\nReviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\n\nConsidered whether removing the fabricated-session exception and second-client watcher makes browser coverage fail or silently accepts the wrong terminal. Source refutes this concern for the assigned changes.\n\n## Details\n\nThe same commit removes fabricatedTerminals, the automatic hostPremise fixture, its observeContext registration and the entire helpers/host-premise.ts module (git diff of those helpers inspected). helpers/evidence.ts:18-65 defines the replacement fixture without that option. restart-replace-progress.spec.ts:23-77 still creates an explicitly fabricated source for lifecycle progress and never needs the retired watch's absent-session exception. welcome.spec.ts:60-74 creates an authentication-only second client and checks shared welcome_seen behavior; it no longer imports or calls a deleted module. SPEC_impl.md, Terminal widget: the grid island, says: \"Every terminal runs in a terminal host ... so the browser draws a grid stream with its own grid client\" and Testing says: \"Its stacks create new terminals, as shipped supervisors do.\" Removal of dual-renderer premise plumbing matches that contract. Reviewed only removal implications, not independent defects in retired implementation.\n\nSuggested bucket: other if it were a defect; confidence: confirmed source refutation; proposed_drop: source refutation, synchronized helper API removal and grid-only contract above; possible_cover: none. Could-be-highest: no; this concern is confined to test setup and coverage, with no established security or user-work-loss route. No execution or reproduction performed.\n\n## Synthesis revision (turn 2)\n\nThe original suspected consequence (fixture failure or silently accepting the wrong terminal) is unchanged; this remains a proposed source refutation, not a parent-accepted drop. Checked the cleanup and held-request callers at f560058da19e02716e6f943883a9508b447aff4e: restart-replace-progress.spec.ts:93-110 holds only the mutation using drainedRoute, and every test's finally releases its gate before awaiting stop (including the remaining :263-378 tests read this turn). helpers/route-gate.ts:10-15 releases one promise; helpers/drained-route.ts:19-43 stops admission, drains its own in-flight work and removes its handler. helpers/terminal-suite.ts:202-215 then waits for any remaining listing/detail route work before page/request disposal. The deleted hostPremise watch had no ownership of these route gates. The fabricated source intentionally lacks a real terminal: openSource's state/card/toolbar and held POST are its test premises, not live/revealed terminal input. Source checks therefore show no teardown dependency on the deleted option/watch. welcome.spec.ts:60-74 explicitly closes its caller-owned second context in finally, and its only asserted property there is shared welcome suppression, not terminal readiness. No additional missing premise remains for these narrow deletion implications; this does not claim that a terminal actually revealed in that second client. No execution performed."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g040/findings.jsonl",
+        "id": "c1",
+        "line": 4,
+        "disposition": "excluded",
+        "group": "retired-host-premise-test-plumbing-removal",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-024 after inspecting it. The fabricated-session option and watcher are removed together with their fixture API. The lifecycle-progress fixture does not require live terminal readiness, and the second welcome client tests shared dismissal only. Source refutation limited to deletion implications; it does not certify independent defects in the retired watcher or every surrounding test. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e diff of e2e/tests/helpers/evidence.ts removes fabricatedTerminals, hostPremise and observeContext watcher registration together; the restart test removes its now-absent option and welcome removes the deleted watcher import/call.\",\"Same revision e2e/tests/restart-replace-progress.spec.ts:23-77 fabricates listing/detail state; :93-110 holds a POST and returns a fixture refusal, with no supervisor seeing it. These are progress/card premises rather than live-terminal input premises.\",\"Same revision e2e/tests/welcome.spec.ts:60-74 creates an authentication-only context, asserts shared welcome suppression and closes that context in finally. It does not assert that second client's terminal revealed.\",\"Current SPEC_impl.md:1693-1701 says every browser terminal uses the supervisor-interpreted grid island. The deleted kind watcher no longer checks a distinction present in this protocol. No execution was performed.\"] Current coverage/results: [\"Both specifications' terminal-host/grid and shared-welcome sections support the remaining test contracts; this is source refutation of synchronized API removal, not blanket acceptance of lost terminal identity coverage.\",\"TODO.md Planned is empty; plans/queue tmux removal matches are historical migration context, not a separate unlanded defect repair. BUGS.md has no match.\",\"INDEX.md and queue searches for host-premise/fabricatedTerminals/welcome watcher found no same-root item. Active TRIAGE_OUTCOMES.md has no exact removal decision. FILTER.md is not the basis.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing fabricated-session exceptions and the second-client watcher could break fixtures or silently accept an inappropriate terminal kind. The synchronized API retirement and remaining assertions refute that narrow concern.\"; \"None for the removed fixture option/watcher dependency. No universal route teardown claim or second-client live readiness claim is made.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g040/c1",
+        "line": 4,
+        "disposition": "excluded",
+        "group": "retired-host-premise-test-plumbing-removal",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-024 after inspecting it. The fabricated-session option and watcher are removed together with their fixture API. The lifecycle-progress fixture does not require live terminal readiness, and the second welcome client tests shared dismissal only. Source refutation limited to deletion implications; it does not certify independent defects in the retired watcher or every surrounding test. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e diff of e2e/tests/helpers/evidence.ts removes fabricatedTerminals, hostPremise and observeContext watcher registration together; the restart test removes its now-absent option and welcome removes the deleted watcher import/call.\",\"Same revision e2e/tests/restart-replace-progress.spec.ts:23-77 fabricates listing/detail state; :93-110 holds a POST and returns a fixture refusal, with no supervisor seeing it. These are progress/card premises rather than live-terminal input premises.\",\"Same revision e2e/tests/welcome.spec.ts:60-74 creates an authentication-only context, asserts shared welcome suppression and closes that context in finally. It does not assert that second client's terminal revealed.\",\"Current SPEC_impl.md:1693-1701 says every browser terminal uses the supervisor-interpreted grid island. The deleted kind watcher no longer checks a distinction present in this protocol. No execution was performed.\"] Current coverage/results: [\"Both specifications' terminal-host/grid and shared-welcome sections support the remaining test contracts; this is source refutation of synchronized API removal, not blanket acceptance of lost terminal identity coverage.\",\"TODO.md Planned is empty; plans/queue tmux removal matches are historical migration context, not a separate unlanded defect repair. BUGS.md has no match.\",\"INDEX.md and queue searches for host-premise/fabricatedTerminals/welcome watcher found no same-root item. Active TRIAGE_OUTCOMES.md has no exact removal decision. FILTER.md is not the basis.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Removing fabricated-session exceptions and the second-client watcher could break fixtures or silently accept an inappropriate terminal kind. The synchronized API retirement and remaining assertions refute that narrow concern.\"; \"None for the removed fixture option/watcher dependency. No universal route teardown claim or second-client live readiness claim is made.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-024",
+          "key": "g040/c1",
+          "latest_line": 4,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "retired-host-premise-test-plumbing-removal",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The fabricated-session option and watcher are removed together with their fixture API. The lifecycle-progress fixture does not require live terminal readiness, and the second welcome client tests shared dismissal only.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e diff of e2e/tests/helpers/evidence.ts removes fabricatedTerminals, hostPremise and observeContext watcher registration together; the restart test removes its now-absent option and welcome removes the deleted watcher import/call.",
+            "Same revision e2e/tests/restart-replace-progress.spec.ts:23-77 fabricates listing/detail state; :93-110 holds a POST and returns a fixture refusal, with no supervisor seeing it. These are progress/card premises rather than live-terminal input premises.",
+            "Same revision e2e/tests/welcome.spec.ts:60-74 creates an authentication-only context, asserts shared welcome suppression and closes that context in finally. It does not assert that second client's terminal revealed.",
+            "Current SPEC_impl.md:1693-1701 says every browser terminal uses the supervisor-interpreted grid island. The deleted kind watcher no longer checks a distinction present in this protocol. No execution was performed."
+          ],
+          "coverage_checked": [
+            "Both specifications' terminal-host/grid and shared-welcome sections support the remaining test contracts; this is source refutation of synchronized API removal, not blanket acceptance of lost terminal identity coverage.",
+            "TODO.md Planned is empty; plans/queue tmux removal matches are historical migration context, not a separate unlanded defect repair. BUGS.md has no match.",
+            "INDEX.md and queue searches for host-premise/fabricatedTerminals/welcome watcher found no same-root item. Active TRIAGE_OUTCOMES.md has no exact removal decision. FILTER.md is not the basis."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "None for the removed fixture option/watcher dependency. No universal route teardown claim or second-client live readiness claim is made.",
+          "original_stronger_consequence": "Removing fabricated-session exceptions and the second-client watcher could break fixtures or silently accept an inappropriate terminal kind. The synchronized API retirement and remaining assertions refute that narrow concern.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Source refutation limited to deletion implications; it does not certify independent defects in the retired watcher or every surrounding test."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "retired-host-premise-test-plumbing-removal",
+        "destination": null
+      }
+    },
+    {
+      "key": "g040/c2",
+      "owner": "g040",
+      "id": "c2",
+      "domain": "browser-gui-regressions",
+      "purpose": "browser-gui-regressions: e2e/tests/appearance.spec.ts, e2e/tests/keyboard-shortcuts.spec.ts, e2e/tests/quick-switcher.spec.ts, e2e/tests/real-agent.spec.ts, e2e/tests/replace.spec.ts, e2e/tests/restart-replace-progress.spec.ts, e2e/tests/session-action-shortcuts.spec.ts, e2e/tests/sidebar-resize.spec.ts, e2e/tests/sidebar.spec.ts, e2e/tests/tooltip-coverage.spec.ts, e2e/tests/welcome.spec.ts, e2e/tests/notifications.spec.ts; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Grid-only assertions retain the identity, palette, focus and hit-target checks",
+            "location": "e2e/tests/appearance.spec.ts:187; e2e/tests/replace.spec.ts:867; e2e/tests/sidebar-resize.spec.ts:84; e2e/tests/sidebar.spec.ts:4343; e2e/tests/tooltip-coverage.spec.ts:138",
+            "detail": "# Grid-only assertions retain the identity, palette, focus and hit-target checks\n\nReviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\n\nConsidered whether deleting the old-renderer alternatives weakens or breaks the browser tests. The assigned assertions continue to inspect the terminal the product actually mounts.\n\n## Details\n\nSPEC_impl.md:1504-1513 states every terminal uses a grid client, with Dioxus owning surrounding UI rather than terminal content. terminal.js:4659-4667 publishes __farhelmGrid and __farhelmWs for the agent terminal, and :4848-4849 removes both at teardown. grid-terminal.js:341-368 constructs .grid-terminal, .grid-terminal-screen and the textarea.grid-terminal-input; :828-834 paints the grid element's default foreground/background. Those are exactly the handles/selectors the assigned patches retain. appearance.spec.ts:181-197 retains the actual component and samples its explicit colors; :294-300 still checks component identity, both colors and computed terminal backgrounds. replace.spec.ts:867-869 stamps the actual grid; :929-947 requires a defined different grid with an OPEN socket before inspecting the replacement's READY and full buffer, preserving the old-instance guard. The sidebar focus and hit-test selectors match the grid constructor. tooltip-coverage.spec.ts's exception still excludes its real hidden keyboard textarea. These are source refutations of the contemplated regressions, not runtime observations.\n\nSuggested bucket: other if a test defect; confidence: confirmed source refutation; proposed_drop: actual constructor, paint and test-hook contracts match the remaining assertions; possible_cover: none. Could-be-highest: no; concern is test coverage, with no established security or user-work-loss route. This does not certify unrelated product behavior or all possible stale-singleton races. No execution or reproduction performed."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Grid-only assertions retain the identity, palette, focus and hit-target checks",
+            "location": "e2e/tests/appearance.spec.ts:187; e2e/tests/replace.spec.ts:867; e2e/tests/sidebar-resize.spec.ts:84; e2e/tests/sidebar.spec.ts:4343; e2e/tests/tooltip-coverage.spec.ts:138",
+            "detail": "# Grid-only assertions retain the identity, palette, focus and hit-target checks\n\nReviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\n\nConsidered whether deleting the old-renderer alternatives weakens or breaks the browser tests. The assigned assertions continue to inspect the terminal the product actually mounts.\n\n## Details\n\nSPEC_impl.md:1504-1513 states every terminal uses a grid client, with Dioxus owning surrounding UI rather than terminal content. terminal.js:4659-4667 publishes __farhelmGrid and __farhelmWs for the agent terminal, and :4848-4849 removes both at teardown. grid-terminal.js:341-368 constructs .grid-terminal, .grid-terminal-screen and the textarea.grid-terminal-input; :828-834 paints the grid element's default foreground/background. Those are exactly the handles/selectors the assigned patches retain. appearance.spec.ts:181-197 retains the actual component and samples its explicit colors; :294-300 still checks component identity, both colors and computed terminal backgrounds. replace.spec.ts:867-869 stamps the actual grid; :929-947 requires a defined different grid with an OPEN socket before inspecting the replacement's READY and full buffer, preserving the old-instance guard. The sidebar focus and hit-test selectors match the grid constructor. tooltip-coverage.spec.ts's exception still excludes its real hidden keyboard textarea. These are source refutations of the contemplated regressions, not runtime observations.\n\nSuggested bucket: other if a test defect; confidence: confirmed source refutation; proposed_drop: actual constructor, paint and test-hook contracts match the remaining assertions; possible_cover: none. Could-be-highest: no; concern is test coverage, with no established security or user-work-loss route. This does not certify unrelated product behavior or all possible stale-singleton races. No execution or reproduction performed.\n\n## Synthesis revision (turn 2)\n\nThe original considered consequence remains weakened/broken identity and UI assertions; this is still only a proposed refutation, with no parent drop accepted. Cross-checked f560058da19e02716e6f943883a9508b447aff4e's helper migration and callers: helpers/term.ts:176-215 and :272-300 read the same __farhelmGrid model/socket for termText and waitForTermText. attachSession (:315-337) finishes with waitForSessionReady, whose terminal-readiness.ts:126-183 observation checks decoded session ID, tab selector, OPEN socket, replay and the actual hidden input. Therefore the source is independently identified and ready before replace.spec.ts stamps its marker; the grid-only helper migration did not redirect its source reads. For the result, replace.spec.ts:929-947's sentinel proves a different published component and OPEN socket; it does not independently compare the replacement socket's URL. The old dual-renderer predicate had exactly the same limitation. Thus c2 must not be read as a claim that sentinel inequality alone proves arbitrary replacement identity. No deletion-induced loss of that independent URL check occurred, because the replaced code had none.\n\nChecked the product-side caller supplying the identity this test relies on: lib.rs:2120-2125 keys SessionView by the selected session ID; session_view.rs:1701-1761 builds the primary path from that session's immutable ID, and :1831-1874 generation-fences deferred sync and unmounts on drop. terminal.js:2853-2868 tears down a changed path/generation before mounting, :3191-3226 cancels superseded pending mounts and checks attempt identity before mounting, and :4761-4805 cancels pending/deferred callbacks before closing the old socket. At :4659-4667 grid and socket are published synchronously for that primary mount. This source supports the ordinary replacement path's identity assumption, without certifying every hypothetical framework-ordering regression. A distinct product bug returning an unrelated terminal despite these contracts would need its own established source route; none was found in the assigned changes. Tests were not executed.\n\nChecklist synthesis: source attachment readiness precedes input and marker stamping; absence during unmount cannot satisfy Boolean(term); the retained appearance object explicitly asserts unchanged identity after each palette action, so remount cannot silently count as live recoloring. The no-old-renderer changes preserve rather than manufacture readiness. No additional unsettled premise remains for the narrow deletion claim."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c2",
+            "state": "open",
+            "summary": "Grid-only assertions retain the identity, palette, focus and hit-target checks",
+            "location": "e2e/tests/appearance.spec.ts:187; e2e/tests/replace.spec.ts:867; e2e/tests/sidebar-resize.spec.ts:84; e2e/tests/sidebar.spec.ts:4343; e2e/tests/tooltip-coverage.spec.ts:138",
+            "detail": "# Grid-only assertions retain the identity, palette, focus and hit-target checks\n\nReviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\n\nConsidered whether deleting the old-renderer alternatives weakens or breaks the browser tests. The assigned assertions continue to inspect the terminal the product actually mounts.\n\n## Details\n\nSPEC_impl.md:1504-1513 states every terminal uses a grid client, with Dioxus owning surrounding UI rather than terminal content. terminal.js:4659-4667 publishes __farhelmGrid and __farhelmWs for the agent terminal, and :4848-4849 removes both at teardown. grid-terminal.js:341-368 constructs .grid-terminal, .grid-terminal-screen and the textarea.grid-terminal-input; :828-834 paints the grid element's default foreground/background. Those are exactly the handles/selectors the assigned patches retain. appearance.spec.ts:181-197 retains the actual component and samples its explicit colors; :294-300 still checks component identity, both colors and computed terminal backgrounds. replace.spec.ts:867-869 stamps the actual grid; :929-947 requires a defined different grid with an OPEN socket before inspecting the replacement's READY and full buffer, preserving the old-instance guard. The sidebar focus and hit-test selectors match the grid constructor. tooltip-coverage.spec.ts's exception still excludes its real hidden keyboard textarea. These are source refutations of the contemplated regressions, not runtime observations.\n\nSuggested bucket: other if a test defect; confidence: confirmed source refutation; proposed_drop: actual constructor, paint and test-hook contracts match the remaining assertions; possible_cover: none. Could-be-highest: no; concern is test coverage, with no established security or user-work-loss route. This does not certify unrelated product behavior or all possible stale-singleton races. No execution or reproduction performed.\n\n## Synthesis revision (turn 2)\n\nThe original considered consequence remains weakened/broken identity and UI assertions; this is still only a proposed refutation, with no parent drop accepted. Cross-checked f560058da19e02716e6f943883a9508b447aff4e's helper migration and callers: helpers/term.ts:176-215 and :272-300 read the same __farhelmGrid model/socket for termText and waitForTermText. attachSession (:315-337) finishes with waitForSessionReady, whose terminal-readiness.ts:126-183 observation checks decoded session ID, tab selector, OPEN socket, replay and the actual hidden input. Therefore the source is independently identified and ready before replace.spec.ts stamps its marker; the grid-only helper migration did not redirect its source reads. For the result, replace.spec.ts:929-947's sentinel proves a different published component and OPEN socket; it does not independently compare the replacement socket's URL. The old dual-renderer predicate had exactly the same limitation. Thus c2 must not be read as a claim that sentinel inequality alone proves arbitrary replacement identity. No deletion-induced loss of that independent URL check occurred, because the replaced code had none.\n\nChecked the product-side caller supplying the identity this test relies on: lib.rs:2120-2125 keys SessionView by the selected session ID; session_view.rs:1701-1761 builds the primary path from that session's immutable ID, and :1831-1874 generation-fences deferred sync and unmounts on drop. terminal.js:2853-2868 tears down a changed path/generation before mounting, :3191-3226 cancels superseded pending mounts and checks attempt identity before mounting, and :4761-4805 cancels pending/deferred callbacks before closing the old socket. At :4659-4667 grid and socket are published synchronously for that primary mount. This source supports the ordinary replacement path's identity assumption, without certifying every hypothetical framework-ordering regression. A distinct product bug returning an unrelated terminal despite these contracts would need its own established source route; none was found in the assigned changes. Tests were not executed.\n\nChecklist synthesis: source attachment readiness precedes input and marker stamping; absence during unmount cannot satisfy Boolean(term); the retained appearance object explicitly asserts unchanged identity after each palette action, so remount cannot silently count as live recoloring. The no-old-renderer changes preserve rather than manufacture readiness. No additional unsettled premise remains for the narrow deletion claim.\n\n## Discovery-pass attribution check (turn 3)\n\nCompared the complete pinned range rather than inferring age from f560's parent: git show 6e423e30068b62c6cfa276c6d720ee35bb70387a:e2e/tests/replace.spec.ts:861-946 already has the same source marker, replacement selected-row assertion, Boolean(component)/marker inequality/OPEN-socket guard and subsequent READY/no-marker reads, without a socket URL comparison. This establishes the precise independent-identity-oracle limitation discussed in synthesis predates the exclusive range base. Correct production mapping is not offered as a refutation of that distinct test limitation. The original grid-only deletion concern remains refuted narrowly because it preserves the same grid predicate and reads; the separate pre-existing oracle limitation was not introduced anywhere in this pinned range. No parent drop has been accepted. Source-only attribution check, no execution."
+          }
+        }
+      ],
+      "latest": {
+        "line": 7,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c2",
+          "state": "open",
+          "summary": "Grid-only assertions retain the identity, palette, focus and hit-target checks",
+          "location": "e2e/tests/appearance.spec.ts:187; e2e/tests/replace.spec.ts:867; e2e/tests/sidebar-resize.spec.ts:84; e2e/tests/sidebar.spec.ts:4343; e2e/tests/tooltip-coverage.spec.ts:138",
+          "detail": "# Grid-only assertions retain the identity, palette, focus and hit-target checks\n\nReviewed commit: f560058da19e02716e6f943883a9508b447aff4e\n\n## TLDR\n\nConsidered whether deleting the old-renderer alternatives weakens or breaks the browser tests. The assigned assertions continue to inspect the terminal the product actually mounts.\n\n## Details\n\nSPEC_impl.md:1504-1513 states every terminal uses a grid client, with Dioxus owning surrounding UI rather than terminal content. terminal.js:4659-4667 publishes __farhelmGrid and __farhelmWs for the agent terminal, and :4848-4849 removes both at teardown. grid-terminal.js:341-368 constructs .grid-terminal, .grid-terminal-screen and the textarea.grid-terminal-input; :828-834 paints the grid element's default foreground/background. Those are exactly the handles/selectors the assigned patches retain. appearance.spec.ts:181-197 retains the actual component and samples its explicit colors; :294-300 still checks component identity, both colors and computed terminal backgrounds. replace.spec.ts:867-869 stamps the actual grid; :929-947 requires a defined different grid with an OPEN socket before inspecting the replacement's READY and full buffer, preserving the old-instance guard. The sidebar focus and hit-test selectors match the grid constructor. tooltip-coverage.spec.ts's exception still excludes its real hidden keyboard textarea. These are source refutations of the contemplated regressions, not runtime observations.\n\nSuggested bucket: other if a test defect; confidence: confirmed source refutation; proposed_drop: actual constructor, paint and test-hook contracts match the remaining assertions; possible_cover: none. Could-be-highest: no; concern is test coverage, with no established security or user-work-loss route. This does not certify unrelated product behavior or all possible stale-singleton races. No execution or reproduction performed.\n\n## Synthesis revision (turn 2)\n\nThe original considered consequence remains weakened/broken identity and UI assertions; this is still only a proposed refutation, with no parent drop accepted. Cross-checked f560058da19e02716e6f943883a9508b447aff4e's helper migration and callers: helpers/term.ts:176-215 and :272-300 read the same __farhelmGrid model/socket for termText and waitForTermText. attachSession (:315-337) finishes with waitForSessionReady, whose terminal-readiness.ts:126-183 observation checks decoded session ID, tab selector, OPEN socket, replay and the actual hidden input. Therefore the source is independently identified and ready before replace.spec.ts stamps its marker; the grid-only helper migration did not redirect its source reads. For the result, replace.spec.ts:929-947's sentinel proves a different published component and OPEN socket; it does not independently compare the replacement socket's URL. The old dual-renderer predicate had exactly the same limitation. Thus c2 must not be read as a claim that sentinel inequality alone proves arbitrary replacement identity. No deletion-induced loss of that independent URL check occurred, because the replaced code had none.\n\nChecked the product-side caller supplying the identity this test relies on: lib.rs:2120-2125 keys SessionView by the selected session ID; session_view.rs:1701-1761 builds the primary path from that session's immutable ID, and :1831-1874 generation-fences deferred sync and unmounts on drop. terminal.js:2853-2868 tears down a changed path/generation before mounting, :3191-3226 cancels superseded pending mounts and checks attempt identity before mounting, and :4761-4805 cancels pending/deferred callbacks before closing the old socket. At :4659-4667 grid and socket are published synchronously for that primary mount. This source supports the ordinary replacement path's identity assumption, without certifying every hypothetical framework-ordering regression. A distinct product bug returning an unrelated terminal despite these contracts would need its own established source route; none was found in the assigned changes. Tests were not executed.\n\nChecklist synthesis: source attachment readiness precedes input and marker stamping; absence during unmount cannot satisfy Boolean(term); the retained appearance object explicitly asserts unchanged identity after each palette action, so remount cannot silently count as live recoloring. The no-old-renderer changes preserve rather than manufacture readiness. No additional unsettled premise remains for the narrow deletion claim.\n\n## Discovery-pass attribution check (turn 3)\n\nCompared the complete pinned range rather than inferring age from f560's parent: git show 6e423e30068b62c6cfa276c6d720ee35bb70387a:e2e/tests/replace.spec.ts:861-946 already has the same source marker, replacement selected-row assertion, Boolean(component)/marker inequality/OPEN-socket guard and subsequent READY/no-marker reads, without a socket URL comparison. This establishes the precise independent-identity-oracle limitation discussed in synthesis predates the exclusive range base. Correct production mapping is not offered as a refutation of that distinct test limitation. The original grid-only deletion concern remains refuted narrowly because it preserves the same grid predicate and reads; the separate pre-existing oracle limitation was not introduced anywhere in this pinned range. No parent drop has been accepted. Source-only attribution check, no execution."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g040/findings.jsonl",
+        "id": "c2",
+        "line": 7,
+        "disposition": "excluded",
+        "group": "grid-only-browser-oracle-migration",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-024 after inspecting it. The retained handles/selectors match the mounted grid and preserve the old grid-branch assertions. The distinct absence of an independently matched replacement socket URL predates the exclusive range base. Refute the deletion-induced regression narrowly. Treat the separately discussed missing URL comparison as out of range based on explicit exclusive-base source, not on production correctness. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/assets/grid-terminal.js:341-368 constructs the retained grid/screen/input classes; :828-834 paints default colors on the grid element. terminal.js:4659-4673 publishes __farhelmGrid and __farhelmWs together for the primary agent mount; :4848-4849 removes them on teardown.\",\"Same commit diff e2e/tests/appearance.spec.ts:181-197,294-300 preserves component identity, palette and computed backgrounds; sidebar-resize.spec.ts:84 and sidebar.spec.ts:4343 retain the actual screen/input selectors; tooltip-coverage.spec.ts:138 still excludes the hidden real grid input.\",\"Same diff replace.spec.ts:867-869,929-947 retains the source marker, defined-different component, OPEN socket and subsequent READY/no-marker reads for the grid branch. No independent replacement socket URL comparison is present.\",\"6e423e30068b62c6cfa276c6d720ee35bb70387a:e2e/tests/replace.spec.ts:861-870,920-946 already has the source sentinel, defined-different component/OPEN guard and READY/no-marker reads without matching the replacement socket URL. That precise identity-oracle limitation is outside this range. Correct production mapping is not used to refute a test-oracle defect. No runtime observation is claimed.\"] Current coverage/results: [\"Both current specifications were searched for grid terminal/identity/appearance contracts. SPEC_impl.md:1693-1701 explicitly defines the grid-only path; no acceptance of arbitrary replacement-identity false passes is claimed.\",\"TODO.md Planned is empty; plans/queue tmux removal context does not repair or accept an independent replacement-URL oracle gap. BUGS.md has no match.\",\"INDEX.md and queue searches for replacement identity/socket URL, grid-only assertions and appearance found no exact same-root item. Existing replace-cleanup/selection items concern different mechanisms. Active TRIAGE_OUTCOMES.md has no exact oracle-migration decision. FILTER.md is not the basis.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Deleting old-renderer alternatives might weaken/break identity, palette, focus or hit-target checks. Later synthesis identifies a distinct independent replacement-identity-oracle limitation; latest history preserves it but attributes it before this range.\"; \"None for deletion preserving the old grid branch. A separate product wrong-session route is not established; the pre-existing test limitation should not be conflated with proof that sentinel inequality alone proves arbitrary replacement identity.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g040/c2",
+        "line": 7,
+        "disposition": "excluded",
+        "group": "grid-only-browser-oracle-migration",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-024 after inspecting it. The retained handles/selectors match the mounted grid and preserve the old grid-branch assertions. The distinct absence of an independently matched replacement socket URL predates the exclusive range base. Refute the deletion-induced regression narrowly. Treat the separately discussed missing URL comparison as out of range based on explicit exclusive-base source, not on production correctness. Checked source/results: [\"f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/assets/grid-terminal.js:341-368 constructs the retained grid/screen/input classes; :828-834 paints default colors on the grid element. terminal.js:4659-4673 publishes __farhelmGrid and __farhelmWs together for the primary agent mount; :4848-4849 removes them on teardown.\",\"Same commit diff e2e/tests/appearance.spec.ts:181-197,294-300 preserves component identity, palette and computed backgrounds; sidebar-resize.spec.ts:84 and sidebar.spec.ts:4343 retain the actual screen/input selectors; tooltip-coverage.spec.ts:138 still excludes the hidden real grid input.\",\"Same diff replace.spec.ts:867-869,929-947 retains the source marker, defined-different component, OPEN socket and subsequent READY/no-marker reads for the grid branch. No independent replacement socket URL comparison is present.\",\"6e423e30068b62c6cfa276c6d720ee35bb70387a:e2e/tests/replace.spec.ts:861-870,920-946 already has the source sentinel, defined-different component/OPEN guard and READY/no-marker reads without matching the replacement socket URL. That precise identity-oracle limitation is outside this range. Correct production mapping is not used to refute a test-oracle defect. No runtime observation is claimed.\"] Current coverage/results: [\"Both current specifications were searched for grid terminal/identity/appearance contracts. SPEC_impl.md:1693-1701 explicitly defines the grid-only path; no acceptance of arbitrary replacement-identity false passes is claimed.\",\"TODO.md Planned is empty; plans/queue tmux removal context does not repair or accept an independent replacement-URL oracle gap. BUGS.md has no match.\",\"INDEX.md and queue searches for replacement identity/socket URL, grid-only assertions and appearance found no exact same-root item. Existing replace-cleanup/selection items concern different mechanisms. Active TRIAGE_OUTCOMES.md has no exact oracle-migration decision. FILTER.md is not the basis.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Deleting old-renderer alternatives might weaken/break identity, palette, focus or hit-target checks. Later synthesis identifies a distinct independent replacement-identity-oracle limitation; latest history preserves it but attributes it before this range.\"; \"None for deletion preserving the old grid branch. A separate product wrong-session route is not established; the pre-existing test limitation should not be conflated with proof that sentinel inequality alone proves arbitrary replacement identity.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-024",
+          "key": "g040/c2",
+          "latest_line": 7,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "grid-only-browser-oracle-migration",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The retained handles/selectors match the mounted grid and preserve the old grid-branch assertions. The distinct absence of an independently matched replacement socket URL predates the exclusive range base.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/assets/grid-terminal.js:341-368 constructs the retained grid/screen/input classes; :828-834 paints default colors on the grid element. terminal.js:4659-4673 publishes __farhelmGrid and __farhelmWs together for the primary agent mount; :4848-4849 removes them on teardown.",
+            "Same commit diff e2e/tests/appearance.spec.ts:181-197,294-300 preserves component identity, palette and computed backgrounds; sidebar-resize.spec.ts:84 and sidebar.spec.ts:4343 retain the actual screen/input selectors; tooltip-coverage.spec.ts:138 still excludes the hidden real grid input.",
+            "Same diff replace.spec.ts:867-869,929-947 retains the source marker, defined-different component, OPEN socket and subsequent READY/no-marker reads for the grid branch. No independent replacement socket URL comparison is present.",
+            "6e423e30068b62c6cfa276c6d720ee35bb70387a:e2e/tests/replace.spec.ts:861-870,920-946 already has the source sentinel, defined-different component/OPEN guard and READY/no-marker reads without matching the replacement socket URL. That precise identity-oracle limitation is outside this range. Correct production mapping is not used to refute a test-oracle defect. No runtime observation is claimed."
+          ],
+          "coverage_checked": [
+            "Both current specifications were searched for grid terminal/identity/appearance contracts. SPEC_impl.md:1693-1701 explicitly defines the grid-only path; no acceptance of arbitrary replacement-identity false passes is claimed.",
+            "TODO.md Planned is empty; plans/queue tmux removal context does not repair or accept an independent replacement-URL oracle gap. BUGS.md has no match.",
+            "INDEX.md and queue searches for replacement identity/socket URL, grid-only assertions and appearance found no exact same-root item. Existing replace-cleanup/selection items concern different mechanisms. Active TRIAGE_OUTCOMES.md has no exact oracle-migration decision. FILTER.md is not the basis."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "None for deletion preserving the old grid branch. A separate product wrong-session route is not established; the pre-existing test limitation should not be conflated with proof that sentinel inequality alone proves arbitrary replacement identity.",
+          "original_stronger_consequence": "Deleting old-renderer alternatives might weaken/break identity, palette, focus or hit-target checks. Later synthesis identifies a distinct independent replacement-identity-oracle limitation; latest history preserves it but attributes it before this range.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Refute the deletion-induced regression narrowly. Treat the separately discussed missing URL comparison as out of range based on explicit exclusive-base source, not on production correctness."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "grid-only-browser-oracle-migration",
+        "destination": null
+      }
+    },
+    {
+      "key": "g040/c3",
+      "owner": "g040",
+      "id": "c3",
+      "domain": "browser-gui-regressions",
+      "purpose": "browser-gui-regressions: e2e/tests/appearance.spec.ts, e2e/tests/keyboard-shortcuts.spec.ts, e2e/tests/quick-switcher.spec.ts, e2e/tests/real-agent.spec.ts, e2e/tests/replace.spec.ts, e2e/tests/restart-replace-progress.spec.ts, e2e/tests/session-action-shortcuts.spec.ts, e2e/tests/sidebar-resize.spec.ts, e2e/tests/sidebar.spec.ts, e2e/tests/tooltip-coverage.spec.ts, e2e/tests/welcome.spec.ts, e2e/tests/notifications.spec.ts; phases complete small per-commit changes",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Updated wrap and notification commentary matches its source contracts",
+            "location": "e2e/tests/real-agent.spec.ts:374; e2e/tests/notifications.spec.ts:450; e2e/tests/sidebar.spec.ts:595; e2e/tests/replace.spec.ts:911",
+            "detail": "# Updated wrap and notification commentary matches its source contracts\n\nReviewed commits: f560058da19e02716e6f943883a9508b447aff4e; 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e\n\n## TLDR\n\nConsidered whether renamed terminology conceals a test behavior mismatch. The changed prose describes the grid helpers and new old-terminal notice accurately; the later commit changes no executable assertions in this group.\n\n## Details\n\nAt f560058da19e02716e6f943883a9508b447aff4e, real-agent.spec.ts:374-412 now says the row's wrapped flag reconstructs logical lines. helpers/real-agent.ts:131-167 reads grid rows and appends following text when the previous row's wrapped flag is true. grid-buffer.js:159-178 uses the same previous-row convention; terminalSize in helpers/term.ts:55-59 reads committed model dimensions, consistent with the test's live-width padding. SPEC_impl.md, The grid client, describes screen and scrollback as styled rows interpreted by the supervisor. No new wrap oracle or control-flow change was introduced in the assigned patch. Keyboard-shortcuts, quick-switcher and session-action-shortcuts patches replace xterm terminology with terminal without changing executable logic, matching SPEC_impl.md:1578-1644's capture-listener ordering contract.\n\nAt 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e, notifications.spec.ts:450-455 now refers to the notice that the old terminal ended, instead of the earlier warning. SPEC.md:2808-2816 says the ended notice ends with the new-terminals docs link, and :2822-2825 requires only Farhelm docs URLs to be clickable. SPEC_impl.md:5682-5689 describes OldTerminalEnded as the successor. The unchanged test :456-488 still checks exactly one docs link beside a foreign URL and records its external-opener call. sidebar.spec.ts:595-600's host terminology matches the grid-only terminal-host substrate. replace.spec.ts:911-916 clarifies source-terminal identity with no changed test behavior (its operative guard was analyzed under c2).\n\nSuggested bucket: other if commentary defect; confidence: confirmed source refutation; proposed_drop: unchanged executable checks and direct helper/spec support above; possible_cover: none. Could-be-highest: no; no changed production action or established security/work-loss consequence. No execution or reproduction performed."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "c3",
+            "state": "open",
+            "summary": "Updated wrap and notification commentary matches its source contracts",
+            "location": "e2e/tests/real-agent.spec.ts:374; e2e/tests/notifications.spec.ts:450; e2e/tests/sidebar.spec.ts:595; e2e/tests/replace.spec.ts:911",
+            "detail": "# Updated wrap and notification commentary matches its source contracts\n\nReviewed commits: f560058da19e02716e6f943883a9508b447aff4e; 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e\n\n## TLDR\n\nConsidered whether renamed terminology conceals a test behavior mismatch. The changed prose describes the grid helpers and new old-terminal notice accurately; the later commit changes no executable assertions in this group.\n\n## Details\n\nAt f560058da19e02716e6f943883a9508b447aff4e, real-agent.spec.ts:374-412 now says the row's wrapped flag reconstructs logical lines. helpers/real-agent.ts:131-167 reads grid rows and appends following text when the previous row's wrapped flag is true. grid-buffer.js:159-178 uses the same previous-row convention; terminalSize in helpers/term.ts:55-59 reads committed model dimensions, consistent with the test's live-width padding. SPEC_impl.md, The grid client, describes screen and scrollback as styled rows interpreted by the supervisor. No new wrap oracle or control-flow change was introduced in the assigned patch. Keyboard-shortcuts, quick-switcher and session-action-shortcuts patches replace xterm terminology with terminal without changing executable logic, matching SPEC_impl.md:1578-1644's capture-listener ordering contract.\n\nAt 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e, notifications.spec.ts:450-455 now refers to the notice that the old terminal ended, instead of the earlier warning. SPEC.md:2808-2816 says the ended notice ends with the new-terminals docs link, and :2822-2825 requires only Farhelm docs URLs to be clickable. SPEC_impl.md:5682-5689 describes OldTerminalEnded as the successor. The unchanged test :456-488 still checks exactly one docs link beside a foreign URL and records its external-opener call. sidebar.spec.ts:595-600's host terminology matches the grid-only terminal-host substrate. replace.spec.ts:911-916 clarifies source-terminal identity with no changed test behavior (its operative guard was analyzed under c2).\n\nSuggested bucket: other if commentary defect; confidence: confirmed source refutation; proposed_drop: unchanged executable checks and direct helper/spec support above; possible_cover: none. Could-be-highest: no; no changed production action or established security/work-loss consequence. No execution or reproduction performed.\n\n## Synthesis revision (turn 2)\n\nOriginal concern and consequence remain terminology hiding a behavior mismatch; proposed refutation remains unaccepted by the parent. Cross-batch check: git diff f560058da19e02716e6f943883a9508b447aff4e..61e632323dbc6b4a35ed27bf5b9833102ffd5a4e for helpers/term.ts, real-agent.ts, drained-route.ts, terminal-suite.ts and evidence.ts shows only comment edits in terminal-suite.ts (stop annotation and history retention), with no executable changes to these helper interfaces. The later assigned comment edits therefore run against the same grid readers, hooks and route retirement contracts as the first batch.\n\nChecked the shortcut-comment input premise at f560058da19e02716e6f943883a9508b447aff4e: helpers/program-input.ts:27-30 observes every binary frame, :76-95 decodes grid input with explicit tokens for unknown/malformed messages, and :104-105 includes every frame in the comparison. quick-switcher.spec.ts:98-133 installs this observer before navigation and compares actual input after restored focus; :159-163 waits for the requested second session's identity/readiness before input. session-action-shortcuts.spec.ts:16-27 obtains a processed live echo through its own attachment; :40-53 matches that session socket and asserts the observer saw the probe before clearing it; :71-77 then compares exactly the post-cancel marker and Enter. Thus changing the prose from xterm to terminal did not leave a decoder blind to grid input.\n\nCleanup implications checked: at 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e, helpers/fleet.ts:576-588 still stops then deletes the exact owned session ID, tolerates only OK/404, and does not select a renderer. sidebar.spec.ts:624-654 passes recorded IDs through this cleanup, independently of the comment's terminal-host wording. Replace's source and replacement cleanup IDs remain separate (replace.spec.ts:949-952 at f560058da19e02716e6f943883a9508b447aff4e). These checks establish the comment's ownership model, not successful runtime teardown in an executed test. No remaining missing premise for these assigned prose/deletion implications; no execution or reproduction."
+          }
+        }
+      ],
+      "latest": {
+        "line": 6,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "c3",
+          "state": "open",
+          "summary": "Updated wrap and notification commentary matches its source contracts",
+          "location": "e2e/tests/real-agent.spec.ts:374; e2e/tests/notifications.spec.ts:450; e2e/tests/sidebar.spec.ts:595; e2e/tests/replace.spec.ts:911",
+          "detail": "# Updated wrap and notification commentary matches its source contracts\n\nReviewed commits: f560058da19e02716e6f943883a9508b447aff4e; 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e\n\n## TLDR\n\nConsidered whether renamed terminology conceals a test behavior mismatch. The changed prose describes the grid helpers and new old-terminal notice accurately; the later commit changes no executable assertions in this group.\n\n## Details\n\nAt f560058da19e02716e6f943883a9508b447aff4e, real-agent.spec.ts:374-412 now says the row's wrapped flag reconstructs logical lines. helpers/real-agent.ts:131-167 reads grid rows and appends following text when the previous row's wrapped flag is true. grid-buffer.js:159-178 uses the same previous-row convention; terminalSize in helpers/term.ts:55-59 reads committed model dimensions, consistent with the test's live-width padding. SPEC_impl.md, The grid client, describes screen and scrollback as styled rows interpreted by the supervisor. No new wrap oracle or control-flow change was introduced in the assigned patch. Keyboard-shortcuts, quick-switcher and session-action-shortcuts patches replace xterm terminology with terminal without changing executable logic, matching SPEC_impl.md:1578-1644's capture-listener ordering contract.\n\nAt 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e, notifications.spec.ts:450-455 now refers to the notice that the old terminal ended, instead of the earlier warning. SPEC.md:2808-2816 says the ended notice ends with the new-terminals docs link, and :2822-2825 requires only Farhelm docs URLs to be clickable. SPEC_impl.md:5682-5689 describes OldTerminalEnded as the successor. The unchanged test :456-488 still checks exactly one docs link beside a foreign URL and records its external-opener call. sidebar.spec.ts:595-600's host terminology matches the grid-only terminal-host substrate. replace.spec.ts:911-916 clarifies source-terminal identity with no changed test behavior (its operative guard was analyzed under c2).\n\nSuggested bucket: other if commentary defect; confidence: confirmed source refutation; proposed_drop: unchanged executable checks and direct helper/spec support above; possible_cover: none. Could-be-highest: no; no changed production action or established security/work-loss consequence. No execution or reproduction performed.\n\n## Synthesis revision (turn 2)\n\nOriginal concern and consequence remain terminology hiding a behavior mismatch; proposed refutation remains unaccepted by the parent. Cross-batch check: git diff f560058da19e02716e6f943883a9508b447aff4e..61e632323dbc6b4a35ed27bf5b9833102ffd5a4e for helpers/term.ts, real-agent.ts, drained-route.ts, terminal-suite.ts and evidence.ts shows only comment edits in terminal-suite.ts (stop annotation and history retention), with no executable changes to these helper interfaces. The later assigned comment edits therefore run against the same grid readers, hooks and route retirement contracts as the first batch.\n\nChecked the shortcut-comment input premise at f560058da19e02716e6f943883a9508b447aff4e: helpers/program-input.ts:27-30 observes every binary frame, :76-95 decodes grid input with explicit tokens for unknown/malformed messages, and :104-105 includes every frame in the comparison. quick-switcher.spec.ts:98-133 installs this observer before navigation and compares actual input after restored focus; :159-163 waits for the requested second session's identity/readiness before input. session-action-shortcuts.spec.ts:16-27 obtains a processed live echo through its own attachment; :40-53 matches that session socket and asserts the observer saw the probe before clearing it; :71-77 then compares exactly the post-cancel marker and Enter. Thus changing the prose from xterm to terminal did not leave a decoder blind to grid input.\n\nCleanup implications checked: at 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e, helpers/fleet.ts:576-588 still stops then deletes the exact owned session ID, tolerates only OK/404, and does not select a renderer. sidebar.spec.ts:624-654 passes recorded IDs through this cleanup, independently of the comment's terminal-host wording. Replace's source and replacement cleanup IDs remain separate (replace.spec.ts:949-952 at f560058da19e02716e6f943883a9508b447aff4e). These checks establish the comment's ownership model, not successful runtime teardown in an executed test. No remaining missing premise for these assigned prose/deletion implications; no execution or reproduction."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g040/findings.jsonl",
+        "id": "c3",
+        "line": 6,
+        "disposition": "under-investigation",
+        "group": "g040-c3",
+        "reason": "Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it."
+      },
+      "accepted_parent_decision": null,
+      "returned_claim_checks": [
+        {
+          "batch": "claims-024",
+          "key": "g040/c3",
+          "latest_line": 6,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "grid-wrap-and-ended-notice-comment-contracts",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "The edited commentary matches the retained previous-row wrapped convention and ended-terminal notice. The notification test still asserts one allowed docs link beside a foreign URL and the exact external-opener call. This does not refute separately queued lossy space reconstruction.",
+          "checks": [
+            "f560058da19e02716e6f943883a9508b447aff4e:e2e/tests/helpers/real-agent.ts:131-167 joins according to the previous row's wrapped flag; crates/farhelm-ui/assets/grid-buffer.js:159-178 uses that same preceding-row convention. The test's terminology change does not introduce a wrap oracle/control-flow change.",
+            "61e632323dbc6b4a35ed27bf5b9833102ffd5a4e diff for notifications.spec.ts, sidebar.spec.ts and replace.spec.ts is commentary only. notifications.spec.ts:456-488 still requires exactly one docs href beside the foreign URL and records exactly [docs] through the external opener.",
+            "Current SPEC.md:2804-2825 describes the ended-terminal successor notice and restricts clickable notification addresses to Farhelm docs; SPEC_impl.md's OldTerminalEnded discussion agrees. The real-agent helper's trailing-space trim is a distinct existing queue finding, not evidence that the previous-row terminology is wrong. No execution was performed."
+          ],
+          "coverage_checked": [
+            "Both specifications' grid client, notification and keyboard-input contracts were searched; matching current ended-notice and allowlist sections were read. They support the prose, not an unrestricted claim that all helper reconstruction is correct.",
+            "TODO.md Planned is empty; matching plans/queue/tmux-drop-from-docs.md is terminology cleanup context. No unlanded exact defect repair needed or found. BUGS.md has no match.",
+            "INDEX.md and agent-text-helper-removes-wrap-boundary-spaces.md were checked: that item's per-row trailing-space removal is already separately retained and is not an exact alias of incorrect wrapped-flag commentary. No extension is established. Active TRIAGE_OUTCOMES.md has no exact terminology/notice decision. FILTER.md is not the basis."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "None for the narrow terminology and retained notification-link assertions. Runtime teardown, every input frame and complete lossless logical-line reconstruction are not certified by this check.",
+          "original_stronger_consequence": "Renamed terminology could conceal a test behavior mismatch, including wrong wrap reconstruction or an inappropriate notification-link contract. Later history preserves that concern while proposing source refutation; no parent drop is assumed.",
+          "needs_independent_drop_check": true,
+          "proposed_basis": "Refute the named commentary mismatch only. Because the notification portion touches a supervisor-to-client link trust boundary, preserve the original concern and send that narrow refutation to the independent drop check; do not drop the separately queued wrap-space defect."
+        }
+      ],
+      "parent_proposals": [
+        {
+          "artifact": "parent-flagged-judgments-024.json",
+          "key": "g040/c3",
+          "proposal": "claim-checks/claims-024/result.json",
+          "parent_proposal": "source-refuted-wrap-and-notification-comment-contract-mismatch",
+          "final_independent_gate": "required-by-conservative-link-trust-flag",
+          "reason": "Full024 previousrowwrappedflagmatchesgridbuffer, terminologyonlydoesnotchangecontrolflow; endednoticenamecurrentSPEC, notificationstillonealloweddocshrefbesideforeignURL/exactexternalopenerassertion. Conservativefreshlinkboundarychecknarrowcommentaccuracyonly, notcertifyallinputframesorlosslessreconstruction. Existingagent-text-helper-removes-wrap-boundary-spacesretainstrimmingdefectindependently, notrefutedorcoveredbyrightflagterminology."
+        }
+      ],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": true,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "grid-wrap-and-ended-notice-comment-contracts",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete: all 14 assigned patch packets read at their recorded revisions.\n\nNo substantive findings or unresolved leads. Three considered concerns were refuted through source analysis and recorded as candidates c1–c3 in `findings.jsonl`. `progress.md` records coverage and next state.\n\nNo tests or reproductions run; checkout unchanged."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised c1–c3 with cross-batch, caller, identity, and cleanup checks. Narrowed c2: its sentinel proves a fresh component and open socket, not independent replacement URL identity; that limitation predates the patch.\n\nNo new findings. Unresolved lead IDs: none."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass 1 complete. Checked neighbour context, shortcut input oracles, grid sizing, appearance boundaries, welcome-client premises, and whole-range attribution. Revised c2 with base-revision evidence.\n\nNew verified IDs: none. New unverified IDs: none. Open leads: none. Nothing new found. No runtime execution."
+    }
+  ],
+  "progress": "g040: initialized, awaiting initial source review.\nGroup g040: browser GUI regressions. Initial review, turn 1; discovery passes 0.\nRead brief fully and inventory commits field only. Required reviewer instructions loaded.\nCurrent state: initial source review complete; awaiting caller's later synthesis/discovery turn.\nScope: 14 packets (318 lines) across f560058da19e02716e6f943883a9508b447aff4e and 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e.\nInterface assumptions: browser tests exercise shared fixtures and GUI controls owned by adjacent groups; inspect those only to validate assigned changes.\nNext action: return initial-pass result; do not simulate a later-turn pass in this turn.\nUnread assigned scope: none. All 14 packets read using the absolute evidence command, each in its own shell call: 01143:1-48, 01156:1-12, 01158:1-22, 01159:1-31, 01160:1-56, 01161:1-13, 01162:1-13, 01163:1-13, 01164:1-13, 01181:1-22, 01182:1-21, 01510:1-22, 01511:1-19, 01512:1-13.\nNew verified finding IDs: none. New unverified finding/lead IDs: none. Candidates c1, c2, c3 contain source-refuted concerns, their original considered consequences, full commit hashes, source references, bucket/confidence/drop/cover/could-be-highest fields. No unresolved leads.\nNo tests, builds or reproductions run; source-only review as assigned. Nothing in the checkout modified.\n\nContracts read at f560058da19e02716e6f943883a9508b447aff4e: SPEC_impl.md Terminal widget: the grid island and The grid client (1504-1887), Answers bind to what was drawn and surrounding modal contract (1060-1112), Testing (8200-8267); SPEC.md lifecycle operations through Replace with (1884-2029), appearance/shared settings (2292-2364), Keyboard focus (3215-3346), Status first part (2651-2755), Welcome card (4389-4404). At 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e: SPEC.md notification contracts (2765-2844), SPEC_impl.md session-notification implementation contract (5662-5709). Targeted searches supplied additional section locations; clipped broad search output was not used as a substitute for source reading.\n\nPinned source/context reads at f560058da19e02716e6f943883a9508b447aff4e: appearance.spec.ts 1-110,151-323; replace.spec.ts 802-972; restart-replace-progress.spec.ts 1-260; welcome.spec.ts 1-170; real-agent.spec.ts 374-475; sidebar-resize.spec.ts 39-115; sidebar.spec.ts 4306-4415; tooltip-coverage.spec.ts 125-196; helpers/evidence.ts 1-270; helpers/terminal-suite.ts 1-220, openTerminal 275-327; helpers/real-agent.ts bufferText and caller comments 103-277; helpers/term.ts terminalScreen/terminalSize and adjacent helper excerpts; grid-terminal.js 325-397,813-853; terminal.js 4615-4684,4808-4861; grid-buffer.js targeted wrap references. Same-commit diff of helpers/evidence.ts and removed host-premise.ts read solely for assigned removal implications. At 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e: notifications.spec.ts 440-526; sidebar.spec.ts 578-654. The initial fixtures.ts lookup named a nonexistent path and yielded no source; corrected to helpers/evidence.ts.\n\nRecording note: c1's first event used unsupported state closed; evidence rejected it without appending. Changed it to the supported state open and successfully recorded the source-refuted candidate. c2's first event-file patch was rejected for multiple operations on one path before any write; immediately corrected to a distinct event-c2.json and recorded. No candidate was omitted from findings.jsonl.\n\n## Turn 2: later-turn synthesis\n\nState: synthesis complete. Discovery-pass count remains 0; this was the caller-requested synthesis, not a discovery turn. Revisited all three candidate records against the test-review checklist and source/caller interactions. Appended revisions under c1, c2 and c3; no new verified findings, unverified findings or lead IDs. Parent has accepted no proposed drops; candidates remain review records, not certified drop decisions.\n\nc1: checked route-gate release before drained-route stop and the subsequent terminal-suite unrouteAll wait; confirmed no route teardown dependency on the removed premise watcher or fabricatedTerminals option. Second welcome context explicitly closes in finally and only checks welcome state, without claiming terminal readiness.\nc2: traced source identity through attachSession and readiness socket URL matching, then the singleton readers and product mount caller. Narrowed the refutation: the replacement sentinel proves a fresh published grid plus OPEN socket, not independent socket URL identity. That limitation already existed; the grid-only patch removes no such check. The keyed session view, immutable session path, deferred-sync generations and canceled mount attempts support ordinary source/replacement mapping in source. No new defect route was established.\nc3: verified the second batch leaves relevant grid/real-agent/route helper behavior unchanged; binary frame decoding still exposes unknown messages to shortcut assertions, live probes precede use, and cleanup uses recorded owned session IDs without a renderer dependency.\n\nAdditional pinned reads: f560058da19e02716e6f943883a9508b447aff4e helpers/term.ts 1-355; terminal-readiness.ts 1-310; drained-route.ts 1-44; route-gate.ts 1-16; restart-replace-progress.spec.ts 260-378; fleet.ts cleanupSession and resetPreferences excerpts; program-input.ts 1-106; terminal-suite.ts 195-224; quick-switcher.spec.ts 85-175; session-action-shortcuts.spec.ts 1-110; terminal.js 2780-2970,3150-3278,4750-4808; lib.rs 1975-2008,2114-2138; session_view.rs 1685-1888. Read same-commit helper term migration through diff line 165 and f560..61e helper-interface diff. At 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e read fleet.ts 565-592. Source-only; no execution. No assigned material unread; no open leads. Next action: return delta to caller and await requested later turn.\n\n## Turn 3: discovery pass 1\n\nState: separate discovery pass complete, empty result. Discovery-pass count: 1. First read all 70 lines / 11996 bytes of discovery-neighbours.json. No named pending questions were supplied; neighbour findings concerned specifications or Settings ordering and supplied no new concrete lead within this assignment. No parent drop or lowering assumed accepted.\n\nSearched assigned changes for additional test-oracle/documentation defects, using the test-review checklist: input capture and focus premises, live probe distinction, actual rendered grid dimensions, appearance test's startup renderer hold and release, and welcome's second-client data boundary. Source checks found no new defect. Revisited complete-range attribution rather than asserting a concern predates the range from a single parent commit: the exclusive base's replace.spec.ts 861-946 already has the exact sentinel/OPEN-socket predicate and no replacement socket URL check. Immediately appended that evidence to original c2, explicitly keeping distinct test-oracle limitations separate from product correctness. No new candidate IDs were invented for routine clean checks.\n\nUseful checks/read results: git log restricted to assigned paths across the whole pinned range identified four touching commits, including two earlier contextual commits; assignment still consists of the audited 14 packets in f560 and 61e, not the other groups' earlier patches. At f560058da19e02716e6f943883a9508b447aff4e read keyboard-shortcuts.spec.ts 1-190: observer installed before attachment, explicit terminal focus, processed owned echo and exact programInput comparison; appearance.spec.ts 112-200,300-398: real renderer module held with request witness, finally releases before stopRoute, live palette gestures retain object identity; welcome.spec.ts 40-83: real replay before dismissal and auth-only client storage premise; quick-switcher.spec.ts 170-212: ownership cleanup uses both recorded session IDs. Read grid-terminal.js's dimensions 623-632 and input handlers 1507-1607: screen box is committed grid dimensions and key listener is on the input beneath window capture, confirming the changed selector/comment contracts. Read terminal.js 4290-4370: grid created with its real theme/platform/input callback, no separate old-renderer construction assumption in these assertions. At exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a read replace.spec.ts 854-1000 excerpt for attribution only.\n\nNew verified findings: none. New unverified-after-investigation findings: none. Revised IDs: c2 only. Open leads: none. Anything new found: no. No runtime tests, reproductions, builds, live-install actions or checkout edits. Unread assigned scope: none. Next action: report empty discovery delta and await caller.\n"
+}

@@ -1,0 +1,347 @@
+{
+  "group": {
+    "id": "g134",
+    "domain": "supervisor-status-reporting",
+    "purpose": "supervisor-status-reporting: crates/farhelm-supervisor/src/service/ticker.rs; phases -    async fn dead_tab_reaping_sweeps_a_live_daemonized_child() {",
+    "interfaces": [
+      "g001",
+      "g007",
+      "g008",
+      "g009",
+      "g102",
+      "g103",
+      "g104",
+      "g105",
+      "g106",
+      "g107",
+      "g108",
+      "g109",
+      "g110",
+      "g111",
+      "g112",
+      "g113",
+      "g114",
+      "g115",
+      "g116",
+      "g129",
+      "g131",
+      "g132",
+      "g133",
+      "g159",
+      "g160",
+      "g161",
+      "g162",
+      "g163",
+      "g164",
+      "g165",
+      "g166",
+      "g167",
+      "g168",
+      "g169",
+      "g170",
+      "g171",
+      "g172",
+      "g173"
+    ],
+    "sources": [
+      {
+        "path": "[private-run]/prep/parts/00945-002.patch",
+        "ranges": [
+          [
+            1,
+            1257
+          ]
+        ],
+        "original_path": "crates/farhelm-supervisor/src/service/ticker.rs",
+        "commit": "1ed482dde220452e424973faf38a5e1318986333",
+        "notes": "-    async fn dead_tab_reaping_sweeps_a_live_daemonized_child() {; patch character offsets [117227,175894)",
+        "lines": 1257,
+        "bytes": 58691,
+        "start": 117227,
+        "end": 175894,
+        "original": "[private-run]/prep/originals/00945.patch"
+      }
+    ],
+    "lines": 1257,
+    "bytes": 58691
+  },
+  "records": [
+    {
+      "key": "g134/l1",
+      "owner": "g134",
+      "id": "l1",
+      "domain": "supervisor-status-reporting",
+      "purpose": "supervisor-status-reporting: crates/farhelm-supervisor/src/service/ticker.rs; phases -    async fn dead_tab_reaping_sweeps_a_live_daemonized_child() {",
+      "history": [
+        {
+          "line": 1,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Check replacement coverage for automatic tab exit wake and descendant cleanup",
+            "location": "crates/farhelm-supervisor/src/service/ticker.rs:2936",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: the assigned patch removes real dead-tab daemon cleanup and pane-death wake integration tests; the visible replacements use synthetic gone tabs or invoke reap_pass directly, which by themselves cannot detect a broken host-exit notifier or failure to sweep a real tab descendant. Source basis: assigned patch lines 1–162 and 181–273; ticker.rs:2028–2067 constructs gone handles; :2936–2965 calls reap_pass explicitly after waiting for agent death. Contract: SPEC.md Session view says a shell exit is reaped automatically and silently; SPEC_impl.md Terminal host, Tabs in hosts says processed host exit wakes ticker reap at once with no poll and cleanup includes marker-only survivors. Suggested bucket: other if confirmed as test coverage gap; could-be-highest: no established shipped loss-of-work or security route. Confidence: open lead, not yet investigated to completion. Next checks: inspect host-tab and ticker integration tests at this revision for equivalent real tab cleanup and notifier coverage, and source wiring of liveness events. Missing premise: whether independent replacement tests already exercise these boundaries. proposed_drop: false. possible_cover: none; coverage metadata and queue have not been read. No execution or reproduction performed."
+          }
+        },
+        {
+          "line": 2,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Automatic wake is covered; finish checking surviving descendant cleanup coverage",
+            "location": "crates/farhelm-supervisor/src/service/ticker.rs:2936",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Original concern: removal of real dead-tab daemon cleanup and wake integration tests could leave a broken host-exit notifier or descendant sweep undetected. Wake portion refuted by source: crates/farhelm/tests/e2e/host_tabs.rs:521–565, an_exited_host_tab_is_reaped_on_its_hosts_exit, starts a served supervisor at a 600-second interval, opens a real tab, types exit and requires its listing, host process, socket and record gone well before a tick. core/tests/host_terminals.rs:358–414 independently requires a notifier-announced agent exit durably recorded at a 600-second interval. ticker.rs:929–956 drains real host changes into reap_pass; core/host_tabs.rs:684 gives tab adoption the supervisor notifier. For descendant cleanup, core/host_tabs.rs:964–1040 rechecks death, runs reap_tab_tree, ends the host, and runs a marker-only survivor sweep on the same close path; explicit daemon tests were located at crates/farhelm/tests/e2e/terminal_tabs.rs:552 onward but have not yet been read. Missing premise: whether those tests pin cleanup of surviving real tab descendants sufficiently to refute the remaining test-removal concern. Suggested bucket: other if a meaningful gap remains. Could-be-highest: no established shipped loss-of-work/security route. Confidence: unresolved test-coverage lead; no runtime defect established. proposed_drop: false pending final source check. possible_cover: none. Checks are source-only; no runtime execution."
+          }
+        },
+        {
+          "line": 4,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Removed tmux cleanup tests have terminal-host coverage and a shared sweep path",
+            "location": "crates/farhelm-supervisor/src/service/ticker.rs:2936",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR considered: removing real dead-tab daemon cleanup and pane-death wake tests could leave automatic host-tab cleanup untested. Decision: do not report as a defect. Source refutation: crates/farhelm/tests/e2e/host_tabs.rs:521–565 exercises a real opened tab exiting on a served supervisor with a 600-second tick interval, requiring host process, listing, record and socket gone; core/tests/host_terminals.rs:358–414 separately pins notifier-driven durable agent exit. core/host_tabs.rs:684 wires tab adoption to the notifier, ticker.rs:929–956 runs reap_pass from that notifier, and core/host_tabs.rs:964–1040 routes automatic and explicit closes through the same tree sweep, host end and marker-only survivor sweep. crates/farhelm/tests/e2e/terminal_tabs.rs:542–666 exercises an explicit tab close with a daemon reparented to init and verifies that daemon and shell gone while the other tab and agent still answer. Automatic-with-daemon is no longer a single combined test in this assigned hunk, but the separate real-event, shared-close, and descendant-isolation checks establish the mechanisms; no concrete bug or substantive unsupported contract was found. Suggested bucket: other (test coverage question only). Confidence: confirmed source-based refutation; tests were read, not run. Could-be-highest: no; no established security or loss-of-work consequence. proposed_drop: source refutation above, not specification acceptance or outside coverage. possible_cover: none. No queue, excluded coverage metadata or other forbidden coverage sources read."
+          }
+        },
+        {
+          "line": 6,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Synthesize automatic cleanup oracles without assuming an unmarked shell",
+            "location": "crates/farhelm-supervisor/src/service/ticker.rs:2936",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Synthesis turn 2. Original potential impact retained: removal of real automatic tab-exit/daemon cleanup tests could leave the exit notifier or descendant cleanup unverified. Parent supplies a separate g103/f1 concern: a replacement unmarked-shell test clears only descendant environment, leaving a marked shell as a competing root. My earlier l1 candidate cited terminal_tabs.rs:542–666 only for explicit daemon cleanup and isolation, but did not establish an unmarked-shell premise or prove which cleanup mechanism kills that daemon. Reopen the narrow test-evidence premise before relying on that citation. Readily checkable work: trace explicit/automatic close dispatch and only_if_dead differences; read the daemon launcher and harness scope configuration; identify existing tests whose oracles distinguish daemon marker sweep from child-root or scope cleanup. No unmarked-shell coverage is claimed. Suggested bucket: other, test coverage question only; could-be-highest: no established shipped security/loss-of-work route. Confidence: open source-analysis lead, not a confirmed finding. proposed_drop: false pending checks; possible_cover: none. No runtime execution or reproduction."
+          }
+        },
+        {
+          "line": 7,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l1",
+            "state": "open",
+            "summary": "Shared dispatch verified; daemon test does not isolate scope versus marker cleanup",
+            "location": "crates/farhelm-supervisor/src/service/ticker.rs:2936",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Synthesis checks: core.rs:13937–14059 shows explicit close_tab supplies only_if_dead=false and automatic try_close_tab supplies true; both enter the same close_tab_claimed, close_tab_under_claim and close_host_tab_under_claim. host_tabs.rs:964–1040 uses only_if_dead solely for the reap_due recheck and log, then both run the same reap_tab_tree, host end, marker-only survivor sweep and record removal. core.rs:14120–14180 maps dead/gone child to no root and both root states to the same tab-target reaper. terminal_tabs.rs:307–345 daemon launcher double-forks, setsid and ignores HUP before publishing its pid; :619–666 launches that marked daemon and requires its disappearance while the other tab and agent still answer. This establishes cleanup beyond shell/pty death but does NOT isolate marker sweep from scope cleanup: harness.rs:1793–1795, :1956–1973 uses SupervisorSeams::default, and core.rs:1150–1166 defaults scopes to ScopeManager::systemd. Thus the earlier l1 wording 'only tab-marker scan can' is too broad on scoped hosts. Nor does this test unmark the shell, so it supplies no refutation of g103/f1's separate unmarked-shell competing-root finding. Remaining check: find the reaper's rootless marker-selection test or equivalent source/test oracle to bound the shared-path argument; no product failure has been established. Original possible consequence retained: loss of coverage for automatic daemon cleanup; suggested bucket other; could-be-highest no established security/loss-of-work route. Confidence: source-confirmed dispatch and limitations, open final test-oracle premise. proposed_drop false pending final check; possible_cover none. No runtime execution."
+          }
+        },
+        {
+          "line": 8,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l1",
+            "state": "open",
+            "summary": "Separate exit, daemon, and rootless-sweep oracles cover the removed automatic cleanup test",
+            "location": "crates/farhelm-supervisor/src/service/ticker.rs:2936",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Synthesis conclusion: do not report the absence of a combined automatic-exit-plus-daemon test as a missing cleanup mechanism. Original potential consequence retained: a broken host-exit notifier or real descendant cleanup could escape tests after deletion of the tmux integration tests. The source and distinguishing oracles are: (1) crates/farhelm/tests/e2e/host_tabs.rs:521–565 serves a supervisor at a 600-second interval, opens a real tab, types exit, and requires not only its listing empty but also host process gone and socket/record removed. Listing alone could pass without any reap; these other oracles require the event-driven automatic close. (2) core.rs:13937–14059 routes explicit close(false) and try_close_tab(true) through the same close_tab_claimed, close_tab_under_claim and close_host_tab_under_claim. host_tabs.rs:964–1040 branches on only_if_dead solely to recheck reap_due and log; all cleanup, host ending, survivor sweep and record removal then share identical code. core.rs:14120–14180 converts a dead/gone child to no root and passes the same tab target to the same reaper. (3) terminal_tabs.rs:307–345 creates a double-forked setsid descendant that ignores HUP before publishing its PID; :619–666 waits for that PID, explicitly closes its tab, requires daemon and shell gone, and requires a second tab and agent still answer. The marked shell cannot provide a PPID route to a reparented daemon, and terminal hangup cannot kill this HUP-immune daemon. This test demonstrates real descendant cleanup and isolation, but does not isolate scope from marker selection: harness.rs:1793–1795, :1956–1973 and core.rs:1150–1166 use the default systemd scope manager. That corrects and narrows my earlier implication that its result proves marker scanning alone. (4) sweep.rs:3366–3423, a_sigterm_ignoring_tab_process_ends_by_hangup_inside_the_grace, calls kill_process_tree_with_grace(None, session, SweepTarget::Tab, grace) on a real marked sleeper. There is no explicit root and no scope call in that entry point. It requires the tab sleeper's exit signal to be SIGHUP and the separately session-marked agent still alive. Thus it distinguishes rootless tab-marker selection and signal delivery from scope cleanup, a child-root PPID walk, or a whole-session overreach. sweep.rs:587–629 inserts marked identities before optional roots and expands the same closure regardless of root presence. This provides the missing rootless-marker oracle independently of the explicit close test. Contract: SPEC.md Session view requires exited tabs reaped automatically and their processes cleaned; SPEC_impl.md Terminal host/Tabs in hosts specifies notifier-driven reap and survivor sweep. These are source/test-contract checks only; no tests were executed. No unmarked-shell premise is established or claimed by any of these citations. They do not refute g103/f1, which concerns a distinct unmarked-shell/descendant-root coverage claim. Suggested bucket: other (test coverage candidate only); confidence: confirmed source-based refutation of this narrowly stated missing-mechanism concern; could-be-highest: no established shipped security or loss-of-work route. proposed_drop: source refutation through actual shared dispatch plus distinct automatic-close, real-daemon and rootless-marker oracles above; not acceptance based on correct production code alone. possible_cover: none. No unresolved premise remains for l1."
+          }
+        }
+      ],
+      "latest": {
+        "line": 8,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l1",
+          "state": "open",
+          "summary": "Separate exit, daemon, and rootless-sweep oracles cover the removed automatic cleanup test",
+          "location": "crates/farhelm-supervisor/src/service/ticker.rs:2936",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Synthesis conclusion: do not report the absence of a combined automatic-exit-plus-daemon test as a missing cleanup mechanism. Original potential consequence retained: a broken host-exit notifier or real descendant cleanup could escape tests after deletion of the tmux integration tests. The source and distinguishing oracles are: (1) crates/farhelm/tests/e2e/host_tabs.rs:521–565 serves a supervisor at a 600-second interval, opens a real tab, types exit, and requires not only its listing empty but also host process gone and socket/record removed. Listing alone could pass without any reap; these other oracles require the event-driven automatic close. (2) core.rs:13937–14059 routes explicit close(false) and try_close_tab(true) through the same close_tab_claimed, close_tab_under_claim and close_host_tab_under_claim. host_tabs.rs:964–1040 branches on only_if_dead solely to recheck reap_due and log; all cleanup, host ending, survivor sweep and record removal then share identical code. core.rs:14120–14180 converts a dead/gone child to no root and passes the same tab target to the same reaper. (3) terminal_tabs.rs:307–345 creates a double-forked setsid descendant that ignores HUP before publishing its PID; :619–666 waits for that PID, explicitly closes its tab, requires daemon and shell gone, and requires a second tab and agent still answer. The marked shell cannot provide a PPID route to a reparented daemon, and terminal hangup cannot kill this HUP-immune daemon. This test demonstrates real descendant cleanup and isolation, but does not isolate scope from marker selection: harness.rs:1793–1795, :1956–1973 and core.rs:1150–1166 use the default systemd scope manager. That corrects and narrows my earlier implication that its result proves marker scanning alone. (4) sweep.rs:3366–3423, a_sigterm_ignoring_tab_process_ends_by_hangup_inside_the_grace, calls kill_process_tree_with_grace(None, session, SweepTarget::Tab, grace) on a real marked sleeper. There is no explicit root and no scope call in that entry point. It requires the tab sleeper's exit signal to be SIGHUP and the separately session-marked agent still alive. Thus it distinguishes rootless tab-marker selection and signal delivery from scope cleanup, a child-root PPID walk, or a whole-session overreach. sweep.rs:587–629 inserts marked identities before optional roots and expands the same closure regardless of root presence. This provides the missing rootless-marker oracle independently of the explicit close test. Contract: SPEC.md Session view requires exited tabs reaped automatically and their processes cleaned; SPEC_impl.md Terminal host/Tabs in hosts specifies notifier-driven reap and survivor sweep. These are source/test-contract checks only; no tests were executed. No unmarked-shell premise is established or claimed by any of these citations. They do not refute g103/f1, which concerns a distinct unmarked-shell/descendant-root coverage claim. Suggested bucket: other (test coverage candidate only); confidence: confirmed source-based refutation of this narrowly stated missing-mechanism concern; could-be-highest: no established shipped security or loss-of-work route. proposed_drop: source refutation through actual shared dispatch plus distinct automatic-close, real-daemon and rootless-marker oracles above; not acceptance based on correct production code alone. possible_cover: none. No unresolved premise remains for l1."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g134/findings.jsonl",
+        "id": "l1",
+        "line": 8,
+        "disposition": "excluded",
+        "group": "removed-tmux-automatic-tab-cleanup-test-composition",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-084 after inspecting it. Separate real automatic-exit, real daemon/sibling and rootless marker-selection oracles refute the narrowly stated absence of cleanup-mechanism coverage. They do not prove every combined schedule or an unmarked-shell root oracle. Complementary distinguishing test oracles plus checked shared dispatch, not production correctness alone. Preserve the withdrawn marker-only attribution and all combined-schedule limits. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333:crates/farhelm/tests/e2e/host_tabs.rs:531-565 requires host process/socket/record gone after exit while the normal tick is 600 seconds away. service/core/host_tabs.rs:683-690 wires its notifier; service/ticker.rs:929-953 wakes reap_pass from it.\",\"service/core.rs:13937-14059 shares automatic/explicit close dispatch; core/host_tabs.rs:964-1040 differs in deadness recheck then shares sweeps, host ending and record removal; core.rs:14120-14180 maps a dead/gone child to no root and keeps the tab-target reaper.\",\"crates/farhelm/tests/e2e/terminal_tabs.rs:310-344,619-661 uses a reparented, setsid, HUP-immune daemon and verifies surviving sibling/agent responses. harness.rs:1793-1795,1956-1972 and service/core.rs:1150-1166 retain default systemd scopes, so this does not isolate marker cleanup.\",\"service/sweep.rs:3366-3419 invokes kill_process_tree_with_grace(None, ..., Tab, ...) and requires SIGHUP for the marked tab sleeper while the separately marked agent survives. :587-620 inserts marker roots independently of optional explicit roots. No scope call is used by that test entry point. Source only, no runtime result.\",\"History preserved: initial automatic-notifier concern settled first; earlier marker-only implication was reopened at lines 6-7 and explicitly narrowed at line 8. No combined automatic-exit-plus-daemon-plus-sibling test or unmarked shell is claimed.\"] Current coverage/results: [\"SPEC.md Session view:2147-2173 and SPEC_impl.md Tabs in hosts:2234-2270 prescribe automatic tab cleanup; neither accepts missing test coverage.\",\"Empty TODO Planned; plans/queue, BUGS, queue INDEX/matching files and active ledger searches found no exact missing-mechanism claim. The full Stop hangup-oracle and tab-reap-deadline queue items have different triggers/consequences. User-tmux cleanup decisions concern scope migration, not these tests. FILTER.md: none applied.\",\"g133/l1 is an exact same-root named alias. Parent-supplied g103/f1 remains a distinct unmarked-shell/root-oracle concern and was not independently available as input here.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Deleting real automatic tab-exit/daemon cleanup and pane-death wake tests might leave broken notifier or descendant cleanup undetected. Earlier attribution of the daemon test's success solely to marker scanning was explicitly withdrawn because scopes can supply the same result.\"; \"None for the narrowly stated missing-mechanism concern; automatic combined scheduling and the unmarked-shell premise are not certified.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g134/l1",
+        "line": 8,
+        "disposition": "excluded",
+        "group": "removed-tmux-automatic-tab-cleanup-test-composition",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-084 after inspecting it. Separate real automatic-exit, real daemon/sibling and rootless marker-selection oracles refute the narrowly stated absence of cleanup-mechanism coverage. They do not prove every combined schedule or an unmarked-shell root oracle. Complementary distinguishing test oracles plus checked shared dispatch, not production correctness alone. Preserve the withdrawn marker-only attribution and all combined-schedule limits. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333:crates/farhelm/tests/e2e/host_tabs.rs:531-565 requires host process/socket/record gone after exit while the normal tick is 600 seconds away. service/core/host_tabs.rs:683-690 wires its notifier; service/ticker.rs:929-953 wakes reap_pass from it.\",\"service/core.rs:13937-14059 shares automatic/explicit close dispatch; core/host_tabs.rs:964-1040 differs in deadness recheck then shares sweeps, host ending and record removal; core.rs:14120-14180 maps a dead/gone child to no root and keeps the tab-target reaper.\",\"crates/farhelm/tests/e2e/terminal_tabs.rs:310-344,619-661 uses a reparented, setsid, HUP-immune daemon and verifies surviving sibling/agent responses. harness.rs:1793-1795,1956-1972 and service/core.rs:1150-1166 retain default systemd scopes, so this does not isolate marker cleanup.\",\"service/sweep.rs:3366-3419 invokes kill_process_tree_with_grace(None, ..., Tab, ...) and requires SIGHUP for the marked tab sleeper while the separately marked agent survives. :587-620 inserts marker roots independently of optional explicit roots. No scope call is used by that test entry point. Source only, no runtime result.\",\"History preserved: initial automatic-notifier concern settled first; earlier marker-only implication was reopened at lines 6-7 and explicitly narrowed at line 8. No combined automatic-exit-plus-daemon-plus-sibling test or unmarked shell is claimed.\"] Current coverage/results: [\"SPEC.md Session view:2147-2173 and SPEC_impl.md Tabs in hosts:2234-2270 prescribe automatic tab cleanup; neither accepts missing test coverage.\",\"Empty TODO Planned; plans/queue, BUGS, queue INDEX/matching files and active ledger searches found no exact missing-mechanism claim. The full Stop hangup-oracle and tab-reap-deadline queue items have different triggers/consequences. User-tmux cleanup decisions concern scope migration, not these tests. FILTER.md: none applied.\",\"g133/l1 is an exact same-root named alias. Parent-supplied g103/f1 remains a distinct unmarked-shell/root-oracle concern and was not independently available as input here.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Deleting real automatic tab-exit/daemon cleanup and pane-death wake tests might leave broken notifier or descendant cleanup undetected. Earlier attribution of the daemon test's success solely to marker scanning was explicitly withdrawn because scopes can supply the same result.\"; \"None for the narrowly stated missing-mechanism concern; automatic combined scheduling and the unmarked-shell premise are not certified.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-084",
+          "key": "g134/l1",
+          "latest_line": 8,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "removed-tmux-automatic-tab-cleanup-test-composition",
+          "aliases": [
+            "g133/l1"
+          ],
+          "target_queue_file": null,
+          "why": "Separate real automatic-exit, real daemon/sibling and rootless marker-selection oracles refute the narrowly stated absence of cleanup-mechanism coverage. They do not prove every combined schedule or an unmarked-shell root oracle.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333:crates/farhelm/tests/e2e/host_tabs.rs:531-565 requires host process/socket/record gone after exit while the normal tick is 600 seconds away. service/core/host_tabs.rs:683-690 wires its notifier; service/ticker.rs:929-953 wakes reap_pass from it.",
+            "service/core.rs:13937-14059 shares automatic/explicit close dispatch; core/host_tabs.rs:964-1040 differs in deadness recheck then shares sweeps, host ending and record removal; core.rs:14120-14180 maps a dead/gone child to no root and keeps the tab-target reaper.",
+            "crates/farhelm/tests/e2e/terminal_tabs.rs:310-344,619-661 uses a reparented, setsid, HUP-immune daemon and verifies surviving sibling/agent responses. harness.rs:1793-1795,1956-1972 and service/core.rs:1150-1166 retain default systemd scopes, so this does not isolate marker cleanup.",
+            "service/sweep.rs:3366-3419 invokes kill_process_tree_with_grace(None, ..., Tab, ...) and requires SIGHUP for the marked tab sleeper while the separately marked agent survives. :587-620 inserts marker roots independently of optional explicit roots. No scope call is used by that test entry point. Source only, no runtime result.",
+            "History preserved: initial automatic-notifier concern settled first; earlier marker-only implication was reopened at lines 6-7 and explicitly narrowed at line 8. No combined automatic-exit-plus-daemon-plus-sibling test or unmarked shell is claimed."
+          ],
+          "coverage_checked": [
+            "SPEC.md Session view:2147-2173 and SPEC_impl.md Tabs in hosts:2234-2270 prescribe automatic tab cleanup; neither accepts missing test coverage.",
+            "Empty TODO Planned; plans/queue, BUGS, queue INDEX/matching files and active ledger searches found no exact missing-mechanism claim. The full Stop hangup-oracle and tab-reap-deadline queue items have different triggers/consequences. User-tmux cleanup decisions concern scope migration, not these tests. FILTER.md: none applied.",
+            "g133/l1 is an exact same-root named alias. Parent-supplied g103/f1 remains a distinct unmarked-shell/root-oracle concern and was not independently available as input here."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "None for the narrowly stated missing-mechanism concern; automatic combined scheduling and the unmarked-shell premise are not certified.",
+          "original_stronger_consequence": "Deleting real automatic tab-exit/daemon cleanup and pane-death wake tests might leave broken notifier or descendant cleanup undetected. Earlier attribution of the daemon test's success solely to marker scanning was explicitly withdrawn because scopes can supply the same result.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Complementary distinguishing test oracles plus checked shared dispatch, not production correctness alone. Preserve the withdrawn marker-only attribution and all combined-schedule limits.",
+          "new_interface_evidence": "The checked source comment itself still says 'only the tab’s own marker scan can' explain the daemon cleanup (1ed482d:crates/farhelm/tests/e2e/terminal_tabs.rs:546-548). The checked harness uses default systemd scopes (harness.rs:1956-1957; core.rs:1161), which the reviewer correctly recognized as an alternative mechanism. This is concrete documentation/oracle-attribution evidence for the owner of that test, separate from l1's refuted missing-automatic-mechanism concern; no further search performed."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "removed-tmux-automatic-tab-cleanup-test-composition",
+        "destination": null
+      }
+    },
+    {
+      "key": "g134/l2",
+      "owner": "g134",
+      "id": "l2",
+      "domain": "supervisor-status-reporting",
+      "purpose": "supervisor-status-reporting: crates/farhelm-supervisor/src/service/ticker.rs; phases -    async fn dead_tab_reaping_sweeps_a_live_daemonized_child() {",
+      "history": [
+        {
+          "line": 3,
+          "event": {
+            "version": 1,
+            "kind": "lead",
+            "id": "l2",
+            "state": "open",
+            "summary": "Check activity baseline after terminal-host unavailability and readoption",
+            "location": "crates/farhelm-supervisor/src/service/ticker.rs:1319",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: after a terminal becomes unreadable and later recovers, old screen evidence might be compared against the recovered screen and incorrectly mark quiet sessions active or promote their ordering. Source basis: assigned patch lines 1170–1257 delete forget_tail recovery assertions and failed-capture baseline tests; ticker.rs:1327–1340 skips unavailable/not-caught-up terminals without clearing ActivitySample, while :1390–1398 later compares through observe_screen. Contract: SPEC_impl.md Runtime state, Last-activity timestamp and Work-start ordering state that the first successful sample after a capture failure never dates or promotes and only establishes a baseline. Missing premise: whether readoption or another host lifecycle boundary clears the same run's comparison/reading before sampling resumes; need inspect host_reclaim and ActivitySample lifecycle. Suggested bucket if confirmed: high for fleet-wide false recency; could-be-highest: no established security/loss-of-work route (cosmetic activity and order). Confidence: unresolved source lead; no execution performed. proposed_drop: false. possible_cover: none."
+          }
+        },
+        {
+          "line": 5,
+          "event": {
+            "version": 1,
+            "kind": "candidate",
+            "id": "l2",
+            "state": "open",
+            "summary": "Capture-recovery test deletion removes an unavailable tmux-only path",
+            "location": "crates/farhelm-supervisor/src/service/ticker.rs:1327",
+            "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR considered: deleting forget_tail tests could allow a recovered host screen to spuriously refresh activity or reorder sessions after an outage. Decision: do not report against this assigned removal. Checks actually made: ticker.rs:1327–1340 at the reviewed revision filters unreadable/replaying hosts; parent ticker.rs:1691–1724 already applies the identical Host caught_up/evidence filter. Parent service/terminals.rs:319–331 returns Ok(host.screen_tail(max_bytes)) unconditionally for Host terminals, and :336–340 does the same for title. Therefore the removed capture-Err/forget_tail path was reachable for the removed tmux driver and injected faults, not normal host screen reads. Parent ticker.rs:1764–1781 invokes forget_tail only on that Result error. The supposed host-outage reset omission was not introduced by these deletions, and treating a separate preexisting readoption question as a defect of the removed tmux tests would violate the assigned deletion scope. SPEC_impl.md Runtime state says baseline samples after failed captures never date or promote; that contract's failed-capture trigger is no longer produced by host screen_tail. No conclusion is claimed about independent older host readoption semantics. Suggested bucket: other (scope/refutation); original speculative impact was high cosmetic recency/order, preserved here. Could-be-highest: no established security/loss-of-work route. Confidence: confirmed source-based attribution refutation; no runtime execution. proposed_drop: source shows unchanged host behavior and removal of a tmux-only failure path, not a new contract violation. possible_cover: none."
+          }
+        }
+      ],
+      "latest": {
+        "line": 5,
+        "event": {
+          "version": 1,
+          "kind": "candidate",
+          "id": "l2",
+          "state": "open",
+          "summary": "Capture-recovery test deletion removes an unavailable tmux-only path",
+          "location": "crates/farhelm-supervisor/src/service/ticker.rs:1327",
+          "detail": "Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR considered: deleting forget_tail tests could allow a recovered host screen to spuriously refresh activity or reorder sessions after an outage. Decision: do not report against this assigned removal. Checks actually made: ticker.rs:1327–1340 at the reviewed revision filters unreadable/replaying hosts; parent ticker.rs:1691–1724 already applies the identical Host caught_up/evidence filter. Parent service/terminals.rs:319–331 returns Ok(host.screen_tail(max_bytes)) unconditionally for Host terminals, and :336–340 does the same for title. Therefore the removed capture-Err/forget_tail path was reachable for the removed tmux driver and injected faults, not normal host screen reads. Parent ticker.rs:1764–1781 invokes forget_tail only on that Result error. The supposed host-outage reset omission was not introduced by these deletions, and treating a separate preexisting readoption question as a defect of the removed tmux tests would violate the assigned deletion scope. SPEC_impl.md Runtime state says baseline samples after failed captures never date or promote; that contract's failed-capture trigger is no longer produced by host screen_tail. No conclusion is claimed about independent older host readoption semantics. Suggested bucket: other (scope/refutation); original speculative impact was high cosmetic recency/order, preserved here. Could-be-highest: no established security/loss-of-work route. Confidence: confirmed source-based attribution refutation; no runtime execution. proposed_drop: source shows unchanged host behavior and removal of a tmux-only failure path, not a new contract violation. possible_cover: none."
+        }
+      },
+      "recording_decision": {
+        "version": 1,
+        "kind": "disposition",
+        "log": "[private-run]/g134/findings.jsonl",
+        "id": "l2",
+        "line": 5,
+        "disposition": "excluded",
+        "group": "removed-tmux-capture-error-baseline-host-attribution",
+        "reason": "Parent explicitly accepted named refuted proposal from claims-084 after inspecting it. Deleting a fallible tmux capture path does not introduce the alleged host reset omission. The relevant host filter and run-cell preservation also existed at the exclusive range start, rather than merely before this one patch. Refute the named deletion claim. Do not report the broader older readoption question as newly introduced in this range; preserve its unresolved trigger/contract premise rather than declaring all host recovery correct. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333:crates/farhelm-supervisor/src/service/ticker.rs:1327-1339 filters unreadable/replaying hosts; parent :1696-1723 has the same Host caught_up/evidence filter. Parent terminals.rs:319-340 returns successful host memory reads; ticker.rs:1766-1780 forgets only on capture Err.\",\"At exclusive range start 6e423e30068b62c6cfa276c6d720ee35bb70387a, service/ticker.rs:1696-1719 already has the identical host filter; service/terminals.rs:324-335 already returns Ok(host.screen_tail(...)). Thus this is not assigned-patch-only attribution reasoning.\",\"Readoption's source does preserve the run: 1ed482d:service/core/host_handover.rs:1655-1701, especially :1694; exclusive-start same file:1694-1703 already clones current.run. That preservation does not by itself establish a false activity date or a supported capture-failure contract trigger.\",\"No production activity/order failure established or reproduced. This rejects the removed-fallible-capture premise, not all independent host unavailability/readoption semantics.\"] Current coverage/results: [\"Current SPEC_impl.md:4228-4267 requires baseline-only samples after failed captures and describes work ordering. Current SPEC.md Session list plus host contracts supply product context; neither explicitly accepts false recency after host readoption.\",\"Empty TODO Planned. Searches across plans/queue, BUGS, queue INDEX and active ledger found no exact recovered-host false-recency item. Full reconnect-replay-keeps-obsolete-event-count-fence.md concerns suppressed sampling and prompt refusal, not false dating after recovery. No exact filter applied.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Originally suggested high: recovered screens might spuriously refresh last activity or promote fleet ordering after an outage. Latest line 5 lowered this to an attribution/refutation concern and expressly left independent older readoption semantics unresolved.\"; \"For the separate broader question: a supported host recovery sequence, a contract requiring baseline reset for that sequence, and a resulting false date/order transition remain unestablished. The relevant omission/preservation predates this review range.\"."
+      },
+      "accepted_parent_decision": {
+        "key": "g134/l2",
+        "line": 5,
+        "disposition": "excluded",
+        "group": "removed-tmux-capture-error-baseline-host-attribution",
+        "bucket": "other",
+        "recording": "refuted",
+        "queue_target_candidate": null,
+        "needs_independent_drop_check": false,
+        "reason": "Parent explicitly accepted named refuted proposal from claims-084 after inspecting it. Deleting a fallible tmux capture path does not introduce the alleged host reset omission. The relevant host filter and run-cell preservation also existed at the exclusive range start, rather than merely before this one patch. Refute the named deletion claim. Do not report the broader older readoption question as newly introduced in this range; preserve its unresolved trigger/contract premise rather than declaring all host recovery correct. Checked source/results: [\"1ed482dde220452e424973faf38a5e1318986333:crates/farhelm-supervisor/src/service/ticker.rs:1327-1339 filters unreadable/replaying hosts; parent :1696-1723 has the same Host caught_up/evidence filter. Parent terminals.rs:319-340 returns successful host memory reads; ticker.rs:1766-1780 forgets only on capture Err.\",\"At exclusive range start 6e423e30068b62c6cfa276c6d720ee35bb70387a, service/ticker.rs:1696-1719 already has the identical host filter; service/terminals.rs:324-335 already returns Ok(host.screen_tail(...)). Thus this is not assigned-patch-only attribution reasoning.\",\"Readoption's source does preserve the run: 1ed482d:service/core/host_handover.rs:1655-1701, especially :1694; exclusive-start same file:1694-1703 already clones current.run. That preservation does not by itself establish a false activity date or a supported capture-failure contract trigger.\",\"No production activity/order failure established or reproduced. This rejects the removed-fallible-capture premise, not all independent host unavailability/readoption semantics.\"] Current coverage/results: [\"Current SPEC_impl.md:4228-4267 requires baseline-only samples after failed captures and describes work ordering. Current SPEC.md Session list plus host contracts supply product context; neither explicitly accepts false recency after host readoption.\",\"Empty TODO Planned. Searches across plans/queue, BUGS, queue INDEX and active ledger found no exact recovered-host false-recency item. Full reconnect-replay-keeps-obsolete-event-count-fence.md concerns suppressed sampling and prompt refusal, not false dating after recovery. No exact filter applied.\"] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: \"Originally suggested high: recovered screens might spuriously refresh last activity or promote fleet ordering after an outage. Latest line 5 lowered this to an attribution/refutation concern and expressly left independent older readoption semantics unresolved.\"; \"For the separate broader question: a supported host recovery sequence, a contract requiring baseline reset for that sequence, and a resulting false date/order transition remain unestablished. The relevant omission/preservation predates this review range.\"."
+      },
+      "returned_claim_checks": [
+        {
+          "batch": "claims-084",
+          "key": "g134/l2",
+          "latest_line": 5,
+          "recommendation": "refuted",
+          "bucket": "other",
+          "underlying_key": "removed-tmux-capture-error-baseline-host-attribution",
+          "aliases": [],
+          "target_queue_file": null,
+          "why": "Deleting a fallible tmux capture path does not introduce the alleged host reset omission. The relevant host filter and run-cell preservation also existed at the exclusive range start, rather than merely before this one patch.",
+          "checks": [
+            "1ed482dde220452e424973faf38a5e1318986333:crates/farhelm-supervisor/src/service/ticker.rs:1327-1339 filters unreadable/replaying hosts; parent :1696-1723 has the same Host caught_up/evidence filter. Parent terminals.rs:319-340 returns successful host memory reads; ticker.rs:1766-1780 forgets only on capture Err.",
+            "At exclusive range start 6e423e30068b62c6cfa276c6d720ee35bb70387a, service/ticker.rs:1696-1719 already has the identical host filter; service/terminals.rs:324-335 already returns Ok(host.screen_tail(...)). Thus this is not assigned-patch-only attribution reasoning.",
+            "Readoption's source does preserve the run: 1ed482d:service/core/host_handover.rs:1655-1701, especially :1694; exclusive-start same file:1694-1703 already clones current.run. That preservation does not by itself establish a false activity date or a supported capture-failure contract trigger.",
+            "No production activity/order failure established or reproduced. This rejects the removed-fallible-capture premise, not all independent host unavailability/readoption semantics."
+          ],
+          "coverage_checked": [
+            "Current SPEC_impl.md:4228-4267 requires baseline-only samples after failed captures and describes work ordering. Current SPEC.md Session list plus host contracts supply product context; neither explicitly accepts false recency after host readoption.",
+            "Empty TODO Planned. Searches across plans/queue, BUGS, queue INDEX and active ledger found no exact recovered-host false-recency item. Full reconnect-replay-keeps-obsolete-event-count-fence.md concerns suppressed sampling and prompt refusal, not false dating after recovery. No exact filter applied."
+          ],
+          "exact_cover_quotes": [],
+          "missing_premise": "For the separate broader question: a supported host recovery sequence, a contract requiring baseline reset for that sequence, and a resulting false date/order transition remain unestablished. The relevant omission/preservation predates this review range.",
+          "original_stronger_consequence": "Originally suggested high: recovered screens might spuriously refresh last activity or promote fleet ordering after an outage. Latest line 5 lowered this to an attribution/refutation concern and expressly left independent older readoption semantics unresolved.",
+          "needs_independent_drop_check": false,
+          "proposed_basis": "Refute the named deletion claim. Do not report the broader older readoption question as newly introduced in this range; preserve its unresolved trigger/contract premise rather than declaring all host recovery correct.",
+          "new_interface_evidence": "The originally requested lifecycle check finds install_readopted explicitly retaining current.run, both at 1ed482d:core/host_handover.rs:1691-1699 and at exclusive-start 6e423e3:1694-1702. This answers the run-cell-preservation question without demonstrating a runtime dating defect; any broader follow-up belongs with that lifecycle's existing reviewer."
+        }
+      ],
+      "parent_proposals": [],
+      "collection": {
+        "retain": false,
+        "clearly_refuted_candidate": true,
+        "needs_unfinished_gate": false,
+        "provisional_bucket": "other",
+        "confidence": "Unverified collection; recording proposals and any disagreement remain unresolved",
+        "deduplication_key": "removed-tmux-capture-error-baseline-host-attribution",
+        "destination": null
+      }
+    }
+  ],
+  "replies": [
+    {
+      "turn": 1,
+      "reply": "Initial review complete: all 1,257 assigned patch lines reviewed. No confirmed findings; two leads resolved as source-refuted candidates. No open leads or unread assigned scope.\n\nRecords updated in `g134/findings.jsonl` and `g134/progress.md`. No tests or reproductions run."
+    },
+    {
+      "turn": 2,
+      "reply": "Revised `l1` with shared-path proof and separate automatic-exit, daemon-cleanup, and rootless-marker test oracles. Removed the overbroad marker-only claim; these tests do not refute `g103/f1`’s unmarked-shell concern.\n\nNo new findings. Unresolved lead IDs: none. No tests executed."
+    },
+    {
+      "turn": 3,
+      "reply": "Discovery pass complete. Checked settlement/reload, late-failure retries, reboot finality, cleanup retries, and retained sampling oracles against their callers and contracts. Nothing new found.\n\nNew verified IDs: none. New unverified IDs: none. Open leads: none.\n\nProgress updated. No runtime execution."
+    }
+  ],
+  "progress": "Group: g134, supervisor-status-reporting.\nTurn: initial review, count 1. Discovery passes: 0. Initial assigned pass complete; waiting for caller's later synthesis/discovery turn.\nReviewed revision: 1ed482dde220452e424973faf38a5e1318986333.\nFindings: none established. IDs appended/revised: l1 and l2, each resolved from lead to candidate with complete source refutation. No open leads remain. No runtime tests, builds, or reproductions run; conclusions are source-based.\n\nAssigned evidence coverage: prep/parts/00945-002.patch, all lines 1–1257, delivered with evidence read in packets 1–180, 181–360, 361–540, 541–720, 721–900, 901–1080, 1081–1257. No assigned patch material unread. Complete inventory commits field read, without excluded coverage metadata.\n\nGoverning contracts read at the reviewed revision: SPEC.md 1910–2169 (lifecycle, containment, tab exit), 2651–2838 (Status); SPEC_impl.md 2184–2363 (terminal-host runtime, tabs and event-driven reap), 4269–4475 (runtime state/status/activity/outcome rules), 4928–5119 (process ownership, scopes and cleanup). Root AGENTS.md injected in full through End sentinel; review_feedback_queue/AGENTS.md, recording.md, .agents/machine.md, skillette and scode-voice instructions read in full. No forbidden coverage source read.\n\nSource context read at the reviewed revision, beyond the complete assigned patch: ticker.rs 460–656, 860–1055, 1121–1249, 1290–1425, 1610–1670, 1830–2010, 2020–2200, 2370–2670, 2680–2858, 2871–3041, 3043–3365, 3370–3460; core/host_tabs.rs 907–1047; core/tests/host_terminals.rs 350–432; crates/farhelm/tests/e2e/host_tabs.rs 521–655; crates/farhelm/tests/e2e/terminal_tabs.rs 542–677; service/terminals.rs 1–199. Targeted symbol/heading/reference searches in the pinned specifications, ticker.rs, core.rs, host_tabs.rs, host_reclaim.rs, host_handover.rs, host_terminals.rs and the e2e tests located the relevant callers. Parent revision context: ticker.rs 1691–1805 and targeted forget_tail/host sampling references; terminals.rs screen_tail/title definitions at 319–340.\n\nInterface assumptions: host terminals have one child for their lifetime and do not support tmux pane respawn/move semantics. Real tab notifier coverage lives in the e2e host-tabs suite, not this ticker hunk. Explicit and automatic closes share close_host_tab and both survivor sweeps; l1 records that evidence. Host screen reads were already infallible before this commit; l2 records the attribution boundary for removed capture-failure tests.\n\nArtifact note: one candidate append initially used unsupported state closed and was rejected without appending; retried with state open successfully. Both final candidates are durable through the evidence record command. Candidate means considered and set aside, not an unresolved lead.\nNext: return for the caller's later synthesis turn. No additional discovery pass performed inside this initial turn.\n\nSynthesis turn 2 complete. Discovery-pass count remains 0.\nChanges this turn: l1 reopened for the parent's oracle/competing-root question, then revised to candidate after checking actual dispatch and separate tests. Its record now explicitly retracts the overbroad implication that terminal_tabs.rs's explicit daemon test isolates marker scanning: that harness uses the real scope manager, so scope cleanup can compete. Rootless tab-marker selection is instead pinned by sweep.rs:3366–3423, which invokes the portable sweep with None roots, requires SIGHUP death of a real marked tab sleeper, and requires a session-marked agent survive. Explicit and automatic close differ only in the death guard, then share the same reap/end/survivor-sweep path. The real automatic-tab event test requires host process/socket/record gone in addition to listing absence. No citation claims an unmarked shell; g103/f1 remains a separate question for its owning group. Parent-supplied g132 agreement reinforces l2's unchanged-host-path attribution boundary; no l2 revision was needed.\nVerified/unverified findings this turn: none. Revised candidate: l1. Unresolved lead IDs: none. No parent acceptance of a proposed drop is assumed.\nNew source context at 1ed482dde220452e424973faf38a5e1318986333: core.rs 1125–1175, 13925–14124, 14120–14230, 18155–18280; core/host_tabs.rs 907–1042; e2e/terminal_tabs.rs 1–198, 307–354, 730–830; e2e/host_tabs.rs 1–150; e2e/harness.rs 1785–1808, 1950–2046, 2574–2605; sweep.rs 239–263, 327–399, 508–598, 587–653, 1061–1170, 1398–1535, 2470–2541, 2550–2596, 3200–3300, 3350–3435, 3565–3600. Targeted symbol searches located dispatch, default seams, test fixture and sweep tests. Two guessed harness/module paths did not exist; the actual harness.rs was then located and read. No required evidence or assigned patch scope remains unread.\nInterface assumptions now checked: daemon marker cleanup and unmarked live-shell cleanup are distinct; a marked shell cannot supply a PPID route to a reparented daemon, but a systemd scope can compete in the explicit daemon test. Rootless portable sweep coverage supplies the independent oracle. No runtime execution, builds, or reproductions.\nNext: return this turn's delta to the caller; await a later discovery/synthesis request.\n\nDiscovery turn 3 complete. Discovery-pass count: 1. Result: empty; nothing new found.\nRead discovery-neighbours.json in full (575 lines), using bounded ranges 1–160, 161–200, 201–240, 241–280, 281–320, 321–360, 361–400, 401–440, 441–480, 481–520, 521–575. These were interface context/novelty records, not source evidence credit. No named pending cross-group question was supplied. Existing IDs l1/l2 and their original consequences/proposed-drop bases remain unchanged; no parent drop or lowering is assumed accepted.\nFresh assigned-scope checks focused beyond those IDs: ticker.rs:3035–3190 and :3191–3363 re-read launch-read settlement/reload, late-sentinel retry modes, same-boot absence versus persisted reboot finality, Interrupted fallback, and error-cleanup retries. Compared them to status.rs:570–725: successful reads settle only with recording authority plus owned terminal death/boot proof/Interrupted; unreadable hosts do not produce observations; sentinel errors and read failures retain retry obligations. The test poison-file checks distinguish bypassed reads from merely unchanged outcomes, and cleanup detector replanting distinguishes one-time removal from repeated work. Read ticker.rs:2195–2244 and :2245–2359 for unwind release and frame/stamp readiness helper contracts, and :3607–3695 for retained baseline and Codex redraw/working-title transition assertions. These checks yielded no distinct substantive finding or unresolved lead. Neighbour readiness/documentation concerns were used for novelty and were not relabelled as new findings.\nNew verified IDs: none. New unverified-after-investigation IDs: none. Remaining lead IDs: none. Findings log unchanged this turn because no new substantive finding/candidate/lead was reached. Assigned material unread: none. Evidence remains source-only; no runtime tests, builds, reproductions, forbidden coverage search, or live-install action.\nNext: report the empty discovery result and await the caller's next instruction.\n"
+}
