@@ -189,3 +189,72 @@ Every PR had the required review by a fresh Opus 5.5 agent at high effort, and e
 Separately from the reviews, my own audit search had suggested rewording one queue finding's summary ("the new terminal
 transcript"); I left it, because it is that finding's own dated text. Every commit message went through cold reads (at
 most three each).
+
+### Landing
+
+#### What landed with it
+
+Nothing else landed in this round. Since this stack was built, main gained only plan-queue changes, so nothing could
+interact with it. An independent reviewer read the whole stack against main with one question above the others: whether
+any edit dropped or weakened a claim about the product that is still true while removing tmux wording. An earlier plan
+in this series did that with the installer's "Your sessions keep running.", which you had reverted (#3375). The review
+found one such sentence (the first fix below). Everything else it checked held:
+
+- The specs still say that terminals keep running across supervisor restarts and updates, that uninstall ends no
+  terminal, and that a stopped session's terminal stays viewable.
+- The rewritten spec mechanics match the code: how an agent's window title is read, a tab's cleanup settings, the
+  supervisor's orderly stop, Delete's extra process scan for a session that was ever restarted, and the fact that the
+  background preparation of spare checkouts keeps a `TMUX` the supervisor itself was started with.
+- The code PRs change only comments and wording. Besides the reworded refusal (retrying a session an older release left
+  half created in tmux) and log lines the report names, the only other non-comment changes are test failure messages,
+  one browser-side test name, the supervisor crate's package description, and the header lines of the checked-in
+  keyboard tables, which still match the script that generates them.
+- No frozen material is touched.
+- Each of the ten removed review-queue findings is about something no longer in the code, and none has a pending triage
+  outcome.
+
+#### Fixes made while landing
+
+- **The Tensorlake sandboxes docs page had lost a sentence that is still true** (#3382). It used to say "Older hosts
+  also need **Update** so their Farhelm can deliver the token to new terminals; old terminals do not receive it." The
+  stack removed the whole sentence, but only its second half was about tmux: a host that has not been updated since
+  GitHub-token delivery shipped (v0.37.1) still needs an Update before private checkouts there can use the token, the
+  spec still says so, and no other docs page did. The page now says "Older hosts also need **Update** before their
+  Farhelm can deliver the token."
+- **The implementation spec gave a misleading reason for one terminal rule** (#3381). In the section on the supervisor's
+  terminal emulator, the rule for a lone zero-width sign at the right edge with wrapping off used to cite tmux. The
+  stack had reworded it to "kept as it is, like the two exceptions above", and those two exceptions are kept so that
+  saved terminal contents stay sufficient, which is not this rule's reason. The sentence now says what the stack says
+  everywhere else a value has no reason of its own: this is how Farhelm's terminals behaved before terminal hosts
+  replaced tmux.
+
+#### Things you should know that the report does not say
+
+- **Two true sentences about tmux were removed and I did not restore them**: "Farhelm does not need tmux, on the Mac or
+  on any host" in `docs/install_uninstall.md`, and tmux in the Mac uninstall page's list of things uninstall leaves
+  alone. They only reassured readers about tmux, and the docs site still says Farhelm needs no tmux on the New terminals
+  and Add a remote host pages. Say if you want them back.
+
+#### Checks
+
+The stack changes documentation, comments and wording, so no whole test suite ran (Rust workspace, browser or desktop);
+the runs below are narrow ones, all local.
+
+On the stack as delivered, which already sat on main:
+
+- `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py`, `dprint check`,
+  `python3 scripts/check-agents-md.py`, `python3 releasing/check-changelog.py format`, `python3 -m py_compile` on the
+  three changed Python scripts, `node --check` on the changed browser-side scripts and their tests, and
+  `cargo clippy --all-targets -- -D warnings` (which compiles every test with its reworded messages): passed.
+- The JS unit harness (`node --test` in `crates/farhelm-ui/js-tests`), which also compares the checked-in keyboard
+  tables with what the browser client computes: 527 of 527 passed (`57f880c0`).
+- The docs website build (`bun run build`): passed, every internal link valid.
+- The two tests of the reworded refusal (`cargo nextest run -p farhelm-supervisor -p farhelm --lib --test e2e` filtered
+  to `a_retried_fresh_checkout_interrupted_in_tmux_is_refused_before_its_mkdir` and
+  `a_retry_of_a_create_interrupted_in_tmux_is_refused`): 2 passed (`ffac0fad`).
+
+After the landing fixes, which changed two Markdown files: `dprint check`, `python3 scripts/check-agents-md.py` and the
+website build again: passed.
+
+Reused: nothing. Skipped: the Rust workspace, browser and desktop suites, since nothing they exercise changed behavior;
+and the website preview (unattended run). Pages changed by the fixes: "Tensorlake sandboxes".
