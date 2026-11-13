@@ -76,8 +76,8 @@ class SelectionTest(unittest.TestCase):
         self.assertFalse(result["executed"])
 
     def test_workspace_policy_changes_and_budget_overflow_are_explicit(self):
-        """Runner and substrate changes widen every package; a nonfinite budget is refused."""
-        result = self.plan([".config/nextest.toml", ".github/release/source-pins.env"])
+        """Runner and toolchain changes widen every package; a nonfinite budget is refused."""
+        result = self.plan([".config/nextest.toml", "rust-toolchain.toml"])
         self.assertEqual(len(result["commands"]), 4)
         with self.assertRaises(ValueError):
             planner.build_plan(["Cargo.toml"], packages(), lambda path: True, 1000, 1e308)

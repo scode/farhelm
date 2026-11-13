@@ -18,13 +18,12 @@ a harness; when a harness genuinely needs a stable name, derive it from the run'
 
 What is NOT isolated, and what follows from it:
 
-- One agent per checkout or workspace. Playwright's stack-info and auth files, `.ci-tmux/`, `.ci-nextest/`, and the dx
-  output under `target/` are per checkout. Two agents in one tree race on all of them. Sibling checkouts and
-  `jj workspace` directories are the supported shape; a shared `CARGO_TARGET_DIR` across workspaces is fine for cargo
-  (it locks) but not for the dx build: the desktop smoke serializes its own cargo and dx builds behind
-  `/tmp/fh-build.lock`, and nothing serializes other dx builds. (Fixed lock files like that one, and the CentOS script's
-  lock next to the ssh config, are the exception the fixed-path rule allows: a lock exists to be shared, and it names no
-  state.)
+- One agent per checkout or workspace. Playwright's stack-info and auth files, `.ci-nextest/`, and the dx output under
+  `target/` are per checkout. Two agents in one tree race on all of them. Sibling checkouts and `jj workspace`
+  directories are the supported shape; a shared `CARGO_TARGET_DIR` across workspaces is fine for cargo (it locks) but
+  not for the dx build: the desktop smoke serializes its own cargo and dx builds behind `/tmp/fh-build.lock`, and
+  nothing serializes other dx builds. (Fixed lock files like that one, and the CentOS script's lock next to the ssh
+  config, are the exception the fixed-path rule allows: a lock exists to be shared, and it names no state.)
 - Processes you did not start are someone else's. A helm or supervisor answering on a port you did not choose, a
   `farhelm-<uuid>-*.scope` unit whose UUID no run of yours minted, an `fh-it.*`, `fh-e2e.*` or `fh-smoke.*` directory
   holding a live flock, or a docker container from the CentOS script: leave them alone. The teststate sweep already
@@ -124,7 +123,7 @@ that prompt to anyone, so it sits invisibly until someone happens to look. On 20
 screenshot subagent waited 70 minutes on one `montage $(cat $g)` contact-sheet command that way, and the release notes
 waited with it.
 
-The exception is a command this repository's instructions give word for word (the pinned nextest and tmux `PATH` setup,
-the release procedure's version checks, the plans flow's ntfy send): run it as written, with only its placeholders
-filled in. Those predate this rule and are converted to scripts as they get touched; do not use the exception to compose
-new commands in their style.
+The exception is a command this repository's instructions give word for word (the pinned nextest `PATH` setup, the
+release procedure's version checks, the plans flow's ntfy send): run it as written, with only its placeholders filled
+in. Those predate this rule and are converted to scripts as they get touched; do not use the exception to compose new
+commands in their style.

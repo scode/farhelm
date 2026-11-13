@@ -14,7 +14,7 @@ Each fixture is the visible screen as text, as the emulator gives it to the supe
 (`Emulator::screen_text`), in `<expected>-<scenario>.txt`, with the terminal's title beside it in
 `<expected>-<scenario>.title`. The expected state is the one this tool drove the agent into, never what a reader
 concluded, which is what makes the fixtures a test oracle. Versions captured before 2026-11 were captured in a private
-tmux pane with `capture-pane -p` instead, which is what old terminals show; they stay, since old sessions remain.
+tmux pane with `capture-pane -p` instead; they are kept as captured (`docs/agent-screen-fixtures.md` says why).
 
 What a run costs and touches:
 
@@ -518,8 +518,8 @@ def reach_prompt(
     ready_since: float | None = None
     while True:
         screen, title, dead = term.state()
-        # Checked before any branch can `continue`: a dialog that never accepts its answer (Codex's once ignored tmux
-        # input entirely) must still end in a timeout, and an exited agent keeps showing its last screen.
+        # Checked before any branch can `continue`: a dialog that never accepts its answer (an agent ignoring its input
+        # entirely) must still end in a timeout, and an exited agent keeps showing its last screen.
         if dead:
             raise ScenarioTimeout(f"the agent exited before its prompt was ready:\n{screen}")
         if time.monotonic() >= deadline:
@@ -751,7 +751,7 @@ def run_fixture_tests() -> int:
     env = dict(os.environ, PATH=f"{nextest_dir}:{os.environ.get('PATH', '')}")
     command = [
         sys.executable, "scripts/record-test-run.py", "--runner", "nextest", "--kind", "development",
-        "--selection", "screen reader fixtures", "--concurrency", "4 nextest slots; retries 0", "--tmux", "none",
+        "--selection", "screen reader fixtures", "--concurrency", "4 nextest slots; retries 0",
         "--", "cargo", "nextest", "run", "-p", "farhelm-supervisor", "-E", "test(screen_fixtures)",
     ]
     print("running: " + " ".join(command), file=sys.stderr)

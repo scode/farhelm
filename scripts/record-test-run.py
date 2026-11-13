@@ -221,13 +221,17 @@ def farhelm_name(value: str) -> str:
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
-    """Parse recorder options and require an explicit `--` command boundary."""
+    """Parse recorder options and require an explicit `--` command boundary.
+
+    An unknown option is a refusal before any evidence directory exists, so a
+    retired option in an old command (historical records keep their commands
+    as they were) fails loudly instead of being ignored.
+    """
 
     parser = RefusingArgumentParser(description=__doc__, add_help=True)
     parser.add_argument("--kind", required=True, choices=("development", "repetition", "release"))
     parser.add_argument("--selection", required=True)
     parser.add_argument("--concurrency", required=True)
-    parser.add_argument("--tmux", choices=("warn", "required", "none"), default="warn")
     parser.add_argument("--timeout", type=finite_positive)
     parser.add_argument("--runner", choices=tuple(RUNNER_MODULES))
     parser.add_argument(
@@ -907,27 +911,6 @@ class ConsoleForwarder:
             }
 
 
-def hash_file(path: pathlib.Path) -> tuple[str | None, str | None]:
-    """Stream a regular file into SHA256 while checking a deadline between reads."""
-
-    digest = hashlib.sha256()
-    deadline = time.monotonic() + PROBE_TIMEOUT_SECONDS
-    try:
-        if not stat.S_ISREG(path.stat().st_mode):
-            return None, "not a regular file"
-        with path.open("rb", buffering=0) as handle:
-            while True:
-                chunk = handle.read(1024 * 1024)
-                if not chunk:
-                    break
-                digest.update(chunk)
-                if time.monotonic() >= deadline:
-                    return None, f"hashing exceeded {PROBE_TIMEOUT_SECONDS} seconds"
-    except OSError as error:
-        return None, f"{type(error).__name__}: {error}"
-    return digest.hexdigest(), None
-
-
 def add_problem(problems: list[dict[str, str]], path: bytes | None, message: str) -> None:
     """Keep a bounded byte-safe sample of source-capture problems."""
 
@@ -1145,109 +1128,8 @@ def capture_source(
     return evidence
 
 
-# Substrate and host identity describe what the command inherited without
+# Environment and host identity describe what the command inherited without
 # persisting FARHELM values, which may be credentials.
-
-
-def parse_tmux_pin(checkout: pathlib.Path | None) -> tuple[str | None, str | None]:
-    """Read TMUX_VERSION as data without executing the source-pin file."""
-
-    if checkout is None:
-        return None, "Git checkout unavailable"
-    path = checkout / ".github" / "release" / "source-pins.env"
-    try:
-        if not stat.S_ISREG(path.stat().st_mode):
-            return None, f"source pin is not a regular file: {path}"
-        with path.open("rb", buffering=0) as handle:
-            encoded = handle.read(PROBE_SAMPLE_LIMIT + 1)
-        if len(encoded) > PROBE_SAMPLE_LIMIT:
-            return None, f"source pin exceeds {PROBE_SAMPLE_LIMIT} bytes: {path}"
-        lines = encoded.decode("utf-8").splitlines()
-    except (OSError, UnicodeError) as error:
-        return None, f"could not read {path}: {error}"
-    values = []
-    for line in lines:
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        name, separator, value = stripped.partition("=")
-        if separator and name.strip() == "TMUX_VERSION":
-            values.append(value.strip())
-    if len(values) != 1 or not values[0]:
-        return None, "source-pins.env must contain exactly one non-empty TMUX_VERSION"
-    return values[0], None
-
-
-def capture_tmux(
-    mode: str,
-    checkout: pathlib.Path | None,
-    env: dict[str, str],
-    intent: SignalIntent,
-) -> tuple[dict[str, object], list[str]]:
-    """Compare the controlled tmux binary with both repository pin identities."""
-
-    if mode == "none":
-        return {"mode": "none", "checked": False, "uses_tmux": False}, []
-
-    problems: list[str] = []
-    expected_version, pin_error = parse_tmux_pin(checkout)
-    if pin_error:
-        problems.append(pin_error)
-
-    resolved_text = shutil.which("tmux", path=env.get("PATH"))
-    resolved = pathlib.Path(resolved_text).resolve() if resolved_text else None
-    version_probe: ProbeResult | None = None
-    actual_version: str | None = None
-    actual_hash: str | None = None
-    actual_hash_error: str | None = None
-    if resolved is None:
-        problems.append("tmux is missing from the controlled PATH")
-    else:
-        version_probe = bounded_probe([os.fspath(resolved), "-V"], cwd=pathlib.Path.cwd(), env=env, intent=intent)
-        actual_version = probe_text(version_probe)
-        if actual_version is None:
-            problems.append("tmux version probe failed or returned invalid output")
-        actual_hash, actual_hash_error = hash_file(resolved)
-        if actual_hash_error:
-            problems.append(f"could not hash resolved tmux: {actual_hash_error}")
-
-    expected_binary = checkout / ".ci-tmux" / "tmux" if checkout is not None else None
-    expected_hash: str | None = None
-    expected_hash_error: str | None = None
-    if expected_binary is None:
-        problems.append("repository pinned tmux path is unavailable")
-    else:
-        expected_hash, expected_hash_error = hash_file(expected_binary)
-        if expected_hash_error:
-            problems.append(f"could not hash repository pinned tmux: {expected_hash_error}")
-
-    if expected_version is not None and actual_version != f"tmux {expected_version}":
-        problems.append(f"tmux version mismatch: expected tmux {expected_version}, found {actual_version!r}")
-    if expected_hash is not None and actual_hash is not None and expected_hash != actual_hash:
-        problems.append("tmux executable hash does not match the repository-built .ci-tmux/tmux")
-
-    evidence: dict[str, object] = {
-        "mode": mode,
-        "checked": True,
-        "uses_tmux": True,
-        "lifecycle_complete": version_probe is None or version_probe.lifecycle_error is None,
-        "matches_required_substrate": not problems,
-        "problems": problems,
-        "expected": {
-            "version": expected_version,
-            "binary_path": os.fspath(expected_binary) if expected_binary else None,
-            "binary_sha256": expected_hash,
-            "binary_hash_error": expected_hash_error,
-        },
-        "actual": {
-            "resolved_path": os.fspath(resolved) if resolved else None,
-            "version_output": actual_version,
-            "binary_sha256": actual_hash,
-            "binary_hash_error": actual_hash_error,
-            "version_probe": version_probe.evidence() if version_probe else None,
-        },
-    }
-    return evidence, problems
 
 
 def environment_evidence(
@@ -1844,7 +1726,6 @@ def initial_manifest(
         "environment": environment,
         "platform": platform_evidence(),
         "source": None,
-        "tmux": None,
         "output": None,
         "console": None,
         "test_traces": None,
@@ -1958,13 +1839,11 @@ def run(argv: list[str], *, signal_intent: SignalIntent | None = None) -> int:
             return exit_code
 
         manifest.data["source"] = capture_source(checkout, top_level_probe, child_env, intent)
-        tmux, tmux_problems = capture_tmux(args.tmux, checkout, child_env, intent)
-        manifest.data["tmux"] = tmux
         manifest.write()
 
         source = manifest.data["source"]
         assert isinstance(source, dict)
-        if source.get("lifecycle_complete") is False or tmux.get("lifecycle_complete") is False:
+        if source.get("lifecycle_complete") is False:
             raise RecorderFailure("metadata probe lifecycle incomplete; partial evidence retained")
 
         if intent.received is not None:
@@ -1977,19 +1856,6 @@ def run(argv: list[str], *, signal_intent: SignalIntent | None = None) -> int:
                 error="recorder interrupted during metadata capture",
             )
             return exit_code
-
-        if tmux_problems:
-            diagnostic = "tmux substrate mismatch:\n  - " + "\n  - ".join(tmux_problems) + "\n"
-            best_effort_write(2, diagnostic.encode("utf-8", "replace"))
-            if args.tmux == "required":
-                finalize(
-                    manifest,
-                    outcome="refused",
-                    recorder_exit=125,
-                    total_started=total_started,
-                    error="required tmux substrate did not match",
-                )
-                return 125
 
         if args.runner is not None:
             expected_cwd = checkout / "e2e" if checkout and args.runner == "playwright" else checkout

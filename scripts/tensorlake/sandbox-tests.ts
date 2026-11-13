@@ -38,9 +38,9 @@ type LedgerRow = { name: string; id: string; disk_mb: string; template?: string 
 // --- packing: what a sandbox needs from the local checkout
 
 /** Packs the tested tree (tracked files only: untracked leftovers in the checkout must not reach the tested tree), the
- * locally built binaries, web bundle and pinned tmux, and a one-commit Git checkout.
+ * locally built binaries and web bundle, and a one-commit Git checkout.
  * The sandbox image's glibc matches Ubuntu 24.04, so the debug binaries run there unchanged. The recorder identifies the
- * tested commit and the pinned tmux through Git, so a shallow clone of the local HEAD goes along; the sandbox never
+ * tested commit through Git, so a shallow clone of the local HEAD goes along; the sandbox never
  * contacts the repository's remote. */
 async function pack(scratch: string) {
   const out = `${scratch}/pack`;
@@ -49,7 +49,7 @@ async function pack(scratch: string) {
   await $`git ls-files -z --cached | tar --null -czf ${out}/src.tar.gz -T -`.cwd(REPO)
     .pipefail();
   await $`tar -czf ${out}/bin.tar.gz target/debug/farhelm target/debug/farhelm-fixtures \
-    target/dx/farhelm-ui/release/web/public .ci-tmux`.cwd(REPO);
+    target/dx/farhelm-ui/release/web/public`.cwd(REPO);
   await $`git clone -q --depth 1 ${"file://" + Deno.realPathSync(REPO)} ${out}/shallow`;
   await $`tar -czf ${out}/git.tar.gz -C ${out}/shallow .git`;
   await $`rm -rf ${out}/shallow`;

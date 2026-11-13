@@ -57,7 +57,6 @@ def plan(args):
         "timeout_seconds": args.timeout,
         "maximum_child_command_seconds": args.repeat * args.timeout,
         "concurrency": CONCURRENCY,
-        "tmux": "required (validation only; no build or install)",
         "prerequisites": "installed pinned Playwright, both engines and built application",
         "metadata_and_cleanup_time_outside_child_command_sum": True,
         "output_root": os.fspath(args.output_root) if args.output_root else None,

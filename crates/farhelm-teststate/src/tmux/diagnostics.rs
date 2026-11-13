@@ -26,29 +26,35 @@ const PANES_STDOUT_LIMIT: usize = 8 * 1024;
 const CLIENTS_STDOUT_LIMIT: usize = 4 * 1024;
 const CAPTURE_STDOUT_LIMIT: usize = 4 * 1024;
 
-const FIELD_SEPARATOR: u8 = 0x1f;
-const RECORD_SEPARATOR: u8 = 0x1e;
+// Fields are separated by `|` and every record ends with the line feed tmux
+// itself prints after each formatted line. Both are printable for a reason:
+// Ubuntu 24.04's tmux 3.4 escapes control characters in `list-*`
+// output as octal text, so control-byte separators arrive as `\037` and frame
+// nothing, while later releases pass them through. Printable framing reads the
+// same on both.
+const FIELD_SEPARATOR: u8 = b'|';
+const RECORD_TERMINATOR: u8 = b'\n';
 
 // Pane processes can write user options, and names are not framing authority.
-// Sanitize control bytes inside text values before adding our own separators;
-// otherwise a marker could manufacture another apparently complete pane row.
-// tmux's substitution modifier replaces every match, including US, RS and LF.
+// Sanitize control bytes and `|` inside text values before adding our own
+// separators; otherwise a marker could manufacture another apparently complete
+// pane row. tmux's substitution modifier replaces every match, including LF.
 // Use literal ASCII ranges: a POSIX class such as [[:cntrl:]] contains colons
 // that tmux parses as the end of its modifier before the regex sees them. NUL
 // cannot occur inside tmux's C-string values.
 const SESSIONS_FORMAT: &str = concat!(
-    "#{s/[\u{1}-\u{1f}\u{7f}]/_/:session_name}\u{1f}",
-    "#{session_windows}\u{1f}#{session_attached}\u{1e}",
+    "#{s/[\u{1}-\u{1f}\u{7f}|]/_/:session_name}|",
+    "#{session_windows}|#{session_attached}",
 );
 const PANES_FORMAT: &str = concat!(
-    "#{pane_id}\u{1f}#{s/[\u{1}-\u{1f}\u{7f}]/_/:session_name}\u{1f}#{window_index}\u{1f}",
-    "#{pane_dead}\u{1f}#{pane_dead_status}\u{1f}#{pane_width}\u{1f}#{pane_height}\u{1f}",
-    "#{s/[\u{1}-\u{1f}\u{7f}]/_/:pane_current_command}\u{1f}",
-    "#{s/[\u{1}-\u{1f}\u{7f}]/_/:@farhelm-agent}\u{1f}#{s/[\u{1}-\u{1f}\u{7f}]/_/:@farhelm-tab}\u{1e}",
+    "#{pane_id}|#{s/[\u{1}-\u{1f}\u{7f}|]/_/:session_name}|#{window_index}|",
+    "#{pane_dead}|#{pane_dead_status}|#{pane_width}|#{pane_height}|",
+    "#{s/[\u{1}-\u{1f}\u{7f}|]/_/:pane_current_command}|",
+    "#{s/[\u{1}-\u{1f}\u{7f}|]/_/:@farhelm-agent}|#{s/[\u{1}-\u{1f}\u{7f}|]/_/:@farhelm-tab}",
 );
 const CLIENTS_FORMAT: &str = concat!(
-    "#{s/[\u{1}-\u{1f}\u{7f}]/_/:client_session}\u{1f}",
-    "#{s/[\u{1}-\u{1f}\u{7f}]/_/:client_flags}\u{1f}#{client_pid}\u{1e}",
+    "#{s/[\u{1}-\u{1f}\u{7f}|]/_/:client_session}|",
+    "#{s/[\u{1}-\u{1f}\u{7f}|]/_/:client_flags}|#{client_pid}",
 );
 
 /// The three metadata queries are fixed so callers cannot turn diagnostics
@@ -266,8 +272,8 @@ fn run_metadata(
 ) -> TmuxDiagnosticCommand {
     let (subcommand, all_panes, format, stdout_limit) = query.command();
     let mut command = tmux_command(authority, executable);
-    // env_clear removes locale hints. Without -u, tmux sanitizes US/RS to
-    // underscores for a non-UTF8 client, destroying the record boundaries.
+    // env_clear removes locale hints. -u keeps non-ASCII names and commands
+    // printed as UTF-8, the same way the visible captures below print them.
     command.args(["-u", subcommand]);
     if all_panes {
         command.arg("-a");
@@ -393,7 +399,7 @@ fn command_succeeded(outcome: &CommandRunOutcome) -> bool {
         && !outcome.ownership_lost
 }
 
-/// Select only complete `RS LF`-framed pane records. A retained prefix that
+/// Select only complete, LF-terminated pane records. A retained prefix that
 /// reached its cap still contributes its complete records, but cannot claim an
 /// exact omitted total. Any malformed nonempty record has the same effect.
 fn parse_pane_listing(prefix: &[u8], complete: bool, omitted_bytes: Option<u64>) -> PaneSelection {
@@ -405,17 +411,12 @@ fn parse_pane_listing(prefix: &[u8], complete: bool, omitted_bytes: Option<u64>)
     let mut malformed = false;
     let mut remaining = prefix;
     while !remaining.is_empty() {
-        let Some(separator) = remaining.iter().position(|byte| *byte == RECORD_SEPARATOR) else {
+        let Some(end) = remaining.iter().position(|byte| *byte == RECORD_TERMINATOR) else {
             malformed = true;
             break;
         };
-        let record = &remaining[..separator];
-        let after_separator = &remaining[separator + 1..];
-        let Some(rest) = after_separator.strip_prefix(b"\n") else {
-            malformed = true;
-            break;
-        };
-        remaining = rest;
+        let record = &remaining[..end];
+        remaining = &remaining[end + 1..];
         if record.is_empty() {
             malformed = true;
             continue;
@@ -463,14 +464,14 @@ mod tests {
 
     const HELPER_MODE: &str = "FARHELM_DIAGNOSTICS_HELPER_MODE";
 
-    /// Make rows match tmux's format output exactly: it adds LF after the
-    /// record separator supplied by the `-F` string.
+    /// Make rows match tmux's format output exactly: it ends each formatted
+    /// line with LF.
     fn pane_row(id: &str) -> Vec<u8> {
         let mut row = id.as_bytes().to_vec();
         for _ in 0..9 {
             row.extend([FIELD_SEPARATOR, b'x']);
         }
-        row.extend([RECORD_SEPARATOR, b'\n']);
+        row.push(RECORD_TERMINATOR);
         row
     }
 
@@ -480,7 +481,7 @@ mod tests {
     fn pane_prefix_selects_complete_ids_and_marks_partial_total_unknown() {
         let mut bytes = pane_row("%1");
         bytes.extend(pane_row("%2"));
-        bytes.extend(b"%3\x1fx");
+        bytes.extend(b"%3|x");
         let parsed = parse_pane_listing(&bytes, false, Some(3));
         assert_eq!(parsed.ids, vec!["%1".to_owned(), "%2".to_owned()]);
         assert_eq!(parsed.omitted, None);
@@ -491,7 +492,7 @@ mod tests {
     #[test]
     fn malformed_pane_record_prevents_an_exact_omitted_count() {
         let mut bytes = pane_row("%1");
-        bytes.extend(b"invalid\x1fx\x1fx\x1fx\x1fx\x1fx\x1fx\x1fx\x1fx\x1fx\x1e\n");
+        bytes.extend(b"invalid|x|x|x|x|x|x|x|x|x\n");
         let parsed = parse_pane_listing(&bytes, true, Some(0));
         assert_eq!(parsed.ids, vec!["%1".to_owned()]);
         assert_eq!(parsed.omitted, None);
@@ -531,8 +532,9 @@ mod tests {
         assert_eq!(parsed.omitted, Some(1));
     }
 
-    /// An empty complete listing is exact, while a prefix ending between RS
-    /// and LF cannot authorize that last row. No whitespace is trimmed from IDs.
+    /// An empty complete listing is exact, while a prefix ending before a
+    /// record's LF cannot authorize that last row. No whitespace is trimmed
+    /// from IDs.
     #[test]
     fn framing_boundaries_preserve_only_complete_targets() {
         assert_eq!(parse_pane_listing(b"", true, Some(0)).omitted, Some(0));
@@ -589,7 +591,7 @@ case "$1" in
   list-panes)
     test "$#" = 4 && test "$2" = -a && test "$3" = -F || exit 44
     for id in 1 2 3 4 5; do
-      printf '%%%s\037x\037x\037x\037x\037x\037x\037x\037x\037x\036\n' "$id"
+      printf '%%%s|x|x|x|x|x|x|x|x|x\n' "$id"
     done ;;
   capture-pane)
     test "$#" = 4 && test "$2" = -p && test "$3" = -t || exit 45

@@ -11,6 +11,7 @@ import json
 import os
 import pathlib
 import select
+import shlex
 import shutil
 import signal
 import stat
@@ -313,7 +314,7 @@ class RecorderTest(unittest.TestCase):
                 mock.patch.object(RECORDER, "run_command", wraps=RECORDER.run_command) as command:
             result = RECORDER.run([
                 "--kind", "repetition", "--selection", "fixture", "--concurrency", "4",
-                "--tmux", "none", "--runner", "nextest", "--output-root", str(self.evidence),
+                "--runner", "nextest", "--output-root", str(self.evidence),
                 "--", "cargo", "nextest", "run", "--lib",
             ], signal_intent=intent)
         prepared.assert_called_once()
@@ -364,7 +365,7 @@ class RecorderTest(unittest.TestCase):
                 del RECORDER.os.waitid
                 code = RECORDER.run([
                     "--kind", "development", "--selection", "fixture", "--concurrency", "one",
-                    "--tmux", "none", "--output-root", str(self.evidence), "--", PYTHON, "-c", "pass",
+                    "--output-root", str(self.evidence), "--", PYTHON, "-c", "pass",
                 ])
             finally:
                 RECORDER.os.waitid = waitid
@@ -453,7 +454,7 @@ class RecorderTest(unittest.TestCase):
                     mock.patch.object(RECORDER, "reap_owned_child", side_effect=consume_status_before_reap):
                 code = RECORDER.run([
                     "--kind", "development", "--selection", "fixture", "--concurrency", "one",
-                    "--tmux", "none", "--output-root", str(self.evidence), "--", PYTHON, "-c",
+                    "--output-root", str(self.evidence), "--", PYTHON, "-c",
                     f"import pathlib; pathlib.Path({str(marker)!r}).touch()",
                 ])
             self.assertEqual(code, 125)
@@ -526,7 +527,7 @@ class RecorderTest(unittest.TestCase):
                             mock.patch.object(RECORDER, "run_command") as command:
                         code = RECORDER.run([
                             "--kind", "development", "--selection", "fixture", "--concurrency", "one",
-                            "--tmux", "none", "--output-root", str(root), "--", PYTHON, "-c", "pass",
+                            "--output-root", str(root), "--", PYTHON, "-c", "pass",
                         ])
                     self.assertEqual(code, 125)
                     self.assertEqual(len(consumed), 1)
@@ -815,7 +816,7 @@ class RecorderTest(unittest.TestCase):
             release_fixture_processes(pid_path)
         self.assertTrue(self.stop_path.exists())
 
-    def cli(self, command: list[str], *options: str, tmux: str = "none") -> list[str]:
+    def cli(self, command: list[str], *options: str) -> list[str]:
         """Construct the common required recorder interface around one argv."""
 
         return [
@@ -827,8 +828,6 @@ class RecorderTest(unittest.TestCase):
             "fixture selection",
             "--concurrency",
             "one process",
-            "--tmux",
-            tmux,
             "--output-root",
             os.fspath(self.evidence),
             *options,
@@ -840,14 +839,13 @@ class RecorderTest(unittest.TestCase):
         self,
         command: list[str],
         *options: str,
-        tmux: str = "none",
         env: dict[str, str] | None = None,
         stdout: int = subprocess.PIPE,
     ) -> subprocess.CompletedProcess[bytes]:
         """Run the recorder synchronously with bounded capture chosen by each test."""
 
         return subprocess.run(
-            self.cli(command, *options, tmux=tmux),
+            self.cli(command, *options),
             cwd=self.repo,
             env=env or self.environment(),
             stdout=stdout,
@@ -1269,38 +1267,6 @@ class RecorderTest(unittest.TestCase):
                 self.assertEqual(result.returncode, 125)
                 self.assertEqual(self.run_directories(), [])
 
-    def install_tmux_fixture(
-        self, version: str = "9.9", matching: bool = True, reject_environment_name: str | None = None
-    ) -> pathlib.Path:
-        """Install a controlled tmux and repository binary without touching the real pin."""
-
-        bin_dir = self.base / "bin"
-        bin_dir.mkdir(exist_ok=True)
-        tmux = bin_dir / "tmux"
-        environment_guard = ""
-        if reject_environment_name is not None:
-            environment_guard = (
-                f"if test \"${{{reject_environment_name}+present}}\" = present; then\n"
-                "  printf 'tmux contaminated\\n'\n"
-                "  exit 0\n"
-                "fi\n"
-            )
-        tmux.write_text(
-            f"#!/bin/sh\n{environment_guard}printf 'tmux {version}\\n'\n", encoding="utf-8"
-        )
-        tmux.chmod(0o700)
-        pin_dir = self.repo / ".github" / "release"
-        pin_dir.mkdir(parents=True, exist_ok=True)
-        (pin_dir / "source-pins.env").write_text("TMUX_VERSION=9.9\n", encoding="utf-8")
-        ci_dir = self.repo / ".ci-tmux"
-        ci_dir.mkdir(exist_ok=True)
-        if matching:
-            shutil.copyfile(tmux, ci_dir / "tmux")
-        else:
-            (ci_dir / "tmux").write_text("different binary\n", encoding="utf-8")
-        (ci_dir / "tmux").chmod(0o700)
-        return bin_dir
-
     def test_failed_retry_and_passing_retry_keep_distinct_records(self) -> None:
         """A later pass must not erase the failed evidence that motivated the retry."""
 
@@ -1339,54 +1305,49 @@ class RecorderTest(unittest.TestCase):
         self.assertEqual(child_result.returncode, 0)
         self.assertIn(b"--help", child_result.stdout)
 
-    def test_required_tmux_accepts_matching_version_and_binary(self) -> None:
-        """Required mode permits execution only when both pin identities match."""
+    def install_git_guard(self, reject_environment_name: str) -> tuple[pathlib.Path, pathlib.Path]:
+        """Put a `git` on PATH that fails whenever it sees the named variable, else runs the real Git.
 
-        bin_dir = self.install_tmux_fixture()
-        environment = self.environment(PATH=f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
-        result = self.invoke([PYTHON, "-c", "print('ran')"], tmux="required", env=environment)
-        self.assertEqual(result.returncode, 0, result.stderr.decode())
-        _run_dir, manifest = self.latest_manifest()
-        self.assertTrue(manifest["tmux"]["matches_required_substrate"])
-        self.assertEqual(manifest["tmux"]["actual"]["version_output"], "tmux 9.9")
+        The recorder's metadata probes are the Git commands of source capture,
+        so a contaminated probe environment shows up as incomplete source
+        evidence rather than as anything the test command itself could see.
+        Every invocation also appends a line to the returned log, so a test can
+        show that the probes went through the guard at all: complete evidence
+        from probes that never reached it would prove nothing.
 
-    def test_required_tmux_refuses_missing_and_wrong_substrates_before_spawn(self) -> None:
-        """Required-mode mismatch is a refusal and cannot run even a marker command."""
+        Returns the directory to put first on PATH and the invocation log.
+        """
 
-        marker = self.base / "spawned"
-        command = [PYTHON, "-c", f"from pathlib import Path; Path({str(marker)!r}).touch()"]
-        missing_env = self.environment(PATH=os.fspath(self.base / "empty-bin"))
-        (self.base / "empty-bin").mkdir()
-        missing = self.invoke(command, tmux="required", env=missing_env)
-        self.assertEqual(missing.returncode, 125)
-        self.assertFalse(marker.exists())
-        self.assertEqual(self.latest_manifest()[1]["outcome"], "refused")
-
-        bin_dir = self.install_tmux_fixture(version="9.8", matching=False)
-        wrong_env = self.environment(PATH=f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
-        wrong = self.invoke(command, tmux="required", env=wrong_env)
-        self.assertEqual(wrong.returncode, 125)
-        self.assertFalse(marker.exists())
-        problems = self.latest_manifest()[1]["tmux"]["problems"]
-        self.assertTrue(any("version mismatch" in problem for problem in problems))
-        self.assertTrue(any("hash" in problem for problem in problems))
-
-    def test_warn_mode_reports_mismatch_and_runs(self) -> None:
-        """Warn mode makes substrate drift visible without changing command execution."""
-
-        bin_dir = self.install_tmux_fixture(version="8.0", matching=False)
-        environment = self.environment(PATH=f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
-        result = self.invoke([PYTHON, "-c", "print('still ran')"], tmux="warn", env=environment)
-        self.assertEqual(result.returncode, 0)
-        self.assertIn(b"tmux substrate mismatch", result.stderr)
-        self.assertIn(b"still ran", result.stdout)
-        self.assertFalse(self.latest_manifest()[1]["tmux"]["matches_required_substrate"])
+        real_git = shutil.which("git")
+        assert real_git is not None, "the recorder fixtures need Git"
+        bin_dir = self.base / "guard-bin"
+        bin_dir.mkdir(exist_ok=True)
+        guard = bin_dir / "git"
+        runs = self.base / "git-guard-runs.log"
+        guard.write_text(
+            "#!/bin/sh\n"
+            f"echo run >> {shlex.quote(str(runs))}\n"
+            f"if test \"${{{reject_environment_name}+present}}\" = present; then\n"
+            "  echo 'git probe saw a scrubbed variable' >&2\n"
+            "  exit 97\n"
+            "fi\n"
+            f"exec {shlex.quote(real_git)} \"$@\"\n",
+            encoding="utf-8",
+        )
+        guard.chmod(0o700)
+        return bin_dir, runs
 
     def test_farhelm_environment_is_scrubbed_for_child_and_probe(self) -> None:
-        """Ambient FARHELM values stay private while explicit names control retention."""
+        """Ambient FARHELM values stay private while explicit names control retention.
+
+        Why: FARHELM_ variables can carry credentials and point a test at a
+        live helm. Spec: neither the command nor the Git probes of source
+        capture see an unrequested FARHELM_ variable, a requested one reaches
+        the command, and the manifest names variables but never holds a value.
+        """
 
         secret = "value-that-must-not-enter-metadata"
-        bin_dir = self.install_tmux_fixture(reject_environment_name="FARHELM_SECRET")
+        bin_dir, guard_runs = self.install_git_guard(reject_environment_name="FARHELM_SECRET")
         environment = self.environment(
             FARHELM_SECRET=secret,
             FARHELM_KEEP="retained value",
@@ -1407,13 +1368,17 @@ class RecorderTest(unittest.TestCase):
             "FARHELM_KEEP",
             "--keep-farhelm-env",
             "FARHELM_ABSENT",
-            tmux="required",
             env=environment,
         )
         self.assertEqual(result.returncode, 0)
         self.assertIn(b"secret=False", result.stdout)
         self.assertIn(b"keep=True", result.stdout)
         run_dir, manifest = self.latest_manifest()
+        # The guard fails every probe that sees the secret, so complete source
+        # evidence is what shows the probes ran with the scrubbed environment,
+        # once its log shows the probes went through it.
+        self.assertTrue(guard_runs.is_file() and guard_runs.read_text(encoding="utf-8"), "the Git probes bypassed the guard")
+        self.assertTrue(manifest["source"]["complete"], manifest["source"])
         encoded = (run_dir / "manifest.json").read_text(encoding="utf-8")
         self.assertNotIn(secret, encoded)
         names = manifest["environment"]["farhelm"]
@@ -2171,6 +2136,32 @@ class RecorderTest(unittest.TestCase):
                     )
                 finally:
                     cleanup_direct_child(recorder)
+
+    def test_unknown_option_is_refused_before_any_evidence(self) -> None:
+        """An option the recorder does not define is refused before anything runs or is written.
+
+        Why: commands kept in historical records, and documentation that has not
+        caught up, can carry an option the recorder has since retired. Ignoring
+        it would let such a command run without whatever the option used to
+        ask for, as though it had been honoured. Spec: an unknown option, with
+        or without a value after it, exits 125 with an argparse refusal naming
+        the option, runs nothing and creates no run directory, while the same
+        command without it runs.
+        """
+
+        marker = self.base / "unknown-option-ran"
+        command = [PYTHON, "-c", f"import pathlib; pathlib.Path({str(marker)!r}).touch()"]
+        for option in (["--no-such-option"], ["--no-such-option", "value"]):
+            with self.subTest(option=option):
+                result = self.invoke(command, *option)
+                self.assertEqual(result.returncode, 125)
+                self.assertIn(b"record-test-run: refused:", result.stderr)
+                self.assertIn(b"--no-such-option", result.stderr)
+                self.assertFalse(marker.exists())
+                self.assertEqual(self.run_directories(), [])
+        # Premise: the same command without the option does run.
+        self.assertEqual(self.invoke(command).returncode, 0)
+        self.assertTrue(marker.exists())
 
     def test_invalid_termination_grace_refuses_before_spawning(self) -> None:
         """Invalid or unbounded cleanup allowances must not start a command."""

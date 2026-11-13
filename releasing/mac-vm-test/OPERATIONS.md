@@ -382,7 +382,7 @@ continuity. It changes no test-process environment variables. Run it through the
 source checkout, including the `scripts/` dependencies:
 
 ```sh
-python3 -B scripts/record-test-run.py --kind development --selection 'portable Tart harness' --concurrency 'one unittest process' --tmux none --timeout 30 --output-root "$guest_test_evidence" -- python3 -B -m unittest discover -s releasing/mac-vm-test -p 'test_*.py' -v
+python3 -B scripts/record-test-run.py --kind development --selection 'portable Tart harness' --concurrency 'one unittest process' --timeout 30 --output-root "$guest_test_evidence" -- python3 -B -m unittest discover -s releasing/mac-vm-test -p 'test_*.py' -v
 ```
 
 The historical 27-test suite passed on real Linux during bring-up; profile/coordinator tests extend that suite. Linux

@@ -141,7 +141,9 @@ class BrowserHuntTest(unittest.TestCase):
                     """Stand in for execution while preserving real per-attempt report files."""
                     calls.append(argv)
                     self.assertEqual(argv[argv.index("--runner") + 1], "playwright")
-                    self.assertEqual(argv[argv.index("--tmux") + 1], "required")
+                    # The recorder refuses `--tmux` (its tmux mode is gone), and this
+                    # stand-in would not notice, so its absence is asserted here.
+                    self.assertNotIn("--tmux", argv)
                     self.assertEqual(argv[argv.index("--kind") + 1], "repetition")
                     attempt = pathlib.Path(argv[argv.index("--output-root") + 1])
                     if mode == "failure-then-pass" and len(calls) == 1:

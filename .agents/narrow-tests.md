@@ -31,16 +31,15 @@ The workspace holds roughly 2,100 Rust tests. Most are per-crate unit tests (`fa
 smaller process-level binaries (`agent_cli`, `spawn_cli`, and friends). Everything is selectable with cargo's ordinary
 target flags and nextest filter expressions. Nextest starts one process per test; doctests remain a separate cargo run.
 
-Use the run recorder around the selected command so each attempt retains its own output, source state, and substrate
-identity. The shapes below are child commands after `--`, not substitutes for the recorder. For a controlled Rust
-reproduction, put the pinned tmux first on PATH; its build is cached under `.ci-tmux/` after the first call:
+Use the run recorder around the selected command so each attempt retains its own output, source state, and platform
+details. The shapes below are child commands after `--`, not substitutes for the recorder. For a Rust reproduction, put
+the pinned nextest first on PATH:
 
 ```sh
 nextest_dir=$(python3 scripts/install-pinned-nextest.py) && \
-tmux_dir=$(scripts/build-pinned-tmux-ci.sh) && \
-PATH="$nextest_dir:$tmux_dir:$PATH" python3 scripts/record-test-run.py \
+PATH="$nextest_dir:$PATH" python3 scripts/record-test-run.py \
   --runner nextest --kind repetition --selection 'terminal_tabs module' \
-  --concurrency '4 nextest slots; retries 0' --tmux required \
+  --concurrency '4 nextest slots; retries 0' \
   -- cargo nextest run -p farhelm --test e2e -E 'test(terminal_tabs::)'
 ```
 
@@ -53,13 +52,11 @@ python3 scripts/hunt-rust-tests.py --repeat 20 --timeout 60 --execute \
   -- cargo nextest run -p farhelm-supervisor --lib -E 'test(repeated_pause_spam)'
 ```
 
-Each attempt still goes through the recorder, so the pinned tmux binary must already be available. The wrapper does not
-build or install it, and keeps failed attempts when a later attempt passes.
+Each attempt still goes through the recorder, and the wrapper keeps failed attempts when a later attempt passes.
 
-For checks without tmux, use `--tmux none`; a deliberate comparison with another local binary uses `warn`. Record the
-actual selection and four-slot runner budget in `--concurrency`. Do not label a one-test run as a four-test load merely
-because its budget is four. `docs/test-run-evidence.md` describes private retention and incomplete runs. Failed attempts
-stay in the working log and on disk before a retry; only latent flakes belong in FLAKES.md.
+Record the actual selection and four-slot runner budget in `--concurrency`. Do not label a one-test run as a four-test
+load merely because its budget is four. `docs/test-run-evidence.md` describes private retention and incomplete runs.
+Failed attempts stay in the working log and on disk before a retry; only latent flakes belong in FLAKES.md.
 
 The shapes, narrowest first:
 
@@ -128,10 +125,7 @@ Every run, however narrow, boots the real stacks once: one per worker slot, thre
 config's `webServer` entries, a few seconds), even when the selection is a single test that only one worker will run.
 Playwright spreads the selection's (engine, spec file) projects over up to three workers. Every run also needs the
 prerequisites built first: `cargo build` and the `dx build` web bundle, per AGENTS.md's merge-gate paragraph. That cost
-is per-invocation, not per-test, so a `--repeat-each=20` loop pays it once. The stack resolves `tmux` through PATH and
-the supervisor refuses a below-floor version, so on a machine whose distro tmux sits below the floor the same prefix as
-the Rust suite applies: `PATH="$(scripts/build-pinned-tmux-ci.sh):$PATH" npx playwright test ...` — without it, every
-test fails with a 409 "host 1 is connecting" from a supervisor that never came up.
+is per-invocation, not per-test, so a `--repeat-each=20` loop pays it once.
 
 Engine choice: chromium is the faster iteration engine; webkit is the desktop stand-in, so a report that smells
 desktop-family (see `docs/desktop-web-triage.md`) should reproduce on `webkit-<spec>` before anyone blames shared code.

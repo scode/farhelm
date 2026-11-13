@@ -12,13 +12,10 @@ Run local and worker runtime tests through `python3 scripts/record-test-run.py`,
 Use Python 3.13 or newer on macOS: the recorder requires `os.waitid` with `WNOWAIT` to keep child ownership through
 cleanup. The release setup selects Python 3.13 explicitly on that platform. The commands in the gate inventory and
 narrow-test recipe are the child argv after its `--`. Supply the actual selection and concurrency, `--kind development`
-for ordinary validation or `--kind repetition` for a focused attempt, and an appropriate tmux mode. Use
-`--tmux required` with the built `.ci-tmux` first on PATH for controlled comparisons; `warn` records a different
-developer substrate visibly, and `none` is for checks that do not use tmux. The wrapper scrubs ambient `FARHELM_*`
-before test-process startup. Retain a variable only by naming an intentional test input with `--keep-farhelm-env`;
-values stay out of metadata. The recorder reserves `FARHELM_TEST_TRACE_DIR` for a fresh private directory per command,
-overriding any ambient value even when retention requests it. Never fix this by changing the test process's own
-environment.
+for ordinary validation or `--kind repetition` for a focused attempt. The wrapper scrubs ambient `FARHELM_*` before
+test-process startup. Retain a variable only by naming an intentional test input with `--keep-farhelm-env`; values stay
+out of metadata. The recorder reserves `FARHELM_TEST_TRACE_DIR` for a fresh private directory per command, overriding
+any ambient value even when retention requests it. Never fix this by changing the test process's own environment.
 
 Keep the failed UUID run directory before retrying, and record its path and disposition in the session's working log. A
 later pass is another observation, not a replacement for the failure. Preserve failure evidence until a fix PR or

@@ -62,8 +62,9 @@ Before starting, read these in full, and again after any compaction or resume:
 ## 1. Start
 
 Start on a clean working copy of the latest `main` (`jj git fetch`, then a new change on `main@origin`). Prepare the
-pinned nextest and tmux once (`python3 scripts/install-pinned-nextest.py`, `scripts/build-pinned-tmux-ci.sh`); fix
-verification later needs them.
+pinned nextest once (`python3 scripts/install-pinned-nextest.py`); fix verification later needs it. Make sure the
+machine has a tmux on `PATH` (the distribution's is fine): the tests that start a real tmux server print `SKIPPED`
+without one, which loses their coverage, so the sweep's preparation stops at its tmux check when there is none.
 
 Check that no other deflake sweep holds the machine: `deflake/bin/deflake start` refuses while another daemon lives, but
 finding out now avoids running static checks under someone else's sweep. If another checkout's sweep is running, tell
@@ -216,9 +217,9 @@ check passes, land it without waiting for unrelated work.
 
 The Linux release gate includes the full farhelm integration selection as well as the other workspace targets. Its setup
 prepares rootless Podman, starts the runner's systemd user manager, exports its bus environment and verifies a transient
-user scope before caching the exact Ubuntu digest. Loopback SSH, pinned static tmux and musl build tools are also ready
-before the workspace selection. The focused nextest setup builds the same-source installer payload before cargo-dist has
-produced a release artifact. The real recipe's network bootstrap is part of the gate.
+user scope before caching the exact Ubuntu digest. Loopback SSH, the distribution's tmux and musl build tools are also
+ready before the workspace selection. The focused nextest setup builds the same-source installer payload before
+cargo-dist has produced a release artifact. The real recipe's network bootstrap is part of the gate.
 
 Only once the static checks pass and the sweep has finished with every failure fixed or recorded. On top of the stack
 (or of `main` when all fixes have already landed):

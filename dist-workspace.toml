@@ -202,7 +202,7 @@
 # provider's own publishing chain), so pinning only one of them would not change the trust
 # the release rests on. Pinning all of them is a possible future hardening
 # project, not a requirement today. What IS pinned by checksum stays pinned:
-# tmux and its libraries, the zig wheel, nextest, and dx.
+# nextest and dx.
 #
 # dx and nextest are upstream release binaries, not builds from source, so
 # their digests pin the bytes their projects' own release machines produced.

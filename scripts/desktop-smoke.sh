@@ -49,7 +49,7 @@
 # Prereqs (apt): xvfb xdotool openbox imagemagick curl python3, plus the
 # webkit2gtk dev stack the desktop feature already needs, dioxus-cli
 # 0.7.10, the wasm32-unknown-unknown target (the run starts by building the
-# web bundle, which is then embedded in the desktop build), and tmux.
+# web bundle, which is then embedded in the desktop build).
 # Usage: scripts/desktop-smoke.sh   (from the repo root; ~5 min)
 # Honors CARGO_TARGET_DIR, relative or absolute.
 # DESKTOP_SMOKE_WEB_DIST=/abs/path/to/public skips the web build and embeds
@@ -97,7 +97,7 @@ esac
 # Preflight, before anything is created or spawned: every external binary
 # the phases below shell out to. Local optional runs skip cleanly; CI must
 # fail because a green integration gate that exercised nothing is false.
-for tool in Xvfb xdotool openbox import convert curl python3 tmux dx; do
+for tool in Xvfb xdotool openbox import convert curl python3 dx; do
   if ! command -v "$tool" >/dev/null; then
     if [ "${CI:-}" = true ]; then
       echo "FAIL: desktop-smoke requires $tool in CI" >&2
@@ -213,31 +213,23 @@ curl_auth() {
   curl --noproxy '*' --config "$CURL_AUTH_CONFIG" "$@"
 }
 # Whether session $1 (its local id) of the main state directory still has a
-# live agent terminal, of either kind; exit status only.
+# live agent terminal; exit status only.
 #
-# The app's supervisor runs the bare `farhelm supervisor run`, so every
-# session this script creates runs in a terminal host, while a supervisor
-# built before terminal hosts (or a session from one) runs it in tmux. The
-# session's row says which (`terminal_kind`) and where (`terminal_address`:
-# the host's socket name, or the tmux pane), so the check follows the row: a
-# tmux terminal is alive when the private server still has its tmux session
-# (named `fh-` and the session's id, the only name one ever has), a
-# host one when a process still listens on its socket. The socket table is
-# read rather than the socket connected to, because a host serves exactly
-# one client, its supervisor, and a socket file outlives the host that bound
-# it. The database is opened read-only beside the running supervisor.
+# Every session this script creates runs in a terminal host, whose socket the
+# session's row names (`terminal_address`). The terminal is alive when a
+# process still listens on that socket. The socket table is read rather than
+# the socket connected to, because a host serves exactly one client, its
+# supervisor, and a socket file outlives the host that bound it. The database
+# is opened read-only beside the running supervisor.
 session_terminal_alive() {
   python3 - "$X/state" "$1" <<'PY'
-import os, sqlite3, subprocess, sys
+import os, sqlite3, sys
 state, sid = sys.argv[1], sys.argv[2]
 db = sqlite3.connect("file:" + os.path.join(state, "supervisor.db") + "?mode=ro", uri=True, timeout=5)
 row = db.execute("select terminal_kind, terminal_address from sessions where id = ?", (sid,)).fetchone()
 if row is None:
     sys.exit(1)
 kind, address = row
-if kind == "tmux":
-    probe = ["tmux", "-S", os.path.join(state, "tmux.sock"), "has-session", "-t", "fh-" + sid]
-    sys.exit(subprocess.run(probe, capture_output=True).returncode)
 if kind != "host" or not address:
     sys.exit(1)
 socket = os.path.join(state, "hosts", address)
@@ -252,10 +244,9 @@ with open("/proc/net/unix") as table:
 sys.exit(1)
 PY
 }
-# Fail unless session $1 (its local id) is a terminal-host row: the app's
-# supervisor runs the bare `farhelm supervisor run`, whose default is terminal
-# hosts, so a tmux row here means a shipped launch went back to tmux, which
-# `session_terminal_alive` alone would not notice (it follows either kind).
+# Fail unless session $1 (its local id) is a terminal-host row, the only kind
+# a supervisor of this release creates. `session_terminal_alive` would also
+# report another kind as not alive, but this names what went wrong.
 expect_host_terminal() {
   local kind
   kind=$(python3 - "$X/state" "$1" <<'PY'
@@ -277,7 +268,7 @@ PY
 #
 # These events are the only outside view of the page's terminal attachments
 # for a terminal in a terminal host: such a host serves only its supervisor,
-# so the tmux client listing this script once read has no counterpart. Open
+# so nothing outside it can list a terminal's clients. Open
 # attachments rather than a running count, so that an attachment that came
 # and went (the page moving on to another session, a socket closed by a
 # rotation) does not count as one the page still holds.
@@ -408,13 +399,13 @@ SID="" # set once the create-form phase produces a session; read by teardown
 SID_NEWEST="" # second restart fixture; empty during the interaction-only create
 SID_ROTATED="" # post-rotation fixture: proves native REST still works; read by teardown
 SID_KEPT="" # held across the supervisor replacement to prove sessions survive it; read by teardown
-# The helm's API IDs include their host entry; tmux names and systemd scopes
-# belong to this run's local supervisor and contain only the session component.
+# The helm's API IDs include their host entry; systemd scopes belong to this
+# run's local supervisor and contain only the session component.
 # Keep both spellings so API cleanup never loses the routing identity.
 LOCAL_SID=""
 LOCAL_SID_NEWEST=""
-# Set by the answering-supervisor leg, which starts its own supervisor, tmux
-# server and desktop outside the main launch's state directory. Each is
+# Set by the answering-supervisor leg, which starts its own supervisor and
+# desktop outside the main launch's state directory. Each is
 # cleared once stop_answering has stopped what it names, so a pid is never
 # signalled after it has been reaped (and possibly reused).
 ANSWERING_STATE=""
@@ -426,16 +417,10 @@ ANSWERING_DESKTOP_PID=""
 # The supervisor runs in its own process group (the leg starts it under
 # setsid) and the whole group is stopped and waited for, not just the
 # supervisor's pid. A supervisor killed during startup, before it installs its
-# SIGTERM handler, dies at once and leaves any in-flight tmux child behind
-# (a supervisor runs tmux at startup only to adopt a server that already
-# runs, and earlier builds always ran `start-server`), and that child could
-# create or touch the tmux server after the kill-server below had already
-# run. The tmux server itself daemonizes out of
-# the group, so it is stopped through its socket afterwards; it outlives the
-# supervisor by design (sessions survive a supervisor restart). That has to
-# happen before teardown's `rm -r` of the state directory, which deletes the
-# socket and with it the script's only handle on the server. kill-server is
-# bounded like everything else in teardown, so a wedged server cannot hang it.
+# SIGTERM handler, dies at once and leaves any in-flight child behind. Its
+# terminal hosts daemonize out of the group and outlive the supervisor by
+# design (sessions survive a supervisor restart), so they are stopped through
+# their state directory afterwards, before teardown's `rm -r` deletes it.
 stop_answering() {
   if [ -n "$ANSWERING_DESKTOP_PID" ]; then
     kill "$ANSWERING_DESKTOP_PID" 2>/dev/null
@@ -454,7 +439,6 @@ stop_answering() {
   fi
   if [ -n "$ANSWERING_STATE" ]; then
     stop_terminal_hosts "$ANSWERING_STATE"
-    timeout 10 tmux -S "$ANSWERING_STATE/tmux.sock" kill-server 2>/dev/null
     ANSWERING_STATE=""
   fi
 }
@@ -551,11 +535,11 @@ teardown() {
 
   # Delete THIS run's session through its own helm while the helm is
   # still answering, so the supervisor's normal delete path (process-tree
-  # kill, tmux teardown, systemd scope stop) runs first and the daemon
+  # kill, ending the terminal host, systemd scope stop) runs first and the daemon
   # kills below and the unit-stop fallback further down are usually
   # no-ops. Best-effort: teardown must proceed even if the helm is
   # already gone or wedged.
-  # 30 s, not 5: a delete of a session whose pane shell ignores SIGTERM (an
+  # 30 s, not 5: a delete of a session whose shell ignores SIGTERM (an
   # interactive `bash`, which these smoke sessions run) waits the supervisor's
   # full SIGTERM grace (`KILL_GRACE` in sweep.rs, 5 s) before the SIGKILL, so
   # the request itself takes a little over 5 s; see the cleanup below.
@@ -568,7 +552,7 @@ teardown() {
     [ -f "$X/$p.pid" ] && kill "$(cat "$X/$p.pid")" 2>/dev/null
   done
   # The app's supervisor outlives the app, so it is stopped here by its
-  # record, before its tmux server goes. Then its terminal hosts, which a
+  # record. Then its terminal hosts, which a
   # supervisor's stop leaves running, but only once that supervisor is
   # confirmed gone: one still running could start a host after the scan.
   for state in "$X/state" "${APPEARANCE_STATES[@]}"; do
@@ -577,10 +561,6 @@ teardown() {
     else
       hosts_left_unscanned "$state"
     fi
-  done
-  tmux -S "$X/state/tmux.sock" kill-server 2>/dev/null
-  for state in "${APPEARANCE_STATES[@]}"; do
-    timeout 10 tmux -S "$state/tmux.sock" kill-server 2>/dev/null
   done
   stop_answering
 
@@ -1990,9 +1970,8 @@ done
 
 echo "== typing into the terminal and asserting through a file the typed command writes"
 # The create lands in the session view with the terminal mounted. The typed
-# command leaves its evidence in a file rather than on the screen, so the check
-# reads the same for a terminal in a terminal host, whose screen nothing
-# outside the supervisor can read, as for a tmux pane.
+# command leaves its evidence in a file rather than on the screen, because a
+# terminal host's screen is something nothing outside the supervisor can read.
 sleep 3
 TYPED_PROOF="$X/legacy-typed"
 DISPLAY=$DISP xdotool mousemove 700 400 click 1 sleep 0.5 type --delay 120 "echo smoke-ok >$TYPED_PROOF"

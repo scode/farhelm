@@ -21,6 +21,13 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn guard_captures_before_shutdown_on_success_error_and_unwind() {
         use tracing_subscriber::prelude::*;
+        if farhelm_teststate::tmux::machine_tmux_or_skip(
+            "guard_captures_before_shutdown_on_success_error_and_unwind",
+        )
+        .is_none()
+        {
+            return;
+        }
         let _slot = super::super::SLOTS.acquire().await.unwrap();
         let capture = farhelm_testtrace::current_capture().expect("test capture");
         for disposition in 0..5 {

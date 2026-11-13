@@ -77,9 +77,10 @@ for host in localhost 127.0.0.1 "[localhost]:$SELF_SSH_PORT" "[127.0.0.1]:$SELF_
 done
 ssh-keyscan -4 -H -p "$SELF_SSH_PORT" localhost 127.0.0.1 >>/home/tl-user/.ssh/known_hosts 2>/dev/null
 ssh -o BatchMode=yes localhost true && echo "self-ssh: ok" >>"$OUT/summary.txt" || echo "self-ssh: FAILED" >>"$OUT/summary.txt"
+# A template without tmux runs the tests that start a real tmux server as SKIPPED passes; say so where the summary is read.
+{ tmux -V 2>/dev/null || echo "tmux: MISSING"; } >>"$OUT/summary.txt"
 # --- the partition
 cd "$M" || exit 1
-export PATH="$M/.ci-tmux:$PATH"
 # The caller names the pinned nextest (scripts/install-pinned-nextest.py's directory): .ci-nextest can also hold older
 # installs, which the repo's config refuses.
 nextest="$M/$NEXTEST"
@@ -100,7 +101,7 @@ PY
 # exports FARHELM_HELM_PAYLOAD_DIR only for podman_environments, after the
 # recorder has scrubbed unrelated ambient Farhelm variables.
 export FARHELM_TEST_PODMAN_PAYLOAD_DIR="$M/target/podman-test-payloads"
-python3 scripts/record-test-run.py --kind development --tmux required \
+python3 scripts/record-test-run.py --kind development \
   --keep-farhelm-env FARHELM_TEST_PODMAN_PAYLOAD_DIR --keep-farhelm-env FARHELM_TEST_SKIP_PODMAN \
   --selection "sandbox rust shard $K/$N (hash partition): $* " \
   --concurrency '4 nextest slots; retries 0' \

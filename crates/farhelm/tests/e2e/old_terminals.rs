@@ -3,9 +3,10 @@
 //! release ran sessions in, and what still ran there.
 //!
 //! Every test builds that earlier release's layout by hand, with whatever
-//! `tmux` the test machine has: a server on `<state dir>/tmux.sock` started
-//! with `-S` and `-f <state dir>/tmux.conf` as the supervisor started it, one
-//! tmux session `fh-<id>` per Farhelm session, windows marked as the agent's or
+//! `tmux` the test machine has (and skips, saying so, on a machine with none:
+//! `farhelm_teststate::tmux::machine_tmux_or_skip`): a server on
+//! `<state dir>/tmux.sock` started with `-S` and `-f <state dir>/tmux.conf` as
+//! the supervisor started it, one tmux session `fh-<id>` per Farhelm session, windows marked as the agent's or
 //! a tab's (`@farhelm-agent`, `@farhelm-tab`) whose panes carry the
 //! `FARHELM_*` markers, and old-kind rows in the store naming those panes.
 //! Then a supervisor of this release starts on the same state directory and
@@ -242,6 +243,9 @@ async fn supervisor_with_scopes(
 #[farhelm_testtrace::test]
 async fn a_dead_old_agents_scoped_job_is_ended_and_the_session_restarts_in_a_host() {
     let test = "a_dead_old_agents_scoped_job_is_ended_and_the_session_restarts_in_a_host";
+    if farhelm_teststate::tmux::machine_tmux_or_skip(test).is_none() {
+        return;
+    }
     let Some(scopes) = probed_scope_manager(test).await else {
         return;
     };
@@ -393,6 +397,10 @@ async fn a_dead_old_agents_scoped_job_is_ended_and_the_session_restarts_in_a_hos
 /// reads exited with code 0, with its warning resolved and no notice.
 #[farhelm_testtrace::test]
 async fn with_no_server_the_old_rows_leftovers_and_files_are_cleaned_up() {
+    let test = "with_no_server_the_old_rows_leftovers_and_files_are_cleaned_up";
+    if farhelm_teststate::tmux::machine_tmux_or_skip(test).is_none() {
+        return;
+    }
     let h = harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
     let (template, _template_work) = basic_session(&h).await;
@@ -496,6 +504,10 @@ async fn with_no_server_the_old_rows_leftovers_and_files_are_cleaned_up() {
 /// that skip is not exercised, which the test says.
 #[farhelm_testtrace::test]
 async fn a_mixed_sessions_old_tab_is_ended_and_its_host_terminals_are_not() {
+    let test = "a_mixed_sessions_old_tab_is_ended_and_its_host_terminals_are_not";
+    if farhelm_teststate::tmux::machine_tmux_or_skip(test).is_none() {
+        return;
+    }
     let scopes = Arc::new(farhelm_supervisor::scope::ScopeManager::systemd());
     let scoped = scopes.available().await;
     let h = harness_with_seams(

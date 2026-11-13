@@ -197,7 +197,7 @@ async fn wait_for_agent_tui_ready(
 //
 //     python3 scripts/record-test-run.py --kind development \
 //         --selection 'real Claude hook audit across /clear' \
-//         --concurrency 'one test; libtest one thread' --tmux none \
+//         --concurrency 'one test; libtest one thread' \
 //         -- cargo test -p farhelm --test e2e -- --ignored --exact \
 //         --test-threads 1 \
 //         real_agent_capture::real_claude_session_reports_its_identity_across_clear

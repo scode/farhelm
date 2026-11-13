@@ -4233,7 +4233,7 @@ async fn a_scoped_stop_leaves_jobs_in_a_session_started_stock_tmux_server() {
     if !stock_tmux.is_file() {
         eprintln!(
             "SKIPPED a_scoped_stop_leaves_jobs_in_a_session_started_stock_tmux_server: \
-             no stock tmux at /usr/bin/tmux; the pinned harness tmux is not this substrate"
+             no stock tmux at /usr/bin/tmux, the distribution build whose pane migration this tests"
         );
         return;
     }
@@ -4291,8 +4291,8 @@ async fn a_scoped_stop_leaves_jobs_in_a_session_started_stock_tmux_server() {
         ),
     )
     .unwrap();
-    // Capture the chosen executable before launch. This owns only the new
-    // socket; the harness's pinned private server remains a separate fixture.
+    // Capture the chosen executable before launch. The guard owns only this
+    // test's own socket.
     let _stock_server = TmuxServerGuard::with_program(socket, stock_tmux);
     let session = h
         .client
@@ -4326,7 +4326,7 @@ async fn a_scoped_stop_leaves_jobs_in_a_session_started_stock_tmux_server() {
     assert_eq!(
         std::fs::read_link(format!("/proc/{server_pid}/exe")).unwrap(),
         stock_tmux.canonicalize().unwrap(),
-        "the fixture must run the stock executable, not the pinned harness tmux"
+        "the fixture must run the stock executable, not another tmux on PATH"
     );
     assert_eq!(
         std::fs::read_to_string(format!("/proc/{server_pid}/comm"))

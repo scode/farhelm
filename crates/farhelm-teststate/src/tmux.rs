@@ -215,6 +215,30 @@ pub enum TmuxPollFailure {
     UnexpectedEvents(i16),
 }
 
+/// The machine's `tmux`, for a test that must start a real tmux server, or
+/// `None` after printing a `SKIPPED` line that names `test`.
+///
+/// Farhelm itself runs no tmux. The tests that still start a server are the
+/// ones that build an earlier release's layout by hand to check that a
+/// starting supervisor ends it, the cleanup that ends a server a killed test
+/// left behind, and their fixtures. They use whatever tmux the machine has,
+/// found on the inherited `PATH` by the same lookup [`guard::TmuxServerGuard`]
+/// uses (empty and relative entries read as the current directory, as
+/// `Command::new("tmux")` reads them), so the skip decision and the tmux that
+/// then runs agree. The returned path is canonical. A machine without one
+/// skips these tests with a message the test recorder's output shows, the
+/// way the systemd- and SSH-dependent tests report a missing substrate. A
+/// skip is not a pass, so a gate that runs these tests has to install a tmux.
+pub fn machine_tmux_or_skip(test: &str) -> Option<std::path::PathBuf> {
+    let found = std::env::current_dir().ok().and_then(|cwd| {
+        guard::resolve_executable(Path::new("tmux"), std::env::var_os("PATH").as_deref(), &cwd).ok()
+    });
+    if found.is_none() {
+        eprintln!("SKIPPED {test}: no tmux on PATH, and this test starts a real tmux server");
+    }
+    found
+}
+
 /// Shut down the tmux server listening at a caller-owned private socket.
 ///
 /// `tmux_executable` must already be an absolute, resolved executable file.
@@ -1148,13 +1172,13 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn healthy_tmux_server_is_observed_dead() {
-        let Some(fixture) = TmuxFixture::start() else {
+        let Some(fixture) = TmuxFixture::start("healthy_tmux_server_is_observed_dead") else {
             return;
         };
         let started = Instant::now();
         let outcome = shutdown_tmux_server(&fixture.socket, &fixture.executable);
         // Retain absolute teardown cost without making scheduler timing a
-        // pass/fail premise. The recorder keeps this with the exact substrate.
+        // pass/fail premise.
         println!("healthy tmux shutdown elapsed: {:?}", started.elapsed());
         let TmuxProtocolOutcome::Attempted(protocol) = &outcome.protocol else {
             panic!("healthy server requires the protocol path: {outcome:?}");
@@ -1166,14 +1190,15 @@ mod tests {
         assert_eq!(outcome.death, TmuxDeath::Observed);
     }
 
-    /// The diagnostic API uses the same pinned private server shape as
+    /// The diagnostic API uses the same private server shape as
     /// shutdown, yet asks tmux only for metadata and the pane's visible
     /// screen. A marker sent to the shell makes history-free capture visible
     /// without exposing an environment or command line in the assertion.
     #[cfg(target_os = "linux")]
     #[test]
     fn diagnostics_capture_a_real_tmux_visible_marker() {
-        let Some(fixture) = TmuxFixture::start() else {
+        let Some(fixture) = TmuxFixture::start("diagnostics_capture_a_real_tmux_visible_marker")
+        else {
             return;
         };
         let limits = CommandRunLimits::new(
@@ -1205,7 +1230,7 @@ mod tests {
         // Pane-owned markers are data, even when they contain a complete fake
         // inventory row. Link the same real pane into a second session as well:
         // both shapes must still yield exactly the two distinct real panes.
-        let forged = "marker\u{1f}tab\u{1e}\n%999999\u{1f}x\u{1f}x\u{1f}x\u{1f}x\u{1f}x\u{1f}x\u{1f}x\u{1f}x\u{1f}x\u{1e}\n";
+        let forged = "marker|tab\n%999999|x|x|x|x|x|x|x|x|x\n";
         for args in [
             vec!["set-option", "-p", "-t", "0:0", "@farhelm-agent", forged],
             vec!["set-option", "-p", "-t", "0:0", "@farhelm-tab", forged],
@@ -1264,17 +1289,13 @@ mod tests {
         let rows = panes.stdout.prefix.split(|byte| *byte == b'\n');
         let mut original_rows = 0;
         for row in rows.filter(|row| !row.is_empty()) {
-            let fields: Vec<_> = row
-                .strip_suffix(&[0x1e])
-                .expect("record terminator")
-                .split(|byte| *byte == 0x1f)
-                .collect();
+            let fields: Vec<_> = row.split(|byte| *byte == b'|').collect();
             assert_eq!(fields.len(), 10);
             assert!(fields[1] == b"0" || fields[1] == b"diagnostic-linked");
             assert!(!fields[7].is_empty(), "current command text disappeared");
             if fields[0] == b"%0" {
                 original_rows += 1;
-                let expected = b"marker_tab__%999999_x_x_x_x_x_x_x_x_x__";
+                let expected = b"marker_tab_%999999_x_x_x_x_x_x_x_x_x_";
                 assert_eq!(fields[8], expected);
                 assert_eq!(fields[9], expected);
             }
@@ -1348,10 +1369,12 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn ancestor_replacement_cannot_redirect_shutdown() {
-        let Some(original) = TmuxFixture::start() else {
+        let Some(original) = TmuxFixture::start("ancestor_replacement_cannot_redirect_shutdown")
+        else {
             return;
         };
-        let Some(unrelated) = TmuxFixture::start() else {
+        let Some(unrelated) = TmuxFixture::start("ancestor_replacement_cannot_redirect_shutdown")
+        else {
             return;
         };
         let authority = validate_socket(&original.socket)
@@ -1410,7 +1433,8 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn stopped_tmux_server_uses_verified_pidfd_fallback() {
-        let Some(fixture) = TmuxFixture::start() else {
+        let Some(fixture) = TmuxFixture::start("stopped_tmux_server_uses_verified_pidfd_fallback")
+        else {
             return;
         };
         signal_peer(&fixture.peer, libc::SIGSTOP).expect("stop real server through fixture pidfd");
@@ -1577,6 +1601,8 @@ mod tests {
     enum FixtureStart {
         Ready(TmuxFixture),
         Unsupported,
+        /// The machine has no tmux; `machine_tmux_or_skip` already said so.
+        NoTmux,
     }
 
     /// Even partial setup must validate its current socket before protocol
@@ -1602,22 +1628,25 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     impl TmuxFixture {
-        fn start() -> Option<Self> {
-            match Self::start_inner() {
+        /// A running server, or `None` once a SKIPPED line naming `test` says
+        /// why this machine cannot provide one.
+        fn start(test: &str) -> Option<Self> {
+            match Self::start_inner(test) {
                 FixtureStart::Ready(fixture) => Some(fixture),
                 FixtureStart::Unsupported => {
-                    eprintln!(
-                        "SKIPPED real tmux pidfd contract: this Linux kernel does not provide SO_PEERPIDFD"
-                    );
+                    eprintln!("SKIPPED {test}: this Linux kernel does not provide SO_PEERPIDFD");
                     None
                 }
+                FixtureStart::NoTmux => None,
             }
         }
 
-        fn start_inner() -> FixtureStart {
+        fn start_inner(test: &str) -> FixtureStart {
+            let Some(executable) = resolved_machine_tmux(test) else {
+                return FixtureStart::NoTmux;
+            };
             let directory = private_directory();
             let socket = directory.path().join("tmux.sock");
-            let executable = tmux_from_path();
             let limits = CommandRunLimits::new(
                 TOTAL_ALLOWANCE,
                 CLEANUP_RESERVE,
@@ -1692,28 +1721,19 @@ mod tests {
             && !outcome.ownership_lost
     }
 
-    /// Resolve the pinned tmux selected by the inherited PATH without changing
-    /// it. A candidate must be executable before and after canonicalization;
-    /// finding a merely existing or canonicalizable name is not enough.
+    /// The machine's tmux, canonical as `shutdown_tmux_server` requires its
+    /// executable, or `None` (after the SKIPPED line) when the machine has
+    /// none. A tmux that is found but fails the shutdown's own executable
+    /// check is a broken substrate, not a missing one, and fails.
     #[cfg(target_os = "linux")]
-    fn tmux_from_path() -> PathBuf {
-        let path = std::env::var_os("PATH").expect("PATH for pinned tmux");
-        for directory in std::env::split_paths(&path) {
-            let candidate = directory.join("tmux");
-            let Ok(metadata) = fs::metadata(&candidate) else {
-                continue;
-            };
-            if !metadata.is_file() || metadata.permissions().mode() & 0o111 == 0 {
-                continue;
-            }
-            let Ok(resolved) = fs::canonicalize(&candidate) else {
-                continue;
-            };
-            if validate_executable(&resolved).is_some() {
-                return resolved;
-            }
-        }
-        panic!("no executable tmux in PATH")
+    fn resolved_machine_tmux(test: &str) -> Option<PathBuf> {
+        let resolved = machine_tmux_or_skip(test)?;
+        assert!(
+            validate_executable(&resolved).is_some(),
+            "{} is not an executable file",
+            resolved.display()
+        );
+        Some(resolved)
     }
 
     /// Owns a foreign listener subprocess and its causal readiness datagram.

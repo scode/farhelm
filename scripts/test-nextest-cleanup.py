@@ -129,7 +129,7 @@ def main() -> None:
         run_setup(["cargo", "test", "--no-run", "--offline"], root)
         command = [sys.executable, str(RECORDER), "--runner", "nextest", "--kind", "development",
                    "--selection", f"real nextest {args.trigger} timeout; SIGTERM-resistant test and child",
-                   "--concurrency", "4 nextest slots; one fixture test", "--tmux", "none",
+                   "--concurrency", "4 nextest slots; one fixture test",
                    "--timeout", "5" if args.trigger == "recorder" else "30",
                    "--output-root", str(args.output_root.resolve()),
                    "--", "cargo", "nextest", "run", "--test", "e2e"]

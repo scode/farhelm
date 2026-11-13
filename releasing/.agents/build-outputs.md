@@ -18,4 +18,4 @@ between attempts. A release attempt therefore starts and ends with `cargo clean`
   is still being reproduced in that checkout, since the reproduction wants its warm build.
 
 `cargo clean` removes the checkout's whole `target/`, including the dx bundle and any earlier development build there.
-The pinned tmux and nextest (`.ci-tmux`, `.ci-nextest`) live outside it and stay.
+The pinned nextest (`.ci-nextest`) lives outside it and stays.

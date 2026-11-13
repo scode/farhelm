@@ -17,10 +17,10 @@ be, and the disposition: fixed in which PR, ignored with what reason, or open. W
 dated entry rather than editing the old one.
 
 New entries also identify the retained run or release job, tested commit and dirty-tree status, exact selection and
-concurrency, tmux version and executable SHA256 (or explicitly unavailable), locale, and relevant `FARHELM_*` variable
-names. Use portable runner descriptions and redacted paths/commands; never put hostnames, usernames, credentials, or raw
-private manifests here. Distinguish a recorded executable identity from a configured or reported version. The recorder
-and retention rules are in `docs/test-run-evidence.md` and AGENTS.md.
+concurrency, locale, and relevant `FARHELM_*` variable names. Use portable runner descriptions and redacted
+paths/commands; never put hostnames, usernames, credentials, or raw private manifests here. Distinguish a recorded
+executable identity (a browser's build, say) from a configured or reported version. The recorder and retention rules are
+in `docs/test-run-evidence.md` and AGENTS.md.
 
 Record as much of the following as can be had without a new run, and say "unavailable" rather than guessing. Each item
 is something that has been easy to note at the time and hard or impossible to recover later:

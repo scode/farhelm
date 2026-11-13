@@ -192,9 +192,9 @@ def held_cargo_locks(target: pathlib.Path) -> list[pathlib.Path]:
 
     It is deliberately narrower than "some process is still using the
     worktree". The sweep's own batteries routinely leave long-lived processes
-    whose working directory is the worktree (a daemonized tmux server from
-    the desktop smoke, an ssh ControlPersist master from the browser suite),
-    and none of them builds. Refusing on those would block every later run.
+    whose working directory is the worktree (an ssh ControlPersist master
+    from the browser suite, say), and none of them builds. Refusing on those
+    would block every later run.
     """
     held = []
     for pattern in (".cargo*lock", "*/.cargo*lock", "*/*/.cargo*lock"):
@@ -537,7 +537,6 @@ class Phase:
     kind: str
     selection: str
     concurrency: str
-    tmux: str
     argv: list[str]
     cwd: str = "."
     rerun: Callable[["Phase", TestId], list[str]] | None = None
@@ -574,14 +573,14 @@ def phases(profile: str = "full") -> list[Phase]:
     if profile == "eval":
         return [
             Phase("rust-nextest", "nextest", "farhelm-proto unit tests (eval profile)", "4 nextest slots; retries 0",
-                  "required", ["cargo", "nextest", "run", "-p", "farhelm-proto", "--lib"],
+                  ["cargo", "nextest", "run", "-p", "farhelm-proto", "--lib"],
                   rerun=nextest_rerun, runner="nextest"),
             Phase("browser", "playwright", "feed spec, both engines (eval profile)", "3 browser workers, one stack each; retries 0",
-                  "required", ["npx", "playwright", "test", "feed.spec.ts"], cwd="e2e", rerun=playwright_rerun,
+                  ["npx", "playwright", "test", "feed.spec.ts"], cwd="e2e", rerun=playwright_rerun,
                   runner="playwright"),
-            Phase("js-unit", "monolithic", "asset JavaScript unit harness", "node default discovery", "none",
+            Phase("js-unit", "monolithic", "asset JavaScript unit harness", "node default discovery",
                   ["bash", "-c", "cd crates/farhelm-ui/js-tests && node --test"]),
-            Phase("install-sh", "monolithic", "install.sh harness", "single process", "none",
+            Phase("install-sh", "monolithic", "install.sh harness", "single process",
                   ["bash", "-c", "cargo build -p farhelm --locked && "
                    "bash scripts/test-install-sh.sh --farhelm target/debug/farhelm"]),
         ]
@@ -589,30 +588,30 @@ def phases(profile: str = "full") -> list[Phase]:
     desktop_nextest = ["cargo", "nextest", "run", "-p", "farhelm-ui", "--features", "desktop"]
     return [
         Phase("rust-nextest", "nextest", "workspace Rust targets", "4 nextest slots; retries 0",
-              "required", workspace_nextest, rerun=nextest_rerun, runner="nextest"),
+              workspace_nextest, rerun=nextest_rerun, runner="nextest"),
         Phase("browser", "playwright", "browser suite, both engines", "3 browser workers, one stack each; retries 0",
-              "required", ["npx", "playwright", "test"], cwd="e2e", rerun=playwright_rerun,
+              ["npx", "playwright", "test"], cwd="e2e", rerun=playwright_rerun,
               runner="playwright"),
         Phase("desktop-nextest", "nextest", "desktop Rust targets", "4 nextest slots; retries 0",
-              "none", desktop_nextest, rerun=nextest_rerun, runner="nextest"),
-        Phase("rust-doctests", "monolithic", "workspace doctests", "4 doctest threads", "required",
+              desktop_nextest, rerun=nextest_rerun, runner="nextest"),
+        Phase("rust-doctests", "monolithic", "workspace doctests", "4 doctest threads",
               ["cargo", "test", "--locked", "--doc", "--workspace", "--exclude", "farhelm-desktop",
                "--", "--show-output", "--test-threads=4"]),
-        Phase("desktop-doctests", "monolithic", "desktop doctests", "4 doctest threads", "none",
+        Phase("desktop-doctests", "monolithic", "desktop doctests", "4 doctest threads",
               ["cargo", "test", "--locked", "--doc", "-p", "farhelm-ui", "--features", "desktop",
                "--", "--show-output", "--test-threads=4"]),
-        Phase("js-unit", "monolithic", "asset JavaScript unit harness", "node default discovery", "none",
+        Phase("js-unit", "monolithic", "asset JavaScript unit harness", "node default discovery",
               ["bash", "-c", "cd crates/farhelm-ui/js-tests && node --test"]),
         # The release gate runs this suite, so a sweep that skipped it would
         # leave a release-blocking battery without flake discovery.
-        Phase("omp-js", "monolithic", "OMP reporter asset scenarios", "node default discovery", "none",
+        Phase("omp-js", "monolithic", "OMP reporter asset scenarios", "node default discovery",
               ["bash", "-c", "cd crates/farhelm-supervisor/asset-js-tests && node --test"]),
-        Phase("install-sh", "monolithic", "install.sh harness", "single process", "none",
+        Phase("install-sh", "monolithic", "install.sh harness", "single process",
               ["bash", "-c", "cargo build -p farhelm --locked && "
                    "bash scripts/test-install-sh.sh --farhelm target/debug/farhelm"]),
-        Phase("provision-centos", "monolithic", "CentOS provisioning over ssh", "one container", "none",
+        Phase("provision-centos", "monolithic", "CentOS provisioning over ssh", "one container",
               ["scripts/test-provision-centos.sh"]),
-        Phase("desktop-smoke", "monolithic", "desktop smoke", "one Xvfb display", "required",
+        Phase("desktop-smoke", "monolithic", "desktop smoke", "one Xvfb display",
               ["scripts/desktop-smoke.sh"]),
     ]
 
@@ -925,7 +924,7 @@ class Daemon:
     def recorder_argv(self, phase: Phase, argv: list[str], kind: str, timeout: int) -> list[str]:
         recorder = self.workspace / "scripts" / "record-test-run.py"
         cmd = [sys.executable, str(recorder), "--kind", kind, "--selection", phase.selection,
-               "--concurrency", phase.concurrency, "--tmux", phase.tmux, "--timeout", str(timeout)]
+               "--concurrency", phase.concurrency, "--timeout", str(timeout)]
         if phase.runner:
             cmd += ["--runner", phase.runner]
         return [*cmd, "--", *argv]
@@ -1130,9 +1129,9 @@ class Daemon:
         its own, held_cargo_locks, which also covers the exit-time call.
 
         Everything else in the worktree stays: node_modules (which `npm ci`
-        reinstalls from npm's cache every prepare anyway) and the pinned tmux
-        and nextest under `.ci-tmux*` and `.ci-nextest`, which are small and
-        slower to recreate than they are worth deleting.
+        reinstalls from npm's cache every prepare anyway) and the pinned
+        nextest under `.ci-nextest`, which is small and slower to recreate
+        than it is worth deleting.
         """
         target = self.workspace / "target"
         if target.is_symlink():
@@ -1176,8 +1175,8 @@ class Daemon:
     def prepare(self) -> bool:
         """Point the workspace at the base commit and build every prerequisite.
 
-        The worktree itself is persistent across runs, so the pinned tmux and
-        the pinned nextest stay warm and only the working-copy commit moves.
+        The worktree itself is persistent across runs, so the pinned nextest
+        stays warm and only the working-copy commit moves.
         The cargo and dx builds do not: `target/` is deleted here and at
         daemon exit (see clean_build_outputs), so every run builds cold. Each
         step is logged under phases/prepare-<step>.log.
@@ -1185,10 +1184,10 @@ class Daemon:
         # The sweep tree is a detached git worktree, not a jj workspace. A jj
         # workspace of a colocated repo carries only `.jj` (verified on jj
         # 0.45.1), and the recorder locates the checkout with
-        # `git rev-parse --show-toplevel`, so it refused every nextest,
-        # Playwright and tmux-required phase there. jj resolves the base
-        # revision (so `main`, a change id, or any revset works) and git owns
-        # the tree; the checkout's jj view never sees or snapshots it.
+        # `git rev-parse --show-toplevel`, so it refused every nextest and
+        # Playwright phase there. jj resolves the base revision (so `main`, a
+        # change id, or any revset works) and git owns the tree; the
+        # checkout's jj view never sees or snapshots it.
         log = self.run.phases / "prepare-workspace.log"
         resolved = subprocess.run(["jj", "--ignore-working-copy", "log", "-r", self.base, "--no-graph",
                                    "-T", "commit_id"], cwd=self.checkout, capture_output=True, text=True)
@@ -1228,7 +1227,13 @@ class Daemon:
             steps.append(("musl-tools", ["sudo", "-n", "apt-get", "install", "-y", "musl-tools"], "."))
         steps += [
             ("nextest", [sys.executable, "scripts/install-pinned-nextest.py"], "."),
-            ("tmux", ["scripts/build-pinned-tmux-ci.sh"], "."),
+            # Farhelm runs no tmux, but the Rust batteries still have tests that
+            # start a real tmux server (ending an earlier release's server at
+            # startup, the test-state cleanup, a user's own tmux). Without one
+            # on PATH they print SKIPPED and pass as early returns, so a sweep
+            # would quietly drop their coverage; failing prepare here says so
+            # before any battery runs. Any working tmux will do.
+            ("tmux", ["tmux", "-V"], "."),
             ("cargo-build", ["cargo", "build"], "."),
             ("dx-build", ["dx", "build", "--package", "farhelm-ui", "--platform", "web", "--release"], "crates/farhelm-ui"),
             ("npm", ["npm", "ci"], "e2e"),
@@ -1241,9 +1246,9 @@ class Daemon:
             if self._run(argv, log, self.workspace / cwd, "prepare") != 0:
                 self.say(f"prepare step {name} failed")
                 return False
-            if name in {"nextest", "tmux"}:
-                # Both tools print their directory as the last stdout line; the
-                # log also carries any progress they wrote, so take the last
+            if name == "nextest":
+                # The installer prints its directory as the last stdout line;
+                # the log also carries any progress it wrote, so take the last
                 # line that is an existing directory.
                 lines = [l.strip() for l in log.read_text(encoding="utf-8", errors="replace").splitlines()]
                 dirs = [l for l in lines if l and pathlib.Path(l).is_dir()]

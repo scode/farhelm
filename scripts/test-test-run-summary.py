@@ -102,7 +102,6 @@ class ManifestSummaryTest(unittest.TestCase):
             "child_status": {"raw_returncode": 0, "exit_code": 0, "signal": None},
             "recorder": {"exit_code": 0, "forced_cleanup": False, "cleanup_limit": None, "error": None},
             "source": {"complete": True, "fingerprint_sha256": "a" * 64},
-            "tmux": {"mode": "none", "uses_tmux": False},
             "console": {"worker_finished": True, "dropped_or_pending_bytes": 0},
             "output": {"eof_observed": True, "truncated": False, "omitted_bytes": 0},
             "test_traces": {"collection": {"collection_complete": True}},
@@ -116,6 +115,31 @@ class ManifestSummaryTest(unittest.TestCase):
         self.assertEqual(result["report_state"], "unrequested")
         self.assertIsNone(result["report"])
         self.assertEqual(result["gaps"], [])
+
+    def test_a_legacy_tmux_record_summarizes_as_a_current_one(self):
+        """A retained record's `tmux` field, whatever it says, changes nothing in its summary.
+
+        Why: records written before the recorder dropped its tmux mode still
+        carry the field, and the pinned test tmux it describes is gone, so a
+        mismatch in it is no longer a coverage gap and a match no longer
+        evidence. Spec: the summary of a record with any old `tmux` value
+        (unused, matched, mismatched, malformed) equals that of the same record
+        without the field, and names no substrate.
+        """
+        identity, current = self.fixture()
+        expected = manifest_summary(current, identity)
+        self.assertEqual(expected["gaps"], [])
+        self.assertNotIn("substrate", expected)
+        for legacy in (
+            {"mode": "none", "checked": False, "uses_tmux": False},
+            {"mode": "required", "matches_required_substrate": True, "actual": {"binary_sha256": "b" * 64}},
+            {"mode": "warn", "matches_required_substrate": False, "problems": ["tmux version mismatch"]},
+            None, "malformed",
+        ):
+            with self.subTest(legacy=legacy):
+                manifest = copy.deepcopy(current)
+                manifest["tmux"] = legacy
+                self.assertEqual(manifest_summary(manifest, identity), expected)
 
     def test_failure_and_missing_diagnostics_are_both_preserved(self):
         """Evidence failure must not erase an already observed nonzero child result."""

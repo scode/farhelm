@@ -121,13 +121,12 @@ done
 ssh-keyscan -4 -H -p "$SELF_SSH_PORT" localhost 127.0.0.1 >>/home/tl-user/.ssh/known_hosts 2>/dev/null
 ssh -o BatchMode=yes localhost true && echo "self-ssh: ok" >>"$OUT/summary.txt" || echo "self-ssh: FAILED" >>"$OUT/summary.txt"
 # --- the shard
-export PATH="$W/.ci-tmux:$PATH"
 projects=()
 extra=()
 while [ $# -gt 0 ] && [ "$1" != "--" ]; do projects+=("--project=$1"); shift; done
 if [ "${1:-}" = "--" ]; then shift; extra=("$@"); fi
 cd "$W/e2e" || exit 1
-python3 ../scripts/record-test-run.py --kind development --tmux required \
+python3 ../scripts/record-test-run.py --kind development \
   --selection "sandbox shard $label: ${projects[*]} ${extra[*]}" \
   --concurrency '3 browser workers, one stack each; retries 0' \
   -- npx playwright test "${projects[@]}" "${extra[@]}" --retries=0 --reporter=line >"$OUT/console.log" 2>&1

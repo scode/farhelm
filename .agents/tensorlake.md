@@ -39,11 +39,10 @@ agent needs to run them, and to rebuild the sandbox template from scratch when t
    Projects are named as in `e2e/playwright.config.ts` (`chromium-settings`, `webkit-settings`); with none it runs every
    project of the suite. `--grep` and `--repeat` apply to every shard and are for narrow reruns of failures; add
    `--reuse-pack` to send the previous run's pack, the same build, because a Rust test build since then relinks
-   `target/debug/farhelm` with test features. The script packs the tracked tree, the binaries, the web bundle, the
-   pinned tmux and a one-commit Git checkout; balances the projects into shards by spec size (WebKit weighted heavier);
-   clones one sandbox per shard; runs all shards at once, each in one attached exec; copies back each shard's
-   `summary.txt` and `console.log`, and for a failed shard its retained run directories as `runs.tar.gz`; and terminates
-   and sweeps.
+   `target/debug/farhelm` with test features. The script packs the tracked tree, the binaries, the web bundle and a
+   one-commit Git checkout; balances the projects into shards by spec size (WebKit weighted heavier); clones one sandbox
+   per shard; runs all shards at once, each in one attached exec; copies back each shard's `summary.txt` and
+   `console.log`, and for a failed shard its retained run directories as `runs.tar.gz`; and terminates and sweeps.
 3. Read the results like any recorded run. Each shard is its own recorder run, identified by the run ID in its
    `summary.txt`; its record lives on the sandbox and goes with it, except a failed shard's, which comes back as the
    tarball. A failed run's tarball is the retained evidence `.agents/test-evidence.md` requires; keep it until the
@@ -109,9 +108,9 @@ Observed on fresh sandboxes in October 2026; verify rather than assume, since Te
   which the evidence rules do not accept as a pass (`.agents/validation.md`), so the shard runner makes sure a user
   manager runs (below).
 - The glibc matches Ubuntu 24.04 development machines (2.39), so the locally built debug `farhelm` and
-  `farhelm-fixtures`, and the pinned tmux in `.ci-tmux/`, run there unchanged. Pushing them saves a Rust toolchain and a
-  half-hour build on every sandbox. If the development machine moves to a newer Ubuntu, this stops being true: build on
-  the sandbox instead, or pick a matching image.
+  `farhelm-fixtures` run there unchanged. Pushing them saves a Rust toolchain and a half-hour build on every sandbox. If
+  the development machine moves to a newer Ubuntu, this stops being true: build on the sandbox instead, or pick a
+  matching image.
 - The stock image lacks rootless Podman. The template installs it with the production base the environment test uses
   (`docker.io/library/ubuntu@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852`). The production
   readiness probe requires Podman at least 4.9.3, cgroup v2, the systemd cgroup manager and usable user scopes. The
@@ -139,17 +138,18 @@ exists:
    one is destroyed at its idle timeout. The 60-second idle timeout cannot be changed later.
 2. Install packages:
    `build-essential ca-certificates curl git rsync systemd dbus dbus-user-session openssh-server python3`, plus
-   `podman uidmap passt slirp4netns fuse-overlayfs` for the Rust tests, and a resolved drop-in naming public DNS servers
-   (see above). Before running apt, make sure `/run/systemd/system` does not exist and run `dpkg --configure -a`: when
-   that directory exists, libc6's install script believes systemd is running, calls it, and fails with "Failed to
-   connect to bus", leaving dpkg half-configured. On a sandbox without systemd as PID 1 (the template sandbox), the
-   shard runner creates that directory, so one that has run a shard needs it removed before any later apt run. On a
-   clone, where PID 1 is systemd, the directory is systemd's own: leave it, and package scripts reach the running
-   manager.
+   `podman uidmap passt slirp4netns fuse-overlayfs tmux` for the Rust tests (tmux for the few that start a real tmux
+   server; a template built before it was on this list has none, so rebuild it), and a resolved drop-in naming public
+   DNS servers (see above). Before running apt, make sure `/run/systemd/system` does not exist and run
+   `dpkg --configure -a`: when that directory exists, libc6's install script believes systemd is running, calls it, and
+   fails with "Failed to connect to bus", leaving dpkg half-configured. On a sandbox without systemd as PID 1 (the
+   template sandbox), the shard runner creates that directory, so one that has run a shard needs it removed before any
+   later apt run. On a clone, where PID 1 is systemd, the directory is systemd's own: leave it, and package scripts
+   reach the running manager.
 3. Push and unpack the source tree, binaries and web bundle, and a one-commit Git checkout (the script's `pack`). The
-   recorder identifies the tested commit through Git and finds the pinned tmux through the checkout; without `.git` it
-   refuses with "Git checkout unavailable" and "repository pinned tmux path is unavailable". The checkout is a shallow
-   clone of the local checkout's HEAD, so the sandbox never contacts the repository's remote.
+   recorder identifies the tested commit through Git; without `.git` a run records no source identity ("Git top-level
+   was unavailable or invalid"). The checkout is a shallow clone of the local checkout's HEAD, so the sandbox never
+   contacts the repository's remote.
 4. In `e2e/`, `npm ci`, then `sudo -n env PATH=<path> npx playwright install-deps chromium webkit` and
    `npx playwright install chromium webkit`. `install-deps` needs root and the caller's PATH to find npx.
 5. As `tl-user`, run

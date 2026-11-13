@@ -19,9 +19,12 @@ if [ "$(cat /proc/1/comm 2>/dev/null)" != systemd ] && ! [ -S /run/systemd/priva
 fi
 sudo -n env DEBIAN_FRONTEND=noninteractive dpkg --configure -a >/dev/null 2>&1
 sudo -n apt-get update -qq || exit 1
-# Podman and its helpers are for the real environment Rust tests (rust-tests.ts).
+# Podman and its helpers are for the real environment Rust tests (rust-tests.ts), and so is tmux: Farhelm runs none,
+# but the tests that end an earlier release's tmux server, the test-state cleanup and the test of a user's own tmux
+# start a real one, and skip without it.
 sudo -n env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq build-essential ca-certificates curl git rsync \
-  systemd dbus dbus-user-session openssh-server python3 podman uidmap passt slirp4netns fuse-overlayfs >/dev/null || exit 1
+  systemd dbus dbus-user-session openssh-server python3 podman uidmap passt slirp4netns fuse-overlayfs tmux \
+  >/dev/null || exit 1
 # On clones, which boot systemd, systemd-resolved owns /etc/resolv.conf and was observed (November 2026) with no upstream
 # server at all, so nothing on a clone could resolve a name. Real recipe builds install packages and agents over the
 # network. Give resolved public servers for those builds and for diagnosis.
@@ -56,7 +59,7 @@ sudo -n ssh-keygen -A >/dev/null || exit 1
 step versions
 node --version
 "$W/target/debug/farhelm" --version 2>&1 | head -1
-"$W/.ci-tmux/tmux" -V
+tmux -V
 npx playwright --version
 podman --version
 df -h /home | tail -1

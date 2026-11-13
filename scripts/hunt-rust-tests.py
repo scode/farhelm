@@ -104,7 +104,6 @@ def plan(args: argparse.Namespace) -> dict[str, object]:
         "timeout_seconds": args.timeout,
         "maximum_child_command_seconds": args.repeat * args.timeout,
         "concurrency": SLOTS_DESCRIPTION,
-        "tmux": "required (validation only; no build or install)",
         "metadata_and_cleanup_time_outside_child_command_sum": True,
         "output_root": os.fspath(args.output_root) if args.output_root else None,
     }

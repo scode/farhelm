@@ -71,7 +71,7 @@ allows for locks; every port, temporary directory, and unit name inside the batt
 own per-run choices.
 
 **Evidence is retained the project's way.** Every battery and every classification rerun goes through
-`scripts/record-test-run.py`, so a flake record can cite a run id and a substrate identity, and a later pass never
+`scripts/record-test-run.py`, so a flake record can cite a run id and the platform it ran on, and a later pass never
 overwrites a failure.
 
 **A wedged phase is reported, not hidden.** A phase whose output stops growing for a long time produces a stall event
