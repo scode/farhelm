@@ -10,7 +10,7 @@ import types
 import unittest
 
 from control import Refused
-from brick_test import Source, previous_can_create_hosts
+from brick_test import Source
 from guest_workflow import (copy_credentials, instructions, managed_instructions, require_setup, source_url,
                             task_for)
 from test_guest_tester import task
@@ -57,17 +57,17 @@ independent updater check. These assertions cover instructions, not live UI.
         self.assertIn("Click the old app's actual Check for updates", discovery)
 
 
-class TerminalTransitionInstructionsTests(unittest.TestCase):
+class OldSessionInstructionsTests(unittest.TestCase):
     """Pin what P0's old-session turns are told, in both the managed and the plain envelope.
 
-The receipts gate what the tester cannot fake, the terminal kinds included
-(the candidate shows none in its UI); these instructions carry what only the
-UI can show: the Restart offer and the resumed agent remembering the earlier
+The receipts gate what the tester cannot fake, the survival of the old
+session's terminal host included; these instructions carry what only the UI
+can show: the Restart offer and the resumed agent remembering the earlier
 turn. These assertions cover the delivered text, not live product behavior.
 """
 
     def test_only_the_updater_old_fixture_starts_old_sessions(self):
-        """The installer fixture and bonus upgrades keep their old-fixture contract; P0's updater pair seeds the transition."""
+        """The installer fixture and bonus upgrades keep their old-fixture contract; P0's updater pair seeds the old sessions."""
         for build in (managed_instructions, instructions):
             with self.subTest(builder=build.__name__):
                 updater = build('old-fixture', 'p0-updater-upgrade', 'ordinary')
@@ -89,57 +89,53 @@ turn. These assertions cover the delivered text, not live product behavior.
 
 The post-upgrade question's answer must differ from the 42 already on screen.
 The agent restart must not be routed through the app updater's owned restart
-transition, the move is conditional on what the candidate creates, and every
-branch, including the one without a Restart, ends with the final sample the
-import requires, which is also what checks the move (the candidate's session
-details name no terminal kind).
+transition, and the turn ends with the final sample the import requires, which
+is also what checks the move onto a new terminal host. Neither envelope keeps
+a path without a Restart or a terminal kind to read.
 """
         for side, survival, final in (('local', 'host_survival', 'old_session_after'),
                                       ('remote', 'remote_host_survival', 'remote_old_session_after')):
             with self.subTest(side=side):
                 text = managed_instructions(side + '-old-session', 'p0-updater-upgrade', 'ordinary')
                 self.assertLess(text.index(f'call {survival} exactly'), text.index(f'Select the old {side} session'))
-                restart = "use the\nsession's ordinary Restart"
+                restart = "use the session's ordinary Restart"
                 self.assertLess(text.index('What is 6 times 8?'), text.index(restart))
                 self.assertLess(text.index(restart), text.index('Which word did I ask you to remember'))
-                self.assertLess(text.index('Which word did I ask you to remember'), text.index('finish by calling ' + final))
+                self.assertLess(text.index('Which word did I ask you to remember'), text.index('Finish by calling ' + final))
                 self.assertNotIn('stop after', text)
                 self.assertNotIn('6 times 7', text)
-                for phrase in ('only Clone or Replace', 'If survived is false', 'previous_can_create_hosts',
-                               'never brick_ui method restart', 'do not restart; skip to the final step',
-                               'never supply it', 'earlier 17 + 25\nanswer', 'new answer 48',
-                               'moved to one new\nterminal host'):
+                for phrase in ('only Clone or Replace', 'If survived is false',
+                               'never brick_ui method restart', 'never supply it', 'earlier 17 + 25\nanswer',
+                               'new answer 48', 'moved to one new terminal host with\nthe old one gone'):
                     self.assertIn(phrase, text)
-                for phrase in ('band', 'details', 'terminal kind'):
-                    self.assertNotIn(phrase, text)
                 plain = instructions(side + '-old-session', 'p0-updater-upgrade', 'ordinary')
+                for envelope in (text, plain):
+                    for phrase in ('band', 'details', 'terminal kind', 'branch', 'do not restart'):
+                        self.assertNotIn(phrase, envelope)
                 self.assertNotIn('brick_ui', plain)
                 self.assertIn('Which word did I ask you to remember', plain)
                 self.assertIn('new answer 48', plain)
                 # A survival comparison made after touching the session no longer
                 # describes the upgrade: that is the tester's error, not a release failure.
-                self.assertIn('touched the old\nsession before this call: then report automation-failure', text)
+                self.assertIn('touched the old session\nbefore this call: then report automation-failure', text)
                 self.assertIn('automation-failure if you touched the old', plain)
 
-    def test_agent_checks_sample_terminal_hosts_and_keep_the_session_running(self):
-        """The new session's still-running terminal is what tells the old-session comparison what the candidate creates.
+    def test_agent_checks_sample_no_terminal_and_keep_the_remote_session_for_the_menu_checks(self):
+        """The new-session checks decide nothing about the old session, so they take no terminal sample.
 
-A tester that tidied it away would leave that comparison unable to run, so
-both envelopes on both hosts must say to keep it. The managed envelope takes
-the terminal-host sample through its fixed operation and reads no terminal
-kind from the session details, which the candidate no longer shows.
+The remote one must still keep its session running: Remove must show it
+preserved and Uninstall must end it, so a tester that tidied it away would
+leave those checks without their premise.
 """
         for check, operation in (('local-supervisor-agent', 'terminal_hosts'),
                                  ('remote-supervisor-agent', 'remote_terminal_hosts')):
             with self.subTest(check=check):
                 text = managed_instructions(check, 'p0-updater-upgrade', 'ordinary')
-                self.assertIn('call ' + operation, text)
-                self.assertIn('which the import checks', text)
-                self.assertNotIn('details', text)
+                self.assertNotIn('call ' + operation, text)
                 self.assertIn('untouched', text)
                 for envelope in (text, instructions(check, 'p0-updater-upgrade', 'ordinary')):
-                    self.assertIn('Leave this new session running;\nthe old-session check samples its terminal.',
-                                  envelope)
+                    self.assertNotIn('terminal host', envelope)
+                    self.assertEqual('Leave this new session running' in envelope, check.startswith('remote-'))
 
 
 class WindowDragInstructionsTests(unittest.TestCase):
@@ -317,33 +313,6 @@ starting unless the operator separately recorded that exact live-send scope.
         subprocess.run(['git', '-C', str(checkout), 'remote', 'add', 'origin',
                         'https://github.com/fixture/project.git'], check=True, capture_output=True)
         self.assertEqual(source_url(Source(checkout)), 'https://github.com/fixture/project.git')
-
-    def test_previous_source_cross_check_answers_only_where_the_layout_can(self):
-        """A previous tag without the host crate cannot have created a host; a moved crate gives no answer.
-
-Real tags in a throwaway repository exercise the actual Git reader, so an
-absent path must read as an answer, not as a failed lookup.
-"""
-        checkout = self.root / 'tags'
-        def git(*argv):
-            """Run Git in the throwaway checkout, overriding identity, signing and hooks on its command line."""
-            subprocess.run(['git', '-C', str(checkout), '-c', 'user.name=Fixture', '-c', 'user.email=fixture@invalid',
-                            '-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=/dev/null', *argv], check=True, capture_output=True)
-        subprocess.run(['git', 'init', '-q', str(checkout)], check=True, capture_output=True)
-        (checkout / 'README').write_text('fixture\n')
-        git('add', 'README')
-        git('commit', '-q', '-m', 'before hosts')
-        git('tag', 'v0.1.0')
-        (checkout / 'crates/terminal-host').mkdir(parents=True)
-        (checkout / 'crates/terminal-host/Cargo.toml').write_text('[package]\n')
-        git('add', 'crates')
-        git('commit', '-q', '-m', 'hosts')
-        git('tag', 'v0.2.0')
-        git('tag', 'v0.3.0')
-        source = Source(checkout)
-        self.assertIs(previous_can_create_hosts(source, 'v0.1.0', 'v0.2.0'), False)
-        self.assertIs(previous_can_create_hosts(source, 'v0.2.0', 'v0.3.0'), True)
-        self.assertIsNone(previous_can_create_hosts(source, 'v0.1.0', 'v0.1.0'))
 
 
 if __name__ == '__main__':

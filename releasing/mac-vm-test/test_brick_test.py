@@ -47,10 +47,6 @@ class FakeSource:
         """The capability is explicitly supplied by this fixture, not a historical claim."""
         return tag in self.supported
 
-    def ships_terminal_host(self, tag):
-        """No fictional tag carries the terminal host crate, so the cross-check gives no answer."""
-        return False
-
 
 class PlanningTests(unittest.TestCase):
     """Pin candidate selection and the full supported-old-version coverage."""
@@ -811,10 +807,10 @@ image evidence so cleanup cannot silently skip its new obligation.
             self.run.cleanup('p0-updater-upgrade')
 
     def test_old_sessions_follow_each_hosts_agent_check_and_fold_into_its_question(self):
-        """The terminal transition belongs to each supervisor question, before the remote menu checks.
+        """Each old session belongs to its host's supervisor question, before the remote menu checks.
 
-Each old-session check must follow its host's new-session check, which tells it
-whether the candidate creates terminal hosts; the remote one must also follow
+Each old-session check must follow its host's new-session check, which
+establishes that host's candidate supervisor; the remote one therefore follows
 the remote Update. A failed old session fails its host's supervisor question.
 A manifest written before these checks still answers all five questions.
 """

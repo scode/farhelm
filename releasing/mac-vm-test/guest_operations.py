@@ -36,10 +36,11 @@ OPERATIONS = ('prerequisites', 'verify_candidate', 'verify_previous', 'fixture_c
               'remote_old_session_after', 'continuity_command',
               'continuity_before', 'continuity_remote_before', 'continuity_remote_after',
               'continuity_reopen_before', 'continuity_reopen_after', 'prior_receipts', 'window_frame', 'finder_frame')
-# Only the test's session identity columns. `terminal_kind` is the stored kind
-# once the product keeps one; schema introspection drops any absent column, so
-# older releases' databases keep the same observation contract.
-SESSION_COLUMNS = ('id', 'name', 'generation', 'captured_conversation', 'conversation_source', 'terminal_kind')
+# Only the test's session identity columns. Schema introspection drops any
+# absent column, so older releases' databases keep the same observation
+# contract. A session's terminal is observed through its host process, never a
+# stored column: the old-session checks compare processes, not what a row says.
+SESSION_COLUMNS = ('id', 'name', 'generation', 'captured_conversation', 'conversation_source')
 # Like remote_version's default install path, the Linux scripts assume the
 # default state directory, `~/.local/state/farhelm`. A base that gave the
 # provisioned supervisor an XDG_STATE_HOME would need them to follow it.
@@ -623,7 +624,7 @@ twenty-reference evidence budget alongside the ten required native images.
             raise RuntimeError('a prior managed receipt changed or disappeared')
         return json.loads(path.read_text())
 
-    def prior_value(self, check, operation, required=True):
+    def prior_value(self, check, operation):
         """Read the latest retained value of one earlier checkpoint's operation in this pass.
 
 This is how a fresh tester turn's machine-owned comparison reaches the old
@@ -633,9 +634,7 @@ state outlives each attempt, and the digest binding refuses a changed file.
         name = operation.replace('_', '-')
         rows = [row for row in self.state['receipts'] if row['check_id'] == check and row['operation'] == name]
         if not rows:
-            if required:
-                raise RuntimeError(f'{check} retained no {name} receipt in this pass')
-            return None
+            raise RuntimeError(f'{check} retained no {name} receipt in this pass')
         return self.read_receipt(rows[-1])
 
     def sample_hosts(self, side):
@@ -672,111 +671,71 @@ hosts and how many process-table lines could not be parsed.
         return {key: rows[0][key] for key in SESSION_COLUMNS if key in rows[0]}
 
     def terminal_hosts(self, side):
-        """Record the side's terminal hosts, refusing a sample taken before the moment it stands for.
+        """Record the side's terminal hosts; at the updater pair's old fixture, the old session's one host.
 
-At the updater pair's old fixture this is the baseline (elsewhere an old
-fixture starts no session, and the sample is a plain diagnostic), so it is
-refused until this attempt
-has observed the side's one captured session: sampled earlier, an empty list
-would misread a host-run session as tmux. The baseline is either no host (the
-previous release runs the old session in tmux) or exactly that session's one
-host with its one live child; more would make the survival comparison
-ambiguous, and a host contradicts a previous release whose source has none.
-At the new-session check it reads the session rows itself and is refused
-until a session other than the old one exists; it reports the new rows (with
-their stored terminal kind, where the schema has one) beside the hosts the old
-fixture did not see, so the import can compare the two. No later decision
-depends on when these samples were taken: the old-session check samples again.
+At that old fixture this is the baseline the old-session check compares
+against, so it is refused until this attempt has observed the side's one
+captured session (sampled earlier, it could miss the session's host), and it
+requires exactly one host with one live child: none means the previous release
+did not run the old session in a terminal host, which this test no longer
+supports, and more would make the survival comparison ambiguous. Everywhere
+else the sample is a plain diagnostic that no decision depends on; the
+old-session check takes its own samples.
 """
         names = SIDES[side]
-        check = self.task['check_id']
-        baseline_turn = check == 'old-fixture' and self.task['pass_id'] == 'p0-updater-upgrade'
-        if check == 'old-fixture' and not baseline_turn:
-            # Other old fixtures start no session: this is only a diagnostic.
+        if self.task['check_id'] != 'old-fixture' or self.task['pass_id'] != 'p0-updater-upgrade':
             hosts, unparsed = self.sample_hosts(side)
             return {'hosts': hosts, 'unparsed_lines': unparsed}
-        if baseline_turn:
-            rows = self.observations.get(names['state'], {}).get('supervisor.db', {}).get('sessions', [])
-            if len(rows) != 1 or not rows[0].get('captured_conversation'):
-                raise RuntimeError('sample the old fixture terminal hosts only after this attempt observed '
-                                   'its one captured session')
+        rows = self.observations.get(names['state'], {}).get('supervisor.db', {}).get('sessions', [])
+        if len(rows) != 1 or not rows[0].get('captured_conversation'):
+            raise RuntimeError('sample the old fixture terminal hosts only after this attempt observed '
+                               'its one captured session')
         hosts, unparsed = self.sample_hosts(side)
-        if baseline_turn:
-            if len(hosts) > 1 or any(len(host['children']) != 1 for host in hosts):
-                raise RuntimeError('the old fixture needs at most one terminal host, with one live child')
-            if hosts and self.context.get('previous_can_create_hosts') is False:
-                raise RuntimeError('a terminal host contradicts the previous release source, which has none')
-            return {'hosts': hosts, 'unparsed_lines': unparsed}
-        baseline = self.prior_value('old-fixture', names['hosts'], required=False)
-        known = {host_identity(host) for host in (baseline or {'hosts': []})['hosts']}
-        value = {'hosts': hosts, 'new_hosts': [host for host in hosts if host_identity(host) not in known],
-                 'unparsed_lines': unparsed}
-        if check == names['agent_check']:
-            old_id = self.old_session(side)['id']
-            value['new_sessions'] = [row for row in self.sample_sessions(side) if row.get('id') != old_id]
-            if not value['new_sessions']:
-                raise RuntimeError('sample the new session terminal hosts only after the new agent session exists')
-        return value
+        if len(hosts) != 1 or len(hosts[0]['children']) != 1:
+            raise RuntimeError('the old fixture needs exactly one terminal host, with one live child, '
+                               'for its old session')
+        return {'hosts': hosts, 'unparsed_lines': unparsed}
 
     def host_survival(self, side):
-        """Compare the old session and its terminal with the old fixture, from samples this operation takes, once.
+        """Compare the old session and its terminal host with the old fixture, from samples this operation takes, once.
 
-Every input to the branch is taken here, before the old session is touched,
-or read from the old fixture's digest-bound receipts; none depends on when
-the tester called an earlier observation. No host at the old fixture means
-the old session ran in tmux, one host that it ran in a terminal host. Either
-way it survived only if its session row keeps its id and launch generation
-and still has a captured conversation; in the host branch also the same host process, socket
-and child (pid and start identity), so a replacement that restored the screen
-and resumed the conversation still reads as not survived. Whether the
-candidate creates hosts comes from hosts present now that the old fixture did
-not have (the new agent session's, which must still exist), cross-checked
-against the new sessions' stored terminal kind where the schema has it. Called
-after a Restart, every branch reads as not survived: a late call can only be
-refused, never pass.
+Every input is taken here, before the old session is touched, or read from the
+old fixture's digest-bound receipts; none depends on when the tester called an
+earlier observation. The old session survived only if its row keeps its id and
+launch generation and still has a captured conversation, and its terminal host
+and that host's child are the same processes (pid and start identity), so a
+replacement that restored the screen and resumed the conversation still reads
+as not survived. Called after the session's Restart it reads as not survived
+too: a late call can only be refused, never pass.
 """
         names = SIDES[side]
         old_hosts = self.prior_value('old-fixture', names['hosts'])['hosts']
+        if len(old_hosts) != 1:
+            # The baseline sample enforces this; a receipt retained under an
+            # earlier contract, which allowed none, must not pass here.
+            raise RuntimeError('the old fixture retained no single terminal host for the old session')
         old = self.old_session(side)
         current, unparsed = self.sample_hosts(side)
-        sessions = self.sample_sessions(side)
-        rows = [row for row in sessions if row.get('id') == old['id']]
-        new_sessions = [row for row in sessions if row.get('id') != old['id']]
-        if not new_sessions:
-            raise RuntimeError('the new agent session from the agent check is gone; it decides what the candidate creates')
-        branch = 'host' if old_hosts else 'tmux'
+        rows = [row for row in self.sample_sessions(side) if row.get('id') == old['id']]
         row = rows[0] if len(rows) == 1 else None
         session_survived = (row is not None and row.get('generation') == old.get('generation')
                             and bool(row.get('captured_conversation')))
-        observed = None
-        if old_hosts:
-            observed = next((host for host in current if host['pid'] == old_hosts[0]['pid']), None)
-        host_survived = observed == old_hosts[0] if old_hosts else None
-        baseline = {host_identity(host) for host in old_hosts}
-        creates = any(host_identity(host) not in baseline for host in current)
-        disagreements = []
-        kinds = [entry['terminal_kind'] for entry in new_sessions if 'terminal_kind' in entry]
-        if kinds and ('host' in kinds) != creates:
-            disagreements.append(f'new sessions store terminal_kind {kinds} but a new host is {"" if creates else "not "}running')
-        for label, entry in (('old fixture', old), ('current', row or {})):
-            if 'terminal_kind' in entry and entry['terminal_kind'] != branch:
-                disagreements.append(f'{label} old session stores terminal_kind {entry["terminal_kind"]!r}, '
-                                     f'not the observed {branch!r}')
-        return {'branch': branch, 'survived': session_survived and host_survived is not False,
+        observed = next((host for host in current if host['pid'] == old_hosts[0]['pid']), None)
+        host_survived = observed == old_hosts[0]
+        return {'survived': session_survived and host_survived,
                 'session_survived': session_survived, 'host_survived': host_survived,
-                'old_fixture_host': old_hosts[0] if old_hosts else None, 'observed_host': observed,
-                'old_session': old, 'current_session': row, 'candidate_creates_hosts': creates,
-                'restart_required': branch == 'host' or creates, 'pre_restart_hosts': current,
-                'kind_disagreements': disagreements, 'unparsed_lines': unparsed}
+                'old_fixture_host': old_hosts[0], 'observed_host': observed,
+                'old_session': old, 'current_session': row, 'pre_restart_hosts': current,
+                'unparsed_lines': unparsed}
 
     def old_session_after(self, side):
-        """Take the old-session check's final sample: its session row and the hosts, after any Restart.
+        """Take the old-session check's final sample: its session row and the hosts, after its Restart.
 
 Refused until `host_survival` ran in this attempt, so "after" is relative to a
 comparison the coordinator owns. Hosts are compared with that comparison's
 own pre-Restart sample, so a host counts as the restarted session's only if
 it appeared since. A call made before the Restart shows the old launch
-generation and no new host, which the import refuses when a Restart was due.
+generation and no new host, which the import refuses.
 """
         names = SIDES[side]
         if names['survival'] not in self.completed:
@@ -786,10 +745,9 @@ generation and no new host, which the import refuses when a Restart was due.
         rows = [row for row in self.sample_sessions(side) if row.get('id') == survival['old_session']['id']]
         before = {host_identity(host) for host in survival['pre_restart_hosts']}
         identities = {host_identity(host) for host in hosts}
-        old_host = survival['old_fixture_host']
         return {'session': rows[0] if len(rows) == 1 else None, 'hosts': hosts,
                 'appeared_hosts': [host for host in hosts if host_identity(host) not in before],
-                'old_host_present': old_host is not None and host_identity(old_host) in identities,
+                'old_host_present': host_identity(survival['old_fixture_host']) in identities,
                 'unparsed_lines': unparsed}
 
     def inspect_state(self):

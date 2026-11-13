@@ -378,12 +378,11 @@ neither the update endpoint nor the native capture is a live product oracle.
             self.run.cleanup('p0-updater-upgrade')
 
     def test_updater_pair_schedules_each_old_session_after_its_hosts_agent_check(self):
-        """The dispatched guest turns, not only the declared manifest, carry the terminal transition in order.
+        """The dispatched guest turns, not only the declared manifest, carry the old sessions in order.
 
-Each old-session turn must follow its host's new-session turn, whose receipt
-says whether the candidate creates terminal hosts, and the remote one must
-follow the remote Update. Every turn carries the previous-source cross-check;
-these fictional tags have no terminal host crate, so it gives no answer.
+Each old-session turn must follow its host's new-session turn, which
+establishes that host's candidate supervisor, so the remote one follows the
+remote Update.
 """
         self.finish_preceding_pairs()
         self.seen.clear()
@@ -392,7 +391,6 @@ these fictional tags have no terminal host crate, so it gives no answer.
                          ['native-preflight', 'artifact-verification', 'old-fixture', 'update-discovery',
                           'update-relaunch', 'local-supervisor-agent', 'local-old-session',
                           'remote-supervisor-agent', 'remote-old-session', 'remote-host-remove', 'remote-host-uninstall'])
-        self.assertTrue(all(value['context']['previous_can_create_hosts'] is None for value in self.seen))
         remote = next(value for value in self.seen if value['check_id'] == 'remote-old-session')
         self.assertIn('remote_host_survival', remote['instructions'])
         budgets = {value['check_id']: value['timeout_seconds'] for value in self.seen}

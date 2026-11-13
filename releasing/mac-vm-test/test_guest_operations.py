@@ -25,7 +25,7 @@ from unittest import mock
 from guest_operations import (Operations, installer_environment, parse_mac_processes, remote_host_snapshot,
                               run_fixed, select_hosts, serve, write_json)
 from guest_tester import managed_result, native_args, prompt, TesterError
-from checkpoint_contract import (available_operations, require_agent_terminal, require_old_session,
+from checkpoint_contract import (available_operations, require_old_session,
                                  required_operations, require_remote_host_effect, turn_timeout)
 from guest_workflow import managed_instructions
 from test_guest_tester import task
@@ -753,7 +753,7 @@ def mac_table(*rows):
                    for pid, ppid, second, args in rows)
 
 
-class TerminalTransitionTests(unittest.TestCase):
+class OldSessionTests(unittest.TestCase):
     """Carry P0's old-session terminal facts from the old fixture to the later checkpoint turns.
 
 Each checkpoint is a separate attempt with its own operations object, as in a
@@ -793,24 +793,18 @@ no command line other than a host's socket reaches a receipt.
         return [(pid, 1, second, f'/fixture/Versions/0.29.0/farhelm internal terminal-host --socket {self.hosts}/{name}'),
                 (child, pid, second, '/fixture/codex --private-marker')]
 
-    def sessions(self, generation, new=True, kind=None, new_kind=None):
-        """Write the old session's supervisor row, and the new agent session's once it exists.
-
-`kind` and `new_kind` model the stored terminal kind; None leaves the column
-out, as in a schema from before it existed.
-"""
+    def sessions(self, generation, new=True):
+        """Write the old session's supervisor row, and the new agent session's once it exists."""
         path = self.state / 'supervisor.db'
         path.unlink(missing_ok=True)
-        columns = 'id TEXT, name TEXT, generation INTEGER, captured_conversation TEXT, token TEXT'
-        with_kind = kind is not None or new_kind is not None
         with contextlib.closing(sqlite3.connect(path)) as connection, connection:
-            connection.execute(f'CREATE TABLE sessions ({columns}{", terminal_kind TEXT" if with_kind else ""})')
-            rows = [('session-1', 'old', generation, 'conversation-1', 'private-marker', kind)]
+            connection.execute('CREATE TABLE sessions (id TEXT, name TEXT, generation INTEGER, '
+                               'captured_conversation TEXT, token TEXT)')
+            rows = [('session-1', 'old', generation, 'conversation-1', 'private-marker')]
             if new:
-                rows.append(('session-2', 'new', 1, None, 'private-marker', new_kind))
+                rows.append(('session-2', 'new', 1, None, 'private-marker'))
             for row in rows:
-                connection.execute(f'INSERT INTO sessions VALUES ({",".join("?" * (6 if with_kind else 5))})',
-                                   row if with_kind else row[:5])
+                connection.execute('INSERT INTO sessions VALUES (?,?,?,?,?)', row)
 
     def attempt(self, check_id, pass_id='p0-updater-upgrade', **context):
         """Start one checkpoint's operations, reading the pass state earlier attempts left."""
@@ -826,31 +820,28 @@ out, as in a schema from before it existed.
             return subprocess.CompletedProcess(argv, 0, self.table.encode(), b'')
         return value, output, Operations(value, output, runner=runner, home=self.home)
 
-    def old_fixture(self, *rows, kind=None):
+    def old_fixture(self, *rows):
         """Record the old fixture's local baseline: the captured session first, then the processes."""
         self.table = mac_table(*rows)
-        self.sessions(generation=1, new=False, kind=kind)
+        self.sessions(generation=1, new=False)
         _, _, operations = self.attempt('old-fixture')
         operations.dispatch('inspect_state')
         return operations.dispatch('terminal_hosts')['observation']['hosts']
 
-    def agent_check(self, *rows, new_kind=None):
-        """Record the new local session's check: the session exists, then its terminal is sampled."""
-        self.table = mac_table(*rows)
-        self.sessions(generation=1, new_kind=new_kind)
-        value, output, operations = self.attempt('local-supervisor-agent')
-        operations.dispatch('terminal_hosts')
-        return value, output, operations
+    def old_session(self, before, after, generation, before_generation=1, new=True):
+        """Run the old-session turn: survival on the pre-Restart table, the final sample on the later one.
 
-    def old_session(self, before, after, generation, before_generation=1, kind=None, new_kind=None):
-        """Run the old-session turn: survival on the pre-Restart table, the final sample on the later one."""
+By default both tables include the new agent session's row, as in a run where
+the new-session check left it running; `new=False` leaves it out, as in a run
+where it was gone by then, which nothing in the comparison may depend on.
+"""
         value, output, operations = self.attempt('local-old-session')
         operations.dispatch('prior_receipts')
         self.table = mac_table(*before)
-        self.sessions(before_generation, kind=kind, new_kind=new_kind)
+        self.sessions(before_generation, new=new)
         survival = operations.dispatch('host_survival')['observation']
         self.table = mac_table(*after)
-        self.sessions(generation, kind=kind if generation == before_generation else 'host', new_kind=new_kind)
+        self.sessions(generation, new=new)
         operations.dispatch('old_session_after')
         return value, output, survival
 
@@ -858,25 +849,29 @@ out, as in a schema from before it existed.
         """Apply the import gate to a model's pass claim for this attempt."""
         return managed_result(value, output, {'status': 'pass', 'detail': 'fictional UI observation'})
 
-    def test_host_branch_requires_the_same_host_child_and_a_restart_onto_a_new_host(self):
+    def test_old_session_requires_the_same_host_and_child_then_a_restart_onto_a_new_host(self):
         """A replacement that merely restores the screen and resumes the conversation must not pass.
 
-The old fixture's identities reach the later turn only through retained
-receipts. A changed start time on the same pid, a new child, or another pid on
-the same socket name is a replacement. After the Restart the old host must be
-gone and exactly one new host present: a leaked old host, or a Restart back
-into tmux, is refused.
+This is the upgrade promise P0 checks for every release: a running agent
+session keeps its terminal host across the upgrade, then Restart resumes it in
+a new one. The old fixture's identities reach the later turn only through
+retained receipts. A changed start time on the same pid, a new child, another
+pid on the same socket name, or a launch generation that moved before the
+comparison is a replacement. After the Restart the old host must be gone,
+exactly one new host present and the generation later: a leaked old host, no
+new host, or no new generation is refused.
 """
         old = self.host(200, 1, 201)
         self.assertEqual(len(self.old_fixture(*old)), 1)
         new = self.host(400, 5, 401, name='b2')
-        self.agent_check(*old, *new)
         restarted = self.host(500, 9, 501, name='c3')
         value, output, survival = self.old_session([*old, *new], [*new, *restarted], generation=2)
-        self.assertEqual((survival['branch'], survival['survived'], survival['candidate_creates_hosts'],
-                          survival['restart_required'], survival['old_session']['id']),
-                         ('host', True, True, True, 'session-1'))
+        self.assertEqual((survival['survived'], survival['old_session']['id']), (True, 'session-1'))
         self.assertEqual(self.accept(value, output)['status'], 'pass')
+        with self.subTest(case='the new agent session is gone by the comparison'):
+            value, output, survival = self.old_session(old, restarted, generation=2, new=False)
+            self.assertIs(survival['survived'], True)
+            self.assertEqual(self.accept(value, output)['status'], 'pass')
         for label, replacement in (('restarted host', self.host(200, 7, 201)),
                                    ('new child', [old[0], (202, 200, 1, '/fixture/codex --private-marker')]),
                                    ('other pid, same socket', self.host(210, 7, 211))):
@@ -885,149 +880,101 @@ into tmux, is refused.
                 self.assertIs(survival['survived'], False)
                 with self.assertRaisesRegex(TesterError, 'did not survive'):
                     self.accept(value, output)
-        for label, after, refusal in (('old host leaked', [*old, *new, *restarted], 'still running'),
-                                      ('back to tmux', new, 'did not move')):
+        with self.subTest(replacement='relaunched before the comparison'):
+            value, output, survival = self.old_session([*old, *new], [*new, *restarted], generation=3,
+                                                       before_generation=2)
+            self.assertEqual((survival['session_survived'], survival['host_survived']), (False, True))
+            with self.assertRaisesRegex(TesterError, 'did not survive'):
+                self.accept(value, output)
+        for label, after, generation, refusal in (('old host leaked', [*old, *new, *restarted], 2, 'still running'),
+                                                  ('no new host', new, 2, 'did not move'),
+                                                  ('no new generation', [*new, *restarted], 1, 'restart and resume')):
             with self.subTest(after=label):
-                value, output, _ = self.old_session([*old, *new], after, generation=2)
+                value, output, _ = self.old_session([*old, *new], after, generation)
                 with self.assertRaisesRegex(TesterError, refusal):
                     self.accept(value, output)
-
-    def test_tmux_branch_requires_survival_then_a_move_only_when_the_candidate_creates_hosts(self):
-        """The move is conditional on the candidate's observed hosts, never on a release version.
-
-The old tmux session must first keep its launch generation across the upgrade:
-a candidate that silently relaunched it fails. With hosts created, a pass then
-needs a later generation and one host that appeared since the survival sample.
-With none created, no Restart is due and the generation must stay unchanged.
-"""
-        self.assertEqual(self.old_fixture(), [])
-        new = self.host(400, 5, 401, name='b2')
-        self.agent_check(*new)
-        restarted = self.host(500, 9, 501, name='c3')
-        cases = ((1, [*new, *restarted], 1, 'restart and resume'),
-                 (1, new, 2, 'did not move'),
-                 (2, [*new, *restarted], 3, 'did not survive'),
-                 (1, [*new, *restarted], 2, None))
-        for before_generation, after, generation, refusal in cases:
-            with self.subTest(before=before_generation, generation=generation, hosts=len(after)):
-                value, output, survival = self.old_session(new, after, generation, before_generation)
-                self.assertEqual((survival['branch'], survival['restart_required']), ('tmux', True))
-                if refusal:
-                    with self.assertRaisesRegex(TesterError, refusal):
-                        self.accept(value, output)
-                else:
-                    self.assertEqual(self.accept(value, output)['status'], 'pass')
-        self.agent_check()
-        for generation, refusal in ((1, None), (2, 'relaunched')):
-            with self.subTest(no_hosts=generation):
-                value, output, survival = self.old_session([], [], generation)
-                self.assertEqual((survival['candidate_creates_hosts'], survival['restart_required']), (False, False))
-                if refusal:
-                    with self.assertRaisesRegex(TesterError, refusal):
-                        self.accept(value, output)
-                else:
-                    self.assertEqual(self.accept(value, output)['status'], 'pass')
 
     def test_decisions_do_not_depend_on_when_the_tester_sampled(self):
         """Out-of-order calls must end in a refusal or an unavailable check, never a pass.
 
-An agent-check sample taken before the new session's host started must not
-make the candidate look host-less: the survival comparison samples hosts
-itself. Samples that would stand for the wrong moment are refused outright.
+A baseline sampled before the old session's capture could miss its host, a
+final sample needs the comparison first, a comparison made after the Restart
+sees the legitimate replacement as not surviving, and a final sample taken
+before the Restart shows nothing moved.
 """
-        self.table = ''
+        old = self.host(200, 1, 201)
+        new = self.host(400, 5, 401, name='b2')
+        restarted = self.host(500, 9, 501, name='c3')
+        self.table = mac_table(*old)
         self.sessions(generation=1, new=False)
         _, _, operations = self.attempt('old-fixture')
         with self.assertRaisesRegex(RuntimeError, 'only after this attempt observed'):
             operations.dispatch('terminal_hosts')
-        self.old_fixture()
-        self.sessions(generation=1, new=False)
-        _, _, operations = self.attempt('local-supervisor-agent')
-        with self.assertRaisesRegex(RuntimeError, 'only after the new agent session exists'):
-            operations.dispatch('terminal_hosts')
-        _, output, operations = self.agent_check()
-        self.assertEqual(operations.observations['terminal_hosts']['new_hosts'], [])
+        self.old_fixture(*old)
         _, _, operations = self.attempt('local-old-session')
         with self.assertRaisesRegex(RuntimeError, 'before observing the old session afterwards'):
             operations.dispatch('old_session_after')
-        new = self.host(400, 5, 401, name='b2')
-        restarted = self.host(500, 9, 501, name='c3')
-        value, output, survival = self.old_session(new, [*new, *restarted], generation=2)
-        self.assertIs(survival['candidate_creates_hosts'], True)
-        self.assertEqual(self.accept(value, output)['status'], 'pass')
         value, output, survival = self.old_session([*new, *restarted], [*new, *restarted], generation=2,
                                                    before_generation=2)
         self.assertIs(survival['survived'], False, 'a comparison made after the Restart cannot pass')
-        self.sessions(generation=1, new=False)
-        _, _, operations = self.attempt('local-old-session')
-        with self.assertRaisesRegex(RuntimeError, 'new agent session from the agent check is gone'):
-            operations.dispatch('host_survival')
-
-    def test_stored_terminal_kind_cross_checks_the_sampled_processes(self):
-        """Where the schema stores the kind, it must agree with the hosts the operations saw.
-
-A new session stored as `host` with no new host process, an old session stored
-as `host` that the old fixture saw in tmux, or a Restart whose row still says
-`tmux`, all refuse. The new-session check's own sample is compared too.
-"""
-        self.old_fixture(kind='tmux')
-        _, _, operations = self.agent_check(new_kind='host')
-        with self.assertRaisesRegex(ValueError, 'terminal_kind'):
-            require_agent_terminal(operations.observations['terminal_hosts'])
-        new = self.host(400, 5, 401, name='b2')
-        restarted = self.host(500, 9, 501, name='c3')
-        value, output, survival = self.old_session([], [], 1, kind='tmux', new_kind='host')
-        self.assertTrue(survival['kind_disagreements'])
-        with self.assertRaisesRegex(TesterError, 'terminal_kind'):
+        with self.assertRaisesRegex(TesterError, 'did not survive'):
             self.accept(value, output)
-        value, output, survival = self.old_session(new, [*new, *restarted], 2, kind='host', new_kind='host')
-        with self.assertRaisesRegex(TesterError, "old session stores terminal_kind 'host'"):
+        value, output, survival = self.old_session([*old, *new], [*old, *new], generation=1)
+        self.assertIs(survival['survived'], True)
+        with self.assertRaisesRegex(TesterError, 'restart and resume'):
             self.accept(value, output)
-        value, output, _ = self.old_session(new, [*new, *restarted], 2, kind='tmux', new_kind='host')
-        self.assertEqual(self.accept(value, output)['status'], 'pass')
-        # A new host appeared, but the restarted row still says tmux.
-        _, _, operations = self.attempt('local-old-session')
-        self.table = mac_table(*new)
-        self.sessions(1, kind='tmux', new_kind='host')
-        operations.dispatch('host_survival')
-        self.table = mac_table(*new, *restarted)
-        self.sessions(2, kind='tmux', new_kind='host')
-        operations.dispatch('old_session_after')
-        self.assertEqual(operations.observations['old_session_after']['session']['terminal_kind'], 'tmux')
-        with self.assertRaisesRegex(ValueError, 'did not move'):
-            require_old_session(operations.observations, 'local')
 
     def test_survival_is_compared_once_before_the_restart_replaces_the_host(self):
         """A second comparison after Restart would see the legitimate replacement and overwrite the one that counts."""
         old = self.host(200, 1, 201)
         self.old_fixture(*old)
-        self.agent_check(*old)
         _, _, operations = self.attempt('local-old-session')
         self.table = mac_table(*old)
+        self.sessions(generation=1)
         operations.dispatch('host_survival')
         with self.assertRaisesRegex(RuntimeError, 'cannot be replayed'):
             operations.dispatch('host_survival')
         self.assertIsNotNone(operations.failure)
 
-    def test_old_fixture_baseline_must_be_unambiguous_and_consistent_with_source(self):
-        """Two hosts, a childless host, or a host the previous source cannot create would make survival meaningless."""
+    def test_old_fixture_baseline_must_be_exactly_one_host_with_one_child(self):
+        """No host, two hosts or a childless host would leave the survival comparison nothing unambiguous to compare.
+
+The previous release must run the old session in a terminal host: an old
+session anywhere else is no longer a case this test supports, so the baseline
+refuses it rather than recording a comparison that could only fail later.
+"""
         old = self.host(200, 1, 201)
-        cases = ((mac_table(*old, *self.host(210, 2, 211, name='z9')), {}),
-                 (mac_table(old[0]), {}),
-                 (mac_table(*old), {'previous_can_create_hosts': False}))
+        cases = (('no host', ''), ('two hosts', mac_table(*old, *self.host(210, 2, 211, name='z9'))),
+                 ('childless host', mac_table(old[0])))
         self.sessions(generation=1, new=False)
-        for table, context in cases:
-            with self.subTest(context=context, rows=table.count('\n')):
+        for label, table in cases:
+            with self.subTest(case=label):
                 self.table = table
-                _, _, operations = self.attempt('old-fixture', **context)
+                _, _, operations = self.attempt('old-fixture')
                 operations.dispatch('inspect_state')
-                with self.assertRaises(RuntimeError):
+                with self.assertRaisesRegex(RuntimeError, 'exactly one terminal host'):
                     operations.dispatch('terminal_hosts')
                 self.assertIsNotNone(operations.failure)
         self.table = mac_table(*old)
-        _, _, operations = self.attempt('old-fixture', previous_can_create_hosts=True)
+        _, _, operations = self.attempt('old-fixture')
         operations.dispatch('inspect_state')
         self.assertEqual(len(operations.dispatch('terminal_hosts')['observation']['hosts']), 1)
+
+    def test_a_baseline_retained_without_a_host_cannot_pass_survival(self):
+        """A receipt kept under the earlier contract, which accepted an old fixture with no host, must not compare as survived.
+
+The baseline sample now refuses that case itself; this is the comparison's own
+guard for an old-fixture receipt that predates the refusal.
+"""
+        self.sessions(generation=1, new=False)
+        _, _, operations = self.attempt('old-fixture')
+        operations.dispatch('inspect_state')
+        operations.receipt('terminal-hosts', {'hosts': [], 'unparsed_lines': 0})
+        _, _, operations = self.attempt('local-old-session')
+        self.sessions(generation=1)
+        with self.assertRaisesRegex(RuntimeError, 'no single terminal host'):
+            operations.dispatch('host_survival')
+        self.assertIsNotNone(operations.failure)
 
     def test_old_fixture_pass_needs_one_captured_session_per_host(self):
         """Restart is only offered after capture, so an uncaptured old session cannot carry the later checks."""
@@ -1068,6 +1015,10 @@ default, never past the tester's maximum.
         once = {'host_survival', 'remote_host_survival', 'old_session_after', 'remote_old_session_after'}
         for check in ('old-fixture', 'local-supervisor-agent', 'remote-supervisor-agent', 'reopen'):
             self.assertFalse(once & available_operations(check, 'p0-updater-upgrade', 'ordinary'))
+        # The new-session checks sample no terminal: nothing later depends on it.
+        self.assertEqual(required_operations('local-supervisor-agent', 'p0-updater-upgrade', 'ordinary'), {'versions'})
+        self.assertEqual(required_operations('remote-supervisor-agent', 'p0-updater-upgrade', 'ordinary'),
+                         {'remote_version'})
         self.assertEqual(required_operations('local-old-session', 'p0-updater-upgrade', 'ordinary'),
                          {'prior_receipts', 'host_survival', 'old_session_after'})
         self.assertEqual(required_operations('remote-old-session', 'p0-updater-upgrade', 'ordinary'),
@@ -1131,7 +1082,7 @@ fixture, so neither the capture premise nor the one-host rule applies there.
         self.table = mac_table(*self.host(200, 1, 201), *self.host(210, 2, 211, name='z9'))
         for pass_id in ('p0-installer-upgrade', 'upgrade-v0.29.0'):
             with self.subTest(pass_id=pass_id):
-                _, _, operations = self.attempt('old-fixture', pass_id=pass_id, previous_can_create_hosts=False)
+                _, _, operations = self.attempt('old-fixture', pass_id=pass_id)
                 self.assertEqual(len(operations.dispatch('terminal_hosts')['observation']['hosts']), 2)
                 self.assertIsNone(operations.failure)
 
@@ -1167,7 +1118,7 @@ stdin ends both; cleanup tolerates a host the test already stopped.
 
     @unittest.skipUnless(sys.platform == 'linux', 'the remote scan reads Linux /proc')
     def test_remote_side_runs_end_to_end_on_real_linux_processes(self):
-        """Drive the remote baseline, new-session sample, survival comparison and final sample over the modeled peer.
+        """Drive the remote baseline, survival comparison and final sample over the modeled peer.
 
 The modeled SSH transport runs the exact script texts locally against owned
 processes and an explicit child-only HOME, so the remote operation names, the
@@ -1175,8 +1126,8 @@ remote session rows and the private-output path all compose as a real run
 would use them. A real process whose last arguments are `--socket` and a path
 in the state directory's hosts/ is found with its one real child and kernel
 start identities; no child's command line leaves the modeled peer; the
-session-row script drops columns outside the contract. A host-branch Restart
-onto a new host, with the old host gone, passes the import's check.
+session-row script drops columns outside the contract. A Restart onto a new
+host, with the old host gone, passes the import's check.
 """
         old, child = self.start_host('r1')
         self.sessions(generation=3, new=False)
@@ -1203,17 +1154,14 @@ onto a new host, with the old host gone, passes the import's check.
         self.assertEqual([(entry['pid'], entry['socket']) for entry in hosts], [(old.pid, self.hosts + '/r1')])
         self.assertEqual([entry['pid'] for entry in hosts[0]['children']], [child])
         self.assertEqual(set(hosts[0]['start']), {'start_ticks', 'boot_id'})
-        new, _ = self.start_host('r2')
+        # The new agent session's host is already running at the comparison,
+        # so only the Restart's host can count as having appeared since.
+        self.start_host('r2')
         self.sessions(generation=3)
-        operations = attempt('remote-supervisor-agent')
-        sampled = operations.dispatch('remote_terminal_hosts')['observation']
-        self.assertEqual([entry['pid'] for entry in sampled['new_hosts']], [new.pid])
-        self.assertEqual([row['id'] for row in sampled['new_sessions']], ['session-2'])
         operations = attempt('remote-old-session')
         operations.dispatch('prior_receipts')
         survival = operations.dispatch('remote_host_survival')['observation']
-        self.assertEqual((survival['branch'], survival['survived'], survival['candidate_creates_hosts']),
-                         ('host', True, True))
+        self.assertIs(survival['survived'], True)
         self.stop_host(old)
         restarted, _ = self.start_host('r3')
         self.sessions(generation=4)

@@ -14,11 +14,13 @@ authorization.
 ## Prepare the bases
 
 Use a recent compatible Cirrus macOS image and ARM64 Ubuntu. Bring-up exercised Tahoe 26.6.2 and Ubuntu 24.04.5 LTS.
-Record the exact OCI digests and provisioning privately. The Mac base needs a logged-in desktop, Homebrew tmux in a
-prefix Farhelm probes, genuine selected agent CLIs on its login-shell PATH, Python and minisign for verification. The
+Record the exact OCI digests and provisioning privately. The Mac base needs a logged-in desktop, genuine selected agent
+CLIs on its login-shell PATH, Python and minisign for verification, and Homebrew tmux in a prefix older Farhelm apps
+probe: releases from before Farhelm stopped requiring tmux need it (the latest of them refuses to start without tmux
+3.7c or newer). P0's baseline is such a release until one that needs none becomes the previous stable, and bonus
+baselines from before that release always are. The candidate itself needs none. Bring-up used Homebrew tmux 3.7c. The
 Linux base needs key-based SSH, a working systemd user manager, lingering and guest privileges for persistent user
-services. Bring-up used Homebrew tmux 3.7c locally and removed distro tmux from Linux so Farhelm installed its static
-3.7c payload. Removing distro tmux can remove packages depending on it; inspect the package manager's plan first.
+services.
 
 Install Codex in Linux too. Prepare the official native Mac CUA helper and guest permissions during setup, then prove
 native use and genuine agents in disposable validation clones. Keep both bases credential-free; authorized injection
@@ -166,21 +168,18 @@ pid, program path and start second. An app that starts its supervisor detached r
 no longer the app's child; terminal hosts and session reporters running a versioned `farhelm` are never counted.
 
 P0's old sessions use read-only observations and two samples that only the old-session checks may take. `inspect_state`
-and `remote_inspect_state` read only the session identity columns of each side's `supervisor.db`, including the stored
-`terminal_kind` where the schema has it (`remote_` runs over the pinned SSH alias). `terminal_hosts` and
-`remote_terminal_hosts` list the terminal hosts, recognized by their last two arguments, `--socket` and a socket
-directly inside the state directory's `hosts/`, with each host's children; identities are pid plus start identity (`ps`
-`lstart` under the C locale on the Mac, kernel start ticks and boot ID on Linux). Only a host's socket path is kept: no
-child's or other process's command line reaches a receipt, and a failed process scan keeps its exit status, byte count
-and bounded stderr, never its output. A process-table line that does not parse is skipped and counted. At `old-fixture`
-the sample is refused until that attempt has observed the side's one captured session, and requires at most one host
-with one live child; at the new-session checks it is refused until the new session exists and reads its rows too, so the
-import can compare the stored kind with the hosts. `host_survival` and `remote_host_survival` run once per attempt,
-before the old session is touched, and take their own samples: they report the branch, whether the session (and in the
-host branch its host and child) survived, whether the candidate creates hosts and whether Restart is due, plus any
-stored-kind disagreement. `old_session_after` and `remote_old_session_after` take the final sample and are refused until
-the comparison ran. The tester's import refuses an old-session pass that contradicts them; see BRICK-TEST.md, "Perform
-the product checks".
+and `remote_inspect_state` read only the session identity columns of each side's `supervisor.db` (`remote_` runs over
+the pinned SSH alias). `terminal_hosts` and `remote_terminal_hosts` list the terminal hosts, recognized by their last
+two arguments, `--socket` and a socket directly inside the state directory's `hosts/`, with each host's children;
+identities are pid plus start identity (`ps` `lstart` under the C locale on the Mac, kernel start ticks and boot ID on
+Linux). Only a host's socket path is kept: no child's or other process's command line reaches a receipt, and a failed
+process scan keeps its exit status, byte count and bounded stderr, never its output. A process-table line that does not
+parse is skipped and counted. At the updater pair's `old-fixture` the sample is refused until that attempt has observed
+the side's one captured session, and requires exactly one host with one live child; elsewhere it is a plain diagnostic.
+`host_survival` and `remote_host_survival` run once per attempt, before the old session is touched, and take their own
+samples: they report whether the session, its host and that host's child survived. `old_session_after` and
+`remote_old_session_after` take the final sample and are refused until the comparison ran. The tester's import refuses
+an old-session pass that contradicts them; see BRICK-TEST.md, "Perform the product checks".
 
 `guest_ui.py` exposes single structured app actions through the official native provider; executable JavaScript is not
 offered to the model. Restart is a separate lifecycle action: one native click, independent observation of the running
