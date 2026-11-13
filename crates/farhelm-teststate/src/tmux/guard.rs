@@ -18,7 +18,8 @@ use std::path::{Path, PathBuf};
 ///
 /// Keep this field before the state directory in fixture structs, and after it
 /// in destructuring patterns (locals drop in reverse order). A separate owner
-/// is intentional: reboot tests drop it mid-test while retaining the directory.
+/// is intentional: the old-terminal tests start the server on a state
+/// directory the harness already owns.
 /// The bounded support APIs report uncertain cleanup rather than signalling a
 /// numeric PID. Abrupt process death still bypasses Drop.
 pub struct TmuxServerGuard {
@@ -27,44 +28,27 @@ pub struct TmuxServerGuard {
 }
 
 impl TmuxServerGuard {
-    /// Match default in-process supervisor seams: literal `tmux` through PATH.
-    /// Ambient FARHELM_TMUX belongs to CLI startup and must not affect these
-    /// fixtures, which construct the supervisor directly.
+    /// Guard a server the test starts with the literal `tmux` on PATH, the
+    /// machine's tmux the real-tmux tests use
+    /// ([`crate::tmux::machine_tmux_or_skip`]).
     pub fn new(socket: PathBuf) -> Self {
         Self::with_program(socket, Path::new("tmux"))
     }
 
-    /// Capture a seam's configured spelling before moving it into a supervisor.
-    /// Resolution does not launch a probe or alter the product's own lookup.
+    /// Guard a server the test starts with a specific tmux program (the
+    /// stock-tmux test's `/usr/bin/tmux`), resolved now against the current
+    /// PATH and directory; resolution launches no probe. Relative paths are
+    /// frozen against the fixture's launch directory, so the test must start
+    /// its server from that same directory. A failed resolution is retained
+    /// as evidence, so Drop never retries against some later environment or
+    /// guesses an executable in the socket directory. With no PATH at all,
+    /// the platform's default search path is used.
     pub fn with_program(socket: PathBuf, program: &Path) -> Self {
-        Self::with_environment(socket, program, std::env::var_os("PATH").as_deref())
-    }
-
-    /// Freeze relative paths against the fixture's launch directory. A failed
-    /// resolution is retained as evidence, so Drop never retries against some
-    /// later environment or guesses an executable in the socket directory.
-    /// `path` is the child's effective PATH, including explicit removal: None
-    /// uses the platform's default search path. The caller must use the current
-    /// directory for both this capture and the child's launch.
-    pub fn with_environment(socket: PathBuf, program: &Path, path: Option<&OsStr>) -> Self {
+        let path = std::env::var_os("PATH");
         let executable = std::env::current_dir()
-            .and_then(|cwd| resolve_executable(program, path, &cwd))
+            .and_then(|cwd| resolve_executable(program, path.as_deref(), &cwd))
             .map_err(|error| error.kind());
         Self { socket, executable }
-    }
-
-    /// Preserve a readable failure message as well as structured trace events.
-    /// Both paths consume the same bounded snapshot; this does not run a second
-    /// set of independent probes with fresh per-command timeouts.
-    pub fn diagnostic_text(&self) -> String {
-        match &self.executable {
-            Ok(executable) => {
-                let snapshot = snapshot_tmux_diagnostics(&self.socket, executable);
-                emit_snapshot(&snapshot);
-                render_snapshot(&snapshot)
-            }
-            Err(reason) => format!("tmux diagnostic executable unavailable: {reason:?}"),
-        }
     }
 }
 
@@ -213,47 +197,6 @@ fn emit_stream(label: &str, stream: &str, output: &CapturedOutput) {
         tracing::info!(%label, %stream, byte_offset = index * 768,
             text = %String::from_utf8_lossy(bytes), "tmux diagnostic output");
     }
-}
-
-/// Render only already-bounded buffers. The fixed query count and stream caps
-/// also bound this assertion text, including UTF-8 replacement expansion.
-fn render_snapshot(snapshot: &TmuxDiagnosticsOutcome) -> String {
-    use std::fmt::Write;
-    let mut text = format!(
-        "tmux snapshot: {:?}; omitted panes={:?}\n",
-        snapshot.authorization, snapshot.omitted_valid_panes
-    );
-    for command in snapshot.metadata.iter().chain(&snapshot.captures) {
-        let _ = writeln!(text, "{:?}:", command.label);
-        match &command.result {
-            TmuxDiagnosticAttempt::Attempted(outcome) => {
-                let _ = writeln!(
-                    text,
-                    "status={:?} timeout={} reaped={} ownership_lost={} errors={:?} errors_truncated={}",
-                    outcome.status,
-                    outcome.timed_out,
-                    outcome.direct_child_reaped,
-                    outcome.ownership_lost,
-                    outcome.errors,
-                    outcome.errors_truncated
-                );
-                for (name, output) in [("stdout", &outcome.stdout), ("stderr", &outcome.stderr)] {
-                    let _ = writeln!(
-                        text,
-                        "{name}: observed={:?} omitted={:?} complete={}\n{}",
-                        output.observed_bytes,
-                        output.omitted_bytes,
-                        output.complete,
-                        String::from_utf8_lossy(&output.prefix)
-                    );
-                }
-            }
-            TmuxDiagnosticAttempt::NotAttempted(reason) => {
-                let _ = writeln!(text, "not attempted: {reason:?}");
-            }
-        }
-    }
-    text
 }
 
 #[cfg(test)]

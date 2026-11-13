@@ -27,9 +27,10 @@ of one test cost far less than one run of everything.
 
 The workspace holds roughly 2,100 Rust tests. Most are per-crate unit tests (`farhelm-helm` ~610, `farhelm-supervisor`
 ~590, `farhelm-ui` ~300, `farhelm-proto` ~100, `farhelm` ~100). The expensive battery is the one integration binary
-`crates/farhelm/tests/e2e` (~330 tests driving a real supervisor and real tmux); `crates/farhelm/tests/` also has five
-smaller process-level binaries (`agent_cli`, `spawn_cli`, and friends). Everything is selectable with cargo's ordinary
-target flags and nextest filter expressions. Nextest starts one process per test; doctests remain a separate cargo run.
+`crates/farhelm/tests/e2e` (several hundred tests driving real supervisors and terminal hosts); `crates/farhelm/tests/`
+also has five smaller process-level binaries (`agent_cli`, `spawn_cli`, and friends). Everything is selectable with
+cargo's ordinary target flags and nextest filter expressions. Nextest starts one process per test; doctests remain a
+separate cargo run.
 
 Use the run recorder around the selected command so each attempt retains its own output, source state, and platform
 details. The shapes below are child commands after `--`, not substitutes for the recorder. For a Rust reproduction, put
