@@ -174,6 +174,480 @@ Motivation: the proto crate is the seam that keeps helm and supervisor honestly 
 even in-process). `farhelm` remains the single multi-call artifact provisioning ever has to move — farhelm-desktop is a
 second release binary for the Mac desktop alone, never provisioned to a host.
 
+## GUI architecture
+
+NOTE: This section governs the GPUI desktop app (macOS and Linux) that replaces the Dioxus GUI. The older GUI sections
+below ("GUI: Dioxus", "GUI: sidebar, sounds, text size, quick switcher and shortcuts", "Terminal widget: the grid
+island") describe the app being replaced and leave with its code. New GUI code follows this section, not them. Where a
+rule names an owner that is not built yet, its path is recorded in the foundation ownership table when it is built.
+
+This is a rulebook in the style of SPEC.md's "Keyboard focus": each app-wide concern has one owner, a rule, and the
+mechanism that enforces it. The old GUI decided these concerns one feature at a time (focus, popover placement, late
+replies, escaping, drafts), and an audit of its fix history found most bugs were a rule one path followed and a sibling
+path missed. GPUI adds a class of its own: it tracks no reads, so a view that copies shared state, or a change made
+without a notification, goes stale silently. The answer in both cases is the same. Build each mechanism once, route
+every feature through it, and make going around it fail a lint, a type check or a test rather than a reviewer's
+attention.
+
+Here's the short version: the GUI talks to the helm only through one ordered UI channel, plus terminal streams and plain
+HTTP for transfers. The store holds what the helm pushed, and views draw from it. One owner each moves focus, draws
+overlays, asks questions, holds pending work, decides notices and runs animation time. On any break of the channel the
+whole UI resets.
+
+Port, not redesign: the GPUI app copies the old app's layout, spacing, colors and behavior as of reference commit
+`24bc0580`. Read old behavior from git at that commit and check screens side by side with the reference screenshots.
+Text renders differently in GPUI, so pixels will not match; a deviation that cannot be avoided is recorded and surfaced
+to the maintainer, never decided quietly.
+
+### Where the GUI meets the helm
+
+GUI crates do not depend on the helm crate. Everything the GUI knows about the helm arrives over the UI channel, a
+terminal stream or plain HTTP, even in the desktop app, which runs the helm in its own process. The desktop binary that
+embeds the helm is the only place both meet. This keeps the helm/UI split real: a remote helm stays possible, and the
+GUI cannot grow a dependency on helm internals that would make it impossible.
+
+GUI crates live under `crates/gui/`, and so do the framework-free GUI crates (the terminal grid model, input mapping,
+the escape table, the store and drafts logic), so every ban covers them too. Framework-free crates have no `gpui`
+dependency and can be tested without a window. Of these, only the escape table is shared with the command line. The
+desktop binary, which embeds the helm and holds the bootstrap, menus and quit, stays outside `crates/gui/`; it denies
+`unwrap_used` and `expect_used` in its own `[lints]`. Network I/O (the UI channel's socket, terminal streams, HTTP
+transfers) lives in the helm client, a framework-free crate outside `crates/gui/`: it is the one runtime owner, owning
+the async runtime and its threads, and it hands results to the GUI through GPUI's executor. The helm client is the GUI's
+one exemption from the ban on threads and other runtimes, and it counts as a lint exception like any `#[allow]`; no
+other crate the GUI depends on gets one.
+
+Enforced by a `cargo metadata` test that fails when a GUI crate depends, directly or transitively, on the helm crate, or
+when a framework-free crate depends on `gpui`.
+
+### The UI channel
+
+Owner: the UI channel, one WebSocket per UI. It carries everything except bulk data, in one ordered stream:
+
+- commands from the GUI, each an envelope of `{id, method, path, body}`;
+- the helm's reply to each command, with its status and body: done, refused, or accepted (for long work);
+- state the helm pushes: a full snapshot of the pushed collections when the channel opens, then changes per collection.
+
+The helm runs each command through its existing HTTP router in process, so a command gets the same handlers, validation
+and authentication middleware as an HTTP request. There is no second, typed command API. A route that genuinely cannot
+work this way is recorded as a decision with the reason. The router's existing contracts hold: the cancellable group in
+`api_router` is dropped when its caller goes away, as today, and work behind `own_state_change` finishes after a reset
+(see "Who owns an accepted action").
+
+The router has one client. After the browser UI is gone, only the GUI calls the HTTP API, plus terminal streams and file
+transfers. The command line and agents reach the helm through the supervisor relay and the shared `do_*` handler
+functions, with their own credentials and approvals. A route may therefore change to its accepted form outright, with no
+second blocking mode kept for a client that does not exist. When a shared `do_*` function changes behavior, check the
+relay path that also calls it.
+
+Commands are admitted in the order they arrive. The channel's owner starts each command only after the previous one has
+replied (done, refused or accepted), and it serializes replies and pushes onto the wire. This is what makes the stream
+ordered: without it, a quick launch could overtake the template save sent just before it, which the old GUI had to fence
+by hand. Heartbeats bypass the queue.
+
+Serial admission only works if every handler replies promptly, so every handler does:
+
+- A timeout against a host is an ordinary reply ("the host timed out"). The helm's links to supervisors stay fallible,
+  and the user sees that, but it never leaks into the transport. Bounding a handler's host wait is preferred over adding
+  an accepted form.
+- A command whose normal duration can exceed the host-wait bound uses the accepted form: provisioning, host update,
+  trash deletion, recipe builds, and sandbox and container (environment) session creates, which take minutes. Every
+  other command bounds its host wait. A later click therefore waits behind at most one bounded command, never behind a
+  long launch. Each route converted to accepted names the state that carries its eventual outcome (success, partial
+  result or refusal). Reuse existing domain progress where it exists; otherwise the outcome goes in one bounded
+  operation-result collection keyed by envelope id, with explicit completion and removal rules. "Accepted" settles the
+  transport watchdog. It does not mean the work succeeded.
+- Routes are converted as the work that first ports them needs them, not in a sweep.
+
+Every change a command causes is pushed before that command's reply. When the GUI sees "done", its store already shows
+the result, so the GUI needs no optimistic updates.
+
+### What is pushed, and how changes are found
+
+Owner: the UI channel.
+
+Pushed collections are the helm-local data the fleet feed already invalidates: sessions, hosts, templates, preferences,
+notices, approvals, announcements and host progress. The PR that adds a collection lists it. The snapshot sent when a
+channel opens never waits on a remote host. Every other read (directory browse, repository lists, the trash list, launch
+history, file stat) is an ordinary GET command whose reply body is the result. Data the old GUI polled stays a query
+that the GUI issues again; it does not become a replicated collection.
+
+The session list is a query. Its filter, sort and cap are this channel's state, set by a command, and the helm keeps
+serving the filtered, capped view with its `total`, `matching` and `truncated` counts. Collections carry their metadata:
+completeness or unavailability, counts and order.
+
+Changes are sent per collection, keyed by id, and an entry is always replaced whole; there are no field-level patches.
+The GUI applies every collection's changes with one generic piece of code, not code per kind. The helm finds changes by
+re-running the collections' existing GET handlers in process, after every fleet feed bump and after each command's
+handler returns, and diffing against what it last sent this UI. Only successful, comparable projections are diffed: a
+failed or partial read is never an empty collection and never evidence that something was deleted.
+
+The fleet feed stays an invalidation hint that carries no data. No typed per-mutation events are added. Every mutation
+of a pushed collection bumps the feed at its shared mutation boundary, including agent-relay writes and supervisor
+updates, so the projection runs whoever made the change.
+
+Wire types live in one framework-free crate (`farhelm-proto` holds shared types today): the envelope, the push messages
+and every collection's entry type. The helm serializes them and the GUI deserializes the same types. There are no
+hand-written mirrors on either side; two copies of one type that drift apart is a documented bug class of the old GUI.
+
+Enforced by a round-trip contract test per collection, tests that a preference patch and an agent-originated change each
+reach a connected UI, and, in GUI tests, a consistency check at quiet points (after each test step) that compares the
+GUI's copy with a fresh full snapshot and fails loudly on a mismatch.
+
+### Paths are a trust boundary
+
+Owner: the UI channel's path builder.
+
+GUI commands are built only through one path builder that percent-encodes each segment. Ids that come from a supervisor
+(tab ids, for example) get no check on the helm side, so an id like `../../victim` must never be able to retarget a
+request. The envelope dispatcher refuses non-canonical paths: dot segments (plain or percent-encoded), empty segments
+and encoded slashes.
+
+Enforced by the path builder being the only constructor of a command path (the envelope's path field is not a plain
+string feature code can fill in), and by dispatcher tests for each refused form.
+
+### One failure path: the reset
+
+Owner: the UI channel's watchdog, and the UI-session owner.
+
+A heartbeat, plus one watchdog that treats any command left unanswered for N seconds as a broken channel, replaces every
+per-request deadline. A command's clock starts when the channel admits it (when the previous command's reply arrived),
+not when the GUI sent it, so a queue behind a slow command does not trip the watchdog. N is set above the helm's own
+bound on host waits. That bound is also the longest any queued click can wait behind a slow host, so it is kept short
+(the exact value is chosen with the channel's implementation). However the channel broke, the same code runs: the window
+goes inert behind "Reconnecting to the helm…", everything that came from the helm is dropped, and the window rebuilds
+from the new snapshot. One generic notice says the connection was lost and that something done just before may or may
+not have happened. No action tracks its own fate.
+
+In the embedded topology the UI reconnects to the same helm. If the helm task itself has ended, the app shows the
+existing startup-refusal surface and exits; there is no in-process helm restarter. A refused credential shows a terminal
+"cannot connect" state with Retry, not a reconnect loop. The UI has at most one connection attempt at a time.
+
+A reset drops the UI's async owners, not just its data. Transient stores, and their UI-side tasks, subscriptions and
+callbacks, live under one resettable UI-session owner. On reset that owner is dropped and its queued callbacks are
+rejected before the new snapshot is installed. Only the agreed survivors carry over: local preferences (sidebar width,
+theme, window size) and the selected session by id, if it still exists. The survivors (per-device local preferences, the
+selected session id) live in a local store outside the UI-session owner; the store fed by the channel holds only helm
+state. Half-typed drafts do not survive. Work the helm accepted continues independently of the reset.
+
+What never gets written again on the GUI side: lost-reply reconciliation, retry keys, request fences, outcome-unknown
+reports, and their tests. On the helm side only machinery that existed solely for the old GUI goes; idempotency the
+command line or agents use stays (the launch idempotency keys in `crates/farhelm/src/agent_client.rs`, for example).
+
+Enforced by a test of a completion queued across a reset (it must not reach the new UI session), and by the review gate.
+
+### The seat: one UI per helm
+
+Owner: the UI channel.
+
+The helm accepts one UI channel. A new one displaces the old; the displaced window shows "another window took over" and
+does not reconnect on its own. Only the live channel's "displaced" message counts as a takeover. Losing the seat makes
+the displaced window wholly inert: it tears down its terminal attachments and their automatic reconnect workers, and
+none of them restarts until the user explicitly takes the seat back.
+
+Whether a window is open, for agent approvals, is the live seat, released on disconnect and on takeover. It is not a
+count of feed subscribers: the helm's own internal subscriptions to the feed never count as windows.
+
+Enforced by tests of an agent request with a connected UI, after a disconnect and after a takeover, and a test that a
+displaced UI cannot take a terminal back.
+
+### Bulk data stays separate
+
+Terminal streams stay one stream per terminal, with their own reconnect handling, because the supervisor and host behind
+each can fail independently of the helm. File uploads and downloads use plain HTTP; a failed transfer is that transfer's
+own visible outcome, and the user retries it. Neither touches the command path, so a large upload never delays a click.
+
+### The store, and how views redraw
+
+Owner: the store.
+
+The store is fed only by the channel. Views read from it when they draw; a view never keeps its own copy of shared
+state. Shared state changes only through store methods that notify. Caching a view goes only through one wrapper that
+computes the view's inputs from the store and redraws only when they differ, so a forgotten notification cannot leave a
+cached view stale. A child view talks to its parent only by emitting events that the parent subscribes to; a child never
+holds a parent handle to call `update` on it (see the re-entrancy trap below).
+
+Enforced by tests that count redraws per view (an app-level render counter compiled into test builds; no GPUI patch), by
+a test for each store that a change through its public methods redraws the views that read it, and by the per-PR review
+gate.
+
+### Focus: the focus coordinator
+
+Owner: the focus coordinator. It implements SPEC.md's "Keyboard focus" as one module: the "user moved on" counter, home
+(the selected session's terminal), the dialog stack's trap and restore, and the record of who opened what.
+
+It is the only Farhelm code that moves focus. In GPUI, moving focus also redraws the whole window and drops pending
+keystrokes, which is one more reason for one owner. GPUI Kit moves focus inside its own text inputs on user clicks;
+those moves are accepted, and the per-step focus invariant covers them.
+
+Enforced by clippy `disallowed-methods` on GPUI's focus calls everywhere in the GUI crates except the coordinator, and
+by the focus invariant that in-process tests check after every step: exactly one focused element, inside the topmost
+modal or in an agent approval card if a modal is open (SPEC.md, "Keyboard focus").
+
+### Overlays: the layer manager
+
+Owner: the layer manager. It owns the dialog slot, the popover stack and tooltips.
+
+Every overlay is anchored to an element, not to coordinates; menus opened at a right-click point are the exception.
+Escape from a focused terminal goes to its program (SPEC.md); otherwise it closes only the topmost layer, unless a mode
+SPEC.md says captures the keyboard (the quick-launch sequence) is armed. An overlay closes when its subject is gone, not
+when it moves; anchoring to the element makes a moved row's menu follow the row. Whether a terminal link's destination
+disclosure is covered is a hit test, never a hand-kept list of covering surfaces. Things the user did not start never
+open a layer over what they are doing (SPEC.md, "Keyboard focus").
+
+Enforced by clippy bans on GPUI's `deferred` and `anchored` outside the layer manager; by `disallowed-types` on GPUI
+Kit's Dialog, Sheet, Popover, HoverCard, PopupMenu, ContextMenu, DropdownMenu, Notification and Tooltip, and its Select,
+Combobox and DatePicker, which draw their dropdowns through `deferred` and `anchored` (dropdowns go through the layer
+manager instead); by `disallowed-methods` on Kit's `open_dialog`, `open_sheet` and `push_notification`, the
+`.tooltip(..)` methods on Kit controls, and the `context_menu` and `dropdown_menu` extension methods; and by the overlay
+invariant checked after every test step. The Kit bans apply inside the component layer too: only the layer manager draws
+overlays. Kit Input's built-in right-click menu is disabled, matching today's app, whose release builds have no context
+menu.
+
+### Questions: the prompt
+
+Owner: the prompt, the one way to ask the user a question.
+
+A confirmation freezes what it shows when it opens: targets, consequences and preconditions. Its answer buttons come
+pre-wired to that frozen state, so feature code never wires an answer by hand. Commands name their targets by stable id,
+never by list position, and the helm refuses a target that is gone. The existing per-route refusals of a target that
+changed since its prompt stay (a delete or restart that goes beyond what its confirmation said is refused, commit
+`6aef8dc2`). No new generic precondition protocol is added; new precondition checks go only where SPEC already requires
+them.
+
+This is the structural fix for the old GUI's largest bug class: an action that ran on state the user was not shown.
+
+SPEC.md's "One GUI at a time" (2026-10-10) lets input delivered before a redraw run as delivered, so a Confirm queued
+behind a Cancel may still submit. What the prompt guarantees is that whatever runs acts on the state the confirmation
+froze when it opened, never on state the user was not shown.
+
+Enforced by the prompt being the only type that renders answer buttons for a question, and by a generic test, for every
+prompt kind, that changes the confirmation's subject after it opens, then sends Cancel and Confirm with no draw between
+them, and checks that any command sent names the frozen targets and preconditions.
+
+### Work that finishes later: the operation stores
+
+Owner: the operation stores, app-level stores that outlive the views that start work.
+
+Task handles are stored under the operation that owns them. "Latest wins" applies only to work that is explicitly
+supersedable for the same resource, such as a search being retyped. Independent actions, such as a Stop on one session
+while a Delete on another is in flight, each keep their completion handling until they settle or the UI resets. Dropping
+a waiter never cancels work the helm accepted. A completion that would focus, open, select or close something asks the
+focus coordinator whether the user has moved on.
+
+Feature code does not detach tasks. GUI crates do not spawn threads or other runtimes' tasks, sleep, or read the system
+clock; time comes from the ticker and async work from GPUI's executor, which keeps tests deterministic. The runtime that
+network I/O needs lives in the helm client, outside `crates/gui/` (see "Where the GUI meets the helm").
+
+Enforced by clippy `disallowed-methods` for detaching, thread and runtime spawns, sleeps and clock reads in the GUI
+crates, and by a test of overlapping actions on two sessions.
+
+### Drafts
+
+Owner: drafts.
+
+Each draft field records whether the user touched it, and a pushed change never overwrites a touched field. Saves keep
+today's API semantics. Partial saves are used only where the API already supports them, or where SPEC.md's "a GUI write
+must not undo a change an agent or the command line made" needs them. The two confirmed last-write-wins exceptions
+(templates and number keys, SPEC.md 2026-10-21) stay. A failed save is reported, never retried, and never treated as
+saved; whether the field reverts or keeps its text for editing follows that editor's SPEC rule (several explicit-save
+editors keep the draft).
+
+Enforced by draft tests that push a change under a touched field and by save tests that load, save untouched and
+compare.
+
+### Host-supplied text
+
+Owner: host text.
+
+Host-supplied text is its own type from the moment it is decoded. The only element that can draw it escapes hidden
+characters and isolates text direction, using one escape table shared with the command line. This covers host-authored
+text shown anywhere outside the terminal, including link disclosures and accessible names. Terminal grid content keeps
+its own rendering contract (SPEC.md: "Terminal output is not part of this rule"). The only strings that come out of host
+text are its escaped presentation, used for display and accessible names, and its raw value, used for editing and
+operations. Raw values keep their bytes, and an escaped presentation never becomes a saved value.
+
+Enforced by the type: host text has no other conversion to a string, and the component layer accepts it only through the
+escaping element. A corpus of spoofing strings is pushed through the host-text element and the views that render it in
+the slice.
+
+### The component layer and theme
+
+Owner: the component layer, over GPUI Kit.
+
+Component constructors require a label, hover help and an accessibility role, so the old rule that every control has a
+tooltip becomes something the compiler checks; the test bridge also reads roles and labels to find controls. Where the
+old coverage rule exempted items that carry a visible description, a constructor's description counts as its hover help.
+Colors come only from theme tokens, which are copied from the old stylesheet (`crates/farhelm-ui/assets/app.css` at the
+reference commit). One dialog frame keeps the answer buttons pinned and scrolls the body, and when even those do not
+fit, the whole frame scrolls, as today's dialogs do. The window has a minimum size, to be written into SPEC.md when
+chosen.
+
+GPUI Kit is used for `Root`, text inputs and named primitives, as the prototype did. Kit's own overlays (dialogs,
+sheets, popovers, menus, notifications, tooltips) are not used, not even inside the component layer: Kit moves focus
+internally and has its own modal, notification and popover layers, which Farhelm's lints cannot see into, so the layer
+manager draws every overlay instead. Kit is not forked to satisfy a lint.
+
+Enforced by `disallowed-types` and `disallowed-methods` entries that ban raw color construction and direct Kit use
+outside the component layer (the overlay bans are listed under the layer manager), and by one golden screenshot per
+component and per dialog frame.
+
+### Actions and keymap
+
+Owner: actions and keymap, a module unless crate layering needs a crate.
+
+All actions are declared in one place. Buttons, menu items and keys dispatch the same action. A terminal pass-through
+table lists the keys the terminal always receives. No key context that contains a terminal may hold a multi-key chord
+prefix, because GPUI holds the first key of a chord back for up to a second.
+
+Enforced by a test that walks the keymap and fails on a chord prefix in any context containing a terminal, and by a test
+that every pass-through key reaches the terminal with the app's bindings loaded.
+
+### Animation time: the ticker
+
+Owner: the ticker, one shared clock and animation ticker.
+
+It serves two kinds of time. Periodic animation ticks come at most 10 times a second and pause while the window is
+inactive. One-shot deadlines (hover delay, the approval card's pause, banner expiry, copy confirmation, "still waiting"
+thresholds) fire on time whether or not the window is active. It reads reduced motion from the OS. No row or view runs
+its own timer. This carries over the old rule that nothing redraws on its own more than 10 times a second; without it,
+one animating row redraws its whole list at display rate.
+
+GPUI's `with_animation` and `with_animations` are used only in the component layer, and only for one-shot transitions:
+no loops, and switched off under reduced motion.
+
+Enforced by the clock bans under "Work that finishes later"; by `disallowed-methods` on GPUI's
+`BackgroundExecutor::timer`, `request_animation_frame` and `on_next_frame` in the GUI crates outside the ticker and the
+channel's watchdog and heartbeat, and on `with_animation` and `with_animations` outside the component layer; and by a
+test that an animating row redraws at most 10 times a second and not at all while the window is inactive.
+
+### Notices: the notice center
+
+Owner: the notice center. It is a code owner, not a new surface.
+
+It is the single place that decides when to post to and withdraw from the existing surfaces: the bell list and notices
+panel, approval cards, banners such as the version-mismatch and outage cards, and chimes. The surfaces look as they do
+today. The only new notice is the generic connection-lost one after a reset, in an existing style.
+
+Enforced by the review gate.
+
+### Startup and quit: the bootstrap
+
+Owner: the bootstrap.
+
+One bootstrap installs all app-wide state (globals, the channel, the stores, the keymap) before anything runs. No
+`unwrap` or `expect` in code that platform callbacks can reach: a panic inside an AppKit callback aborts the process.
+State is saved continuously, because GPUI gives quit handlers only 200 ms.
+
+Enforced by denying clippy's `unwrap_used` and `expect_used` crate-wide in the GUI crates, with tests exempt.
+
+### Dependencies and licenses
+
+GPUI is pinned to gpui-pre 0.3.12 and GPUI Kit to 0.9.1 exactly, with the lockfile committed. Upgrades happen only at
+milestones, as a dedicated change. Patched GPUI crates are vendored under `vendor/` with their patch files, per
+`vendor/README.md`.
+
+No GPL-family code (GPL, AGPL, LGPL) enters the tree, as a dependency or as copied or closely paraphrased source.
+MPL-2.0 is allowed only as an unmodified dependency. Agents read GPL or other copyleft source only in an isolated
+research agent that reports back general approaches and no source details. Zed's crates other than `gpui`,
+`gpui_macros`, `gpui_platform`, `gpui_util`, `gpui_tokio` and `scheduler` are assumed GPL unless checked, and so are
+Zed's keymap and settings JSON. Code adapted from a permissive source carries a comment linking to it.
+
+Enforced by cargo-deny: a license allowlist (no GPL, AGPL or LGPL) and a sources section that denies every git source,
+because cargo-deny cannot check a git repository's license. Copying cannot be caught by a tool, so the review gate asks.
+
+### How the rules are enforced
+
+The GUI bans are clippy `disallowed-methods` and `disallowed-types`, each entry with a reason, configured in
+`crates/gui/clippy.toml` (clippy uses the nearest `clippy.toml`). That scopes them to the GUI crates: the helm, the
+supervisor, the command line, the desktop binary and the helm client legitimately spawn, sleep and read clocks and are
+unaffected. Each owner holds one `#[allow]` for the call it owns. `cargo clippy --all-targets -- -D warnings` stays
+green, and every lint has a demonstration that it fails on a violation.
+
+The test automation bridge is a cargo feature that shipped builds and devbuilds never enable: its socket is
+unauthenticated, and local agent sessions run as the same user, so with the bridge in a build any agent could click
+Allow on its own approval card. A check fails the build if a release or devbuild profile contains the feature. Bridge
+runs use a private 0700 directory.
+
+What no tool checks, the per-PR review gate asks.
+
+### Testing the GUI
+
+In-process GPUI tests use GPUI's seeded scheduler to reorder async completions. End-to-end tests drive the real app,
+against a real helm and supervisor with fake agents, through the bridge. Behavior is ported from SPEC.md and the old
+Playwright specs' acceptance cases at the reference commit, not one spec file at a time.
+
+### GPUI cookbook: traps
+
+NOTE: These are traps, not a map of the code. Each one cost a shipping GPUI app, the prototype, or both. Public issues
+are cited by number; "REPORT.md" is the GPUI prototype's report, in a private repository. None of this is copied code.
+Traps that an earlier rule already prevents get one line pointing at it.
+
+- **Re-entrant entity updates panic,** and abort the app inside an AppKit callback (sheprd#1297, zed#65140); see "The
+  store, and how views redraw".
+- **Missed notifications are silent.** The prototype had five confirmed and one candidate missed-notification bugs,
+  found by review or by turning caching on, never by its own tests (REPORT.md, "Missed-notification bugs"); see "The
+  store, and how views redraw".
+- **A notify requested during prepaint is dropped.** Request redraws from event handlers and updates, not from paint.
+- **Effects flush only after the outermost update returns.** Emits and notifies queue until then, so a test calls
+  `run_until_parked()` outside `update_window` and renders a frame before querying.
+- **Caching has sharp edges.** A cache miss re-renders the whole subtree uncached, nested cached views miss when their
+  parent re-renders (zed#66451), a cached view is laid out from its style alone so it needs an explicit size, and
+  per-frame paint callbacks are skipped on replay. Rule: flat, explicitly sized cached views behind the wrapper.
+- **`focus()` clears pending keystrokes and refreshes the whole window;** see "Focus: the focus coordinator".
+- **A focus handle is a Tab stop only when built with `.tab_stop(true)`.** The default blocks Tab.
+- **A virtualized row keeps focus only if registered with `ListState::splice_focusable`.** Otherwise a focused row that
+  scrolls out, or is re-spliced, fires focus-lost.
+- **Key bindings beat key listeners.** Bindings dispatch before capture-phase key listeners, and a binding with no
+  context ranks as the deepest. In the prototype, the Mac Edit-menu work made Kit Root's `ctrl-c` binding active, and it
+  swallowed Ctrl+C on Linux, so programs never got ^C. Rule: the terminal pass-through table, with `NoAction` bindings
+  in the terminal context, and a test per pass-through key.
+- **Chord prefixes hold the first key for up to a second;** see "Actions and keymap".
+- **Bound keys never reach the input method,** so a bare printable key cannot be bound in a text field.
+- **Mac menus read the keymap once.** `set_menus` captures shortcuts when it runs, and menu items are enabled only when
+  the focused dispatch path handles their action. Bind keys first.
+- **Actions can vanish at link time.** Actions register through `inventory`; a crate whose actions the binary never
+  references can be dropped by the linker. Keep an `init()` that the binary calls.
+- **`uniform_list` measures only item 0.** No header or empty-state row at index 0.
+- **A list with no definite height draws nothing,** and logs nothing (herdr#930). Every virtualized list needs a
+  definite height up its container chain.
+- **Element ids from indices go wrong.** The same id with a different state type panics, and an index id follows the
+  position, not the thing. Rule: `(component, domain id)` ids.
+- **`text!` in an iterator gives every item the same id,** because the id comes from the call site. Duplicate ids are a
+  debug panic only while assistive technology is active, so ordinary runs never see them.
+- **Dropping a `Task` cancels it; detaching one leaks it;** see "Work that finishes later: the operation stores".
+- **Quit gets 200 ms;** see "Startup and quit: the bootstrap".
+- **`cx.global` panics when the global is missing** (Runner #472); see "Startup and quit: the bootstrap".
+- **Work inside `open_window`'s builder closure is a trap.** A task spawned there updates its model without scheduling a
+  frame, and a resize there doubles every `px()`. Rule: do the work after the window exists.
+- **Headless Mutter reports the window inactive forever.** `Window::is_window_active()` stays false even after Mutter
+  focuses the window, so a ticker that pauses while inactive never ticks in headless end-to-end runs. Rule: the ticker
+  takes its notion of "active" through a test override.
+- **The test context's text system is fake.** Every character advances 0.6 em (1.2 em outside the BMP), there is one
+  font, no fallback and no wide CJK. Rule: tests whose outcome depends on layout (wrapping, truncation, the terminal
+  cell grid) use the real text system (`HeadlessAppContext` with a real text system).
+- **Leak checks check nothing by default.** `assert_no_new_leaks` is a no-op unless GPUI is built with `leak-detection`;
+  `test-support` does not turn it on. Turn the feature on for the dev-dependency. `cx.processor` captures a strong
+  handle, unlike `cx.listener`.
+- **Parking is forbidden under the deterministic scheduler.** Waiting on anything woken outside GPUI's dispatcher (a
+  real socket, tokio, an OS thread) panics; timers jump to their deadline. Rule: a fake, ordered, in-process channel in
+  tests, and executor timers only. Animations use the wall clock, so tests use reduced motion.
+- **A hanging test may be GPUI's.** zed#66801 is an open scheduler deadlock; rule it out before blaming the app.
+- **The glyph atlas never evicts.** Every rasterized size stays in memory, so zooming the terminal grows memory without
+  bound (one report, infiniterm#758, saw 286 MB after 18 hours). Rule: snap terminal zoom to a few sizes; call
+  `drop_image` for every released image.
+- **Paths are a trust boundary;** see "Paths are a trust boundary".
+- **GPUI Kit is a black box to Farhelm's lints** (about 83 focus call sites in 0.9.1, its own overlay layers); see "The
+  component layer and theme".
+- **Parents see presses on child Kit buttons.** A parent's `on_mouse_down` sees presses on child Kit buttons, because
+  Kit calls `prevent_default`, not stop-propagation, so check `default_prevented` (REPORT.md, "GPUI behavior and API
+  surprises").
+- **Kit details.** Kit's single-line Input binds Up and Down and does not propagate them, so ancestors need
+  `capture_action`; a disabled Kit Button still prevents default on press (REPORT.md, "GPUI Kit surprises").
+- **Layout costs show only at scale.** `flex_1` on a repeated item with text makes layout shape the label on every
+  sizing probe; give such items a computed width and `flex_none()`. Flexible children that must shrink need `min_w_0` or
+  `min_h_0`.
+- **Debug builds are not representative for speed.** Measure frame times on an optimized build.
+
 ## GUI: Dioxus
 
 Dioxus, version pinned at the workspace level, rendering the same component tree in two targets: web (wasm32, real DOM,
